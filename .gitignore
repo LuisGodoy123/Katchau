@@ -1,0 +1,11 @@
+# Arquivos gerados pelo make
+build/
+katchau
+katchau.exe
+katchau.zip
+*.o
+
+# Sistema / editores
+.DS_Store
+.vscode/
+.idea/
