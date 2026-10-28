@@ -9,4 +9,7 @@
 #define QUADROS_POR_SEG  60
 #define TITULO_JANELA    "KATCHAU"
 
+/* Corrida */
+#define TOTAL_VOLTAS     3
+
 #endif

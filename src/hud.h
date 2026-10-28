@@ -1,9 +1,18 @@
+/*
+ * hud.h
+ * ------------------------------------------------------------------
+ * Informações por cima da corrida: volta, velocidade e tempo, e a
+ * tela de chegada. Versão simples da Fase 3; na Fase 5 entram o
+ * velocímetro de verdade, a posição (5º/8) e o mini-mapa.
+ * ------------------------------------------------------------------
+ */
+
 #ifndef HUD_H
 #define HUD_H
 
-/*
- * HUD: velocímetro, tempo, posição, volta e mini-mapa (fase 5).
- * Módulo de desenho: pode usar a raylib.
- */
+#include "corrida.h"
+
+void desenharHud(Corrida *corrida);
+void desenharFimDeCorrida(Corrida *corrida);
 
 #endif
