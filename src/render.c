@@ -20,10 +20,27 @@
  *   da estrada um pouco para o lado, e esse empurrão vai crescendo
  *   (dx += curvatura). Somando os empurrões, os segmentos distantes
  *   ficam bem deslocados e a estrada parece curvar.
+ *
+ * Como funcionam as subidas e descidas:
+ *
+ *   Cada segmento tem uma altura. Na projeção, em vez da altura fixa
+ *   da câmera, usamos a diferença entre a altura da câmera e a do
+ *   ponto: um ponto mais alto que o chão sob a câmera sobe na tela,
+ *   um mais baixo desce. Atrás de uma lombada, a estrada fica escondida
+ *   pela parte mais perto, que é desenhada por cima.
+ *
+ * Texturas:
+ *
+ *   As imagens de recursos/texturas são carregadas uma vez, no começo
+ *   (carregarTexturas). Se alguma não for encontrada, aquela parte do
+ *   desenho volta a usar as cores sólidas, então o jogo nunca quebra
+ *   por falta de imagem.
  * ------------------------------------------------------------------
  */
 
+#include <stddef.h>
 #include "raylib.h"
+#include "rlgl.h"
 #include "render.h"
 
 /* ---------- Câmera ---------- */
@@ -49,11 +66,28 @@
 #define PROPORCAO_FAIXA      0.03f     /* largura da faixa branca em relação à estrada */
 #define POSICAO_FAIXA        0.33f     /* faixas a 1/3 do centro, dividindo 3 pistas */
 
+/* ---------- Texturas ---------- */
+#define PASTA_TEXTURAS       "recursos/texturas/"
+#define LARGURA_FUNDO        640.0f    /* largura das imagens de fundo, em pixels */
+#define REPETICOES_ASFALTO   4.0f      /* quantas vezes a textura do asfalto se repete na largura */
+#define TAMANHO_TEXTURA_CHAO 64.0f     /* lado das texturas de asfalto e grama, em pixels */
+#define VELOCIDADE_CIDADE    0.5f      /* a cidade, mais longe, desliza na metade da velocidade dos morros */
+#define VELOCIDADE_CEU       0.2f
+#define LIMITE_VERMELHO      60        /* quanto o vermelho tem que passar o verde e o azul para ser "pintura" */
+#define BRILHO_VERMELHO      200.0f    /* vermelho do sprite que vira exatamente a cor do rival */
+
+/* As três poses do sprite do carro */
+#define POSE_RETO            0
+#define POSE_ESQUERDA        1
+#define POSE_DIREITA         2
+#define TOTAL_POSES          3
+
 /* ---------- Cores ---------- */
 #define COR_CEU_ALTO         (Color){  40, 110, 210, 255 }
 #define COR_CEU_HORIZONTE    (Color){ 160, 210, 255, 255 }
 #define COR_GRAMA_CLARA      (Color){  16, 170,  16, 255 }
 #define COR_GRAMA_ESCURA     (Color){   0, 154,   0, 255 }
+#define COR_CHAO_DISTANTE    (Color){  54, 125,  48, 255 }   /* média da textura de grama */
 #define COR_ASFALTO_CLARO    (Color){ 107, 107, 107, 255 }
 #define COR_ASFALTO_ESCURO   (Color){  99,  99,  99, 255 }
 #define COR_ZEBRA_CLARA      (Color){ 245, 245, 245, 255 }
@@ -88,6 +122,17 @@ static const Color CORES_CABINE[TOTAL_CARROS] = {
     { 110,  60,  30, 255 },
 };
 
+/* Texturas carregadas por carregarTexturas(). id == 0 quer dizer "não carregou". */
+static Texture2D texturaCeu;
+static Texture2D texturaCidade;
+static Texture2D texturaMorros;
+static Texture2D texturaAsfalto[2];   /* [0] escuro, [1] claro */
+static Texture2D texturaGrama[2];     /* [0] escura, [1] clara */
+static Texture2D texturaCarro[TOTAL_CARROS][TOTAL_POSES];
+
+/* Quanto o fundo já deslizou para o lado (em pixels da imagem) por causa das curvas */
+static float deslocamentoFundo = 0.0f;
+
 /* Onde um ponto da pista aparece na tela. */
 typedef struct {
     float x;         /* centro da estrada na tela (pixels) */
@@ -100,27 +145,127 @@ typedef struct {
 typedef struct {
     PosicaoNaPista camera;
     float xCamera;
+    float alturaCamera;                       /* altura da câmera no mundo (chão + ALTURA_CAMERA) */
     Segmento *segmentos[DISTANCIA_VISIVEL];   /* os próximos nós da lista */
     float xCurva[DISTANCIA_VISIVEL];          /* empurrão da curva no começo de cada segmento */
     float dxCurva[DISTANCIA_VISIVEL];         /* quanto o empurrão cresce dentro do segmento */
     PontoNaTela perto[DISTANCIA_VISIVEL];     /* começo do segmento na tela */
     PontoNaTela longe[DISTANCIA_VISIVEL];     /* fim do segmento na tela */
+    float limiteTela[DISTANCIA_VISIVEL];      /* abaixo desta linha da tela, a estrada mais perto cobre o segmento */
 } Visao;
+
+/*
+ * carregarTexturaRepetida
+ * Carrega uma imagem que pode se repetir lado a lado (asfalto, grama, fundo).
+ * Recebe: o nome do arquivo dentro de PASTA_TEXTURAS.
+ * Devolve: a textura (id 0 se o arquivo não existir).
+ */
+static Texture2D carregarTexturaRepetida(const char *arquivo) {
+    Texture2D textura = LoadTexture(TextFormat("%s%s", PASTA_TEXTURAS, arquivo));
+    if (textura.id != 0) {
+        SetTextureWrap(textura, TEXTURE_WRAP_REPEAT);
+    }
+    return textura;
+}
+
+/*
+ * carregarCarroPintado
+ * Carrega um sprite do carro trocando o vermelho da pintura pela cor
+ * pedida. Cada pixel bem vermelho vira a cor nova, mantendo o quanto ele
+ * era claro ou escuro (assim as sombras do desenho continuam lá).
+ * Pneus, asa e detalhes amarelos não são vermelhos e ficam iguais.
+ * Recebe: o nome do arquivo e a cor da carroceria.
+ * Devolve: a textura (id 0 se o arquivo não existir).
+ */
+static Texture2D carregarCarroPintado(const char *arquivo, Color cor) {
+    Image imagem = LoadImage(TextFormat("%s%s", PASTA_TEXTURAS, arquivo));
+    if (imagem.data == NULL) {
+        return (Texture2D){ 0 };
+    }
+    ImageFormat(&imagem, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
+
+    Color *pixels = (Color *) imagem.data;
+    for (int i = 0; i < imagem.width * imagem.height; i++) {
+        Color p = pixels[i];
+        if (p.r > p.g + LIMITE_VERMELHO && p.r > p.b + LIMITE_VERMELHO) {
+            float brilho = p.r / BRILHO_VERMELHO;
+            float r = cor.r * brilho, g = cor.g * brilho, b = cor.b * brilho;
+            pixels[i].r = (unsigned char) (r > 255 ? 255 : r);
+            pixels[i].g = (unsigned char) (g > 255 ? 255 : g);
+            pixels[i].b = (unsigned char) (b > 255 ? 255 : b);
+        }
+    }
+
+    Texture2D textura = LoadTextureFromImage(imagem);
+    UnloadImage(imagem);
+    return textura;
+}
+
+/*
+ * carregarTexturas
+ * Lê todas as imagens do disco para a placa de vídeo. Tem que ser
+ * chamada depois de InitWindow (a raylib precisa da janela aberta).
+ * Recebe: nada.
+ * Devolve: nada.
+ */
+void carregarTexturas(void) {
+    texturaCeu = carregarTexturaRepetida("fundo/ceu.png");
+    texturaCidade = carregarTexturaRepetida("fundo/cidade.png");
+    texturaMorros = carregarTexturaRepetida("fundo/morros.png");
+    texturaAsfalto[0] = carregarTexturaRepetida("estrada/asfalto_escuro.png");
+    texturaAsfalto[1] = carregarTexturaRepetida("estrada/asfalto_claro.png");
+    texturaGrama[0] = carregarTexturaRepetida("estrada/grama_escura.png");
+    texturaGrama[1] = carregarTexturaRepetida("estrada/grama_clara.png");
+
+    const char *poses[TOTAL_POSES] = {
+        "carro/carro_reto.png", "carro/carro_esquerda.png", "carro/carro_direita.png"
+    };
+    for (int pose = 0; pose < TOTAL_POSES; pose++) {
+        /* O sprite já é vermelho: o jogador usa o original */
+        texturaCarro[0][pose] = LoadTexture(TextFormat("%s%s", PASTA_TEXTURAS, poses[pose]));
+        for (int numero = 1; numero < TOTAL_CARROS; numero++) {
+            texturaCarro[numero][pose] = carregarCarroPintado(poses[pose], CORES_CARROCERIA[numero]);
+        }
+    }
+}
+
+/*
+ * descarregarTexturas
+ * Devolve a memória de vídeo das texturas. Chamar antes de CloseWindow.
+ * (UnloadTexture ignora texturas com id 0, as que não carregaram.)
+ * Recebe: nada.
+ * Devolve: nada.
+ */
+void descarregarTexturas(void) {
+    UnloadTexture(texturaCeu);
+    UnloadTexture(texturaCidade);
+    UnloadTexture(texturaMorros);
+    for (int i = 0; i < 2; i++) {
+        UnloadTexture(texturaAsfalto[i]);
+        UnloadTexture(texturaGrama[i]);
+    }
+    for (int numero = 0; numero < TOTAL_CARROS; numero++) {
+        for (int pose = 0; pose < TOTAL_POSES; pose++) {
+            UnloadTexture(texturaCarro[numero][pose]);
+        }
+    }
+}
 
 /*
  * projetar
  * Converte um ponto do chão (coordenadas de mundo) em coordenadas de tela.
- * Recebe: x do centro da estrada, distância z à frente da câmera e x da câmera.
+ * Recebe: x do centro da estrada, altura do chão nesse ponto, distância z
+ *         à frente da câmera, x da câmera e altura da câmera.
  * Devolve: a posição e a largura da estrada naquele ponto da tela.
  */
-static PontoNaTela projetar(float xMundo, float z, float xCamera) {
+static PontoNaTela projetar(float xMundo, float alturaMundo, float z, float xCamera, float alturaCamera) {
     float metadeLargura = GetScreenWidth() / 2.0f;
     float metadeAltura = GetScreenHeight() / 2.0f;
     float escala = PROFUNDIDADE_CAMERA / z;
 
     PontoNaTela ponto;
     ponto.x = metadeLargura + escala * (xMundo - xCamera) * metadeLargura;
-    ponto.y = metadeAltura + escala * ALTURA_CAMERA * metadeAltura;
+    ponto.y = metadeAltura + escala * (alturaCamera - alturaMundo) * metadeAltura;
     ponto.largura = escala * LARGURA_PISTA * metadeLargura;
     return ponto;
 }
@@ -137,6 +282,8 @@ static PontoNaTela projetar(float xMundo, float z, float xCamera) {
 static void calcularVisao(Visao *visao, PosicaoNaPista camera, float deslocamentoLateral) {
     visao->camera = camera;
     visao->xCamera = deslocamentoLateral * LARGURA_PISTA;
+    visao->alturaCamera = alturaNaPosicao(camera) + ALTURA_CAMERA;
+    float limite = GetScreenHeight();
 
     /* Empurrão lateral da curva. Começa "descontando" o pedaço do
      * segmento atual que a câmera já andou, para a curva não dar trancos. */
@@ -155,13 +302,22 @@ static void calcularVisao(Visao *visao, PosicaoNaPista camera, float deslocament
         visao->segmentos[i] = atual;
         visao->xCurva[i] = xCurva;
         visao->dxCurva[i] = dxCurva;
-        visao->perto[i] = projetar(xCurva, zPerto, visao->xCamera);
-        visao->longe[i] = projetar(xCurva + dxCurva, zLonge, visao->xCamera);
+        Segmento *seguinte = proximoSegmento(atual);
+        visao->perto[i] = projetar(xCurva, atual->altura, zPerto, visao->xCamera, visao->alturaCamera);
+        visao->longe[i] = projetar(xCurva + dxCurva, seguinte->altura, zLonge,
+                                   visao->xCamera, visao->alturaCamera);
+
+        /* O ponto mais alto da tela já ocupado pela estrada mais perto:
+         * o que estiver abaixo dele, neste segmento, fica escondido. */
+        visao->limiteTela[i] = limite;
+        if (visao->longe[i].y < limite) {
+            limite = visao->longe[i].y;
+        }
 
         xCurva += dxCurva;
         dxCurva += atual->curvatura * FATOR_CURVA;
 
-        atual = proximoSegmento(atual);   /* lista circular: depois do último vem a largada */
+        atual = seguinte;   /* lista circular: depois do último vem a largada */
     }
 }
 
@@ -186,6 +342,31 @@ static void desenharTrapezio(float xPerto, float yPerto, float metadePerto,
 }
 
 /*
+ * desenharTrapezioComTextura
+ * Igual ao desenharTrapezio, mas preenchido com uma textura. A imagem
+ * ocupa o segmento inteiro no comprimento e se repete "repeticoes"
+ * vezes na largura. Usa a rlgl (a camada de baixo da raylib), porque
+ * as funções comuns de textura só desenham retângulos.
+ * Recebe: a textura, centro e meia-largura embaixo e em cima, e as repetições.
+ * Devolve: nada.
+ */
+static void desenharTrapezioComTextura(Texture2D textura,
+                                       float xPerto, float yPerto, float metadePerto,
+                                       float xLonge, float yLonge, float metadeLonge,
+                                       float repeticoes) {
+    rlSetTexture(textura.id);
+    rlBegin(RL_QUADS);
+    rlColor4ub(255, 255, 255, 255);
+    /* Mesma ordem anti-horária do desenharTrapezio */
+    rlTexCoord2f(0.0f, 0.0f);       rlVertex2f(xLonge - metadeLonge, yLonge);
+    rlTexCoord2f(0.0f, 1.0f);       rlVertex2f(xPerto - metadePerto, yPerto);
+    rlTexCoord2f(repeticoes, 1.0f); rlVertex2f(xPerto + metadePerto, yPerto);
+    rlTexCoord2f(repeticoes, 0.0f); rlVertex2f(xLonge + metadeLonge, yLonge);
+    rlEnd();
+    rlSetTexture(0);
+}
+
+/*
  * ehSegmentoClaro
  * Diz se o segmento usa as cores claras ou escuras. As cores alternam
  * a cada SEGMENTOS_POR_FAIXA segmentos, o que dá a sensação de velocidade.
@@ -204,8 +385,31 @@ static int ehSegmentoClaro(Segmento *segmento) {
  * Devolve: nada.
  */
 static void desenharGrama(Segmento *segmento, PontoNaTela perto, PontoNaTela longe) {
-    Color corGrama = ehSegmentoClaro(segmento) ? COR_GRAMA_CLARA : COR_GRAMA_ESCURA;
-    DrawRectangle(0, (int) longe.y, GetScreenWidth(), (int) (perto.y - longe.y) + 1, corGrama);
+    if (longe.y >= perto.y) {
+        return;   /* descida vista de cima de uma lombada: o segmento está de costas e escondido */
+    }
+    int claro = ehSegmentoClaro(segmento);
+    int largura = GetScreenWidth();
+    float altura = perto.y - longe.y + 1;
+
+    Texture2D textura = texturaGrama[claro];
+    if (textura.id == 0) {
+        Color corGrama = claro ? COR_GRAMA_CLARA : COR_GRAMA_ESCURA;
+        DrawRectangle(0, (int) longe.y, largura, (int) altura, corGrama);
+        return;
+    }
+
+    /* Cada "ladrilho" de grama tem metade da largura da estrada naquele
+     * ponto, então ele encolhe com a distância. A conta do x prende os
+     * ladrilhos no centro da estrada, para a grama andar junto nas curvas. */
+    float ladrilho = perto.largura / 2.0f;
+    if (ladrilho < 1.0f) {
+        ladrilho = 1.0f;
+    }
+    Rectangle origem = { -perto.x / ladrilho * TAMANHO_TEXTURA_CHAO, 0.0f,
+                         largura / ladrilho * TAMANHO_TEXTURA_CHAO, TAMANHO_TEXTURA_CHAO };
+    Rectangle destino = { 0.0f, longe.y, (float) largura, altura };
+    DrawTexturePro(textura, origem, destino, (Vector2){ 0, 0 }, 0.0f, WHITE);
 }
 
 /*
@@ -223,12 +427,18 @@ static void desenharEstrada(Segmento *segmento, PontoNaTela perto, PontoNaTela l
                      longe.x, longe.y, longe.largura * PROPORCAO_ZEBRA, corZebra);
 
     /* Asfalto (branco na linha de largada/chegada) */
-    Color corAsfalto = claro ? COR_ASFALTO_CLARO : COR_ASFALTO_ESCURO;
-    if (segmento->ehLinhaDeChegada) {
-        corAsfalto = COR_LARGADA;
+    Texture2D textura = texturaAsfalto[claro];
+    if (segmento->ehLinhaDeChegada || textura.id == 0) {
+        Color corAsfalto = claro ? COR_ASFALTO_CLARO : COR_ASFALTO_ESCURO;
+        if (segmento->ehLinhaDeChegada) {
+            corAsfalto = COR_LARGADA;
+        }
+        desenharTrapezio(perto.x, perto.y, perto.largura,
+                         longe.x, longe.y, longe.largura, corAsfalto);
+    } else {
+        desenharTrapezioComTextura(textura, perto.x, perto.y, perto.largura,
+                                   longe.x, longe.y, longe.largura, REPETICOES_ASFALTO);
     }
-    desenharTrapezio(perto.x, perto.y, perto.largura,
-                     longe.x, longe.y, longe.largura, corAsfalto);
 
     /* Faixas brancas tracejadas: só nos segmentos claros */
     if (claro && !segmento->ehLinhaDeChegada) {
@@ -245,18 +455,54 @@ static void desenharEstrada(Segmento *segmento, PontoNaTela perto, PontoNaTela l
 }
 
 /*
+ * desenharCamadaDoFundo
+ * Desenha uma imagem de fundo esticada na largura da tela, com a base
+ * encostada em "baseY". A imagem se repete para os lados, então pode
+ * deslizar sem acabar.
+ * Recebe: a textura, a base na tela, quanto já deslizou e a escala.
+ * Devolve: nada.
+ */
+static void desenharCamadaDoFundo(Texture2D textura, float baseY, float deslizou, float escala) {
+    float altura = textura.height * escala;
+    Rectangle origem = { deslizou, 0.0f, LARGURA_FUNDO, (float) textura.height };
+    Rectangle destino = { 0.0f, baseY - altura, GetScreenWidth(), altura };
+    DrawTexturePro(textura, origem, destino, (Vector2){ 0, 0 }, 0.0f, WHITE);
+}
+
+/*
  * desenharFundo
- * Pinta o céu em degradê até o horizonte (meio da tela) e o chão
- * inteiro de grama abaixo dele. O chão cobre a faixa entre o último
- * segmento visível e o horizonte, que nenhum segmento alcança.
+ * Pinta o céu até o horizonte (meio da tela) e o chão inteiro abaixo
+ * dele. O chão cobre a faixa entre o último segmento visível e o
+ * horizonte, que nenhum segmento alcança.
+ * Com as texturas, o céu, a cidade e os morros são três camadas que
+ * deslizam nas curvas, cada uma numa velocidade (efeito parallax:
+ * o que está mais longe parece se mexer menos).
  * Recebe: nada.
  * Devolve: nada.
  */
 static void desenharFundo(void) {
     int largura = GetScreenWidth();
     int horizonte = GetScreenHeight() / 2;
-    DrawRectangleGradientV(0, 0, largura, horizonte, COR_CEU_ALTO, COR_CEU_HORIZONTE);
-    DrawRectangle(0, horizonte, largura, GetScreenHeight() - horizonte, COR_GRAMA_ESCURA);
+    float escala = largura / LARGURA_FUNDO;
+
+    if (texturaCeu.id != 0) {
+        /* O céu sempre preenche do topo até o horizonte */
+        Rectangle origem = { deslocamentoFundo * VELOCIDADE_CEU, 0.0f,
+                             LARGURA_FUNDO, (float) texturaCeu.height };
+        Rectangle destino = { 0.0f, 0.0f, (float) largura, (float) horizonte };
+        DrawTexturePro(texturaCeu, origem, destino, (Vector2){ 0, 0 }, 0.0f, WHITE);
+    } else {
+        DrawRectangleGradientV(0, 0, largura, horizonte, COR_CEU_ALTO, COR_CEU_HORIZONTE);
+    }
+    if (texturaCidade.id != 0) {
+        desenharCamadaDoFundo(texturaCidade, horizonte, deslocamentoFundo * VELOCIDADE_CIDADE, escala);
+    }
+    if (texturaMorros.id != 0) {
+        desenharCamadaDoFundo(texturaMorros, horizonte, deslocamentoFundo, escala);
+    }
+
+    Color corChao = texturaGrama[0].id != 0 ? COR_CHAO_DISTANTE : COR_GRAMA_ESCURA;
+    DrawRectangle(0, horizonte, largura, GetScreenHeight() - horizonte, corChao);
 }
 
 /*
@@ -290,7 +536,7 @@ static void desenharPista(Visao *visao) {
  * Recebe: o carro, o centro da base na tela (x, y) e a escala.
  * Devolve: nada.
  */
-static void desenharCarro(Carro *carro, float centroX, float baseY, float escala) {
+static void desenharCarroComFormas(Carro *carro, float centroX, float baseY, float escala) {
     Comandos comandos = carro->ultimosComandos;
     Color corCarroceria = CORES_CARROCERIA[carro->numero];
     Color corCabine = CORES_CABINE[carro->numero];
@@ -347,6 +593,39 @@ static void desenharCarro(Carro *carro, float centroX, float baseY, float escala
 }
 
 /*
+ * desenharCarro
+ * Desenha um carro visto de trás usando o sprite da pose certa
+ * (reto, virando à esquerda ou à direita). Se o sprite não carregou,
+ * usa o desenho com formas simples.
+ * Recebe: o carro, o centro da base na tela (x, y) e a escala.
+ * Devolve: nada.
+ */
+static void desenharCarro(Carro *carro, float centroX, float baseY, float escala) {
+    Comandos comandos = carro->ultimosComandos;
+    int pose = POSE_RETO;
+    if (comandos.esquerda && !comandos.direita) {
+        pose = POSE_ESQUERDA;
+    }
+    if (comandos.direita && !comandos.esquerda) {
+        pose = POSE_DIREITA;
+    }
+
+    Texture2D sprite = texturaCarro[carro->numero][pose];
+    if (sprite.id == 0) {
+        desenharCarroComFormas(carro, centroX, baseY, escala);
+        return;
+    }
+
+    /* O sprite fica com a mesma largura do carro desenhado com formas,
+     * mantendo a proporção da imagem (a sombra já vem no desenho) */
+    float largura = LARGURA_CARRO * escala;
+    float altura = largura * sprite.height / sprite.width;
+    Rectangle origem = { 0.0f, 0.0f, (float) sprite.width, (float) sprite.height };
+    Rectangle destino = { centroX - largura / 2.0f, baseY - altura, largura, altura };
+    DrawTexturePro(sprite, origem, destino, (Vector2){ 0, 0 }, 0.0f, WHITE);
+}
+
+/*
  * desenharJogador
  * O carro do jogador fica sempre no mesmo lugar da tela (embaixo, no
  * centro): quem se mexe é a estrada. Na grama ele trepida.
@@ -380,15 +659,21 @@ static void desenharRival(Visao *visao, int i, Carro *rival) {
     /* Centro da estrada naquele ponto exato do segmento (com a curva) */
     float fracao = rival->posicao.distanciaNoSegmento / COMPRIMENTO_SEGMENTO;
     float xCurva = visao->xCurva[i] + visao->dxCurva[i] * fracao;
-    PontoNaTela chao = projetar(xCurva, z, visao->xCamera);
+    PontoNaTela chao = projetar(xCurva, alturaNaPosicao(rival->posicao), z,
+                                visao->xCamera, visao->alturaCamera);
 
-    /* O rival tem o tamanho do jogador quando está na mesma distância que ele */
-    PontoNaTela chaoDoJogador = projetar(0.0f, DISTANCIA_CAMERA, 0.0f);
+    /* O rival tem o tamanho do jogador quando está na mesma distância que ele
+     * (a largura na tela só depende da distância, não da altura) */
+    PontoNaTela chaoDoJogador = projetar(0.0f, 0.0f, DISTANCIA_CAMERA, 0.0f, 0.0f);
     float escala = chao.largura / chaoDoJogador.largura;
 
     float centroX = chao.x + rival->deslocamentoLateral * chao.largura;
     float baseY = chao.y - MARGEM_CARRO * escala;
+
+    /* Atrás de uma lombada, só aparece a parte do carro acima da estrada da frente */
+    BeginScissorMode(0, 0, GetScreenWidth(), (int) visao->limiteTela[i]);
     desenharCarro(rival, centroX, baseY, escala);
+    EndScissorMode();
 }
 
 /*
@@ -436,6 +721,13 @@ static void desenharCarros(Visao *visao, Corrida *corrida) {
 void desenharVisaoDoJogador(Corrida *corrida) {
     PosicaoNaPista camera = corrida->jogador.posicao;
     moverNaPista(&camera, -DISTANCIA_CAMERA);   /* as voltas devolvidas não importam aqui */
+
+    /* Nas curvas o fundo desliza: uma volta de 360 graus anda uma
+     * largura inteira da imagem dos morros. Curva à direita (curvatura
+     * positiva) faz o fundo andar para a esquerda. */
+    float grausPorSegundo = camera.segmento->curvatura * corrida->jogador.velocidade
+                            / COMPRIMENTO_SEGMENTO;
+    deslocamentoFundo += grausPorSegundo * GetFrameTime() * LARGURA_FUNDO / 360.0f;
 
     /* static: a struct é grande (~6 KB), então fica fora da pilha */
     static Visao visao;

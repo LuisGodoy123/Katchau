@@ -18,6 +18,8 @@
 
 #include "corrida.h"
 
+void carregarTexturas(void);
+void descarregarTexturas(void);
 void desenharVisaoDoJogador(Corrida *corrida);
 
 #endif

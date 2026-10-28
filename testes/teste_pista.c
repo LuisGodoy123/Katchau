@@ -23,8 +23,11 @@
 #include "ia.h"
 
 #define TOTAL_VOLTAS          3
-#define GRAUS_VOLTA_COMPLETA  360.0f
+#define GRAUS_VOLTA_COMPLETA  -360.0f  /* Interlagos é anti-horário: vira 360 graus para a esquerda */
 #define TOLERANCIA            0.01f
+#define TOLERANCIA_GRAUS      0.05f    /* erro de arredondamento ao somar ~2600 floats */
+#define COMPRIMENTO_INTERLAGOS 4309.0f /* metros */
+#define DESNIVEL_INTERLAGOS     56.0f  /* metros, do S do Senna à Descida do Lago */
 #define PASSOS_PARA_TRAS      5
 
 static int totalFalhas = 0;
@@ -58,6 +61,17 @@ static const char *descreverCurvatura(float curvatura) {
         return "curva a esquerda";
     }
     return "reta";
+}
+
+/*
+ * estaNoTrecho
+ * Diz se o segmento, ou o anterior a ele, pertence ao trecho pedido.
+ * Recebe: o segmento e o nome do trecho.
+ * Devolve: 1 se pertence, 0 se não.
+ */
+static int estaNoTrecho(Segmento *segmento, const char *nome) {
+    return strcmp(segmento->nomeTrecho, nome) == 0 ||
+           strcmp(segmentoAnterior(segmento)->nomeTrecho, nome) == 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -109,21 +123,44 @@ static void testarInserirERemover(void) {
 }
 
 static void testarAutodromo(int modoDetalhado) {
-    printf("\n3) Autodromo completo (criarPista)\n");
+    printf("\n3) Autodromo completo: Interlagos (criarPista)\n");
     Pista *pista = criarPista();
     int total = contarSegmentos(pista);
-    printf("     total de segmentos: %d\n", total);
+    float comprimentoMetros = total / SEGMENTOS_POR_METRO;
+    printf("     total de segmentos: %d (%.0f m)\n", total, comprimentoMetros);
+    verificar(fabsf(comprimentoMetros - COMPRIMENTO_INTERLAGOS) < 5.0f, "a volta tem ~4.309 m");
 
-    /* Soma das curvaturas de uma volta: deve dar 360 graus */
+    /* Soma das curvaturas de uma volta: deve dar -360 graus.
+     * Também guarda o ponto mais alto e o mais baixo. */
     float somaCurvaturas = 0.0f;
+    Segmento *maisAlto = pista->largada;
+    Segmento *maisBaixo = pista->largada;
     Segmento *atual = pista->largada;
     do {
         somaCurvaturas += atual->curvatura;
+        if (atual->altura > maisAlto->altura) {
+            maisAlto = atual;
+        }
+        if (atual->altura < maisBaixo->altura) {
+            maisBaixo = atual;
+        }
         atual = proximoSegmento(atual);
     } while (atual != pista->largada);
-    printf("     soma das curvaturas: %.1f graus\n", somaCurvaturas);
-    verificar(fabsf(somaCurvaturas - GRAUS_VOLTA_COMPLETA) < TOLERANCIA,
-              "uma volta vira exatamente 360 graus");
+    printf("     soma das curvaturas: %.2f graus\n", somaCurvaturas);
+    verificar(fabsf(somaCurvaturas - GRAUS_VOLTA_COMPLETA) < TOLERANCIA_GRAUS,
+              "uma volta vira 360 graus para a esquerda (anti-horario)");
+
+    float desnivelMetros = (maisAlto->altura - maisBaixo->altura) / UNIDADES_POR_METRO;
+    printf("     mais alto: segmento %d (%s)  mais baixo: segmento %d (%s)  desnivel: %.1f m\n",
+           maisAlto->indice, maisAlto->nomeTrecho, maisBaixo->indice, maisBaixo->nomeTrecho,
+           desnivelMetros);
+    verificar(fabsf(desnivelMetros - DESNIVEL_INTERLAGOS) < 0.5f, "desnivel de ~56 m");
+    /* A altura é a do começo do segmento, então o pico pode cair no
+     * primeiro segmento depois do trecho: olha o segmento e o anterior. */
+    verificar(estaNoTrecho(maisAlto, "S do Senna"), "ponto mais alto no S do Senna");
+    verificar(estaNoTrecho(maisBaixo, "Descida do Lago"), "ponto mais baixo na Descida do Lago");
+    verificar(fabsf(pista->largada->anterior->altura) < 0.5f * UNIDADES_POR_METRO,
+              "a volta termina na mesma altura da largada");
 
     verificar(buscarSegmento(pista, 0) == pista->largada, "buscar(0) devolve a largada");
     verificar(buscarSegmento(pista, total - 1) == pista->largada->anterior,
@@ -136,16 +173,17 @@ static void testarAutodromo(int modoDetalhado) {
     atual = pista->largada;
     do {
         if (modoDetalhado) {
-            printf("       segmento %4d | curvatura %5.1f | %s%s\n",
-                   atual->indice, atual->curvatura, descreverCurvatura(atual->curvatura),
+            printf("       segmento %4d | curvatura %6.3f | altura %6.1f m | %s%s\n",
+                   atual->indice, atual->curvatura, atual->altura / UNIDADES_POR_METRO,
+                   descreverCurvatura(atual->curvatura),
                    atual->ehLinhaDeChegada ? "  <- LARGADA" : "");
         }
         Segmento *seguinte = proximoSegmento(atual);
         int trechoAcabou = (seguinte == pista->largada) ||
                            (seguinte->curvatura != atual->curvatura);
         if (trechoAcabou) {
-            printf("       segmentos %4d a %4d: %s (%.1f graus/segmento)\n",
-                   inicioTrecho->indice, atual->indice,
+            printf("       segmentos %4d a %4d: %-18s %-16s (%6.3f graus/segmento)\n",
+                   inicioTrecho->indice, atual->indice, atual->nomeTrecho,
                    descreverCurvatura(atual->curvatura), atual->curvatura);
             inicioTrecho = seguinte;
         }
@@ -231,7 +269,7 @@ static void testarCarro(void) {
     /* Para medir velocidade, um "oval" só de retas: sem curva, nada
      * empurra o carro para a grama. */
     Pista *retaInfinita = criarPistaVazia();
-    adicionarTrecho(retaInfinita, 50, RETA);
+    adicionarTrecho(retaInfinita, "Reta de teste", 50, RETA, 0.0f, 0.0f);
 
     Carro carro = criarCarro("Teste", 0, retaInfinita->largada, 0.0f, 12000.0f, 2400.0f, 0.5f);
     atualizarCarro(&carro, virarDireita, quadro);
@@ -257,8 +295,13 @@ static void testarCarro(void) {
     verificar(estaForaDaPista(&carro) && velocidadeEmKmh(&carro) <= 80,
               "na grama, mesmo acelerando, cai para ~75 km/h");
 
-    /* Curva para a direita empurra para a esquerda */
-    carro.posicao.segmento = buscarSegmento(pista, 200);   /* início da curva 1 */
+    /* Curva para a direita empurra para a esquerda.
+     * Em Interlagos a primeira curva para a direita é o 2o S do Senna. */
+    Segmento *curvaDireita = pista->largada;
+    while (curvaDireita->curvatura <= 0) {
+        curvaDireita = proximoSegmento(curvaDireita);
+    }
+    carro.posicao.segmento = curvaDireita;
     carro.posicao.distanciaNoSegmento = 0.0f;
     carro.deslocamentoLateral = 0.0f;
     carro.velocidade = carro.velocidadeMaxima;

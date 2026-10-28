@@ -30,6 +30,8 @@ static Segmento *criarSegmento(float curvatura) {
     novo->indice = 0;
     novo->curvatura = curvatura;
     novo->ehLinhaDeChegada = 0;
+    novo->altura = 0.0f;
+    novo->nomeTrecho = "";
     novo->obstaculos = NULL;
     novo->proximo = novo;    /* sozinho, ele é o próprio vizinho */
     novo->anterior = novo;
@@ -84,72 +86,100 @@ Pista *criarPistaVazia(void) {
 
 /*
  * adicionarTrecho
- * Coloca vários segmentos iguais no fim da pista (logo antes da largada).
- * Um "trecho" é, por exemplo, uma reta de 200 segmentos ou uma curva
- * de 30 segmentos com a mesma curvatura.
- * Recebe: a pista, quantos segmentos e a curvatura de cada um.
+ * Coloca vários segmentos no fim da pista (logo antes da largada), todos
+ * com a mesma curvatura e o mesmo nome. Um "trecho" é, por exemplo, a
+ * Reta Oposta ou o Bico de Pato.
+ *
+ * A altura vai de alturaInicial até alturaFinal em forma de "S"
+ * (f * f * (3 - 2f), com f indo de 0 a 1): a rampa começa e termina
+ * sem inclinação, então a estrada não dá trancos entre um trecho e outro.
+ *
+ * Recebe: a pista, o nome do trecho, quantos segmentos, a curvatura de
+ *         cada um e a altura no começo e no fim do trecho.
  * Devolve: nada.
  */
-void adicionarTrecho(Pista *pista, int quantidade, float curvatura) {
+void adicionarTrecho(Pista *pista, const char *nome, int quantidade, float curvatura,
+                     float alturaInicial, float alturaFinal) {
     for (int i = 0; i < quantidade; i++) {
-        inserirSegmento(pista, NULL, curvatura);
+        float fracao = (float) i / quantidade;
+        float suave = fracao * fracao * (3.0f - 2.0f * fracao);
+
+        Segmento *novo = inserirSegmento(pista, NULL, curvatura);
+        novo->altura = alturaInicial + (alturaFinal - alturaInicial) * suave;
+        novo->nomeTrecho = nome;
     }
 }
 
+/* Um trecho do autódromo com as medidas do mundo real. */
+typedef struct {
+    const char *nome;
+    float comprimentoMetros;
+    float anguloGraus;      /* quanto a pista vira no trecho: < 0 esquerda, > 0 direita */
+    float desnivelMetros;   /* quanto sobe (> 0) ou desce (< 0) até o fim do trecho */
+} TrechoReal;
+
+/*
+ * Interlagos, na ordem em que é corrido (sentido anti-horário), a partir
+ * da linha de chegada. Dados oficiais (Prefeitura de São Paulo):
+ *   - 4.309 metros de extensão;
+ *   - 11 curvas (o S do Senna conta como duas);
+ *   - desnível de ~56 m: ponto mais alto na entrada do S do Senna (+4 m)
+ *     e mais baixo na Descida do Lago (-52 m).
+ * O comprimento e o ângulo de cada trecho são aproximados a partir da
+ * planta do circuito, ajustados para o desenho fechar (soma dos
+ * ângulos = -360 graus, soma dos desníveis = 0, soma dos comprimentos =
+ * 4.309 m).
+ */
+static const TrechoReal TRECHOS_INTERLAGOS[] = {
+    /* nome                         metros  ângulo  desnível   altura no fim */
+    { "Reta dos Boxes",               329,     0,      4 },  /*  +4 (mais alto) */
+    { "S do Senna",                    87,   -95,     -9 },  /*  -5 */
+    { "S do Senna",                    77,    60,     -7 },  /* -12 */
+    { "Curva do Sol",                 248,  -110,    -10 },  /* -22 */
+    { "Reta Oposta",                  598,   -15,    -18 },  /* -40 */
+    { "Descida do Lago",              115,   -90,     -8 },  /* -48 */
+    { "Descida do Lago",              155,   -60,     -4 },  /* -52 (mais baixo) */
+    { "Reta",                         118,     0,      3 },  /* -49 */
+    { "Ferradura",                    298,   135,      5 },  /* -44 */
+    { "Reta",                         111,     0,      4 },  /* -40 */
+    { "Laranjinha",                   106,    80,      4 },  /* -36 */
+    { "Reta",                         151,     0,      3 },  /* -33 */
+    { "Pinheirinho",                  100,  -130,      1 },  /* -32 */
+    { "Reta",                         141,     0,      0 },  /* -32 */
+    { "Bico de Pato",                  70,   150,      0 },  /* -32 */
+    { "Reta",                         111,     0,     -2 },  /* -34 */
+    { "Mergulho",                     165,   -95,     -8 },  /* -42 */
+    { "Reta",                         110,     0,     -2 },  /* -44 */
+    { "Juncao",                       117,  -110,     -2 },  /* -46 */
+    { "Subida dos Boxes",             823,   -80,     38 },  /*  -8 */
+    { "Reta dos Boxes",               279,     0,      8 },  /*   0 (de volta à largada) */
+};
+#define TOTAL_TRECHOS_INTERLAGOS  (int) (sizeof(TRECHOS_INTERLAGOS) / sizeof(TRECHOS_INTERLAGOS[0]))
+
 /*
  * criarPista
- * Monta o autódromo do KATCHAU, corrido no sentido horário.
- *
- * O desenho tem 4 lados e 4 curvas de 90 graus à direita:
- *
- *        Curva 2 (aberta) ---- Reta oposta ---- Curva 3 (fechada)
- *              |                                      |
- *      Reta + chicane + reta                  Reta + esse + reta
- *              |                                      |
- *        Curva 1 (fechada) -- Reta principal -- Curva 4 (aberta)
- *                              ^ largada
- *
- * Lados opostos têm o mesmo comprimento (as retas dos lados 2 e 4
- * foram ajustadas para compensar a chicane e o esse), então o traçado fecha
- * (isso vai importar no mini-mapa da Fase 5).
- *
+ * Monta o Autódromo de Interlagos a partir da tabela TRECHOS_INTERLAGOS.
+ * Cada trecho em metros vira um bloco de segmentos:
+ *   quantidade = metros * SEGMENTOS_POR_METRO
+ *   curvatura  = ângulo do trecho / quantidade (graus por segmento)
+ *   altura     = soma dos desníveis até ali, em unidades de mundo
  * Recebe: nada.
- * Devolve: a pista completa.
+ * Devolve: a pista completa (o primeiro segmento é a largada).
  */
 Pista *criarPista(void) {
     Pista *pista = criarPistaVazia();
+    float alturaAtual = 0.0f;   /* a linha de chegada fica na altura 0 */
 
-    /* Lado 1: reta principal. O primeiro segmento vira a largada. */
-    adicionarTrecho(pista, 200, RETA);
+    for (int i = 0; i < TOTAL_TRECHOS_INTERLAGOS; i++) {
+        TrechoReal trecho = TRECHOS_INTERLAGOS[i];
 
-    /* Curva 1: fechada à direita (60 x 1,5 grau = 90 graus) */
-    adicionarTrecho(pista, 60, CURVA_FECHADA);
+        int quantidade = (int) (trecho.comprimentoMetros * SEGMENTOS_POR_METRO + 0.5f);
+        float curvatura = trecho.anguloGraus / quantidade;
+        float alturaFinal = alturaAtual + trecho.desnivelMetros * UNIDADES_POR_METRO;
 
-    /* Lado 2: reta, chicane (esquerda-direita-esquerda) e reta */
-    adicionarTrecho(pista, 136, RETA);
-    adicionarTrecho(pista, 20, -CURVA_CHICANE);
-    adicionarTrecho(pista, 40, CURVA_CHICANE);
-    adicionarTrecho(pista, 20, -CURVA_CHICANE);
-    adicionarTrecho(pista, 137, RETA);
-
-    /* Curva 2: aberta à direita (180 x 0,5 grau = 90 graus) */
-    adicionarTrecho(pista, 180, CURVA_ABERTA);
-
-    /* Lado 3: reta oposta, do mesmo tamanho da reta principal */
-    adicionarTrecho(pista, 200, RETA);
-
-    /* Curva 3: fechada à direita, igual à curva 1 */
-    adicionarTrecho(pista, 60, CURVA_FECHADA);
-
-    /* Lado 4: reta, esse suave (esquerda-direita-esquerda) e reta */
-    adicionarTrecho(pista, 60, RETA);
-    adicionarTrecho(pista, 60, -CURVA_ESSE);
-    adicionarTrecho(pista, 120, CURVA_ESSE);
-    adicionarTrecho(pista, 60, -CURVA_ESSE);
-    adicionarTrecho(pista, 60, RETA);
-
-    /* Curva 4: aberta à direita, desemboca na reta principal */
-    adicionarTrecho(pista, 180, CURVA_ABERTA);
+        adicionarTrecho(pista, trecho.nome, quantidade, curvatura, alturaAtual, alturaFinal);
+        alturaAtual = alturaFinal;
+    }
 
     return pista;
 }
@@ -340,6 +370,20 @@ int moverNaPista(PosicaoNaPista *posicao, float distancia) {
     }
 
     return voltas;
+}
+
+/*
+ * alturaNaPosicao
+ * Altura do chão num ponto exato da pista: mistura a altura do começo do
+ * segmento com a do começo do próximo, conforme o quanto já se andou nele.
+ * Recebe: a posição na pista.
+ * Devolve: a altura em unidades de mundo.
+ */
+float alturaNaPosicao(PosicaoNaPista posicao) {
+    float alturaAqui = posicao.segmento->altura;
+    float alturaSeguinte = proximoSegmento(posicao.segmento)->altura;
+    float fracao = posicao.distanciaNoSegmento / COMPRIMENTO_SEGMENTO;
+    return alturaAqui + (alturaSeguinte - alturaAqui) * fracao;
 }
 
 /*

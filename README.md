@@ -77,7 +77,12 @@ src/
   menu.c/.h        menu principal, garagem e tela de resultado         (fase 6)
 testes/
   teste_pista.c    testa pista, carro, corrida, IA e ordenação no terminal
-recursos/          imagens, fontes e sons
+recursos/
+  texturas/        PNGs do jogo (ver recursos/texturas/README.md)
+    estrada/       asfalto, grama, zebra e faixa
+    fundo/         céu, cidade e morros (camadas do horizonte)
+    carro/         carro reto, virando à esquerda e à direita
+    sprites/       árvores, arquibancadas, boxes, pórtico, pneus e placas
 ```
 
 Regra: só `render.c`, `hud.c` e `menu.c` incluem `raylib.h` (além do `main.c`, que abre

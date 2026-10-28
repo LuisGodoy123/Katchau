@@ -42,6 +42,12 @@ int main(void) {
     InitWindow(LARGURA_TELA, ALTURA_TELA, TITULO_JANELA);
     SetTargetFPS(QUADROS_POR_SEG);
 
+    /* As texturas são procuradas em recursos/, ao lado do executável.
+     * Mudar para a pasta do executável faz o jogo achá-las mesmo quando
+     * é aberto de outro lugar (por exemplo, com duplo clique). */
+    ChangeDirectory(GetApplicationDirectory());
+    carregarTexturas();
+
     Pista *pista = criarPista();
     Corrida corrida;
     iniciarCorrida(&corrida, pista);
@@ -72,6 +78,7 @@ int main(void) {
     }
 
     liberarPista(pista);
+    descarregarTexturas();
     CloseWindow();
     return 0;
 }
