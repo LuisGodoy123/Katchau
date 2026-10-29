@@ -57,6 +57,11 @@ static Tela atualizarTelaDaCorrida(Corrida *corrida, float tempoQuadro) {
 }
 
 int main(void) {
+    /* VSync: cada quadro sai junto com a atualização do monitor, em
+     * intervalos regulares, sem os "trancos" de quadros irregulares.
+     * Precisa vir antes do InitWindow. O SetTargetFPS logo abaixo
+     * continua valendo como limite, caso o driver de vídeo ignore o VSync. */
+    SetConfigFlags(FLAG_VSYNC_HINT);
     InitWindow(LARGURA_TELA, ALTURA_TELA, TITULO_JANELA);
     SetTargetFPS(QUADROS_POR_SEG);
     SetExitKey(KEY_NULL);   /* ESC volta de tela; para sair, use "SAIR" no menu */
