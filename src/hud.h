@@ -14,5 +14,6 @@
 
 void desenharHud(Corrida *corrida);
 void desenharFimDeCorrida(Corrida *corrida);
+void formatarTempo(float segundos, char *texto, int tamanho);
 
 #endif

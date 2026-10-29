@@ -21,5 +21,7 @@
 void carregarTexturas(void);
 void descarregarTexturas(void);
 void desenharVisaoDoJogador(Corrida *corrida);
+void desenharPistaDeFundo(Pista *pista);
+void desenharCarroParado(int numero, float centroX, float baseY, float escala);
 
 #endif

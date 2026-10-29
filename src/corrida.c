@@ -19,29 +19,34 @@
 #define DISTANCIA_LATERAL_BATIDA  0.25f   /* mais perto que isso, os carros se tocam */
 #define PERDA_NA_BATIDA           0.8f    /* quem bate atrás fica com 80% da velocidade do outro */
 
-/* Ficha técnica de cada carro. Os nomes e o jeito de cada um são originais do KATCHAU. */
-typedef struct {
-    const char *nome;
-    float velocidadeMaxima;
-    float aceleracao;
-    float aderencia;
-} FichaTecnica;
+/* ---------- Contagem regressiva ---------- */
+#define SEGUNDOS_DE_CONTAGEM   3.0f    /* 3, 2, 1... KATCHAU! */
 
-static const FichaTecnica FICHA_JOGADOR = { "Voce", 12000.0f, 2400.0f, 0.50f };
-
-/* Volta limpa de cada um (sozinho na pista, dirigido pela IA), medida no
- * terminal: o jogador faz 31,4 s; os rivais vão de 31,0 s a 32,7 s.
- * A aderência pesa muito (cada 0,01 vale ~0,15 s), então ela varia pouco. */
-static const FichaTecnica FICHAS_RIVAIS[TOTAL_RIVAIS] = {
-    /* nome           vel.max   acel.    aderência    volta limpa */
-    { "Barao",        12500.0f, 2200.0f, 0.47f },  /* 31,0 s  esportivo arrogante: voa na reta */
-    { "Neon",         11700.0f, 2400.0f, 0.55f },  /* 31,0 s  gruda nas curvas */
-    { "Trovao",       12000.0f, 2700.0f, 0.49f },  /* 31,4 s  arranca forte */
-    { "Ze Pistao",    11800.0f, 2300.0f, 0.51f },  /* 31,7 s  certinho em tudo */
-    { "Fuscao",       11100.0f, 2300.0f, 0.58f },  /* 32,0 s  fusca falante: lento, mas não sai da pista */
-    { "Bolinha",      11400.0f, 2800.0f, 0.51f },  /* 32,5 s  pequeno e esperto na largada */
-    { "Ferrugem",     11200.0f, 2100.0f, 0.54f },  /* 32,7 s  picape enferrujada */
+/* Os 8 carros do jogo. O número de cada um é a posição neste vetor e
+ * define a cor no desenho (0 = vermelho, 1 = amarelo...). O jogador
+ * escolhe um deles na garagem; os outros 7 viram os rivais.
+ * A aderência pesa muito no tempo de volta, então ela varia pouco.
+ * Os nomes e o jeito de cada um são originais do KATCHAU. */
+static const FichaTecnica FICHAS[TOTAL_CARROS] = {
+    /* nome         descrição                         vel.max   acel.    aderência */
+    { "Katchau",    "o carro da casa, equilibrado",    12000.0f, 2400.0f, 0.50f },
+    { "Barao",      "esportivo arrogante, voa na reta", 12500.0f, 2200.0f, 0.47f },
+    { "Neon",       "gruda nas curvas",                11700.0f, 2400.0f, 0.55f },
+    { "Trovao",     "arranca forte",                   12000.0f, 2700.0f, 0.49f },
+    { "Ze Pistao",  "certinho em tudo",                11800.0f, 2300.0f, 0.51f },
+    { "Fuscao",     "lento, mas nao sai da pista",     11100.0f, 2300.0f, 0.58f },
+    { "Bolinha",    "pequeno e esperto na largada",    11400.0f, 2800.0f, 0.51f },
+    { "Ferrugem",   "picape enferrujada",              11200.0f, 2100.0f, 0.54f },
 };
+
+/*
+ * fichaDoCarro
+ * Recebe: o número do carro (0 a TOTAL_CARROS - 1).
+ * Devolve: a ficha técnica dele.
+ */
+const FichaTecnica *fichaDoCarro(int numero) {
+    return &FICHAS[numero];
+}
 
 /*
  * colocarNoGrid
@@ -78,25 +83,34 @@ static Carro criarCarroDaFicha(FichaTecnica ficha, int numero, Pista *pista) {
 
 /*
  * iniciarCorrida
- * Prepara uma corrida nova: 8 carros no grid, relógio zerado e a
- * classificação montada. Serve também para correr de novo.
- * Recebe: a corrida a preparar e a pista onde ela acontece.
+ * Prepara uma corrida nova: o jogador com o carro escolhido na garagem,
+ * os outros 7 carros como rivais, todos no grid, relógio zerado,
+ * contagem regressiva armada e a classificação montada.
+ * Serve também para correr de novo.
+ * Recebe: a corrida a preparar, a pista e o número do carro do jogador.
  * Devolve: nada.
  */
-void iniciarCorrida(Corrida *corrida, Pista *pista) {
+void iniciarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador) {
     corrida->pista = pista;
     corrida->tempoDeCorrida = 0.0f;
+    corrida->contagemRegressiva = SEGUNDOS_DE_CONTAGEM;
     corrida->terminou = 0;
     corrida->posicaoFinal = 0;
 
-    corrida->jogador = criarCarroDaFicha(FICHA_JOGADOR, 0, pista);
+    corrida->jogador = criarCarroDaFicha(FICHAS[carroDoJogador], carroDoJogador, pista);
     colocarNoGrid(&corrida->jogador, LUGAR_DO_JOGADOR);
     corrida->classificacao[0] = &corrida->jogador;
 
-    for (int i = 0; i < TOTAL_RIVAIS; i++) {
-        corrida->rivais[i] = criarCarroDaFicha(FICHAS_RIVAIS[i], i + 1, pista);
-        colocarNoGrid(&corrida->rivais[i], i);   /* rivais nos lugares 0 a 6 */
-        corrida->classificacao[i + 1] = &corrida->rivais[i];
+    /* Rivais: todos os carros, menos o que o jogador pegou */
+    int rival = 0;
+    for (int numero = 0; numero < TOTAL_CARROS; numero++) {
+        if (numero == carroDoJogador) {
+            continue;
+        }
+        corrida->rivais[rival] = criarCarroDaFicha(FICHAS[numero], numero, pista);
+        colocarNoGrid(&corrida->rivais[rival], rival);   /* rivais nos lugares 0 a 6 */
+        corrida->classificacao[rival + 1] = &corrida->rivais[rival];
+        rival++;
     }
 
     ordenarCarrosPorDistancia(corrida->classificacao, TOTAL_CARROS);
@@ -176,6 +190,8 @@ static void verificarBatidas(Corrida *corrida) {
  *   3) trata as batidas;
  *   4) reordena a classificação (Insertion Sort);
  *   5) verifica se o jogador terminou.
+ * Antes disso, enquanto a contagem regressiva não acaba, ninguém sai
+ * do lugar e o relógio não anda.
  * Depois do fim, o jogador segue sem acelerar até parar e os rivais
  * continuam correndo. O relógio também continua, para cada rival ter
  * o seu tempo de chegada; o do jogador fica guardado no carro dele.
@@ -183,6 +199,11 @@ static void verificarBatidas(Corrida *corrida) {
  * Devolve: nada.
  */
 void atualizarCorrida(Corrida *corrida, Comandos comandosJogador, float tempoQuadro) {
+    if (corrida->contagemRegressiva > 0.0f) {
+        corrida->contagemRegressiva -= tempoQuadro;
+        return;
+    }
+
     corrida->tempoDeCorrida += tempoQuadro;
     if (corrida->terminou) {
         Comandos nenhumComando = { 0, 0, 0, 0 };
@@ -214,6 +235,20 @@ void atualizarCorrida(Corrida *corrida, Comandos comandosJogador, float tempoQua
         corrida->terminou = 1;
         corrida->posicaoFinal = posicaoDoCarro(corrida, &corrida->jogador);
     }
+}
+
+/*
+ * todosChegaram
+ * Recebe: a corrida.
+ * Devolve: 1 se os 8 carros já completaram TOTAL_VOLTAS, 0 se não.
+ */
+int todosChegaram(Corrida *corrida) {
+    for (int i = 0; i < TOTAL_CARROS; i++) {
+        if (corrida->classificacao[i]->voltas < TOTAL_VOLTAS) {
+            return 0;
+        }
+    }
+    return 1;
 }
 
 /*

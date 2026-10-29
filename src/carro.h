@@ -21,6 +21,16 @@
 #define TAMANHO_NOME        20
 #define LIMITE_PISTA        1.0f   /* além disso (para qualquer lado) é grama */
 
+/* Ficha técnica de um modelo de carro. A garagem mostra e ordena
+ * as fichas; a corrida cria os carros a partir delas. */
+typedef struct {
+    const char *nome;
+    const char *descricao;         /* o jeito do carro, mostrado na garagem */
+    float velocidadeMaxima;        /* unidades por segundo */
+    float aceleracao;              /* quanto a velocidade sobe por segundo */
+    float aderencia;               /* de 0 a 1 */
+} FichaTecnica;
+
 /* O que o piloto quer fazer neste quadro: 1 = sim, 0 = não. */
 typedef struct {
     int acelerar;
@@ -58,6 +68,7 @@ Carro criarCarro(const char *nome, int numero, Segmento *largada, float deslocam
 int atualizarCarro(Carro *carro, Comandos comandos, float tempoQuadro);
 int estaForaDaPista(Carro *carro);
 int velocidadeEmKmh(Carro *carro);
+int converterParaKmh(float velocidade);
 float velocidadeSeguraNaCurva(Carro *carro, float curvatura);
 
 #endif

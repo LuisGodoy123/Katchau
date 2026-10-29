@@ -73,6 +73,7 @@
 #define TAMANHO_TEXTURA_CHAO 64.0f     /* lado das texturas de asfalto e grama, em pixels */
 #define VELOCIDADE_CIDADE    0.5f      /* a cidade, mais longe, desliza na metade da velocidade dos morros */
 #define VELOCIDADE_CEU       0.2f
+#define VELOCIDADE_CAMERA_MENU 3000.0f /* a câmera do fundo do menu anda a 75 km/h */
 #define LIMITE_VERMELHO      60        /* quanto o vermelho tem que passar o verde e o azul para ser "pintura" */
 #define BRILHO_VERMELHO      200.0f    /* vermelho do sprite que vira exatamente a cor do rival */
 
@@ -735,4 +736,41 @@ void desenharVisaoDoJogador(Corrida *corrida) {
 
     desenharPista(&visao);
     desenharCarros(&visao, corrida);
+}
+
+/*
+ * desenharPistaDeFundo
+ * Fundo das telas de menu: a câmera passeia sozinha pela pista, devagar,
+ * pelo centro da estrada. Ela anda pela lista com moverNaPista(), então
+ * dá voltas infinitas no circuito.
+ * Recebe: a pista.
+ * Devolve: nada.
+ */
+void desenharPistaDeFundo(Pista *pista) {
+    static PosicaoNaPista camera = { NULL, 0.0f };
+    if (camera.segmento == NULL) {
+        camera.segmento = pista->largada;
+    }
+    moverNaPista(&camera, VELOCIDADE_CAMERA_MENU * GetFrameTime());
+
+    /* O fundo desliza nas curvas como na corrida */
+    float grausPorSegundo = camera.segmento->curvatura * VELOCIDADE_CAMERA_MENU / COMPRIMENTO_SEGMENTO;
+    deslocamentoFundo += grausPorSegundo * GetFrameTime() * LARGURA_FUNDO / 360.0f;
+
+    static Visao visao;
+    calcularVisao(&visao, camera, 0.0f);
+    desenharPista(&visao);
+}
+
+/*
+ * desenharCarroParado
+ * Desenha um modelo de carro fora da corrida (por exemplo, na garagem),
+ * visto de trás e andando reto.
+ * Recebe: o número do carro (define a cor), o centro da base na tela e a escala.
+ * Devolve: nada.
+ */
+void desenharCarroParado(int numero, float centroX, float baseY, float escala) {
+    Carro carro = { 0 };   /* sem comandos: pose reta, lanternas apagadas */
+    carro.numero = numero;
+    desenharCarro(&carro, centroX, baseY, escala);
 }

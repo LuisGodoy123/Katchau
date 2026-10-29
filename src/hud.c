@@ -17,6 +17,8 @@
 #define COR_FUNDO_HUD         Fade(BLACK, 0.55f)
 #define COR_TEXTO_HUD         RAYWHITE
 #define COR_DESTAQUE          YELLOW
+#define TAMANHO_CONTAGEM      96
+#define DURACAO_GRITO_LARGADA 1.5f   /* segundos em que o KATCHAU! fica na tela depois da largada */
 
 /* ---------- Mini-mapa ---------- */
 #define MAX_PONTOS_MAPA       8192   /* um ponto por segmento; Interlagos tem ~2.600 */
@@ -46,7 +48,7 @@ static Pista *pistaDoMapa = NULL;
  * Recebe: o tempo, o texto de saída e o tamanho dele.
  * Devolve: nada (o resultado fica em "texto").
  */
-static void formatarTempo(float segundos, char *texto, int tamanho) {
+void formatarTempo(float segundos, char *texto, int tamanho) {
     int minutos = (int) (segundos / 60);
     float resto = segundos - minutos * 60;
     snprintf(texto, tamanho, "%d:%05.2f", minutos, resto);
@@ -185,6 +187,30 @@ static void desenharMiniMapa(Corrida *corrida) {
 }
 
 /*
+ * desenharContagemRegressiva
+ * Na largada, mostra 3, 2, 1 no meio da tela e, no primeiro segundo
+ * de corrida, o grito de KATCHAU!
+ * Recebe: a corrida.
+ * Devolve: nada.
+ */
+static void desenharContagemRegressiva(Corrida *corrida) {
+    const char *texto = NULL;
+    if (corrida->contagemRegressiva > 0.0f) {
+        /* 2,4 s restantes mostra "3"; 1,2 s mostra "2"; 0,3 s mostra "1" */
+        texto = TextFormat("%d", (int) corrida->contagemRegressiva + 1);
+    } else if (corrida->tempoDeCorrida < DURACAO_GRITO_LARGADA) {
+        texto = "KATCHAU!";
+    }
+    if (texto == NULL) {
+        return;
+    }
+
+    int y = GetScreenHeight() / 2 - TAMANHO_CONTAGEM;
+    desenharTextoCentralizado(texto, y + 4, TAMANHO_CONTAGEM, BLACK);   /* sombra */
+    desenharTextoCentralizado(texto, y, TAMANHO_CONTAGEM, COR_DESTAQUE);
+}
+
+/*
  * desenharHud
  * Mostra no topo da tela a posição, a volta, o tempo e a velocidade.
  * Recebe: a corrida.
@@ -220,12 +246,14 @@ void desenharHud(Corrida *corrida) {
     }
 
     desenharMiniMapa(corrida);
+    desenharContagemRegressiva(corrida);
 }
 
 /*
  * desenharFimDeCorrida
  * Painel de chegada: posição, tempo total, tempo de cada volta e a
- * melhor volta. A tabela com todos os carros fica para a Fase 6.
+ * melhor volta. A tabela com todos os carros fica na tela de
+ * resultado (menu.c).
  * Recebe: a corrida (já terminada).
  * Devolve: nada.
  */
@@ -267,5 +295,5 @@ void desenharFimDeCorrida(Corrida *corrida) {
         desenharTextoCentralizado(texto, y + 135 + i * 32, TAMANHO_TEXTO_FIM, cor);
     }
 
-    desenharTextoCentralizado("ENTER para correr de novo", y + altura - 40, 20, LIGHTGRAY);
+    desenharTextoCentralizado("ENTER para ver o resultado", y + altura - 40, 20, LIGHTGRAY);
 }

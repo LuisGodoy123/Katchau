@@ -317,7 +317,7 @@ static void testarCorridaCompleta(void) {
     printf("\n6) Corrida de %d voltas com um piloto automatico simples\n", TOTAL_VOLTAS);
     Pista *pista = criarPista();
     Corrida corrida;
-    iniciarCorrida(&corrida, pista);
+    iniciarCorrida(&corrida, pista, 0);
     float quadro = 1.0f / 60.0f;
     int quadrosMaximos = 60 * 60 * 10;   /* 10 minutos de jogo */
 
@@ -369,7 +369,7 @@ static int estaOrdenada(Carro *carros[], int quantidade) {
 
 static void testarInsertionSort(void) {
     printf("\n7) Insertion Sort (ordenarCarrosPorDistancia)\n");
-    Carro carros[TOTAL_CARROS];
+    Carro carros[TOTAL_CARROS] = { 0 };   /* tudo zerado: ninguem chegou ainda */
     Carro *vetor[TOTAL_CARROS];
 
     /* Embaralhado */
@@ -414,7 +414,7 @@ static void testarCorridaComRivais(void) {
     printf("\n8) Corrida com %d carros (o jogador tambem dirigido pela IA)\n", TOTAL_CARROS);
     Pista *pista = criarPista();
     Corrida corrida;
-    iniciarCorrida(&corrida, pista);
+    iniciarCorrida(&corrida, pista, 0);
     float quadro = 1.0f / 60.0f;
 
     verificar(posicaoDoCarro(&corrida, &corrida.jogador) == TOTAL_CARROS, "o jogador larga em ultimo");
@@ -455,6 +455,126 @@ static void testarCorridaComRivais(void) {
     liberarPista(pista);
 }
 
+/*
+ * fichasEmOrdem
+ * Recebe: um vetor de fichas, o tamanho e o atributo.
+ * Devolve: 1 se estiver do maior para o menor valor do atributo.
+ */
+static int fichasEmOrdem(const FichaTecnica *fichas[], int quantidade, Atributo atributo) {
+    for (int i = 1; i < quantidade; i++) {
+        if (valorDoAtributo(fichas[i - 1], atributo) < valorDoAtributo(fichas[i], atributo)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static void testarMergeSort(void) {
+    printf("\n9) Merge Sort da garagem (ordenarFichasPorAtributo)\n");
+    const FichaTecnica *fichas[TOTAL_CARROS];
+
+    for (int atributo = 0; atributo < TOTAL_ATRIBUTOS; atributo++) {
+        for (int i = 0; i < TOTAL_CARROS; i++) {
+            fichas[i] = fichaDoCarro(i);
+        }
+        ordenarFichasPorAtributo(fichas, TOTAL_CARROS, (Atributo) atributo);
+
+        printf("     por %-10s:", nomeDoAtributo((Atributo) atributo));
+        for (int i = 0; i < TOTAL_CARROS; i++) {
+            printf(" %s", fichas[i]->nome);
+        }
+        printf("\n");
+        char descricao[64];
+        snprintf(descricao, sizeof(descricao), "garagem em ordem decrescente de %s",
+                 nomeDoAtributo((Atributo) atributo));
+        verificar(fichasEmOrdem(fichas, TOTAL_CARROS, (Atributo) atributo), descricao);
+    }
+
+    /* Estabilidade: com tudo empatado, a ordem original não muda */
+    FichaTecnica iguais[4] = {
+        { "A", "", 1.0f, 1.0f, 0.5f }, { "B", "", 1.0f, 1.0f, 0.5f },
+        { "C", "", 1.0f, 1.0f, 0.5f }, { "D", "", 1.0f, 1.0f, 0.5f },
+    };
+    const FichaTecnica *vetorIguais[4] = { &iguais[0], &iguais[1], &iguais[2], &iguais[3] };
+    ordenarFichasPorAtributo(vetorIguais, 4, ATRIBUTO_VELOCIDADE);
+    verificar(vetorIguais[0] == &iguais[0] && vetorIguais[1] == &iguais[1] &&
+              vetorIguais[2] == &iguais[2] && vetorIguais[3] == &iguais[3],
+              "empates mantem a ordem original (Merge Sort e estavel)");
+
+    /* Casos de borda: 1 elemento e 0 elementos não quebram */
+    ordenarFichasPorAtributo(vetorIguais, 1, ATRIBUTO_ACELERACAO);
+    ordenarFichasPorAtributo(vetorIguais, 0, ATRIBUTO_ACELERACAO);
+    verificar(vetorIguais[0] == &iguais[0], "vetor com 1 ou 0 fichas fica como esta");
+}
+
+static void testarEscolhaDaGaragem(void) {
+    printf("\n10) Garagem: correr com o carro escolhido\n");
+    Pista *pista = criarPista();
+    Corrida corrida;
+    int escolhido = 3;   /* Trovao */
+    iniciarCorrida(&corrida, pista, escolhido);
+
+    verificar(corrida.jogador.numero == escolhido &&
+              strcmp(corrida.jogador.nome, fichaDoCarro(escolhido)->nome) == 0,
+              "o jogador corre com o carro escolhido");
+    verificar(corrida.jogador.velocidadeMaxima == fichaDoCarro(escolhido)->velocidadeMaxima,
+              "com a ficha tecnica dele");
+
+    /* Os 7 rivais são os outros 7 carros, cada um uma vez */
+    int apareceu[TOTAL_CARROS] = { 0 };
+    apareceu[corrida.jogador.numero]++;
+    for (int i = 0; i < TOTAL_RIVAIS; i++) {
+        apareceu[corrida.rivais[i].numero]++;
+    }
+    int cadaUmUmaVez = 1;
+    for (int i = 0; i < TOTAL_CARROS; i++) {
+        if (apareceu[i] != 1) {
+            cadaUmUmaVez = 0;
+        }
+    }
+    verificar(cadaUmUmaVez, "os 8 carros estao na corrida, sem repetir");
+
+    /* Contagem regressiva: ninguém anda antes de ela acabar */
+    Comandos acelerar = { 1, 0, 0, 0 };
+    float distanciaAntes = corrida.jogador.distanciaPercorrida;
+    atualizarCorrida(&corrida, acelerar, 1.0f);
+    verificar(corrida.jogador.distanciaPercorrida == distanciaAntes && corrida.tempoDeCorrida == 0.0f,
+              "durante a contagem regressiva ninguem anda e o relogio nao corre");
+
+    /* Corre até todo mundo chegar e confere a ordem de chegada */
+    float quadro = 1.0f / 60.0f;
+    int quadros = 0;
+    while (!todosChegaram(&corrida) && quadros < 60 * 60 * 15) {
+        Comandos comandos = atualizarIA(&corrida.jogador, carroDaFrente(&corrida, &corrida.jogador));
+        atualizarCorrida(&corrida, comandos, quadro);
+        quadros++;
+    }
+    /* Depois de todos chegarem, os carros continuam andando: a ordem não pode mudar */
+    for (int i = 0; i < 60 * 20; i++) {
+        Comandos nenhum = { 0, 0, 0, 0 };
+        atualizarCorrida(&corrida, nenhum, quadro);
+    }
+
+    int ordemPorTempo = 1;
+    for (int i = 1; i < TOTAL_CARROS; i++) {
+        if (corrida.classificacao[i - 1]->tempoDeChegada > corrida.classificacao[i]->tempoDeChegada) {
+            ordemPorTempo = 0;
+        }
+    }
+    printf("     resultado:");
+    for (int i = 0; i < TOTAL_CARROS; i++) {
+        printf(" %do %s (%.1f s)", i + 1, corrida.classificacao[i]->nome,
+               corrida.classificacao[i]->tempoDeChegada);
+    }
+    printf("\n");
+    verificar(todosChegaram(&corrida), "todos os carros completam a corrida");
+    verificar(ordemPorTempo, "o resultado fica na ordem de chegada, mesmo com os carros andando depois");
+    verificar(posicaoDoCarro(&corrida, &corrida.jogador) == corrida.posicaoFinal,
+              "a posicao final do jogador bate com o resultado");
+
+    liberarPista(pista);
+}
+
 int main(int argc, char *argv[]) {
     int modoDetalhado = (argc > 1 && strcmp(argv[1], "-v") == 0);
 
@@ -467,6 +587,8 @@ int main(int argc, char *argv[]) {
     testarCorridaCompleta();
     testarInsertionSort();
     testarCorridaComRivais();
+    testarMergeSort();
+    testarEscolhaDaGaragem();
 
     if (totalFalhas == 0) {
         printf("\nTodos os testes passaram.\n");

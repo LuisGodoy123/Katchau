@@ -10,6 +10,8 @@ lista circular duplamente encadeada de segmentos.
 - **Fase 2:** estrada em pseudo-3D (`src/render.c`).
 - **Fase 3:** carro do jogador (`src/carro.c`), corrida de 3 voltas com tempo por volta (`src/corrida.c`) e HUD simples (`src/hud.c`).
 - **Fase 4:** 7 rivais com IA (`src/ia.c`), classificação refeita a cada quadro com Insertion Sort (`src/ordenacao.c`), colisão e posição no HUD.
+- **Fase 5 (em parte):** Interlagos com subidas e descidas, texturas e mini-mapa. Faltam turbo e obstáculos.
+- **Fase 6:** menu principal, garagem com Merge Sort, como jogar, contagem regressiva e tela de resultado (`src/menu.c`).
 
 ## 1. Instalar a raylib
 
@@ -47,18 +49,47 @@ Para ver cada segmento da pista no teste: `./build/teste_pista -v`.
 
 ## 3. Controles
 
+**Na corrida**
+
 | Tecla | Ação |
 |-------|------|
 | ↑ ou W | Acelerar |
 | ↓ ou S | Frear |
 | ← → ou A D | Virar |
-| ENTER | Correr de novo (depois da chegada) |
-| ESC   | Sair |
+| ENTER | Ver o resultado (depois da chegada) |
+| ESC   | Abandonar a corrida e voltar ao menu |
+
+**Nos menus**
+
+| Tecla | Ação |
+|-------|------|
+| ↑ ↓ ou W S | Escolher opção / carro |
+| ← → ou A D | Na garagem: trocar o critério de ordenação |
+| ENTER | Confirmar |
+| ESC   | Voltar |
+
+Para fechar o jogo, use **SAIR** no menu (ou feche a janela).
 
 Curvas fechadas jogam o carro para fora em alta velocidade: freie antes delas.
 Na grama o carro não passa de ~75 km/h.
 
-_(completar nas fases 5 e 6: turbo, menu)_
+_(completar na fase 5: turbo)_
+
+## As telas
+
+`main.c` guarda em qual tela o jogador está (`Tela`, em `menu.h`) e, a cada quadro,
+chama a função `atualizar...()` dela, que devolve para qual tela ir, e depois a
+`desenhar...()`:
+
+```
+MENU ──> GARAGEM ──> MENU
+  │──> COMO JOGAR ──> MENU
+  └──> CORRIDA ──(chegada + ENTER)──> RESULTADO ──(ENTER)──> CORRIDA
+          └──(ESC)──> MENU                   └──(ESC)──> MENU
+```
+
+Na tela de resultado a corrida continua ao fundo, e a tabela se completa conforme
+os rivais terminam a prova.
 
 ## Estrutura
 
@@ -74,7 +105,7 @@ src/
   ordenacao.c/.h   Insertion Sort e Merge Sort                         (fases 4 e 6)
   obstaculos.c/.h  lista simples de obstáculos por segmento            (fase 5)
   hud.c/.h         velocímetro, tempo, posição, volta e mini-mapa      (fases 3 a 5)
-  menu.c/.h        menu principal, garagem e tela de resultado         (fase 6)
+  menu.c/.h        menu, garagem, como jogar e tela de resultado       (fase 6)
 testes/
   teste_pista.c    testa pista, carro, corrida, IA e ordenação no terminal
 recursos/
@@ -88,49 +119,74 @@ recursos/
 Regra: só `render.c`, `hud.c` e `menu.c` incluem `raylib.h` (além do `main.c`, que abre
 a janela). O resto é lógica pura e pode ser testado no terminal.
 
-## Os rivais
+## Os carros
 
-O jogador larga em último. Cada rival tem uma ficha técnica própria; a "volta limpa" é o
-tempo de uma volta sozinho na pista, dirigido pela IA (o carro do jogador faz 31,4 s).
+São 8 carros (`FICHAS` em `corrida.c`). Na garagem o jogador escolhe um; os outros 7
+viram os rivais, e o jogador larga em último. A "volta limpa" é o tempo de uma volta em
+Interlagos sozinho na pista, dirigido pela IA.
 
 | Carro | Cor | Jeito | Volta limpa |
 |---|---|---|---|
-| Barão | amarelo | esportivo arrogante, voa na reta | 31,0 s |
-| Neon | roxo | gruda nas curvas | 31,0 s |
-| Trovão | azul | arranca forte | 31,4 s |
-| Zé Pistão | laranja | certinho em tudo | 31,7 s |
-| Fuscão | verde-água | lento, mas não sai da pista | 32,0 s |
-| Bolinha | rosa | esperto na largada | 32,5 s |
-| Ferrugem | marrom | picape enferrujada | 32,7 s |
+| Katchau | vermelho | o carro da casa, equilibrado (o padrão) | 57,0 s |
+| Barão | amarelo | esportivo arrogante, voa na reta | 56,8 s |
+| Neon | roxo | gruda nas curvas | 55,7 s |
+| Trovão | azul | arranca forte | 57,0 s |
+| Zé Pistão | laranja | certinho em tudo | 57,5 s |
+| Fuscão | verde-água | lento, mas não sai da pista | 57,0 s |
+| Bolinha | rosa | esperto na largada | 58,6 s |
+| Ferrugem | marrom | picape enferrujada | 59,0 s |
 
 ## Onde a ordenação entra na lógica
 
+### Insertion Sort: a classificação da corrida
+
 `corrida.classificacao` é um vetor de 8 ponteiros para `Carro`, reordenado a cada quadro
-por `ordenarCarrosPorDistancia()` (Insertion Sort). Ele é usado para:
+por `ordenarCarrosPorDistancia()`. A regra de quem está na frente (`estaNaFrente`):
+quem já cruzou a chegada fica na frente de quem ainda corre (pelo tempo de chegada);
+entre os que correm, quem andou mais. O vetor é usado para:
 
 1. **Posição** do jogador no HUD e na chegada (`posicaoDoCarro`).
 2. **Carro da frente** de cada rival (`carroDaFrente`): é só o vizinho anterior no vetor.
    A IA usa isso para decidir quando ultrapassar.
-3. **Fim de corrida:** a posição final sai direto do vetor ordenado.
+3. **Tela de resultado:** a tabela de chegada é o próprio vetor, na ordem.
 
 Insertion Sort foi escolhido porque, de um quadro para o outro, a ordem quase não muda:
 com o vetor quase ordenado ele faz no máximo 1 ou 2 deslocamentos (perto de O(n)). O teste 7
 mostra isso: 0 deslocamentos com o vetor já ordenado, 1 numa ultrapassagem e 28 no pior caso
 (vetor ao contrário, O(n²)).
 
+### Merge Sort: a garagem
+
+A garagem guarda um vetor de 8 ponteiros para `FichaTecnica`, ordenado por
+`ordenarFichasPorAtributo()` do maior para o menor valor do critério escolhido
+(velocidade, aceleração ou aderência). Trocar o critério com ← → reordena a lista, e
+o carro marcado continua marcado, só muda de linha.
+
+Merge Sort foi escolhido porque, ao trocar o critério, a lista muda inteira de ordem:
+não dá para contar com ela "quase ordenada". Ele custa O(n log n) em qualquer caso e
+é **estável**: carros empatados no critério novo mantêm a ordem do anterior (teste 9).
+
 ## A pista
 
-O autódromo tem 1593 segmentos e é corrido no sentido horário. Cada segmento guarda sua
-curvatura em graus (negativo para a esquerda, positivo para a direita), e a soma de uma
-volta dá 360 graus.
+A pista é Interlagos: 2587 segmentos (cerca de 4.309 m), corrida no sentido anti-horário.
+Cada segmento guarda sua curvatura em graus (negativo para a esquerda, positivo para a
+direita), a altura do chão e o nome do trecho. A soma das curvaturas de uma volta dá
+-360 graus, e o desnível é de 56 m, do S do Senna à Descida do Lago.
 
 | Segmentos | Trecho |
 |---|---|
-| 0–199 | Reta principal (largada no 0) |
-| 200–259 | Curva 1, fechada à direita |
-| 260–612 | Reta, chicane (396–475) e reta |
-| 613–792 | Curva 2, aberta à direita |
-| 793–992 | Reta oposta |
-| 993–1052 | Curva 3, fechada à direita |
-| 1053–1412 | Reta, esse suave (1113–1352) e reta |
-| 1413–1592 | Curva 4, aberta à direita |
+| 0–196 | Reta dos Boxes (largada no 0) |
+| 197–294 | S do Senna |
+| 295–443 | Curva do Sol |
+| 444–802 | Reta Oposta |
+| 803–964 | Descida do Lago |
+| 1036–1214 | Ferradura |
+| 1282–1345 | Laranjinha |
+| 1437–1496 | Pinheirinho |
+| 1582–1623 | Bico de Pato |
+| 1691–1789 | Mergulho |
+| 1856–1925 | Junção |
+| 1926–2419 | Subida dos Boxes |
+| 2420–2586 | Reta dos Boxes |
+
+A lista completa, segmento a segmento, sai com `./build/teste_pista -v`.

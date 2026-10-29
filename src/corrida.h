@@ -1,7 +1,8 @@
 /*
  * corrida.h
  * ------------------------------------------------------------------
- * Regras da corrida: grid, tempo, voltas, colisão, classificação e fim.
+ * Regras da corrida: fichas dos carros, grid, contagem regressiva,
+ * tempo, voltas, colisão, classificação e fim.
  * Na Fase 5 entram o turbo (com vácuo) e os obstáculos.
  *
  * Este módulo NÃO usa a raylib.
@@ -27,13 +28,16 @@ typedef struct {
      * com Insertion Sort (ordenacao.c). */
     Carro *classificacao[TOTAL_CARROS];
 
-    float tempoDeCorrida;   /* segundos desde a largada (não para no fim) */
-    int terminou;           /* 1 depois que o jogador completa TOTAL_VOLTAS */
-    int posicaoFinal;       /* posição do jogador na chegada (1 a 8) */
+    float contagemRegressiva;   /* segundos até a largada; a corrida só anda quando chega a 0 */
+    float tempoDeCorrida;       /* segundos desde a largada (não para no fim) */
+    int terminou;               /* 1 depois que o jogador completa TOTAL_VOLTAS */
+    int posicaoFinal;           /* posição do jogador na chegada (1 a 8) */
 } Corrida;
 
-void iniciarCorrida(Corrida *corrida, Pista *pista);
+const FichaTecnica *fichaDoCarro(int numero);
+void iniciarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador);
 void atualizarCorrida(Corrida *corrida, Comandos comandosJogador, float tempoQuadro);
+int todosChegaram(Corrida *corrida);
 int voltaAtual(Carro *carro);
 int posicaoDoCarro(Corrida *corrida, Carro *carro);
 Carro *carroDaFrente(Corrida *corrida, Carro *carro);

@@ -2,15 +2,13 @@
  * main.c
  * ------------------------------------------------------------------
  * Ponto de entrada do KATCHAU.
- * Fase 4: o jogador corre 3 voltas contra 7 rivais da IA; ao final
- *         aparece o painel de chegada e ENTER começa outra corrida.
- * Na Fase 6 este arquivo vai trocar entre as telas (menu, garagem,
- * corrida, resultado).
+ * Abre a janela e troca entre as telas: menu, garagem, como jogar,
+ * corrida e resultado. A variável "tela" diz em qual delas o jogador
+ * está; cada tela devolve para qual ir no quadro seguinte.
  *
  * O laço principal segue sempre a mesma ordem, uma vez por quadro:
- *   1) ler o teclado e transformar em Comandos;
- *   2) atualizar a lógica (corrida.c, carro.c, pista.c);
- *   3) desenhar (render.c, hud.c).
+ *   1) ler o teclado e atualizar a tela atual (lógica);
+ *   2) desenhar a tela atual (render.c, hud.c, menu.c).
  * ------------------------------------------------------------------
  */
 
@@ -21,6 +19,7 @@
 #include "corrida.h"
 #include "render.h"
 #include "hud.h"
+#include "menu.h"
 
 /*
  * lerComandosDoTeclado
@@ -38,9 +37,29 @@ static Comandos lerComandosDoTeclado(void) {
     return comandos;
 }
 
+/*
+ * atualizarTelaDaCorrida
+ * Um quadro da corrida: o jogador dirige, a IA dirige os rivais.
+ * ESC abandona a corrida; depois da chegada, ENTER vai ao resultado.
+ * Recebe: a corrida e o tempo do quadro.
+ * Devolve: a próxima tela.
+ */
+static Tela atualizarTelaDaCorrida(Corrida *corrida, float tempoQuadro) {
+    atualizarCorrida(corrida, lerComandosDoTeclado(), tempoQuadro);
+
+    if (IsKeyPressed(KEY_ESCAPE)) {
+        return TELA_MENU;
+    }
+    if (corrida->terminou && (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER))) {
+        return TELA_RESULTADO;
+    }
+    return TELA_CORRIDA;
+}
+
 int main(void) {
     InitWindow(LARGURA_TELA, ALTURA_TELA, TITULO_JANELA);
     SetTargetFPS(QUADROS_POR_SEG);
+    SetExitKey(KEY_NULL);   /* ESC volta de tela; para sair, use "SAIR" no menu */
 
     /* As texturas são procuradas em recursos/, ao lado do executável.
      * Mudar para a pasta do executável faz o jogo achá-las mesmo quando
@@ -50,29 +69,72 @@ int main(void) {
 
     Pista *pista = criarPista();
     Corrida corrida;
-    iniciarCorrida(&corrida, pista);
+    EstadoMenu menu;
+    iniciarMenu(&menu);
+    Tela tela = TELA_MENU;
 
-    /* Laço principal: roda uma vez por quadro até a janela fechar (ESC) */
-    while (!WindowShouldClose()) {
+    /* Laço principal: roda uma vez por quadro até escolher SAIR ou fechar a janela */
+    while (tela != TELA_SAIR && !WindowShouldClose()) {
         /* Tempo do último quadro, para a velocidade não depender do FPS */
         float tempoQuadro = GetFrameTime();
 
-        /* ---- 1) Ler o teclado ---- */
-        Comandos comandos = lerComandosDoTeclado();
-        if (corrida.terminou && IsKeyPressed(KEY_ENTER)) {
-            iniciarCorrida(&corrida, pista);
+        /* ---- 1) Atualizar a tela atual e descobrir a próxima ---- */
+        Tela proxima = tela;
+        switch (tela) {
+            case TELA_MENU:
+                proxima = atualizarMenuPrincipal(&menu);
+                break;
+            case TELA_GARAGEM:
+                proxima = atualizarGaragem(&menu);
+                break;
+            case TELA_COMO_JOGAR:
+                proxima = atualizarComoJogar();
+                break;
+            case TELA_CORRIDA:
+                proxima = atualizarTelaDaCorrida(&corrida, tempoQuadro);
+                break;
+            case TELA_RESULTADO: {
+                /* A corrida continua ao fundo até todos os rivais chegarem */
+                Comandos nenhumComando = { 0, 0, 0, 0 };
+                atualizarCorrida(&corrida, nenhumComando, tempoQuadro);
+                proxima = atualizarResultado();
+                break;
+            }
+            default:
+                break;
         }
 
-        /* ---- 2) Atualizar ---- */
-        atualizarCorrida(&corrida, comandos, tempoQuadro);
+        /* Entrar na corrida (do menu ou do "correr de novo") sempre começa uma nova */
+        if (proxima == TELA_CORRIDA && tela != TELA_CORRIDA) {
+            iniciarCorrida(&corrida, pista, menu.carroEscolhido);
+        }
+        tela = proxima;
 
-        /* ---- 3) Desenhar ---- */
+        /* ---- 2) Desenhar a tela atual ---- */
         BeginDrawing();
         ClearBackground(BLACK);
-        desenharVisaoDoJogador(&corrida);
-        desenharHud(&corrida);
-        if (corrida.terminou) {
-            desenharFimDeCorrida(&corrida);
+        switch (tela) {
+            case TELA_MENU:
+                desenharMenuPrincipal(&menu, pista);
+                break;
+            case TELA_GARAGEM:
+                desenharGaragem(&menu, pista);
+                break;
+            case TELA_COMO_JOGAR:
+                desenharComoJogar(pista);
+                break;
+            case TELA_CORRIDA:
+                desenharVisaoDoJogador(&corrida);
+                desenharHud(&corrida);
+                if (corrida.terminou) {
+                    desenharFimDeCorrida(&corrida);
+                }
+                break;
+            case TELA_RESULTADO:
+                desenharResultado(&corrida);
+                break;
+            default:
+                break;
         }
         EndDrawing();
     }

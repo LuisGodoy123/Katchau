@@ -165,7 +165,18 @@ int atualizarCarro(Carro *carro, Comandos comandos, float tempoQuadro) {
  * Devolve: a velocidade em km/h, arredondada.
  */
 int velocidadeEmKmh(Carro *carro) {
-    return (int) (carro->velocidade * KMH_POR_UNIDADE + 0.5f);
+    return converterParaKmh(carro->velocidade);
+}
+
+/*
+ * converterParaKmh
+ * Converte qualquer velocidade interna (por exemplo, a velocidade
+ * máxima de uma ficha na garagem) para km/h.
+ * Recebe: a velocidade em unidades por segundo.
+ * Devolve: a velocidade em km/h, arredondada.
+ */
+int converterParaKmh(float velocidade) {
+    return (int) (velocidade * KMH_POR_UNIDADE + 0.5f);
 }
 
 /*
