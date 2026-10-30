@@ -12,6 +12,7 @@
  * ------------------------------------------------------------------
  */
 
+#include <string.h>
 #include "raylib.h"
 #include "config.h"
 #include "pista.h"
@@ -56,15 +57,34 @@ static Tela atualizarTelaDaCorrida(Corrida *corrida, float tempoQuadro) {
     return TELA_CORRIDA;
 }
 
-int main(void) {
+/*
+ * abrirJanela
+ * Abre o jogo em tela cheia, na resolução do monitor. É uma "tela cheia
+ * sem bordas" (borderless): uma janela do tamanho do monitor, sem mudar
+ * o modo de vídeo do Windows, então o Alt+Tab funciona sem travar.
+ * Com --janela na linha de comando, abre numa janela 800x600 (útil para
+ * testar e depurar).
+ * Recebe: 1 para abrir em janela, 0 para tela cheia.
+ * Devolve: nada.
+ */
+static void abrirJanela(int emJanela) {
     /* VSync: cada quadro sai junto com a atualização do monitor, em
      * intervalos regulares, sem os "trancos" de quadros irregulares.
      * Precisa vir antes do InitWindow. O SetTargetFPS logo abaixo
      * continua valendo como limite, caso o driver de vídeo ignore o VSync. */
     SetConfigFlags(FLAG_VSYNC_HINT);
     InitWindow(LARGURA_TELA, ALTURA_TELA, TITULO_JANELA);
+    if (!emJanela) {
+        ToggleBorderlessWindowed();   /* ocupa o monitor inteiro */
+        HideCursor();
+    }
     SetTargetFPS(QUADROS_POR_SEG);
     SetExitKey(KEY_NULL);   /* ESC volta de tela; para sair, use "SAIR" no menu */
+}
+
+int main(int argc, char *argv[]) {
+    int emJanela = (argc > 1 && strcmp(argv[1], "--janela") == 0);
+    abrirJanela(emJanela);
 
     /* As texturas são procuradas em recursos/, ao lado do executável.
      * Mudar para a pasta do executável faz o jogo achá-las mesmo quando
@@ -115,28 +135,45 @@ int main(void) {
         }
         tela = proxima;
 
-        /* ---- 2) Desenhar a tela atual ---- */
+        /* ---- 2) Desenhar a tela atual ----
+         * Primeiro o "mundo" (pista e carros), na resolução real da tela.
+         * Depois a interface (HUD e menus), na tela virtual 800x600 que
+         * comecarInterface() amplia para o tamanho da tela. */
         BeginDrawing();
         ClearBackground(BLACK);
         switch (tela) {
             case TELA_MENU:
-                desenharMenuPrincipal(&menu, pista);
+                desenharPistaDeFundo(pista);
+                comecarInterface(1);
+                desenharMenuPrincipal(&menu);
+                terminarInterface();
                 break;
             case TELA_GARAGEM:
-                desenharGaragem(&menu, pista);
+                desenharPistaDeFundo(pista);
+                comecarInterface(1);
+                desenharGaragem(&menu);
+                terminarInterface();
                 break;
             case TELA_COMO_JOGAR:
-                desenharComoJogar(pista);
+                desenharPistaDeFundo(pista);
+                comecarInterface(1);
+                desenharComoJogar();
+                terminarInterface();
                 break;
             case TELA_CORRIDA:
                 desenharVisaoDoJogador(&corrida);
+                comecarInterface(0);
                 desenharHud(&corrida);
                 if (corrida.terminou) {
                     desenharFimDeCorrida(&corrida);
                 }
+                terminarInterface();
                 break;
             case TELA_RESULTADO:
+                desenharVisaoDoJogador(&corrida);   /* a corrida continua ao fundo */
+                comecarInterface(1);
                 desenharResultado(&corrida);
+                terminarInterface();
                 break;
             default:
                 break;

@@ -50,6 +50,7 @@ typedef struct {
 
     /* ---- Como está andando ---- */
     float velocidade;              /* unidades de mundo por segundo */
+    float volante;                 /* -1 todo à esquerda, 0 reto, +1 todo à direita; anda aos poucos */
     int voltas;                    /* voltas completadas */
     float temposDeVolta[TOTAL_VOLTAS];
     float inicioDaVolta;           /* momento da corrida em que a volta atual começou */

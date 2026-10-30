@@ -57,6 +57,7 @@
 #define MARGEM_CARRO         18        /* distância da base do carro até o pé da tela */
 #define INCLINACAO_CABINE    8.0f      /* quanto a cabine desliza ao virar */
 #define TREPIDACAO_MAXIMA    4         /* pulo máximo na grama */
+#define LIMIAR_POSE_CURVA    0.35f     /* volante além disso (para um lado) mostra a pose de curva */
 
 /* ---------- Pista ---------- */
 #define LARGURA_PISTA        2000.0f   /* metade da largura da estrada, em unidades de mundo */
@@ -82,6 +83,15 @@
 #define POSE_ESQUERDA        1
 #define POSE_DIREITA         2
 #define TOTAL_POSES          3
+
+/* Folha de sprites (gerada pelo gerar_sprites.py): cada linha é um ângulo
+ * de volante (de cima para baixo: todo à esquerda ... todo à direita) e
+ * cada coluna é um quadro do giro das rodas. Tem que bater com as opções
+ * --angulos e --quadros-roda usadas no script (padrão 9 e 4). */
+#define ANGULOS_DA_FOLHA     9
+#define QUADROS_DA_RODA      4
+#define DISTANCIA_POR_QUADRO_DA_RODA 800.0f   /* a 300 km/h: 15 quadros de roda por segundo */
+#define ALTURA_MAXIMA_FRENTE 0.6f             /* a vista de frente não passa de 60% da largura em altura */
 
 /* ---------- Cores ---------- */
 #define COR_CEU_ALTO         (Color){  40, 110, 210, 255 }
@@ -130,6 +140,8 @@ static Texture2D texturaMorros;
 static Texture2D texturaAsfalto[2];   /* [0] escuro, [1] claro */
 static Texture2D texturaGrama[2];     /* [0] escura, [1] clara */
 static Texture2D texturaCarro[TOTAL_CARROS][TOTAL_POSES];
+static Texture2D texturaFolha[TOTAL_CARROS];    /* grade: ângulos de volante x quadros de roda */
+static Texture2D texturaFrente[TOTAL_CARROS];   /* vista de frente, para a garagem e o menu */
 
 /* Quanto o fundo já deslizou para o lado (em pixels da imagem) por causa das curvas */
 static float deslocamentoFundo = 0.0f;
@@ -203,6 +215,41 @@ static Texture2D carregarCarroPintado(const char *arquivo, Color cor) {
 }
 
 /*
+ * carregarSpriteDoCarro
+ * Carrega uma imagem de carro ("folha" ou "frente") para o carro de
+ * número dado. Primeiro procura uma imagem só dele (ex.: carro/3_folha.png);
+ * se não existir, usa a compartilhada (carro/carro_folha.png), repintada
+ * com a cor do carro (o carro 0 usa a original, que já é vermelha).
+ * Liga os mipmaps: versões reduzidas da imagem que a placa de vídeo usa
+ * quando o carro está longe e pequeno, para ele não ficar serrilhado.
+ * Recebe: o número do carro e o tipo ("folha" ou "frente").
+ * Devolve: a textura (id 0 se nenhuma das imagens existir).
+ */
+static Texture2D carregarSpriteDoCarro(int numero, const char *tipo) {
+    Texture2D textura = { 0 };
+    const char *propria = TextFormat("carro/%d_%s.png", numero, tipo);
+    if (FileExists(TextFormat("%s%s", PASTA_TEXTURAS, propria))) {
+        textura = LoadTexture(TextFormat("%s%s", PASTA_TEXTURAS, propria));
+    } else {
+        const char *compartilhada = TextFormat("carro/carro_%s.png", tipo);
+        if (!FileExists(TextFormat("%s%s", PASTA_TEXTURAS, compartilhada))) {
+            return textura;
+        }
+        if (numero == 0) {
+            textura = LoadTexture(TextFormat("%s%s", PASTA_TEXTURAS, compartilhada));
+        } else {
+            textura = carregarCarroPintado(compartilhada, CORES_CARROCERIA[numero]);
+        }
+    }
+
+    if (textura.id != 0) {
+        GenTextureMipmaps(&textura);
+        SetTextureFilter(textura, TEXTURE_FILTER_TRILINEAR);
+    }
+    return textura;
+}
+
+/*
  * carregarTexturas
  * Lê todas as imagens do disco para a placa de vídeo. Tem que ser
  * chamada depois de InitWindow (a raylib precisa da janela aberta).
@@ -228,6 +275,12 @@ void carregarTexturas(void) {
             texturaCarro[numero][pose] = carregarCarroPintado(poses[pose], CORES_CARROCERIA[numero]);
         }
     }
+
+    /* Folhas e vistas de frente (opcionais: sem elas, valem as poses acima) */
+    for (int numero = 0; numero < TOTAL_CARROS; numero++) {
+        texturaFolha[numero] = carregarSpriteDoCarro(numero, "folha");
+        texturaFrente[numero] = carregarSpriteDoCarro(numero, "frente");
+    }
 }
 
 /*
@@ -249,6 +302,8 @@ void descarregarTexturas(void) {
         for (int pose = 0; pose < TOTAL_POSES; pose++) {
             UnloadTexture(texturaCarro[numero][pose]);
         }
+        UnloadTexture(texturaFolha[numero]);
+        UnloadTexture(texturaFrente[numero]);
     }
 }
 
@@ -260,15 +315,31 @@ void descarregarTexturas(void) {
  * Devolve: a posição e a largura da estrada naquele ponto da tela.
  */
 static PontoNaTela projetar(float xMundo, float alturaMundo, float z, float xCamera, float alturaCamera) {
-    float metadeLargura = GetScreenWidth() / 2.0f;
+    float centroX = GetScreenWidth() / 2.0f;
     float metadeAltura = GetScreenHeight() / 2.0f;
     float escala = PROFUNDIDADE_CAMERA / z;
 
+    /* O horizontal usa a mesma escala do vertical (a altura da tela),
+     * na proporção 4:3 em que o jogo foi desenhado. Assim a pista não
+     * estica em monitores largos: eles só mostram mais dos lados. */
+    float fatorHorizontal = metadeAltura * LARGURA_TELA / ALTURA_TELA;
+
     PontoNaTela ponto;
-    ponto.x = metadeLargura + escala * (xMundo - xCamera) * metadeLargura;
+    ponto.x = centroX + escala * (xMundo - xCamera) * fatorHorizontal;
     ponto.y = metadeAltura + escala * (alturaCamera - alturaMundo) * metadeAltura;
-    ponto.largura = escala * LARGURA_PISTA * metadeLargura;
+    ponto.largura = escala * LARGURA_PISTA * fatorHorizontal;
     return ponto;
+}
+
+/*
+ * escalaDaTela
+ * Quanto a tela atual é maior que a de 600 de altura para a qual o jogo
+ * foi desenhado. Usada para os tamanhos fixos em pixels (o carro).
+ * Recebe: nada.
+ * Devolve: 1 em 800x600, 1,8 em 1920x1080...
+ */
+static float escalaDaTela(void) {
+    return GetScreenHeight() / (float) ALTURA_TELA;
 }
 
 /*
@@ -457,16 +528,18 @@ static void desenharEstrada(Segmento *segmento, PontoNaTela perto, PontoNaTela l
 
 /*
  * desenharCamadaDoFundo
- * Desenha uma imagem de fundo esticada na largura da tela, com a base
- * encostada em "baseY". A imagem se repete para os lados, então pode
- * deslizar sem acabar.
+ * Desenha uma imagem de fundo na largura da tela, com a base encostada
+ * em "baseY", ampliada pela mesma escala nos dois eixos (não estica).
+ * A imagem se repete para os lados, então pode deslizar sem acabar e
+ * cobre telas de qualquer largura.
  * Recebe: a textura, a base na tela, quanto já deslizou e a escala.
  * Devolve: nada.
  */
 static void desenharCamadaDoFundo(Texture2D textura, float baseY, float deslizou, float escala) {
+    float largura = GetScreenWidth();
     float altura = textura.height * escala;
-    Rectangle origem = { deslizou, 0.0f, LARGURA_FUNDO, (float) textura.height };
-    Rectangle destino = { 0.0f, baseY - altura, GetScreenWidth(), altura };
+    Rectangle origem = { deslizou, 0.0f, largura / escala, (float) textura.height };
+    Rectangle destino = { 0.0f, baseY - altura, largura, altura };
     DrawTexturePro(textura, origem, destino, (Vector2){ 0, 0 }, 0.0f, WHITE);
 }
 
@@ -484,12 +557,15 @@ static void desenharCamadaDoFundo(Texture2D textura, float baseY, float deslizou
 static void desenharFundo(void) {
     int largura = GetScreenWidth();
     int horizonte = GetScreenHeight() / 2;
-    float escala = largura / LARGURA_FUNDO;
+    /* Em 800x600 a imagem de 640 px ocupava a largura toda (escala 1,25);
+     * em telas maiores, a escala cresce com a altura da tela */
+    float escala = (LARGURA_TELA / LARGURA_FUNDO) * escalaDaTela();
 
     if (texturaCeu.id != 0) {
-        /* O céu sempre preenche do topo até o horizonte */
+        /* O céu sempre preenche do topo até o horizonte, sem esticar */
+        float escalaCeu = (float) horizonte / texturaCeu.height;
         Rectangle origem = { deslocamentoFundo * VELOCIDADE_CEU, 0.0f,
-                             LARGURA_FUNDO, (float) texturaCeu.height };
+                             largura / escalaCeu, (float) texturaCeu.height };
         Rectangle destino = { 0.0f, 0.0f, (float) largura, (float) horizonte };
         DrawTexturePro(texturaCeu, origem, destino, (Vector2){ 0, 0 }, 0.0f, WHITE);
     } else {
@@ -542,13 +618,8 @@ static void desenharCarroComFormas(Carro *carro, float centroX, float baseY, flo
     Color corCarroceria = CORES_CARROCERIA[carro->numero];
     Color corCabine = CORES_CABINE[carro->numero];
 
-    float inclinacao = 0.0f;
-    if (comandos.esquerda) {
-        inclinacao = -INCLINACAO_CABINE * escala;
-    }
-    if (comandos.direita) {
-        inclinacao = INCLINACAO_CABINE * escala;
-    }
+    /* A cabine desliza aos poucos, acompanhando o volante (-1 a +1) */
+    float inclinacao = INCLINACAO_CABINE * escala * carro->volante;
 
     float largura = LARGURA_CARRO * escala;
     float metade = largura / 2.0f;
@@ -594,20 +665,52 @@ static void desenharCarroComFormas(Carro *carro, float centroX, float baseY, flo
 }
 
 /*
+ * desenharCarroDaFolha
+ * Desenha um carro recortando o quadro certo da folha de sprites:
+ *   - a LINHA sai do volante: -1 é a primeira linha (todo à esquerda),
+ *     0 a do meio (reto) e +1 a última (todo à direita);
+ *   - a COLUNA sai da distância percorrida: a cada
+ *     DISTANCIA_POR_QUADRO_DA_RODA andadas, a roda avança um quadro,
+ *     então ela gira mais rápido quanto mais rápido o carro anda.
+ * Recebe: o carro, a folha, o centro da base na tela (x, y) e a escala.
+ * Devolve: nada.
+ */
+static void desenharCarroDaFolha(Carro *carro, Texture2D folha, float centroX, float baseY, float escala) {
+    float larguraQuadro = (float) folha.width / QUADROS_DA_RODA;
+    float alturaQuadro = (float) folha.height / ANGULOS_DA_FOLHA;
+
+    int linha = (int) ((carro->volante + 1.0f) / 2.0f * (ANGULOS_DA_FOLHA - 1) + 0.5f);
+    int coluna = (int) (carro->distanciaPercorrida / DISTANCIA_POR_QUADRO_DA_RODA) % QUADROS_DA_RODA;
+
+    float largura = LARGURA_CARRO * escala;
+    float altura = largura * alturaQuadro / larguraQuadro;
+    Rectangle origem = { coluna * larguraQuadro, linha * alturaQuadro, larguraQuadro, alturaQuadro };
+    Rectangle destino = { centroX - largura / 2.0f, baseY - altura, largura, altura };
+    DrawTexturePro(folha, origem, destino, (Vector2){ 0, 0 }, 0.0f, WHITE);
+}
+
+/*
  * desenharCarro
- * Desenha um carro visto de trás usando o sprite da pose certa
- * (reto, virando à esquerda ou à direita). Se o sprite não carregou,
- * usa o desenho com formas simples.
+ * Desenha um carro visto de trás. Se existir a folha de sprites, usa ela
+ * (vários ângulos de volante e rodas girando). Senão, usa o sprite da pose
+ * certa (reto, virando à esquerda ou à direita): a pose sai do volante e
+ * só troca para a curva depois que ele passa de LIMIAR_POSE_CURVA, então
+ * um toque rápido na seta não faz o carro "piscar" de pose.
+ * Se nenhum sprite carregou, usa o desenho com formas simples.
  * Recebe: o carro, o centro da base na tela (x, y) e a escala.
  * Devolve: nada.
  */
 static void desenharCarro(Carro *carro, float centroX, float baseY, float escala) {
-    Comandos comandos = carro->ultimosComandos;
+    if (texturaFolha[carro->numero].id != 0) {
+        desenharCarroDaFolha(carro, texturaFolha[carro->numero], centroX, baseY, escala);
+        return;
+    }
+
     int pose = POSE_RETO;
-    if (comandos.esquerda && !comandos.direita) {
+    if (carro->volante < -LIMIAR_POSE_CURVA) {
         pose = POSE_ESQUERDA;
     }
-    if (comandos.direita && !comandos.esquerda) {
+    if (carro->volante > LIMIAR_POSE_CURVA) {
         pose = POSE_DIREITA;
     }
 
@@ -630,17 +733,19 @@ static void desenharCarro(Carro *carro, float centroX, float baseY, float escala
  * desenharJogador
  * O carro do jogador fica sempre no mesmo lugar da tela (embaixo, no
  * centro): quem se mexe é a estrada. Na grama ele trepida.
+ * O tamanho acompanha a tela (escala 1 em 800x600).
  * Recebe: o carro do jogador.
  * Devolve: nada.
  */
 static void desenharJogador(Carro *jogador) {
+    float escala = escalaDaTela();
     float centroX = GetScreenWidth() / 2.0f;
-    float baseY = GetScreenHeight() - MARGEM_CARRO;
+    float baseY = GetScreenHeight() - MARGEM_CARRO * escala;
 
     if (estaForaDaPista(jogador) && jogador->velocidade > 0) {
-        baseY -= GetRandomValue(0, TREPIDACAO_MAXIMA);
+        baseY -= GetRandomValue(0, TREPIDACAO_MAXIMA) * escala;
     }
-    desenharCarro(jogador, centroX, baseY, 1.0f);
+    desenharCarro(jogador, centroX, baseY, escala);
 }
 
 /*
@@ -666,7 +771,7 @@ static void desenharRival(Visao *visao, int i, Carro *rival) {
     /* O rival tem o tamanho do jogador quando está na mesma distância que ele
      * (a largura na tela só depende da distância, não da altura) */
     PontoNaTela chaoDoJogador = projetar(0.0f, 0.0f, DISTANCIA_CAMERA, 0.0f, 0.0f);
-    float escala = chao.largura / chaoDoJogador.largura;
+    float escala = chao.largura / chaoDoJogador.largura * escalaDaTela();
 
     float centroX = chao.x + rival->deslocamentoLateral * chao.largura;
     float baseY = chao.y - MARGEM_CARRO * escala;
@@ -764,12 +869,28 @@ void desenharPistaDeFundo(Pista *pista) {
 
 /*
  * desenharCarroParado
- * Desenha um modelo de carro fora da corrida (por exemplo, na garagem),
- * visto de trás e andando reto.
+ * Desenha um modelo de carro fora da corrida (por exemplo, na garagem).
+ * Se existir a vista de frente, usa ela, limitada em altura para não
+ * invadir o resto da tela; senão, desenha o carro de costas, andando reto.
  * Recebe: o número do carro (define a cor), o centro da base na tela e a escala.
  * Devolve: nada.
  */
 void desenharCarroParado(int numero, float centroX, float baseY, float escala) {
+    Texture2D frente = texturaFrente[numero];
+    if (frente.id != 0) {
+        float largura = LARGURA_CARRO * escala;
+        float altura = largura * frente.height / frente.width;
+        float alturaMaxima = largura * ALTURA_MAXIMA_FRENTE;
+        if (altura > alturaMaxima) {   /* imagem alta demais: encolhe as duas medidas */
+            largura *= alturaMaxima / altura;
+            altura = alturaMaxima;
+        }
+        Rectangle origem = { 0.0f, 0.0f, (float) frente.width, (float) frente.height };
+        Rectangle destino = { centroX - largura / 2.0f, baseY - altura, largura, altura };
+        DrawTexturePro(frente, origem, destino, (Vector2){ 0, 0 }, 0.0f, WHITE);
+        return;
+    }
+
     Carro carro = { 0 };   /* sem comandos: pose reta, lanternas apagadas */
     carro.numero = numero;
     desenharCarro(&carro, centroX, baseY, escala);

@@ -21,6 +21,8 @@
 #define ATRITO_GRAMA            6000.0f  /* quanto cai por segundo na grama */
 #define VELOCIDADE_MAXIMA_GRAMA 3000.0f  /* na grama o carro não passa disso */
 #define VELOCIDADE_DE_VIRADA       2.0f  /* larguras de pista por segundo, na velocidade máxima */
+#define GIRO_DO_VOLANTE            6.0f  /* com a seta apertada, o volante vai de 0 a 1 em ~0,17 s */
+#define RETORNO_DO_VOLANTE         8.0f  /* sem seta, o volante volta ao centro em ~0,12 s */
 #define FORCA_CENTRIFUGA           4.8f  /* intensidade do empurrão para fora nas curvas */
 #define LIMITE_LATERAL             2.5f  /* até onde o carro pode ir pela grama */
 #define KMH_POR_UNIDADE            0.025f /* 12000 unidades/s viram 300 km/h no velocímetro */
@@ -45,6 +47,7 @@ Carro criarCarro(const char *nome, int numero, Segmento *largada, float deslocam
     carro.deslocamentoLateral = deslocamentoLateral;
 
     carro.velocidade = 0.0f;
+    carro.volante = 0.0f;
     carro.voltas = 0;
     for (int i = 0; i < TOTAL_VOLTAS; i++) {
         carro.temposDeVolta[i] = 0.0f;
@@ -110,23 +113,51 @@ static void atualizarVelocidade(Carro *carro, Comandos comandos, float tempoQuad
 }
 
 /*
- * atualizarLateral
- * Vira o carro e aplica o empurrão da curva.
+ * aproximar
+ * Leva um valor na direção de um alvo, no máximo "passo" por chamada,
+ * sem passar do alvo.
+ * Recebe: o valor atual, o alvo e o passo máximo.
+ * Devolve: o novo valor.
+ */
+static float aproximar(float valor, float alvo, float passo) {
+    if (valor < alvo) {
+        return (valor + passo > alvo) ? alvo : valor + passo;
+    }
+    return (valor - passo < alvo) ? alvo : valor - passo;
+}
+
+/*
+ * atualizarVolante
+ * O volante não vai direto para o fim: com a seta apertada ele gira aos
+ * poucos até -1 (esquerda) ou +1 (direita); sem seta, volta sozinho ao
+ * centro. É como a velocidade, que também sobe e desce aos poucos.
+ * Isso deixa a curva suave e a pose do carro na tela sem trancos.
  * Recebe: o carro, os comandos e o tempo do quadro em segundos.
+ * Devolve: nada (altera carro->volante).
+ */
+static void atualizarVolante(Carro *carro, Comandos comandos, float tempoQuadro) {
+    float alvo = (float) (comandos.direita - comandos.esquerda);   /* -1, 0 ou +1 */
+
+    if (alvo == 0.0f) {
+        carro->volante = aproximar(carro->volante, 0.0f, RETORNO_DO_VOLANTE * tempoQuadro);
+    } else {
+        carro->volante = aproximar(carro->volante, alvo, GIRO_DO_VOLANTE * tempoQuadro);
+    }
+}
+
+/*
+ * atualizarLateral
+ * Vira o carro conforme o volante e aplica o empurrão da curva.
+ * Recebe: o carro e o tempo do quadro em segundos.
  * Devolve: nada (altera carro->deslocamentoLateral).
  */
-static void atualizarLateral(Carro *carro, Comandos comandos, float tempoQuadro) {
+static void atualizarLateral(Carro *carro, float tempoQuadro) {
     /* 0 parado, 1 na velocidade máxima */
     float proporcaoVelocidade = carro->velocidade / carro->velocidadeMaxima;
 
-    /* Volante */
-    float virada = VELOCIDADE_DE_VIRADA * proporcaoVelocidade * tempoQuadro;
-    if (comandos.esquerda) {
-        carro->deslocamentoLateral -= virada;
-    }
-    if (comandos.direita) {
-        carro->deslocamentoLateral += virada;
-    }
+    /* Volante: o quanto vira depende de quanto o volante está girado */
+    float virada = VELOCIDADE_DE_VIRADA * proporcaoVelocidade * carro->volante * tempoQuadro;
+    carro->deslocamentoLateral += virada;
 
     /* Força centrífuga: curva para a direita (curvatura > 0) empurra
      * para a esquerda, e vice-versa. Mais aderência, menos empurrão. */
@@ -140,15 +171,16 @@ static void atualizarLateral(Carro *carro, Comandos comandos, float tempoQuadro)
 
 /*
  * atualizarCarro
- * Avança o carro um quadro: velocidade, lateral e depois anda pela
- * lista da pista com moverNaPista().
+ * Avança o carro um quadro: velocidade, volante, lateral e depois anda
+ * pela lista da pista com moverNaPista().
  * Recebe: o carro, os comandos e o tempo do quadro em segundos.
  * Devolve: quantas voltas o carro completou neste quadro (0 ou 1).
  */
 int atualizarCarro(Carro *carro, Comandos comandos, float tempoQuadro) {
     carro->ultimosComandos = comandos;
     atualizarVelocidade(carro, comandos, tempoQuadro);
-    atualizarLateral(carro, comandos, tempoQuadro);
+    atualizarVolante(carro, comandos, tempoQuadro);
+    atualizarLateral(carro, tempoQuadro);
 
     float distancia = carro->velocidade * tempoQuadro;
     carro->distanciaPercorrida += distancia;

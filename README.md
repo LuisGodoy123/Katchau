@@ -47,6 +47,14 @@ make clean    # apaga os arquivos gerados
 
 Para ver cada segmento da pista no teste: `./build/teste_pista -v`.
 
+O jogo abre em **tela cheia, na resolução do monitor**. Para abrir numa janela
+800×600 (útil para testar e depurar): `./katchau --janela`.
+
+A pista e os carros são desenhados na resolução real da tela; em monitores largos
+(16:9), a pista não estica, só mostra mais dos lados. O HUD e os menus são
+desenhados numa "tela virtual" de 800×600 que a câmera 2D da raylib amplia para o
+tamanho real (`comecarInterface()` em `hud.c`).
+
 ## 3. Controles
 
 **Na corrida**
@@ -55,7 +63,7 @@ Para ver cada segmento da pista no teste: `./build/teste_pista -v`.
 |-------|------|
 | ↑ ou W | Acelerar |
 | ↓ ou S | Frear |
-| ← → ou A D | Virar |
+| ← → ou A D | Virar (o volante gira aos poucos e volta sozinho ao centro) |
 | ENTER | Ver o resultado (depois da chegada) |
 | ESC   | Abandonar a corrida e voltar ao menu |
 
@@ -118,6 +126,29 @@ recursos/
 
 Regra: só `render.c`, `hud.c` e `menu.c` incluem `raylib.h` (além do `main.c`, que abre
 a janela). O resto é lógica pura e pode ser testado no terminal.
+
+## Sprites dos carros
+
+O `render.c` procura as imagens dos carros em `recursos/texturas/carro/`, nesta ordem:
+
+1. **Folha própria do carro:** `<numero>_folha.png` (ex.: `3_folha.png` para o Trovão), usada como está.
+2. **Folha compartilhada:** `carro_folha.png`, repintada com a cor de cada carro (troca o
+   vermelho da pintura pela cor dele; o carro 0 usa a original).
+3. **Três poses antigas:** `carro_reto.png`, `carro_esquerda.png` e `carro_direita.png`.
+4. Se nada disso existir, o carro é desenhado com formas simples.
+
+A **folha** é uma grade: cada linha é um ângulo de volante (de cima para baixo: todo à
+esquerda, ..., reto, ..., todo à direita) e cada coluna é um quadro do giro das rodas.
+O jogo espera **9 linhas × 4 colunas** (`ANGULOS_DA_FOLHA` e `QUADROS_DA_RODA` no
+`render.c`). A linha sai do volante gradual do carro; a coluna, da distância percorrida
+(as rodas giram mais rápido quanto mais rápido o carro anda).
+
+A vista de frente (`carro_frente.png` ou `<numero>_frente.png`) aparece na garagem e no
+menu. As folhas e as vistas de frente usam *mipmaps*, para os rivais distantes não
+ficarem serrilhados.
+
+As folhas podem ser geradas a partir de um modelo 3D `.glb` com o script do Blender
+`gerar_sprites.py` (as instruções estão no começo do arquivo).
 
 ## Os carros
 

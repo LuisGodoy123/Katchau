@@ -575,6 +575,33 @@ static void testarEscolhaDaGaragem(void) {
     liberarPista(pista);
 }
 
+static void testarVolante(void) {
+    printf("\n11) Volante gradual\n");
+    Pista *reta = criarPistaVazia();
+    adicionarTrecho(reta, "Reta de teste", 50, RETA, 0.0f, 0.0f);
+    Carro carro = criarCarro("Teste", 0, reta->largada, 0.0f, 12000.0f, 2400.0f, 0.5f);
+    carro.velocidade = carro.velocidadeMaxima;
+    float quadro = 1.0f / 60.0f;
+    Comandos direita = { 0, 0, 0, 1 };
+    Comandos nenhum = { 0, 0, 0, 0 };
+
+    atualizarCarro(&carro, direita, quadro);
+    verificar(carro.volante > 0.0f && carro.volante < 1.0f,
+              "um quadro de seta gira o volante so um pouco");
+
+    for (int i = 0; i < 30; i++) {
+        atualizarCarro(&carro, direita, quadro);
+    }
+    verificar(carro.volante == 1.0f, "segurando a seta, o volante chega ao fim e para ali");
+
+    for (int i = 0; i < 30; i++) {
+        atualizarCarro(&carro, nenhum, quadro);
+    }
+    verificar(carro.volante == 0.0f, "soltando a seta, o volante volta sozinho ao centro");
+
+    liberarPista(reta);
+}
+
 int main(int argc, char *argv[]) {
     int modoDetalhado = (argc > 1 && strcmp(argv[1], "-v") == 0);
 
@@ -589,6 +616,7 @@ int main(int argc, char *argv[]) {
     testarCorridaComRivais();
     testarMergeSort();
     testarEscolhaDaGaragem();
+    testarVolante();
 
     if (totalFalhas == 0) {
         printf("\nTodos os testes passaram.\n");

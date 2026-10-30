@@ -8,7 +8,70 @@
 #include <stdio.h>
 #include <math.h>
 #include "raylib.h"
+#include "config.h"
 #include "hud.h"
+
+/* ==================================================================
+ * Tela virtual: o HUD e os menus foram desenhados para 800x600.
+ * Em vez de recalcular cada posição para cada monitor, eles são
+ * desenhados nessas coordenadas e a câmera 2D da raylib amplia tudo
+ * para o tamanho real da tela.
+ * ================================================================== */
+
+/*
+ * escalaDaInterface
+ * Quanto ampliar o 800x600 para caber na tela sem cortar nada.
+ * Recebe: nada.
+ * Devolve: 1 em 800x600, 1,8 em 1920x1080...
+ */
+static float escalaDaInterface(void) {
+    return fminf(GetScreenWidth() / (float) LARGURA_TELA, GetScreenHeight() / (float) ALTURA_TELA);
+}
+
+/*
+ * larguraVirtual / alturaVirtual
+ * Tamanho da tela inteira em coordenadas virtuais. Num monitor 16:9 a
+ * largura virtual passa de 800 (dá ~1067), e o HUD usa o espaço todo.
+ * Recebe: nada.
+ * Devolve: a largura ou a altura virtual.
+ */
+int larguraVirtual(void) {
+    return (int) (GetScreenWidth() / escalaDaInterface());
+}
+int alturaVirtual(void) {
+    return (int) (GetScreenHeight() / escalaDaInterface());
+}
+
+/*
+ * comecarInterface
+ * Daqui até terminarInterface(), tudo é desenhado em coordenadas
+ * virtuais e ampliado para a tela real.
+ *   - centralizada = 0: a origem fica no canto da tela (o HUD usa a
+ *     largura toda, com o mini-mapa e o velocímetro nos cantos de verdade);
+ *   - centralizada = 1: um quadro 800x600 fica no meio da tela (menus).
+ * Recebe: o modo.
+ * Devolve: nada.
+ */
+void comecarInterface(int centralizada) {
+    float zoom = escalaDaInterface();
+    Camera2D camera = { 0 };
+    camera.zoom = zoom;
+    if (centralizada) {
+        camera.offset.x = (GetScreenWidth() - LARGURA_TELA * zoom) / 2.0f;
+        camera.offset.y = (GetScreenHeight() - ALTURA_TELA * zoom) / 2.0f;
+    }
+    BeginMode2D(camera);
+}
+
+/*
+ * terminarInterface
+ * Volta a desenhar em pixels reais da tela.
+ * Recebe: nada.
+ * Devolve: nada.
+ */
+void terminarInterface(void) {
+    EndMode2D();
+}
 
 #define TAMANHO_TEXTO_HUD     24
 #define TAMANHO_TITULO_FIM    48
@@ -62,7 +125,7 @@ void formatarTempo(float segundos, char *texto, int tamanho) {
  */
 static void desenharTextoCentralizado(const char *texto, int y, int tamanho, Color cor) {
     int largura = MeasureText(texto, tamanho);
-    DrawText(texto, (GetScreenWidth() - largura) / 2, y, tamanho, cor);
+    DrawText(texto, (larguraVirtual() - largura) / 2, y, tamanho, cor);
 }
 
 /*
@@ -146,7 +209,7 @@ static Vector2 pontoDoCarroNoMapa(Carro *carro) {
  * Devolve: nada.
  */
 static void desenharMiniMapa(Corrida *corrida) {
-    float x = GetScreenWidth() - TAMANHO_MAPA - MARGEM_HUD;
+    float x = larguraVirtual() - TAMANHO_MAPA - MARGEM_HUD;
     float y = TOPO_MAPA;
     if (pistaDoMapa != corrida->pista) {
         calcularMapa(corrida->pista, x, y);
@@ -205,7 +268,7 @@ static void desenharContagemRegressiva(Corrida *corrida) {
         return;
     }
 
-    int y = GetScreenHeight() / 2 - TAMANHO_CONTAGEM;
+    int y = alturaVirtual() / 2 - TAMANHO_CONTAGEM;
     desenharTextoCentralizado(texto, y + 4, TAMANHO_CONTAGEM, BLACK);   /* sombra */
     desenharTextoCentralizado(texto, y, TAMANHO_CONTAGEM, COR_DESTAQUE);
 }
@@ -231,7 +294,7 @@ void desenharHud(Corrida *corrida) {
              posicao, TOTAL_CARROS, voltaAtual(jogador), TOTAL_VOLTAS);
     snprintf(textoVelocidade, sizeof(textoVelocidade), "%3d km/h", velocidadeEmKmh(jogador));
 
-    int larguraTela = GetScreenWidth();
+    int larguraTela = larguraVirtual();
     DrawRectangle(0, 0, larguraTela, TAMANHO_TEXTO_HUD + 2 * MARGEM_HUD, COR_FUNDO_HUD);
 
     DrawText(textoVolta, MARGEM_HUD, MARGEM_HUD, TAMANHO_TEXTO_HUD, COR_DESTAQUE);
@@ -264,8 +327,8 @@ void desenharFimDeCorrida(Corrida *corrida) {
 
     int largura = 420;
     int altura = 330;
-    int x = (GetScreenWidth() - largura) / 2;
-    int y = (GetScreenHeight() - altura) / 2 - 40;
+    int x = (larguraVirtual() - largura) / 2;
+    int y = (alturaVirtual() - altura) / 2 - 40;
     DrawRectangle(x, y, largura, altura, Fade(BLACK, 0.75f));
 
     /* Só o 1º lugar ganha o grito de KATCHAU! */

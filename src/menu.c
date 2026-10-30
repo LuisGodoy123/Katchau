@@ -69,19 +69,42 @@ static const Tela DESTINOS_OPCOES[TOTAL_OPCOES] = { TELA_CORRIDA, TELA_GARAGEM, 
  * Devolve: nada.
  */
 static void desenharTextoCentralizado(const char *texto, int y, int tamanho, Color cor) {
-    int x = (GetScreenWidth() - MeasureText(texto, tamanho)) / 2;
+    int x = (LARGURA_TELA - MeasureText(texto, tamanho)) / 2;
     DrawText(texto, x + 2, y + 2, tamanho, BLACK);
     DrawText(texto, x, y, tamanho, cor);
 }
 
 /*
+ * Os menus são desenhados num quadro 800x600 no meio da tela (veja
+ * comecarInterface() em hud.c). Em monitores largos sobra espaço dos
+ * lados: margemX/margemY dizem quanto, em coordenadas virtuais.
+ */
+static int margemX(void) {
+    return (larguraVirtual() - LARGURA_TELA) / 2;
+}
+static int margemY(void) {
+    return (alturaVirtual() - ALTURA_TELA) / 2;
+}
+
+/*
+ * escurecerTela
+ * Cobre a tela inteira (inclusive as sobras dos lados) com preto
+ * transparente, para o texto se destacar do fundo.
+ * Recebe: o quanto escurecer (0 a 1).
+ * Devolve: nada.
+ */
+static void escurecerTela(float alfa) {
+    DrawRectangle(-margemX(), -margemY(), larguraVirtual(), alturaVirtual(), Fade(BLACK, alfa));
+}
+
+/*
  * desenharDica
- * Linha de ajuda com os controles, no pé da tela.
+ * Linha de ajuda com os controles, no pé da tela (de ponta a ponta).
  * Recebe: o texto.
  * Devolve: nada.
  */
 static void desenharDica(const char *texto) {
-    DrawRectangle(0, Y_DICA - 8, GetScreenWidth(), GetScreenHeight() - Y_DICA + 8, COR_PAINEL);
+    DrawRectangle(-margemX(), Y_DICA - 8, larguraVirtual(), ALTURA_TELA + margemY() - Y_DICA + 8, COR_PAINEL);
     desenharTextoCentralizado(texto, Y_DICA, TAMANHO_DICA, COR_TEXTO_APAGADO);
 }
 
@@ -173,13 +196,13 @@ Tela atualizarMenuPrincipal(EstadoMenu *menu) {
 
 /*
  * desenharMenuPrincipal
- * Logo, opções e o carro escolhido, com a pista passando ao fundo.
- * Recebe: o estado do menu e a pista (para o fundo).
+ * Logo, opções e o carro escolhido. A pista passando ao fundo é
+ * desenhada antes, pelo main.c.
+ * Recebe: o estado do menu.
  * Devolve: nada.
  */
-void desenharMenuPrincipal(EstadoMenu *menu, Pista *pista) {
-    desenharPistaDeFundo(pista);
-    DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Fade(BLACK, 0.3f));
+void desenharMenuPrincipal(EstadoMenu *menu) {
+    escurecerTela(0.3f);
 
     desenharTextoCentralizado("KATCHAU", 60, TAMANHO_LOGO, COR_DESTAQUE);
     desenharTextoCentralizado("corrida em Interlagos", 160, 22, COR_TEXTO);
@@ -187,7 +210,7 @@ void desenharMenuPrincipal(EstadoMenu *menu, Pista *pista) {
     /* Painel das opções */
     int larguraPainel = 340;
     int alturaPainel = TOTAL_OPCOES * ESPACO_OPCOES + 24;
-    int xPainel = (GetScreenWidth() - larguraPainel) / 2;
+    int xPainel = (LARGURA_TELA - larguraPainel) / 2;
     DrawRectangleRounded((Rectangle){ xPainel, Y_PRIMEIRA_OPCAO - 16, larguraPainel, alturaPainel },
                          0.15f, 8, COR_PAINEL);
 
@@ -203,8 +226,8 @@ void desenharMenuPrincipal(EstadoMenu *menu, Pista *pista) {
 
     /* Carro escolhido, embaixo, para lembrar com qual o jogador vai correr */
     const FichaTecnica *ficha = fichaDoCarro(menu->carroEscolhido);
-    desenharTextoCentralizado(TextFormat("Seu carro: %s", ficha->nome), 462, 20, COR_TEXTO);
-    desenharCarroParado(menu->carroEscolhido, GetScreenWidth() / 2.0f, 552, 0.8f);
+    desenharTextoCentralizado(TextFormat("Seu carro: %s", ficha->nome), 446, 20, COR_TEXTO);
+    desenharCarroParado(menu->carroEscolhido, LARGURA_TELA / 2.0f, 556, 0.7f);
 
     desenharDica("CIMA/BAIXO: escolher     ENTER: confirmar");
 }
@@ -419,12 +442,11 @@ static void desenharFichaMarcada(EstadoMenu *menu) {
 
 /*
  * desenharGaragem
- * Recebe: o estado do menu e a pista (para o fundo).
+ * Recebe: o estado do menu (o fundo é desenhado antes, pelo main.c).
  * Devolve: nada.
  */
-void desenharGaragem(EstadoMenu *menu, Pista *pista) {
-    desenharPistaDeFundo(pista);
-    DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Fade(BLACK, 0.45f));
+void desenharGaragem(EstadoMenu *menu) {
+    escurecerTela(0.45f);
 
     DrawText("GARAGEM", X_LISTA + 2, 22, 40, BLACK);
     DrawText("GARAGEM", X_LISTA, 20, 40, COR_DESTAQUE);
@@ -456,17 +478,16 @@ Tela atualizarComoJogar(void) {
 /*
  * desenharComoJogar
  * Controles e dicas.
- * Recebe: a pista (para o fundo).
+ * Recebe: nada (o fundo é desenhado antes, pelo main.c).
  * Devolve: nada.
  */
-void desenharComoJogar(Pista *pista) {
-    desenharPistaDeFundo(pista);
-    DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Fade(BLACK, 0.45f));
+void desenharComoJogar(void) {
+    escurecerTela(0.45f);
 
     desenharTextoCentralizado("COMO JOGAR", 30, 40, COR_DESTAQUE);
 
     int x = 110;
-    DrawRectangleRounded((Rectangle){ x - 30, 96, GetScreenWidth() - 2 * (x - 30), 440 }, 0.06f, 8, COR_PAINEL);
+    DrawRectangleRounded((Rectangle){ x - 30, 96, LARGURA_TELA - 2 * (x - 30), 440 }, 0.06f, 8, COR_PAINEL);
 
     const char *teclas[] = { "CIMA ou W", "BAIXO ou S", "ESQ/DIR ou A/D", "ESC" };
     const char *acoes[] = { "acelerar", "frear", "virar", "abandonar a corrida" };
@@ -541,7 +562,7 @@ static void desenharLinhaDoResultado(Corrida *corrida, int posicao, int y) {
     char tempo[32];
 
     if (ehJogador) {
-        DrawRectangle(X_COLUNA_POSICAO - 16, y - 8, GetScreenWidth() - 2 * (X_COLUNA_POSICAO - 16),
+        DrawRectangle(X_COLUNA_POSICAO - 16, y - 8, LARGURA_TELA - 2 * (X_COLUNA_POSICAO - 16),
                       ALTURA_LINHA_RESULTADO - 4, COR_LINHA_MARCADA);
     }
 
@@ -577,8 +598,7 @@ static void desenharLinhaDoResultado(Corrida *corrida, int posicao, int y) {
  * Devolve: nada.
  */
 void desenharResultado(Corrida *corrida) {
-    desenharVisaoDoJogador(corrida);
-    DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Fade(BLACK, 0.6f));
+    escurecerTela(0.6f);
 
     if (corrida->posicaoFinal == 1) {
         desenharTextoCentralizado("KATCHAU! VOCE VENCEU!", 28, 40, COR_DESTAQUE);

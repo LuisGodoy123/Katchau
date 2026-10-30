@@ -7,7 +7,8 @@
  *
  * Cada tela tem duas funções, como o laço do main.c:
  *   atualizar...()  lê o teclado e devolve para qual tela ir;
- *   desenhar...()   só desenha.
+ *   desenhar...()   só desenha, em coordenadas de uma tela 800x600 que o
+ *                   main.c amplia para a tela real (comecarInterface).
  */
 
 #include "corrida.h"
@@ -35,13 +36,13 @@ typedef struct {
 void iniciarMenu(EstadoMenu *menu);
 
 Tela atualizarMenuPrincipal(EstadoMenu *menu);
-void desenharMenuPrincipal(EstadoMenu *menu, Pista *pista);
+void desenharMenuPrincipal(EstadoMenu *menu);
 
 Tela atualizarGaragem(EstadoMenu *menu);
-void desenharGaragem(EstadoMenu *menu, Pista *pista);
+void desenharGaragem(EstadoMenu *menu);
 
 Tela atualizarComoJogar(void);
-void desenharComoJogar(Pista *pista);
+void desenharComoJogar(void);
 
 Tela atualizarResultado(void);
 void desenharResultado(Corrida *corrida);

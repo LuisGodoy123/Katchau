@@ -16,4 +16,10 @@ void desenharHud(Corrida *corrida);
 void desenharFimDeCorrida(Corrida *corrida);
 void formatarTempo(float segundos, char *texto, int tamanho);
 
+/* Tela virtual de 800x600 para o HUD e os menus (veja hud.c) */
+void comecarInterface(int centralizada);
+void terminarInterface(void);
+int larguraVirtual(void);
+int alturaVirtual(void);
+
 #endif
