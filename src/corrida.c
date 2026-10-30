@@ -21,7 +21,7 @@
 #define VELOCIDADE_DE_REFERENCIA  9200.0f   /* média de uma volta (~517 mil unidades em ~56 s): converte distância em tempo */
 
 /* ---------- Contagem regressiva ---------- */
-#define SEGUNDOS_DE_CONTAGEM   3.0f    /* 3, 2, 1... KATCHAU! */
+#define SEGUNDOS_DE_CONTAGEM   (NUMEROS_DA_CONTAGEM * SEGUNDOS_POR_NUMERO)   /* 3, 2, 1... KATCHAU! */
 
 /* Os 8 carros do jogo. O número de cada um é a posição neste vetor e
  * define a cor no desenho (0 = vermelho, 1 = amarelo...). O jogador

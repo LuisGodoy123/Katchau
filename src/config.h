@@ -11,6 +11,8 @@
 
 /* Corrida */
 #define TOTAL_VOLTAS     3
+#define NUMEROS_DA_CONTAGEM   3      /* 3, 2, 1... */
+#define SEGUNDOS_POR_NUMERO   1.5f   /* quanto cada número fica na tela: mais tempo, mais tensão */
 #define DURACAO_GRITO_LARGADA 1.5f   /* segundos em que o KATCHAU! fica na tela depois da largada */
 
 #endif
