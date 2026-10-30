@@ -6,6 +6,7 @@
  */
 
 #include <stddef.h>
+#include <math.h>
 #include "corrida.h"
 #include "ia.h"
 #include "ordenacao.h"
@@ -167,6 +168,9 @@ static void atualizarSetores(Corrida *corrida, Carro *carro, int cruzouALinha) {
     if (carro->voltas <= 0 && (cruzouALinha || carro->voltas < 0)) {
         return;   /* ainda saindo do grid: a volta 1 só começou agora */
     }
+    if (carro->voltas > TOTAL_VOLTAS || (carro->voltas == TOTAL_VOLTAS && !cruzouALinha)) {
+        return;   /* já recebeu a bandeirada: as voltas depois do fim não contam */
+    }
 
     float tempo = corrida->tempoDeCorrida - carro->inicioDoSetor;
     carro->inicioDoSetor = corrida->tempoDeCorrida;
@@ -202,6 +206,9 @@ static void registrarVolta(Corrida *corrida, Carro *carro) {
     float tempoDeCorrida = corrida->tempoDeCorrida;
     if (carro->voltas == 0) {
         return;   /* acabou de cruzar a linha saindo do grid: começou a volta 1, que conta desde a largada */
+    }
+    if (carro->voltas > TOTAL_VOLTAS) {
+        return;   /* volta depois da bandeirada: não entra nos tempos nem na melhor volta */
     }
     int indiceDaVolta = carro->voltas - 1;   /* volta 1 fica na posição 0 */
     float tempoDaVolta = tempoDeCorrida - carro->inicioDaVolta;
@@ -286,8 +293,9 @@ static void verificarBatidas(Corrida *corrida) {
  *   5) verifica se o jogador terminou.
  * Antes disso, enquanto a contagem regressiva não acaba, ninguém sai
  * do lugar e o relógio não anda.
- * Depois do fim, o jogador segue sem acelerar até parar e os rivais
- * continuam correndo. O relógio também continua, para cada rival ter
+ * Depois do fim, o jogador segue sem acelerar até parar (ou, se venceu,
+ * a IA assume o carro dele para a volta da vitória, que não acaba mais)
+ * e os rivais continuam correndo. O relógio também continua, para cada rival ter
  * o seu tempo de chegada; o do jogador fica guardado no carro dele.
  * Recebe: a corrida, os comandos do jogador e o tempo do quadro.
  * Devolve: nada.
@@ -299,7 +307,9 @@ void atualizarCorrida(Corrida *corrida, Comandos comandosJogador, float tempoQua
     }
 
     corrida->tempoDeCorrida += tempoQuadro;
-    if (corrida->terminou) {
+    if (jogadorVenceu(corrida)) {
+        comandosJogador = atualizarIA(&corrida->jogador, carroDaFrente(corrida, &corrida->jogador));
+    } else if (corrida->terminou) {
         Comandos nenhumComando = { 0, 0, 0, 0 };
         comandosJogador = nenhumComando;
     }
@@ -446,4 +456,37 @@ Bandeira bandeiraDaCorrida(Corrida *corrida) {
         return BANDEIRA_QUADRICULADA;
     }
     return BANDEIRA_VERDE;
+}
+
+/*
+ * jogadorVenceu
+ * Recebe: a corrida.
+ * Devolve: 1 se o jogador já cruzou a linha final em 1º lugar, 0 se não.
+ */
+int jogadorVenceu(Corrida *corrida) {
+    return corrida->terminou && corrida->posicaoFinal == 1;
+}
+
+/*
+ * segundosAteAVitoria
+ * Quanto falta para o jogador cruzar a linha final, se ele está na última
+ * volta e em 1º lugar. É uma estimativa: a distância que falta dividida
+ * pela velocidade. Como na reta o carro ainda está ganhando velocidade, a
+ * conta usa a média entre a velocidade atual e a máxima (nunca menos que
+ * um terço da máxima, para não explodir com o carro quase parado).
+ * Serve para o som começar a música da vitória no ponto certo.
+ * Recebe: a corrida.
+ * Devolve: os segundos que faltam, ou -1 se ele não está nessa situação.
+ */
+float segundosAteAVitoria(Corrida *corrida) {
+    Carro *jogador = &corrida->jogador;
+    if (corrida->terminou || jogador->voltas != TOTAL_VOLTAS - 1 ||
+        posicaoDoCarro(corrida, jogador) != 1) {
+        return -1.0f;
+    }
+    float comprimentoDaVolta = corrida->totalSegmentos * COMPRIMENTO_SEGMENTO;
+    float falta = TOTAL_VOLTAS * comprimentoDaVolta - jogador->distanciaPercorrida;
+    float velocidade = (jogador->velocidade + jogador->velocidadeMaxima) / 2.0f;
+    velocidade = fmaxf(velocidade, jogador->velocidadeMaxima / 3.0f);
+    return fmaxf(falta, 0.0f) / velocidade;
 }

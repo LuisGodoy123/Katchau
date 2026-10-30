@@ -63,5 +63,7 @@ Carro *carroDaFrente(Corrida *corrida, Carro *carro);
 float intervaloEmSegundos(Carro *carro, Carro *referencia);
 SituacaoDoSetor situacaoDoSetor(Corrida *corrida, Carro *carro, int setor);
 Bandeira bandeiraDaCorrida(Corrida *corrida);
+int jogadorVenceu(Corrida *corrida);
+float segundosAteAVitoria(Corrida *corrida);
 
 #endif

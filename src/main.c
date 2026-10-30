@@ -25,6 +25,10 @@
 #include "visual.h"
 #include "audio.h"
 
+/* Na vitória, o painel de chegada espera um pouco para o jogador ver o
+ * confete e o refrão entrando */
+#define ATRASO_DO_PAINEL_NA_VITORIA  2.5f   /* segundos depois de cruzar a linha */
+
 /*
  * lerComandosDoTeclado
  * Traduz as teclas apertadas para os comandos do carro.
@@ -106,6 +110,7 @@ int main(int argc, char *argv[]) {
     EstadoMenu menu;
     iniciarMenu(&menu);
     Tela tela = TELA_MENU;
+    int venceuAntes = 0;   /* para soltar o confete uma vez só, no quadro da vitória */
 
     /* Laço principal: roda uma vez por quadro até escolher SAIR ou fechar a janela */
     while (tela != TELA_SAIR && !WindowShouldClose()) {
@@ -142,8 +147,17 @@ int main(int argc, char *argv[]) {
         if (proxima == TELA_CORRIDA && tela != TELA_CORRIDA) {
             iniciarCorrida(&corrida, pista, menu.carroEscolhido);
             iniciarMotor(&motor);
+            limparConfetes();
         }
         tela = proxima;
+
+        /* Venceu: a festa começa no quadro em que o jogador cruza a linha */
+        int naCorridaOuResultado = (tela == TELA_CORRIDA || tela == TELA_RESULTADO);
+        int venceu = naCorridaOuResultado && jogadorVenceu(&corrida);
+        if (venceu && !venceuAntes) {
+            soltarConfetes((float) larguraVirtual(), (float) alturaVirtual());
+        }
+        venceuAntes = venceu;
 
         /* O mouse só aparece (e só funciona) no menu principal e na garagem */
         int usaMouse = (tela == TELA_MENU || tela == TELA_GARAGEM);
@@ -160,7 +174,10 @@ int main(int argc, char *argv[]) {
          *  - antes do GO, o motor em marcha lenta (som provisório) e o "3... 2... 1... GO!",
          *    que começa junto com o número 3 na tela e vai até o fim do KATCHAU!;
          *  - do GO em diante, o motor de verdade, que segue a rotação e a carga do carro do
-         *    jogador, e a música de fundo (que sai quando o jogador chega) */
+         *    jogador, e a música de fundo (que sai quando o jogador chega);
+         *  - chegando em 1º na última volta, a música da vitória entra baixinho no lugar
+         *    da música de fundo e o refrão cai junto com a bandeirada; daí em diante só
+         *    ela toca (o motor sai, mesmo com a IA levando o carro) */
         int naCorrida = (tela == TELA_CORRIDA);
         int antesDoGo = (naCorrida && corrida.contagemRegressiva > 0.0f);
         int depoisDoGo = (naCorrida && corrida.contagemRegressiva <= 0.0f);
@@ -169,8 +186,11 @@ int main(int argc, char *argv[]) {
         if (naCorrida) {
             atualizarMotor(&motor, &corrida.jogador, tempoQuadro);
         }
-        atualizarSonsDaCorrida(antesDoGo, naContagem, depoisDoGo && !corrida.terminou);
-        atualizarSomDoMotor(depoisDoGo, motor.giro, motor.carga);
+        float segundosAteALinha = naCorrida ? segundosAteAVitoria(&corrida) : -1.0f;
+        atualizarMusicaDaVitoria(segundosAteALinha, venceu);
+        atualizarSonsDaCorrida(antesDoGo, naContagem,
+                               depoisDoGo && !corrida.terminou && !musicaDaVitoriaTocando());
+        atualizarSomDoMotor(depoisDoGo && !venceu, motor.giro, motor.carga);
 
         /* ---- 2) Desenhar a tela atual ----
          * Primeiro o "mundo" (pista e carros), na resolução real da tela.
@@ -201,15 +221,18 @@ int main(int argc, char *argv[]) {
                 desenharVisaoDoJogador(&corrida);
                 comecarInterface(0);
                 desenharHud(&corrida);
-                if (corrida.terminou) {
+                if (corrida.terminou && (!venceu || corrida.tempoDeCorrida - corrida.jogador.tempoDeChegada
+                                                    > ATRASO_DO_PAINEL_NA_VITORIA)) {
                     desenharFimDeCorrida(&corrida);
                 }
+                desenharConfetes(tempoQuadro);
                 terminarInterface();
                 break;
             case TELA_RESULTADO:
                 desenharVisaoDoJogador(&corrida);   /* a corrida continua ao fundo */
                 comecarInterface(1);
                 desenharResultado(&corrida);
+                desenharConfetes(tempoQuadro);
                 terminarInterface();
                 break;
             default:

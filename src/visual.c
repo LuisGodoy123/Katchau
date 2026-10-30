@@ -5,6 +5,7 @@
  * ------------------------------------------------------------------
  */
 
+#include <math.h>
 #include <string.h>
 #include "visual.h"
 
@@ -291,4 +292,161 @@ void desenharBrilho(float centroX, float centroY, float raio, Color cor) {
         float fracao = 1.0f - (float) i / camadas;   /* de 1 (borda) até perto de 0 (meio) */
         DrawCircleV((Vector2){ centroX, centroY }, raio * fracao, Fade(cor, (float) cor.a / 255.0f / camadas));
     }
+}
+
+/* ==================================================================
+ * Confete
+ * ================================================================== */
+
+/* Dois canhões nos cantos de baixo atiram para cima e para dentro e,
+ * por alguns segundos, mais confete cai do alto da tela. Cada papelzinho
+ * gira no plano da tela e também "vira" (a largura encolhe e cresce com
+ * o cosseno), que é o que dá a impressão de papel caindo. */
+#define MAXIMO_CONFETES        420
+#define CONFETES_POR_CANHAO    130
+#define CONFETES_DA_CHUVA_POR_S 45.0f
+#define DURACAO_DA_CHUVA       5.0f     /* s */
+#define GRAVIDADE_CONFETE      420.0f   /* px/s² (na tela virtual) */
+#define QUEDA_MAXIMA_CONFETE   110.0f   /* px/s: o ar segura o papel */
+#define ARRASTO_CONFETE        1.6f     /* 1/s: quanto a velocidade lateral cai */
+#define BALANCO_CONFETE        28.0f    /* px/s: o vaivém de folha caindo */
+
+typedef struct {
+    float x, y;            /* centro, na tela virtual */
+    float vx, vy;          /* px/s */
+    float angulo;          /* graus, no plano da tela */
+    float giro;            /* graus/s */
+    float virada;          /* fase da virada (rad) */
+    float velocidadeVirada;
+    float largura, altura;
+    Color cor;
+    int ativo;
+} Confete;
+
+static const Color CORES_CONFETE[] = {
+    COR_VERMELHO, COR_AMARELO, COR_CROMO, { 255, 255, 255, 255 },
+    { 40, 140, 255, 255 }, { 60, 200, 110, 255 }, { 255, 120, 30, 255 }
+};
+#define TOTAL_CORES_CONFETE ((int) (sizeof(CORES_CONFETE) / sizeof(CORES_CONFETE[0])))
+
+static Confete confetes[MAXIMO_CONFETES];
+static float tempoDeChuva = 0.0f;    /* segundos de chuva que ainda faltam */
+static float sobraDaChuva = 0.0f;    /* fração de confete acumulada entre quadros */
+static float larguraConfete = 800.0f;
+static float alturaConfete = 600.0f;
+
+/*
+ * sortearEntre
+ * Recebe: o mínimo e o máximo.
+ * Devolve: um número qualquer entre eles.
+ */
+static float sortearEntre(float minimo, float maximo) {
+    return minimo + (maximo - minimo) * (GetRandomValue(0, 10000) / 10000.0f);
+}
+
+/*
+ * criarConfete
+ * Põe um papelzinho novo numa vaga livre (se não houver vaga, não cria).
+ * Recebe: onde ele nasce e a velocidade inicial.
+ * Devolve: nada.
+ */
+static void criarConfete(float x, float y, float vx, float vy) {
+    for (int i = 0; i < MAXIMO_CONFETES; i++) {
+        if (!confetes[i].ativo) {
+            Confete *c = &confetes[i];
+            c->x = x;
+            c->y = y;
+            c->vx = vx;
+            c->vy = vy;
+            c->angulo = sortearEntre(0.0f, 360.0f);
+            c->giro = sortearEntre(-360.0f, 360.0f);
+            c->virada = sortearEntre(0.0f, 2.0f * PI);
+            c->velocidadeVirada = sortearEntre(5.0f, 12.0f);
+            c->largura = sortearEntre(5.0f, 8.0f);
+            c->altura = sortearEntre(9.0f, 13.0f);
+            c->cor = CORES_CONFETE[GetRandomValue(0, TOTAL_CORES_CONFETE - 1)];
+            c->ativo = 1;
+            return;
+        }
+    }
+}
+
+/*
+ * soltarConfetes
+ * Dispara os dois canhões e começa a chuva de confete.
+ * Recebe: o tamanho da tela virtual (largura e altura).
+ * Devolve: nada.
+ */
+void soltarConfetes(float largura, float altura) {
+    larguraConfete = largura;
+    alturaConfete = altura;
+    for (int lado = 0; lado < 2; lado++) {
+        float x = (lado == 0) ? 0.0f : largura;
+        float sentido = (lado == 0) ? 1.0f : -1.0f;   /* para dentro da tela */
+        for (int i = 0; i < CONFETES_POR_CANHAO; i++) {
+            float angulo = sortearEntre(50.0f, 80.0f) * DEG2RAD;   /* acima da horizontal */
+            float forca = sortearEntre(380.0f, 760.0f);
+            criarConfete(x, altura + 10.0f, sentido * cosf(angulo) * forca, -sinf(angulo) * forca);
+        }
+    }
+    tempoDeChuva = DURACAO_DA_CHUVA;
+    sobraDaChuva = 0.0f;
+}
+
+/*
+ * desenharConfetes
+ * Move e desenha o confete. Chamar uma vez por quadro, por cima da
+ * interface (já na tela virtual). O papel que sai por baixo da tela é
+ * apagado.
+ * Recebe: o tempo do quadro.
+ * Devolve: nada.
+ */
+void desenharConfetes(float tempoQuadro) {
+    if (tempoDeChuva > 0.0f) {
+        tempoDeChuva -= tempoQuadro;
+        sobraDaChuva += CONFETES_DA_CHUVA_POR_S * tempoQuadro;
+        while (sobraDaChuva >= 1.0f) {
+            criarConfete(sortearEntre(0.0f, larguraConfete), -12.0f,
+                         sortearEntre(-30.0f, 30.0f), sortearEntre(20.0f, 80.0f));
+            sobraDaChuva -= 1.0f;
+        }
+    }
+
+    for (int i = 0; i < MAXIMO_CONFETES; i++) {
+        Confete *c = &confetes[i];
+        if (!c->ativo) {
+            continue;
+        }
+        c->vx -= c->vx * ARRASTO_CONFETE * tempoQuadro;
+        c->vy = fminf(c->vy + GRAVIDADE_CONFETE * tempoQuadro, QUEDA_MAXIMA_CONFETE);
+        c->virada += c->velocidadeVirada * tempoQuadro;
+        c->angulo += c->giro * tempoQuadro;
+        c->x += (c->vx + sinf(c->virada * 0.5f) * BALANCO_CONFETE) * tempoQuadro;
+        c->y += c->vy * tempoQuadro;
+        if (c->y > alturaConfete + 20.0f && c->vy > 0.0f) {
+            c->ativo = 0;
+            continue;
+        }
+
+        /* A virada: o papel fica fino quando está de lado e mais escuro
+         * quando mostra o verso */
+        float face = cosf(c->virada);
+        float largura = c->largura * fmaxf(fabsf(face), 0.15f);
+        Color cor = (face >= 0.0f) ? c->cor : ColorBrightness(c->cor, -0.35f);
+        DrawRectanglePro((Rectangle){ c->x, c->y, largura, c->altura },
+                         (Vector2){ largura / 2.0f, c->altura / 2.0f }, c->angulo, cor);
+    }
+}
+
+/*
+ * limparConfetes
+ * Apaga todo o confete (ao começar uma corrida nova).
+ * Recebe: nada.
+ * Devolve: nada.
+ */
+void limparConfetes(void) {
+    for (int i = 0; i < MAXIMO_CONFETES; i++) {
+        confetes[i].ativo = 0;
+    }
+    tempoDeChuva = 0.0f;
 }

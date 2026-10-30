@@ -10,6 +10,8 @@
  * provisório, até haver o som do carro), a música de fundo da corrida e a
  * música dos menus, que toca nas telas de menu, some aos poucos quando a
  * corrida começa e volta de onde parou quando o jogador retorna aos menus.
+ * Quem vence ganha "Life Is a Highway": ela entra baixinho pouco antes da
+ * linha e chega ao refrão (1:25) no instante em que o carro cruza.
  *
  * Módulo que usa a raylib (parte de áudio).
  * ------------------------------------------------------------------
@@ -28,6 +30,8 @@ void atualizarAudio(int musicaDoMenu);
 void tocarSom(TipoSom som);
 void atualizarSonsDaCorrida(int motorAtivo, int contagemAtiva, int musicaAtiva);
 void atualizarSomDoMotor(int ativo, float giro, float carga);
+void atualizarMusicaDaVitoria(float segundosAteALinha, int venceu);
+int musicaDaVitoriaTocando(void);
 void descarregarAudio(void);
 
 #endif

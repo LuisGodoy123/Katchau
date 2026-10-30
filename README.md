@@ -126,7 +126,7 @@ testes/
   teste_pista.c    testa pista, carro, corrida, IA e ordenação no terminal
 recursos/
   fontes/          Racing Sans One e Saira Condensed (licença OFL, arquivos *_licenca.txt)
-  sons/            música dos menus, efeitos dos menus e motor da largada (*.wav, *.mp3)
+  sons/            música dos menus e da vitória, efeitos dos menus e motor da largada (*.wav, *.mp3)
   texturas/        PNGs do jogo (ver recursos/texturas/README.md)
     logo/          katchau.png, a logo do menu principal
     estrada/       asfalto, grama, zebra e faixa
@@ -236,6 +236,16 @@ melhor setor e a volta mais rápida de todos. O HUD mostra:
   (verde ganhando, vermelho perdendo), os tempos atual, última, melhor e a mais rápida da
   corrida, e os setores: **roxo** = melhor da corrida, **verde** = seu melhor, **amarelo** = mais lento;
 - **embaixo à esquerda** o mini-mapa e **embaixo à direita** o velocímetro.
+
+## Vitória
+
+Chegando em **1º lugar** na última volta, `segundosAteAVitoria()` (`corrida.c`) estima quanto
+falta para a linha (distância que falta ÷ velocidade). Uns 6 s antes, `audio.c` começa
+`life_is_a_highway.mp3` bem baixo, já no ponto `1:25 - segundos que faltam`, e vai corrigindo
+se a estimativa escorregar; no quadro da bandeirada a música é cravada em **1:25** (o refrão)
+e sobe ao volume máximo, no lugar da música de fundo. Na mesma hora sai o **confete**
+(`visual.c`) e a IA assume o carro do jogador, que segue dando voltas atrás do painel de
+chegada e da tela de resultado. Essas voltas extras não entram nos tempos.
 
 ## Objetos da beira da pista
 

@@ -59,6 +59,30 @@ static int motorSomTocando = 0;
 static int motorSomAtivoAntes = 0;
 static float entradaMotor = 0.0f;   /* 0 a 1: o fade de entrada e saída */
 
+/* A música da vitória. Na última volta, com o jogador em 1º, ela começa
+ * baixinho ANTECEDENCIA_DO_REFRAO segundos antes da linha, já no ponto
+ * certo para o refrão ("LIFE IS A HIGHWAAAY", em 1:25) cair exatamente na
+ * hora em que o carro cruza; aí ela sobe de vez. Se o jogador perde a
+ * liderança antes da linha, ela some. */
+#define ARQUIVO_MUSICA_VITORIA   "recursos/sons/life_is_a_highway.mp3"
+#define MOMENTO_DO_REFRAO        85.0f   /* segundos: 1:25 */
+#define ANTECEDENCIA_DO_REFRAO   6.0f    /* segundos antes da linha em que a música entra */
+#define VOLUME_VITORIA           1.9f    /* volume máximo: acima de 1 porque o arquivo foi gravado
+                                          * baixo (pico em 49% do máximo); 1,9 ainda não distorce */
+#define VOLUME_CHEGANDO_INICIO   0.06f   /* fração do máximo quando ela entra... */
+#define VOLUME_CHEGANDO_FIM      0.25f   /* ...e logo antes da linha */
+#define TOLERANCIA_CHEGANDO      0.30f   /* s: diferença que faz a música pular para o ponto certo */
+#define TOLERANCIA_NA_LINHA      0.05f   /* s: na linha, o acerto é fino */
+#define VELOCIDADE_REFRAO        5.0f    /* 1/s: no refrão, sobe ao máximo em ~0,2 s */
+#define VELOCIDADE_SAIDA_VITORIA 0.7f    /* 1/s: e sai em ~1,4 s */
+
+typedef enum { VITORIA_PARADA, VITORIA_CHEGANDO, VITORIA_REFRAO, VITORIA_SAINDO } EstadoDaVitoria;
+
+static Music musicaVitoria;
+static int musicaVitoriaCarregada = 0;
+static EstadoDaVitoria estadoVitoria = VITORIA_PARADA;
+static float volumeVitoria = 0.0f;   /* 0 a 1, multiplicado por VOLUME_VITORIA */
+
 static const char *ARQUIVOS_SONS[TOTAL_SONS] = {
     "recursos/sons/cursor.wav",
     "recursos/sons/confirmar.wav",
@@ -112,6 +136,12 @@ void carregarAudio(void) {
         motorSomCarregado = IsMusicValid(motorAcelerando) && IsMusicValid(motorAliviando);
         motorAcelerando.looping = true;
         motorAliviando.looping = true;
+    }
+
+    if (FileExists(ARQUIVO_MUSICA_VITORIA)) {
+        musicaVitoria = LoadMusicStream(ARQUIVO_MUSICA_VITORIA);
+        musicaVitoriaCarregada = IsMusicValid(musicaVitoria);
+        musicaVitoria.looping = false;   /* toca do refrão até o fim e para */
     }
 
     if (!FileExists(ARQUIVO_MUSICA_MENU)) {
@@ -284,6 +314,90 @@ void atualizarSomDoMotor(int ativo, float giro, float carga) {
 }
 
 /*
+ * acertarMusicaDaVitoria
+ * Se a música está longe demais do ponto em que deveria estar, pula
+ * para ele.
+ * Recebe: o ponto certo (em segundos) e a diferença tolerada.
+ * Devolve: nada.
+ */
+static void acertarMusicaDaVitoria(float momento, float tolerancia) {
+    if (fabsf(GetMusicTimePlayed(musicaVitoria) - momento) > tolerancia) {
+        SeekMusicStream(musicaVitoria, momento);
+    }
+}
+
+/*
+ * atualizarMusicaDaVitoria
+ * Chamar uma vez por quadro.
+ *   - chegando: enquanto faltam até ANTECEDENCIA_DO_REFRAO segundos para
+ *     o jogador (em 1º) cruzar a linha final, a música toca baixinho e é
+ *     mantida em (1:25 - segundos que faltam), crescendo devagar;
+ *   - venceu: no quadro da chegada ela é cravada em 1:25 (caso a
+ *     estimativa tenha errado um pouco) e sobe ao volume máximo; daí segue
+ *     tocando enquanto "venceu" continuar 1;
+ *   - nenhum dos dois: some aos poucos e para.
+ * Recebe: os segundos até a linha (negativo = o jogador não está chegando
+ *         em 1º) e se ele já venceu (e a tela ainda é a da corrida ou a do
+ *         resultado).
+ * Devolve: nada.
+ */
+void atualizarMusicaDaVitoria(float segundosAteALinha, int venceu) {
+    if (!musicaVitoriaCarregada) {
+        return;
+    }
+    float passo = GetFrameTime();
+
+    if (venceu) {
+        if (estadoVitoria != VITORIA_REFRAO) {
+            if (estadoVitoria == VITORIA_PARADA) {
+                PlayMusicStream(musicaVitoria);   /* venceu sem ter passado pelo "chegando" */
+            }
+            acertarMusicaDaVitoria(MOMENTO_DO_REFRAO, TOLERANCIA_NA_LINHA);
+            estadoVitoria = VITORIA_REFRAO;
+        }
+        volumeVitoria = fminf(volumeVitoria + passo * VELOCIDADE_REFRAO, 1.0f);
+    } else if (segundosAteALinha >= 0.0f && segundosAteALinha <= ANTECEDENCIA_DO_REFRAO) {
+        float momento = MOMENTO_DO_REFRAO - segundosAteALinha;
+        if (estadoVitoria == VITORIA_PARADA) {
+            PlayMusicStream(musicaVitoria);
+            SeekMusicStream(musicaVitoria, momento);
+            volumeVitoria = 0.0f;
+        } else {
+            acertarMusicaDaVitoria(momento, TOLERANCIA_CHEGANDO);
+        }
+        estadoVitoria = VITORIA_CHEGANDO;
+
+        /* cresce de INICIO a FIM conforme a linha se aproxima */
+        float chegada = 1.0f - segundosAteALinha / ANTECEDENCIA_DO_REFRAO;
+        float alvo = VOLUME_CHEGANDO_INICIO + (VOLUME_CHEGANDO_FIM - VOLUME_CHEGANDO_INICIO) * chegada;
+        volumeVitoria = (volumeVitoria < alvo) ? fminf(volumeVitoria + passo, alvo) : alvo;
+    } else if (estadoVitoria != VITORIA_PARADA) {
+        estadoVitoria = VITORIA_SAINDO;
+        volumeVitoria -= passo * VELOCIDADE_SAIDA_VITORIA;
+        if (volumeVitoria <= 0.0f) {
+            StopMusicStream(musicaVitoria);
+            estadoVitoria = VITORIA_PARADA;
+            volumeVitoria = 0.0f;
+        }
+    }
+
+    if (estadoVitoria != VITORIA_PARADA) {
+        SetMusicVolume(musicaVitoria, volumeVitoria * VOLUME_VITORIA);
+        UpdateMusicStream(musicaVitoria);
+    }
+}
+
+/*
+ * musicaDaVitoriaTocando
+ * Recebe: nada.
+ * Devolve: 1 se a música da vitória está chegando ou tocando (a música
+ *          de fundo da corrida deve sair), 0 se não.
+ */
+int musicaDaVitoriaTocando(void) {
+    return estadoVitoria == VITORIA_CHEGANDO || estadoVitoria == VITORIA_REFRAO;
+}
+
+/*
  * descarregarAudio
  * Devolve a memória dos sons e fecha o dispositivo de som. Chamar antes
  * de CloseWindow.
@@ -307,6 +421,10 @@ void descarregarAudio(void) {
         UnloadMusicStream(motorAcelerando);
         UnloadMusicStream(motorAliviando);
         motorSomCarregado = 0;
+    }
+    if (musicaVitoriaCarregada) {
+        UnloadMusicStream(musicaVitoria);
+        musicaVitoriaCarregada = 0;
     }
     if (musicaCarregada) {
         UnloadMusicStream(musicaMenu);

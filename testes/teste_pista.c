@@ -882,6 +882,56 @@ static void testarSetoresEIntervalos(void) {
 }
 
 /* ---------- Motor (rotação, marcha e carga para o som) ---------- */
+/*
+ * testarVoltaDaVitoria
+ * Com o carro 2 (que, dirigido pela IA, vence esta corrida), confere:
+ *   - a estimativa de quanto falta para a linha, usada pela música da vitória;
+ *   - depois da vitória, a IA segue dirigindo o carro do jogador sem parar,
+ *     e essas voltas extras não mexem nos tempos da corrida.
+ */
+static void testarVoltaDaVitoria(void) {
+    printf("\n16) Chegada em 1o: musica no ponto certo e volta da vitoria\n");
+    Pista *pista = criarPista();
+    static Corrida corrida;
+    iniciarCorrida(&corrida, pista, 2);
+    float quadro = 1.0f / 60.0f;
+    float estimativaA6s = -1.0f, tempoA6s = 0.0f;
+
+    while (!corrida.terminou && corrida.tempoDeCorrida < 600.0f) {
+        float estimativa = segundosAteAVitoria(&corrida);
+        if (estimativaA6s < 0.0f && estimativa >= 0.0f && estimativa <= 6.0f) {
+            estimativaA6s = estimativa;
+            tempoA6s = corrida.tempoDeCorrida;
+        }
+        atualizarCorrida(&corrida, atualizarIA(&corrida.jogador, carroDaFrente(&corrida, &corrida.jogador)), quadro);
+    }
+    verificar(jogadorVenceu(&corrida), "o carro 2 dirigido pela IA vence");
+    float real = corrida.jogador.tempoDeChegada - tempoA6s;
+    printf("     a ~6 s da linha: estimativa %.2f s, real %.2f s\n", estimativaA6s, real);
+    verificar(estimativaA6s >= 0.0f && fabsf(estimativaA6s - real) < 0.3f, "estimativa ate a linha erra menos de 0,3 s");
+    verificar(segundosAteAVitoria(&corrida) < 0.0f, "depois da chegada nao ha mais estimativa");
+
+    float melhorVolta = corrida.jogador.melhorVolta;
+    float tempos[TOTAL_VOLTAS];
+    for (int i = 0; i < TOTAL_VOLTAS; i++) {
+        tempos[i] = corrida.jogador.temposDeVolta[i];
+    }
+    Comandos nenhumComando = { 0, 0, 0, 0 };
+    for (int i = 0; i < 60 * 130; i++) {
+        atualizarCorrida(&corrida, nenhumComando, quadro);   /* o teclado nao manda mais */
+    }
+    verificar(corrida.jogador.voltas >= TOTAL_VOLTAS + 2, "a IA leva o vencedor por mais voltas");
+    verificar(corrida.jogador.velocidade > corrida.jogador.velocidadeMaxima * 0.2f, "e o carro nao para");
+    int temposIguais = (corrida.jogador.melhorVolta == melhorVolta);
+    for (int i = 0; i < TOTAL_VOLTAS; i++) {
+        temposIguais = temposIguais && (corrida.jogador.temposDeVolta[i] == tempos[i]);
+    }
+    verificar(temposIguais, "as voltas depois da bandeirada nao mudam os tempos");
+    verificar(corrida.posicaoFinal == 1, "a posicao final continua 1");
+
+    liberarPista(pista);
+}
+
 static void testarMotor(void) {
     printf("\n[Teste] Motor do jogador (rotacao, marchas e carga)\n");
 
@@ -976,6 +1026,7 @@ int main(int argc, char *argv[]) {
     testarGridDeLargada();
     testarSetoresEIntervalos();
     testarMotor();
+    testarVoltaDaVitoria();
 
     if (totalFalhas == 0) {
         printf("\nTodos os testes passaram.\n");
