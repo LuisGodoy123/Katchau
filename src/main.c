@@ -22,6 +22,7 @@
 #include "hud.h"
 #include "menu.h"
 #include "visual.h"
+#include "audio.h"
 
 /*
  * lerComandosDoTeclado
@@ -93,6 +94,7 @@ int main(int argc, char *argv[]) {
     ChangeDirectory(GetApplicationDirectory());
     carregarTexturas();
     carregarVisual();   /* fontes e logo dos menus */
+    carregarAudio();    /* música dos menus */
 
     Pista *pista = criarPista();
     Corrida corrida;
@@ -145,6 +147,9 @@ int main(int argc, char *argv[]) {
             HideCursor();
         }
 
+        /* A música toca nos menus e some quando a corrida começa */
+        atualizarAudio(tela == TELA_MENU || tela == TELA_GARAGEM || tela == TELA_COMO_JOGAR);
+
         /* ---- 2) Desenhar a tela atual ----
          * Primeiro o "mundo" (pista e carros), na resolução real da tela.
          * Depois a interface (HUD e menus), na tela virtual 800x600 que
@@ -194,6 +199,7 @@ int main(int argc, char *argv[]) {
     liberarPista(pista);
     descarregarTexturas();
     descarregarVisual();
+    descarregarAudio();
     CloseWindow();
     return 0;
 }

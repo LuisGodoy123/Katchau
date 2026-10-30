@@ -120,10 +120,12 @@ src/
   hud.c/.h         posições, volta e setores, mini-mapa e velocímetro  (fases 3 a 6)
   menu.c/.h        menu, garagem, como jogar e tela de resultado       (fase 6)
   visual.c/.h      identidade visual: cores, fontes, logo e formas     (fase 6)
+  audio.c/.h       música dos menus (toca nos menus, some na corrida)
 testes/
   teste_pista.c    testa pista, carro, corrida, IA e ordenação no terminal
 recursos/
   fontes/          Racing Sans One e Saira Condensed (licença OFL, arquivos *_licenca.txt)
+  sons/            menu_theme.mp3, a música dos menus
   texturas/        PNGs do jogo (ver recursos/texturas/README.md)
     logo/          katchau.png, a logo do menu principal
     estrada/       asfalto, grama, zebra e faixa
@@ -134,7 +136,7 @@ ferramentas/
   gerar_sprites.py script do Blender: modelo 3D (.glb) vira sprite PNG
 ```
 
-Regra: só `render.c`, `hud.c`, `menu.c` e `visual.c` incluem `raylib.h` (além do `main.c`, que abre
+Regra: só `render.c`, `hud.c`, `menu.c`, `visual.c` e `audio.c` incluem `raylib.h` (além do `main.c`, que abre
 a janela). O resto é lógica pura e pode ser testado no terminal.
 
 ## Sprites dos carros
