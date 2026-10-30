@@ -10,6 +10,7 @@
 #include "raylib.h"
 #include "config.h"
 #include "hud.h"
+#include "visual.h"
 
 /* ==================================================================
  * Tela virtual: o HUD e os menus foram desenhados para 800x600.
@@ -73,29 +74,53 @@ void terminarInterface(void) {
     EndMode2D();
 }
 
-#define TAMANHO_TEXTO_HUD     24
 #define TAMANHO_TITULO_FIM    48
 #define TAMANHO_TEXTO_FIM     22
-#define MARGEM_HUD            14
-#define COR_FUNDO_HUD         Fade(BLACK, 0.55f)
-#define COR_TEXTO_HUD         RAYWHITE
-#define COR_DESTAQUE          YELLOW
+#define MARGEM_HUD            12
+#define COR_TEXTO_HUD         COR_TEXTO_CLARO
 #define TAMANHO_CONTAGEM      96
 #define DURACAO_GRITO_LARGADA 1.5f   /* segundos em que o KATCHAU! fica na tela depois da largada */
 
-/* ---------- Mini-mapa ---------- */
+/* O HUD é discreto, como nas transmissões: painéis pequenos, letra
+ * pequena (Saira Condensed) e nada de faixas grandes por cima da pista. */
+
+/* ---------- Painel de posições (canto superior esquerdo) ---------- */
+#define LARGURA_POSICOES      236.0f
+#define ALTURA_CABECALHO_HUD  20.0f
+#define ALTURA_SUBCABECALHO   16.0f
+#define ALTURA_LINHA_HUD      16.0f
+#define LARGURA_BANDEIRA      78.0f
+#define X_COLUNA_INTERVALO    146.0f   /* a partir da esquerda do painel */
+#define X_COLUNA_ULTIMA       190.0f
+#define LETRA_CABECALHO       14.0f
+#define LETRA_HUD             12.0f
+#define LETRA_PEQUENA         10.5f
+
+/* ---------- Painel da volta (canto superior direito) ---------- */
+#define LARGURA_PAINEL_VOLTA  236.0f
+#define ALTURA_LINHA_VOLTA    20.0f
+#define ALTURA_TEMPOS_VOLTA   32.0f
+#define ALTURA_SETORES        14.0f
+
+/* ---------- Velocímetro (canto inferior direito) ---------- */
+#define RAIO_VELOCIMETRO      62.0f
+#define KMH_DO_MOSTRADOR      350.0f   /* o arco vai de 0 a 350 km/h */
+#define KMH_DA_FAIXA_VERMELHA 300.0f
+#define ANGULO_DO_ZERO        135.0f   /* graus: 0 km/h embaixo à esquerda... */
+#define VARREDURA             270.0f   /* ...e o arco gira 270 graus até embaixo à direita */
+
+/* ---------- Cores do HUD ---------- */
+#define COR_FUNDO_HUD         Fade(COR_GRAFITE, 0.78f)
+#define COR_VERDE_HUD         (Color){  40, 200,  70, 255 }
+#define COR_ROXO_HUD          (Color){ 165,  70, 220, 255 }
+
+/* ---------- Mini-mapa (canto inferior esquerdo) ---------- */
 #define MAX_PONTOS_MAPA       8192   /* um ponto por segmento; Interlagos tem ~2.600 */
 #define TAMANHO_MAPA          150    /* lado do quadrado do mini-mapa, em pixels */
-#define MARGEM_MAPA           12     /* folga entre o traçado e a borda do quadrado */
-#define TOPO_MAPA             64     /* logo abaixo da faixa do HUD */
-#define TAMANHO_TEXTO_MAPA    14
-#define ESPESSURA_TRACADO     4.0f
-#define RAIO_JOGADOR          6.0f
-#define RAIO_RIVAL            3.5f
-#define COR_FUNDO_MAPA        Fade(BLACK, 0.45f)
-#define COR_TRACADO           Fade(RAYWHITE, 0.85f)
-#define COR_JOGADOR_MAPA      RED
-#define COR_RIVAL_MAPA        (Color){ 255, 220, 60, 255 }
+#define MARGEM_MAPA           8      /* folga entre o traçado e a borda do quadrado */
+#define TAMANHO_TEXTO_MAPA    12
+#define ESPESSURA_TRACADO     3.0f
+#define RAIO_CARRO_MAPA       6.5f
 
 /* Desenho da pista visto de cima, já na escala da tela.
  * pontosMapa[i] é onde começa o segmento de índice i. É calculado uma
@@ -103,6 +128,7 @@ void terminarInterface(void) {
 static Vector2 pontosMapa[MAX_PONTOS_MAPA];
 static int totalPontosMapa = 0;
 static Pista *pistaDoMapa = NULL;
+static Vector2 cantoDoMapa = { -1.0f, -1.0f };   /* onde o mapa foi calculado (muda se a janela mudar) */
 
 /*
  * formatarTempo
@@ -115,17 +141,6 @@ void formatarTempo(float segundos, char *texto, int tamanho) {
     int minutos = (int) (segundos / 60);
     float resto = segundos - minutos * 60;
     snprintf(texto, tamanho, "%d:%05.2f", minutos, resto);
-}
-
-/*
- * desenharTextoCentralizado
- * Escreve um texto centralizado na horizontal.
- * Recebe: o texto, a altura (y), o tamanho da fonte e a cor.
- * Devolve: nada.
- */
-static void desenharTextoCentralizado(const char *texto, int y, int tamanho, Color cor) {
-    int largura = MeasureText(texto, tamanho);
-    DrawText(texto, (larguraVirtual() - largura) / 2, y, tamanho, cor);
 }
 
 /*
@@ -182,6 +197,7 @@ static void calcularMapa(Pista *pista, float xQuadrado, float yQuadrado) {
 
     totalPontosMapa = total;
     pistaDoMapa = pista;
+    cantoDoMapa = (Vector2){ xQuadrado, yQuadrado };
 }
 
 /*
@@ -201,26 +217,42 @@ static Vector2 pontoDoCarroNoMapa(Carro *carro) {
 }
 
 /*
+ * desenharCarroNoMapa
+ * Uma bolinha com a posição do carro escrita dentro.
+ * Recebe: onde, a posição (1 a 8), a cor da bolinha e a do número.
+ * Devolve: nada.
+ */
+static void desenharCarroNoMapa(Vector2 ponto, int posicao, Color fundo, Color numero) {
+    DrawCircleV(ponto, RAIO_CARRO_MAPA + 1.0f, COR_GRAFITE);
+    DrawCircleV(ponto, RAIO_CARRO_MAPA, fundo);
+    const char *texto = TextFormat("%d", posicao);
+    float largura = larguraDoTexto(FONTE_FORTE, texto, 11.0f);
+    escrever(FONTE_FORTE, texto, ponto.x - largura / 2.0f, ponto.y - 7.5f, 11.0f, numero);
+}
+
+/*
  * desenharMiniMapa
- * Quadrado no canto superior direito com o traçado da pista, a linha
- * de chegada, os rivais (pontos amarelos) e o jogador (ponto vermelho
- * maior). Embaixo, o nome do trecho onde o jogador está.
+ * No canto inferior esquerdo, sem painel por trás: só o traçado da pista
+ * (branco, com borda escura para aparecer sobre a grama e o asfalto), a
+ * linha de chegada e os carros como bolinhas com a posição de cada um
+ * (o jogador em vermelho, por cima). Embaixo, o nome do trecho.
  * Recebe: a corrida.
  * Devolve: nada.
  */
 static void desenharMiniMapa(Corrida *corrida) {
-    float x = larguraVirtual() - TAMANHO_MAPA - MARGEM_HUD;
-    float y = TOPO_MAPA;
-    if (pistaDoMapa != corrida->pista) {
+    float x = MARGEM_HUD;
+    float y = alturaVirtual() - MARGEM_HUD - TAMANHO_MAPA - TAMANHO_TEXTO_MAPA - 4;
+    if (pistaDoMapa != corrida->pista || cantoDoMapa.x != x || cantoDoMapa.y != y) {
         calcularMapa(corrida->pista, x, y);
     }
 
-    DrawRectangleRounded((Rectangle){ x, y, TAMANHO_MAPA, TAMANHO_MAPA + TAMANHO_TEXTO_MAPA + 8 },
-                         0.1f, 6, COR_FUNDO_MAPA);
-
-    /* Traçado: uma linha entre cada par de pontos vizinhos (fechando a volta) */
+    /* Traçado: borda escura por baixo e a linha branca por cima */
     for (int i = 0; i < totalPontosMapa; i++) {
-        DrawLineEx(pontosMapa[i], pontosMapa[(i + 1) % totalPontosMapa], ESPESSURA_TRACADO, COR_TRACADO);
+        DrawLineEx(pontosMapa[i], pontosMapa[(i + 1) % totalPontosMapa], ESPESSURA_TRACADO + 3.0f,
+                   Fade(COR_GRAFITE, 0.7f));
+    }
+    for (int i = 0; i < totalPontosMapa; i++) {
+        DrawLineEx(pontosMapa[i], pontosMapa[(i + 1) % totalPontosMapa], ESPESSURA_TRACADO, COR_TEXTO_CLARO);
     }
 
     /* Linha de chegada: um tracinho atravessado no ponto da largada */
@@ -229,24 +261,269 @@ static void desenharMiniMapa(Corrida *corrida) {
     Vector2 direcao = { frente.x - largada.x, frente.y - largada.y };
     float tamanho = sqrtf(direcao.x * direcao.x + direcao.y * direcao.y);
     if (tamanho > 0.0f) {
-        Vector2 lado = { -direcao.y / tamanho * 7.0f, direcao.x / tamanho * 7.0f };
+        Vector2 lado = { -direcao.y / tamanho * 6.0f, direcao.x / tamanho * 6.0f };
         DrawLineEx((Vector2){ largada.x - lado.x, largada.y - lado.y },
-                   (Vector2){ largada.x + lado.x, largada.y + lado.y }, 3.0f, BLACK);
+                   (Vector2){ largada.x + lado.x, largada.y + lado.y }, 2.5f, COR_VERMELHO);
     }
 
-    for (int r = 0; r < TOTAL_RIVAIS; r++) {
-        DrawCircleV(pontoDoCarroNoMapa(&corrida->rivais[r]), RAIO_RIVAL, COR_RIVAL_MAPA);
+    /* Do último para o primeiro, para o líder ficar por cima; o jogador por último de todos */
+    for (int i = TOTAL_CARROS - 1; i >= 0; i--) {
+        Carro *carro = corrida->classificacao[i];
+        if (carro != &corrida->jogador) {
+            desenharCarroNoMapa(pontoDoCarroNoMapa(carro), i + 1, COR_TEXTO_CLARO, COR_GRAFITE);
+        }
     }
-    /* O jogador por último, para ficar por cima dos rivais */
-    Vector2 jogador = pontoDoCarroNoMapa(&corrida->jogador);
-    DrawCircleV(jogador, RAIO_JOGADOR + 2.0f, RAYWHITE);
-    DrawCircleV(jogador, RAIO_JOGADOR, COR_JOGADOR_MAPA);
+    desenharCarroNoMapa(pontoDoCarroNoMapa(&corrida->jogador), posicaoDoCarro(corrida, &corrida->jogador),
+                        COR_VERMELHO, COR_TEXTO_CLARO);
 
-    /* Nome do trecho (ex.: "S do Senna") centralizado embaixo do mapa */
     const char *trecho = corrida->jogador.posicao.segmento->nomeTrecho;
-    int larguraTexto = MeasureText(trecho, TAMANHO_TEXTO_MAPA);
-    DrawText(trecho, (int) (x + (TAMANHO_MAPA - larguraTexto) / 2), (int) (y + TAMANHO_MAPA),
-             TAMANHO_TEXTO_MAPA, COR_TEXTO_HUD);
+    escrever(FONTE_FORTE, trecho, x + 2, y + TAMANHO_MAPA + 2, TAMANHO_TEXTO_MAPA, COR_TEXTO_HUD);
+}
+
+/*
+ * textoDoTempo
+ * Um tempo no formato do formatarTempo, ou "--" se ainda não existe (0).
+ * Recebe: o tempo, o texto de saída e o tamanho dele.
+ * Devolve: o próprio texto, para usar direto numa chamada.
+ */
+static const char *textoDoTempo(float segundos, char *texto, int tamanho) {
+    if (segundos <= 0.0f) {
+        snprintf(texto, tamanho, "--");
+    } else {
+        formatarTempo(segundos, texto, tamanho);
+    }
+    return texto;
+}
+
+/*
+ * ultimaVolta
+ * Recebe: o carro.
+ * Devolve: o tempo da última volta completada (0 se nenhuma).
+ */
+static float ultimaVolta(Carro *carro) {
+    int voltas = carro->voltas < TOTAL_VOLTAS ? carro->voltas : TOTAL_VOLTAS;
+    return voltas >= 1 ? carro->temposDeVolta[voltas - 1] : 0.0f;
+}
+
+/*
+ * desenharBandeira
+ * A etiqueta do estado da prova no painel de posições.
+ * Recebe: posição e tamanho da etiqueta e a bandeira.
+ * Devolve: nada.
+ */
+static void desenharBandeira(float x, float y, float largura, float altura, Bandeira bandeira) {
+    float centro = x + largura / 2.0f;
+    float letra = LETRA_PEQUENA;
+    float yTexto = y + (altura - letra) / 2.0f - 2.0f;
+    if (bandeira == BANDEIRA_LARGADA) {
+        DrawRectangleRec((Rectangle){ x, y, largura, altura }, COR_VERMELHO);
+        escreverCentralizado(FONTE_FORTE, "LARGADA", centro, yTexto, letra, COR_TEXTO_CLARO);
+    } else if (bandeira == BANDEIRA_VERDE) {
+        DrawRectangleRec((Rectangle){ x, y, largura, altura }, COR_VERDE_HUD);
+        escreverCentralizado(FONTE_FORTE, "BANDEIRA VERDE", centro, yTexto, letra, COR_GRAFITE);
+    } else {
+        desenharQuadriculado(x, y, largura, altura, altura / 2.0f);
+        float meia = larguraDoTexto(FONTE_FORTE, "CHEGADA", letra) / 2.0f + 5.0f;
+        DrawRectangleRec((Rectangle){ centro - meia, y + 3, 2 * meia, altura - 6 }, COR_GRAFITE);
+        escreverCentralizado(FONTE_FORTE, "CHEGADA", centro, yTexto, letra, COR_TEXTO_CLARO);
+    }
+}
+
+/*
+ * desenharPainelDePosicoes
+ * Tabela pequena no canto superior esquerdo, como nas transmissões:
+ * cabeçalho com a volta e a bandeira, o tempo de prova e, para cada
+ * carro (na ordem da classificação do Insertion Sort), a posição, o
+ * nome, o intervalo para o jogador (+ à frente, - atrás) e a última volta.
+ * Recebe: a corrida.
+ * Devolve: nada.
+ */
+static void desenharPainelDePosicoes(Corrida *corrida) {
+    Carro *jogador = &corrida->jogador;
+    float x = MARGEM_HUD, y = MARGEM_HUD;
+    float larguraTitulo = LARGURA_POSICOES - LARGURA_BANDEIRA;
+    char texto[32];
+
+    /* Cabeçalho */
+    DrawRectangleRec((Rectangle){ x, y, larguraTitulo, ALTURA_CABECALHO_HUD }, COR_GRAFITE);
+    escrever(FONTE_FORTE, "CORRIDA", x + 7, y + 1, LETRA_CABECALHO, COR_TEXTO_CLARO);
+    escreverADireita(FONTE_FORTE, TextFormat("VOLTA %d/%d", voltaAtual(jogador), TOTAL_VOLTAS),
+                     x + larguraTitulo - 7, y + 1, LETRA_CABECALHO, COR_TEXTO_CLARO);
+    desenharBandeira(x + larguraTitulo, y, LARGURA_BANDEIRA, ALTURA_CABECALHO_HUD, bandeiraDaCorrida(corrida));
+    y += ALTURA_CABECALHO_HUD;
+
+    /* Tempo de prova e títulos das colunas. Depois da chegada, o relógio
+     * fica parado no tempo do jogador. */
+    float tempo = corrida->terminou ? jogador->tempoDeChegada : corrida->tempoDeCorrida;
+    DrawRectangleRec((Rectangle){ x, y, LARGURA_POSICOES, ALTURA_SUBCABECALHO }, COR_GRAFITE);
+    formatarTempo(tempo, texto, sizeof(texto));
+    escrever(FONTE_FORTE, texto, x + 7, y + 1, LETRA_HUD, COR_TEXTO_CLARO);
+    escrever(FONTE_FORTE, "Interv.", x + X_COLUNA_INTERVALO, y + 1, LETRA_HUD, COR_TEXTO_CLARO);
+    escrever(FONTE_FORTE, "Última", x + X_COLUNA_ULTIMA, y + 1, LETRA_HUD, COR_TEXTO_CLARO);
+    y += ALTURA_SUBCABECALHO;
+
+    for (int i = 0; i < TOTAL_CARROS; i++) {
+        Carro *carro = corrida->classificacao[i];
+        int ehJogador = (carro == jogador);
+        Color corTexto = ehJogador ? COR_AMARELO : COR_TEXTO_CLARO;
+
+        DrawRectangleRec((Rectangle){ x, y, LARGURA_POSICOES, ALTURA_LINHA_HUD }, COR_FUNDO_HUD);
+        DrawRectangleRec((Rectangle){ x + 3, y + 2, 13, ALTURA_LINHA_HUD - 4 },
+                         ehJogador ? COR_AMARELO : COR_TEXTO_CLARO);
+        escreverCentralizado(FONTE_FORTE, TextFormat("%d", i + 1), x + 9.5f, y + 1, LETRA_PEQUENA, COR_GRAFITE);
+        escrever(FONTE_TEXTO, carro->nome, x + 22, y + 1, LETRA_HUD, corTexto);
+
+        const char *intervalo = ehJogador ? "--" : TextFormat("%+.2f", intervaloEmSegundos(carro, jogador));
+        escrever(FONTE_TEXTO, intervalo, x + X_COLUNA_INTERVALO, y + 1, LETRA_HUD, corTexto);
+        escrever(FONTE_TEXTO, textoDoTempo(ultimaVolta(carro), texto, sizeof(texto)),
+                 x + X_COLUNA_ULTIMA, y + 1, LETRA_HUD, corTexto);
+        y += ALTURA_LINHA_HUD;
+    }
+}
+
+/*
+ * corDoSetor
+ * Recebe: a situação de um setor.
+ * Devolve: roxo (melhor da corrida), verde (melhor pessoal), amarelo
+ *          (mais lento) ou apagado (ainda não feito), como no F1.
+ */
+static Color corDoSetor(SituacaoDoSetor situacao) {
+    switch (situacao) {
+        case SETOR_MELHOR_DA_CORRIDA: return COR_ROXO_HUD;
+        case SETOR_MELHOR_PESSOAL:    return COR_VERDE_HUD;
+        case SETOR_MAIS_LENTO:        return COR_AMARELO;
+        default:                      return COR_FUNDO_HUD;
+    }
+}
+
+/*
+ * desenharPainelDaVolta
+ * Painel pequeno no canto superior direito com a volta do jogador:
+ *   - a diferença para a melhor volta dele no último setor fechado
+ *     (verde se está ganhando tempo, vermelho se está perdendo);
+ *   - tempo da volta atual, da última, da melhor e a mais rápida da corrida;
+ *   - os três setores, pintados conforme foram.
+ * Recebe: a corrida.
+ * Devolve: nada.
+ */
+static void desenharPainelDaVolta(Corrida *corrida) {
+    Carro *jogador = &corrida->jogador;
+    float largura = LARGURA_PAINEL_VOLTA;
+    float metade = largura / 2.0f;
+    float x = larguraVirtual() - MARGEM_HUD - largura;
+    float y = MARGEM_HUD;
+    char texto[32];
+
+    /* Linha 1: volta e diferença */
+    DrawRectangleRec((Rectangle){ x, y, metade, ALTURA_LINHA_VOLTA }, COR_GRAFITE);
+    escrever(FONTE_FORTE, TextFormat("VOLTA %d", voltaAtual(jogador)), x + 7, y + 1, LETRA_CABECALHO,
+             COR_TEXTO_CLARO);
+
+    Color corDiferenca = COR_FUNDO_HUD;
+    Color corTextoDiferenca = COR_TEXTO_FRACO;
+    const char *diferenca = "--";
+    if (jogador->temDiferenca) {
+        diferenca = TextFormat("%+.3f", jogador->diferenca);
+        corDiferenca = (jogador->diferenca <= 0.0f) ? COR_VERDE_HUD : COR_VERMELHO;
+        corTextoDiferenca = (jogador->diferenca <= 0.0f) ? COR_GRAFITE : COR_TEXTO_CLARO;
+    }
+    DrawRectangleRec((Rectangle){ x + metade, y, metade, ALTURA_LINHA_VOLTA }, corDiferenca);
+    escreverCentralizado(FONTE_FORTE, diferenca, x + metade * 1.5f, y + 1, LETRA_CABECALHO, corTextoDiferenca);
+    y += ALTURA_LINHA_VOLTA;
+
+    /* Linhas 2 e 3: tempos */
+    DrawRectangleRec((Rectangle){ x, y, largura, ALTURA_TEMPOS_VOLTA }, COR_FUNDO_HUD);
+    DrawRectangleRec((Rectangle){ x + metade, y + 4, 1, ALTURA_TEMPOS_VOLTA - 8 }, Fade(COR_CROMO, 0.3f));
+
+    float atual = 0.0f;
+    if (corrida->contagemRegressiva <= 0.0f && !corrida->terminou) {
+        atual = corrida->tempoDeCorrida - jogador->inicioDaVolta;
+    }
+    const char *rotulos[4] = { "Atual:", "Última:", "Melhor:", "Mais rápida:" };
+    float valores[4] = { atual, ultimaVolta(jogador), jogador->melhorVolta, corrida->voltaMaisRapida };
+    for (int i = 0; i < 4; i++) {
+        float coluna = x + (i < 2 ? 0.0f : metade);
+        float linha = y + 1 + (i % 2) * 15;
+        escrever(FONTE_TEXTO, rotulos[i], coluna + 7, linha, LETRA_HUD, COR_TEXTO_CLARO);
+        Color cor = (i == 3 && valores[3] > 0.0f && valores[3] == jogador->melhorVolta) ? COR_ROXO_HUD : COR_TEXTO_CLARO;
+        escreverADireita(FONTE_TEXTO, textoDoTempo(valores[i], texto, sizeof(texto)), coluna + metade - 7,
+                         linha, LETRA_HUD, cor);
+    }
+    y += ALTURA_TEMPOS_VOLTA;
+
+    /* Setores, colados um no outro */
+    float larguraSetor = largura / TOTAL_SETORES;
+    for (int s = 0; s < TOTAL_SETORES; s++) {
+        SituacaoDoSetor situacao = situacaoDoSetor(corrida, jogador, s);
+        float sx = x + s * larguraSetor;
+        DrawRectangleRec((Rectangle){ sx, y, larguraSetor, ALTURA_SETORES }, corDoSetor(situacao));
+        if (s > 0) {
+            DrawRectangleRec((Rectangle){ sx, y, 1, ALTURA_SETORES }, COR_GRAFITE);
+        }
+        Color corTexto = (situacao == SETOR_PENDENTE || situacao == SETOR_MELHOR_DA_CORRIDA)
+                         ? COR_TEXTO_CLARO : COR_GRAFITE;
+        escreverCentralizado(FONTE_FORTE, TextFormat("S%d", s + 1), sx + larguraSetor / 2.0f, y,
+                             LETRA_PEQUENA, corTexto);
+    }
+}
+
+/*
+ * pontoNoMostrador
+ * Recebe: o centro do velocímetro, o raio e a fração do mostrador
+ *         (0 = 0 km/h, 1 = KMH_DO_MOSTRADOR).
+ * Devolve: o ponto na tela (y cresce para baixo, então o ângulo gira
+ *          no sentido horário).
+ */
+static Vector2 pontoNoMostrador(Vector2 centro, float raio, float fracao) {
+    float angulo = (ANGULO_DO_ZERO + VARREDURA * fracao) * DEG2RAD;
+    return (Vector2){ centro.x + cosf(angulo) * raio, centro.y + sinf(angulo) * raio };
+}
+
+/*
+ * desenharArco
+ * Um pedaço do mostrador, feito de tracinhos curtos.
+ * Recebe: centro, raio, de que fração até que fração, grossura e cor.
+ * Devolve: nada.
+ */
+static void desenharArco(Vector2 centro, float raio, float de, float ate, float grossura, Color cor) {
+    int passos = (int) ((ate - de) * 80.0f) + 1;
+    for (int i = 0; i < passos; i++) {
+        float f0 = de + (ate - de) * i / passos;
+        float f1 = de + (ate - de) * (i + 1) / passos;
+        DrawLineEx(pontoNoMostrador(centro, raio, f0), pontoNoMostrador(centro, raio, f1), grossura, cor);
+    }
+}
+
+/*
+ * desenharVelocimetro
+ * No canto inferior direito, só o essencial: um arco que enche com a
+ * velocidade (vermelho a partir de 300 km/h), a velocidade em números
+ * grandes no meio e a posição do jogador embaixo.
+ * Recebe: a corrida.
+ * Devolve: nada.
+ */
+static void desenharVelocimetro(Corrida *corrida) {
+    Carro *jogador = &corrida->jogador;
+    float raio = RAIO_VELOCIMETRO;
+    Vector2 centro = { larguraVirtual() - MARGEM_HUD - raio - 4, alturaVirtual() - MARGEM_HUD - raio + 6 };
+    int kmh = velocidadeEmKmh(jogador);
+    float fracao = fminf(kmh / KMH_DO_MOSTRADOR, 1.0f);
+    float faixaVermelha = KMH_DA_FAIXA_VERMELHA / KMH_DO_MOSTRADOR;
+
+    desenharBrilho(centro.x, centro.y, raio + 6, Fade(BLACK, 0.55f));
+    desenharArco(centro, raio, 0.0f, 1.0f, 5.0f, Fade(COR_TEXTO_CLARO, 0.25f));
+    if (fracao > 0.0f) {
+        desenharArco(centro, raio, 0.0f, fminf(fracao, faixaVermelha), 5.0f, COR_TEXTO_CLARO);
+        if (fracao > faixaVermelha) {
+            desenharArco(centro, raio, faixaVermelha, fracao, 5.0f, COR_VERMELHO);
+        }
+    }
+
+    escreverCentralizado(FONTE_FORTE, TextFormat("%d", kmh), centro.x, centro.y - 30, 38.0f, COR_TEXTO_CLARO);
+    escreverCentralizado(FONTE_TEXTO, "km/h", centro.x, centro.y + 10, 12.0f, COR_TEXTO_FRACO);
+
+    int posicao = corrida->terminou ? corrida->posicaoFinal : posicaoDoCarro(corrida, jogador);
+    escreverCentralizado(FONTE_FORTE, TextFormat("P%d", posicao), centro.x, centro.y + 26, 20.0f, COR_AMARELO);
 }
 
 /*
@@ -268,47 +545,28 @@ static void desenharContagemRegressiva(Corrida *corrida) {
         return;
     }
 
-    int y = alturaVirtual() / 2 - TAMANHO_CONTAGEM;
-    desenharTextoCentralizado(texto, y + 4, TAMANHO_CONTAGEM, BLACK);   /* sombra */
-    desenharTextoCentralizado(texto, y, TAMANHO_CONTAGEM, COR_DESTAQUE);
+    float y = alturaVirtual() / 2.0f - TAMANHO_CONTAGEM;
+    escreverCentralizado(FONTE_TITULO, texto, larguraVirtual() / 2.0f, y, TAMANHO_CONTAGEM, COR_AMARELO);
 }
 
 /*
  * desenharHud
- * Mostra no topo da tela a posição, a volta, o tempo e a velocidade.
+ * O HUD da corrida, nos quatro cantos da tela: posições (em cima à
+ * esquerda), a volta (em cima à direita), o mapa (embaixo à esquerda)
+ * e o velocímetro (embaixo à direita).
  * Recebe: a corrida.
  * Devolve: nada.
  */
 void desenharHud(Corrida *corrida) {
-    Carro *jogador = &corrida->jogador;
-    char textoTempo[32];
-    char textoVolta[32];
-    char textoVelocidade[32];
-
-    /* Depois da chegada, o relógio do HUD fica parado no tempo do jogador */
-    float tempo = corrida->terminou ? jogador->tempoDeChegada : corrida->tempoDeCorrida;
-    int posicao = corrida->terminou ? corrida->posicaoFinal : posicaoDoCarro(corrida, jogador);
-
-    formatarTempo(tempo, textoTempo, sizeof(textoTempo));
-    snprintf(textoVolta, sizeof(textoVolta), "POS %d/%d   VOLTA %d/%d",
-             posicao, TOTAL_CARROS, voltaAtual(jogador), TOTAL_VOLTAS);
-    snprintf(textoVelocidade, sizeof(textoVelocidade), "%3d km/h", velocidadeEmKmh(jogador));
-
-    int larguraTela = larguraVirtual();
-    DrawRectangle(0, 0, larguraTela, TAMANHO_TEXTO_HUD + 2 * MARGEM_HUD, COR_FUNDO_HUD);
-
-    DrawText(textoVolta, MARGEM_HUD, MARGEM_HUD, TAMANHO_TEXTO_HUD, COR_DESTAQUE);
-    desenharTextoCentralizado(textoTempo, MARGEM_HUD, TAMANHO_TEXTO_HUD, COR_TEXTO_HUD);
-
-    int larguraVelocidade = MeasureText(textoVelocidade, TAMANHO_TEXTO_HUD);
-    DrawText(textoVelocidade, larguraTela - larguraVelocidade - MARGEM_HUD, MARGEM_HUD,
-             TAMANHO_TEXTO_HUD, COR_TEXTO_HUD);
-
-    if (estaForaDaPista(jogador)) {
-        desenharTextoCentralizado("FORA DA PISTA!", 70, TAMANHO_TEXTO_HUD, COR_DESTAQUE);
-    }
-
+    desenharPainelDePosicoes(corrida);
+    desenharPainelDaVolta(corrida);
     desenharMiniMapa(corrida);
+    desenharVelocimetro(corrida);
+
+    if (estaForaDaPista(&corrida->jogador)) {
+        escreverCentralizado(FONTE_FORTE, "FORA DA PISTA", larguraVirtual() / 2.0f, alturaVirtual() * 0.30f,
+                             20.0f, COR_AMARELO);
+    }
     desenharContagemRegressiva(corrida);
 }
 
@@ -322,28 +580,28 @@ void desenharHud(Corrida *corrida) {
  */
 void desenharFimDeCorrida(Corrida *corrida) {
     Carro *jogador = &corrida->jogador;
-    char texto[64];
     char tempo[32];
 
-    int largura = 420;
-    int altura = 330;
-    int x = (larguraVirtual() - largura) / 2;
-    int y = (alturaVirtual() - altura) / 2 - 40;
-    DrawRectangle(x, y, largura, altura, Fade(BLACK, 0.75f));
+    float largura = 440.0f;
+    float altura = 316.0f;
+    float x = (larguraVirtual() - largura) / 2.0f;
+    float y = (alturaVirtual() - altura) / 2.0f - 30.0f;
+    float centro = x + largura / 2.0f;
 
-    /* Só o 1º lugar ganha o grito de KATCHAU! */
-    if (corrida->posicaoFinal == 1) {
-        desenharTextoCentralizado("KATCHAU!", y + 20, TAMANHO_TITULO_FIM, COR_DESTAQUE);
-    } else {
-        snprintf(texto, sizeof(texto), "%do LUGAR", corrida->posicaoFinal);
-        desenharTextoCentralizado(texto, y + 20, TAMANHO_TITULO_FIM, COR_DESTAQUE);
-    }
+    DrawRectangleRec((Rectangle){ x, y, largura, altura }, COR_PAINEL);
+    desenharQuadriculado(x, y, largura, 12.0f, 6.0f);
+
+    /* Faixa do título: só o 1º lugar ganha o grito de KATCHAU! */
+    desenharParalelogramo(x - 14, y + 24, largura + 14, 62, 14, COR_VERMELHO);
+    desenharParalelogramo(x - 7, y + 24, largura + 14, 31, 7, Fade(WHITE, 0.12f));
+    const char *titulo = (corrida->posicaoFinal == 1) ? "KATCHAU!" : TextFormat("%dº LUGAR", corrida->posicaoFinal);
+    escreverCentralizado(FONTE_TITULO, titulo, centro, y + 26, TAMANHO_TITULO_FIM, COR_TEXTO_CLARO);
 
     formatarTempo(jogador->tempoDeChegada, tempo, sizeof(tempo));
-    snprintf(texto, sizeof(texto), "Tempo total: %s", tempo);
-    desenharTextoCentralizado(texto, y + 90, TAMANHO_TEXTO_FIM, COR_TEXTO_HUD);
+    escrever(FONTE_FORTE, "TEMPO TOTAL", x + 40, y + 106, 16.0f, COR_TEXTO_FRACO);
+    escreverADireita(FONTE_TITULO, tempo, x + largura - 40, y + 98, 30.0f, COR_AMARELO);
 
-    /* Procura a melhor volta enquanto escreve cada uma */
+    /* Procura a melhor volta antes de escrever cada uma */
     int melhorVolta = 0;
     for (int i = 0; i < TOTAL_VOLTAS; i++) {
         if (jogador->temposDeVolta[i] < jogador->temposDeVolta[melhorVolta]) {
@@ -351,12 +609,21 @@ void desenharFimDeCorrida(Corrida *corrida) {
         }
     }
     for (int i = 0; i < TOTAL_VOLTAS; i++) {
+        float linha = y + 150 + i * 38;
+        int ehMelhor = (i == melhorVolta);
+        DrawRectangleRec((Rectangle){ x + 30, linha - 4, largura - 60, 32 }, Fade(COR_GRAFITE, ehMelhor ? 0.95f : 0.6f));
+        escrever(FONTE_FORTE, TextFormat("VOLTA %d", i + 1), x + 42, linha, TAMANHO_TEXTO_FIM, COR_CROMO);
+        if (ehMelhor) {
+            desenharParalelogramo(x + 150, linha + 2, 70, 20, 5, COR_AMARELO);
+            escreverCentralizado(FONTE_FORTE, "MELHOR", x + 188, linha + 2, 15.0f, COR_GRAFITE);
+        }
         formatarTempo(jogador->temposDeVolta[i], tempo, sizeof(tempo));
-        snprintf(texto, sizeof(texto), "Volta %d: %s%s", i + 1, tempo,
-                 i == melhorVolta ? "  (melhor)" : "");
-        Color cor = (i == melhorVolta) ? COR_DESTAQUE : COR_TEXTO_HUD;
-        desenharTextoCentralizado(texto, y + 135 + i * 32, TAMANHO_TEXTO_FIM, cor);
+        escreverADireita(FONTE_FORTE, tempo, x + largura - 42, linha, TAMANHO_TEXTO_FIM,
+                         ehMelhor ? COR_AMARELO : COR_TEXTO_CLARO);
     }
 
-    desenharTextoCentralizado("ENTER para ver o resultado", y + altura - 40, 20, LIGHTGRAY);
+    float larguraDica = larguraDaTecla("ENTER") + 8 + larguraDoTexto(FONTE_FORTE, "VER O RESULTADO", 15.0f);
+    float xDica = centro - larguraDica / 2.0f;
+    xDica += desenharTecla(xDica, y + altura - 40, "ENTER") + 8;
+    escrever(FONTE_FORTE, "VER O RESULTADO", xDica, y + altura - 39, 15.0f, COR_TEXTO_FRACO);
 }

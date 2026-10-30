@@ -10,7 +10,8 @@ lista circular duplamente encadeada de segmentos.
 - **Fase 2:** estrada em pseudo-3D (`src/render.c`).
 - **Fase 3:** carro do jogador (`src/carro.c`), corrida de 3 voltas com tempo por volta (`src/corrida.c`) e HUD simples (`src/hud.c`).
 - **Fase 4:** 7 rivais com IA (`src/ia.c`), classificação refeita a cada quadro com Insertion Sort (`src/ordenacao.c`), colisão e posição no HUD.
-- **Fase 5 (em parte):** Interlagos com subidas e descidas, texturas e mini-mapa. Faltam turbo e obstáculos.
+- **Fase 5 (em parte):** Interlagos com subidas e descidas, texturas, mini-mapa, zebras só nas curvas,
+  linha de chegada quadriculada e objetos na beira da pista (`src/obstaculos.c`). Falta o turbo.
 - **Fase 6:** menu principal, garagem com Merge Sort, como jogar, contagem regressiva e tela de resultado (`src/menu.c`).
 
 ## 1. Instalar a raylib
@@ -78,8 +79,12 @@ tamanho real (`comecarInterface()` em `hud.c`).
 
 Para fechar o jogo, use **SAIR** no menu (ou feche a janela).
 
-Curvas fechadas jogam o carro para fora em alta velocidade: freie antes delas.
-Na grama o carro não passa de ~75 km/h.
+O carro acelera como um F1: forte na saída (0-100 km/h em ~2,3 s) e cada vez menos
+perto da máxima (0-300 km/h em ~11 s).
+
+Curvas fechadas jogam o carro para fora em alta velocidade: freie antes delas. Quando
+sai **fumaça dos pneus**, a curva está quase vencendo o volante: alivie ou ele escapa.
+Na grama (sai poeira) o carro não passa de ~75 km/h.
 
 _(completar na fase 5: turbo)_
 
@@ -111,20 +116,25 @@ src/
   corrida.c/.h     grid, voltas, colisão, classificação e fim          (fases 3 e 4)
   ia.c/.h          decisões dos rivais                                 (fase 4)
   ordenacao.c/.h   Insertion Sort e Merge Sort                         (fases 4 e 6)
-  obstaculos.c/.h  lista simples de obstáculos por segmento            (fase 5)
-  hud.c/.h         velocímetro, tempo, posição, volta e mini-mapa      (fases 3 a 5)
+  obstaculos.c/.h  objetos da beira: lista simples por segmento       (fase 5)
+  hud.c/.h         posições, volta e setores, mini-mapa e velocímetro  (fases 3 a 6)
   menu.c/.h        menu, garagem, como jogar e tela de resultado       (fase 6)
+  visual.c/.h      identidade visual: cores, fontes, logo e formas     (fase 6)
 testes/
   teste_pista.c    testa pista, carro, corrida, IA e ordenação no terminal
 recursos/
+  fontes/          Racing Sans One e Saira Condensed (licença OFL, arquivos *_licenca.txt)
   texturas/        PNGs do jogo (ver recursos/texturas/README.md)
+    logo/          katchau.png, a logo do menu principal
     estrada/       asfalto, grama, zebra e faixa
     fundo/         céu, cidade e morros (camadas do horizonte)
     carro/         carro reto, virando à esquerda e à direita
-    sprites/       árvores, arquibancadas, boxes, pórtico, pneus e placas
+    sprites/       árvores, pórtico, pneus e placas
+ferramentas/
+  gerar_sprites.py script do Blender: modelo 3D (.glb) vira sprite PNG
 ```
 
-Regra: só `render.c`, `hud.c` e `menu.c` incluem `raylib.h` (além do `main.c`, que abre
+Regra: só `render.c`, `hud.c`, `menu.c` e `visual.c` incluem `raylib.h` (além do `main.c`, que abre
 a janela). O resto é lógica pura e pode ser testado no terminal.
 
 ## Sprites dos carros
@@ -148,24 +158,33 @@ menu. As folhas e as vistas de frente usam *mipmaps*, para os rivais distantes n
 ficarem serrilhados.
 
 As folhas podem ser geradas a partir de um modelo 3D `.glb` com o script do Blender
-`gerar_sprites.py` (as instruções estão no começo do arquivo).
+`ferramentas/gerar_sprites.py` (as instruções estão no começo do arquivo). O mesmo
+script gera os sprites do cenário (`--modo objeto`) e as camadas do fundo (`--modo fundo`):
+
+```
+BLENDER=/Applications/Blender.app/Contents/MacOS/Blender
+$BLENDER -b -P ferramentas/gerar_sprites.py -- --modo carro \
+    --modelo carro.glb --saida recursos/texturas/carro/carro_folha.png
+$BLENDER -b -P ferramentas/gerar_sprites.py -- --modo objeto \
+    --modelo arvore.glb --saida recursos/texturas/sprites/arvore.png
+```
 
 ## Os carros
 
 São 8 carros (`FICHAS` em `corrida.c`). Na garagem o jogador escolhe um; os outros 7
-viram os rivais, e o jogador larga em último. A "volta limpa" é o tempo de uma volta em
-Interlagos sozinho na pista, dirigido pela IA.
+viram os rivais, e o jogador larga em último. A "volta limpa" é o tempo de uma volta lançada
+(a segunda, já em movimento) em Interlagos, sozinho na pista e dirigido pela IA.
 
 | Carro | Cor | Jeito | Volta limpa |
 |---|---|---|---|
-| Katchau | vermelho | o carro da casa, equilibrado (o padrão) | 57,0 s |
-| Barão | amarelo | esportivo arrogante, voa na reta | 56,8 s |
-| Neon | roxo | gruda nas curvas | 55,7 s |
-| Trovão | azul | arranca forte | 57,0 s |
-| Zé Pistão | laranja | certinho em tudo | 57,5 s |
-| Fuscão | verde-água | lento, mas não sai da pista | 57,0 s |
-| Bolinha | rosa | esperto na largada | 58,6 s |
-| Ferrugem | marrom | picape enferrujada | 59,0 s |
+| Katchau | vermelho | o carro da casa, equilibrado (o padrão) | 55,9 s |
+| Barão | amarelo | esportivo arrogante, voa na reta | 55,7 s |
+| Neon | roxo | gruda nas curvas | 55,2 s |
+| Trovão | azul | arranca forte | 55,8 s |
+| Zé Pistão | laranja | certinho em tudo | 56,6 s |
+| Fuscão | verde-água | lento, mas não sai da pista | 56,7 s |
+| Bolinha | rosa | esperto na largada | 57,5 s |
+| Ferrugem | marrom | picape enferrujada | 58,3 s |
 
 ## Onde a ordenação entra na lógica
 
@@ -196,6 +215,42 @@ o carro marcado continua marcado, só muda de linha.
 Merge Sort foi escolhido porque, ao trocar o critério, a lista muda inteira de ordem:
 não dá para contar com ela "quase ordenada". Ele custa O(n log n) em qualquer caso e
 é **estável**: carros empatados no critério novo mantêm a ordem do anterior (teste 9).
+
+## Largada e HUD
+
+O grid fica **antes da linha de chegada**, em zigue-zague, com um colchete pintado no
+asfalto em cada lugar (as medidas estão em `pista.h`: `DISTANCIA_DA_POLE`,
+`ESPACO_ENTRE_LUGARES`). Os carros começam com `voltas = -1`: o primeiro cruzamento da
+linha, logo depois da largada, só abre a volta 1, que (como no F1) conta desde a largada.
+
+A volta é dividida em **3 setores** (terços da pista). Em `corrida.c`, cada carro guarda o
+tempo de cada setor, o melhor setor dele e os setores da melhor volta; a corrida guarda o
+melhor setor e a volta mais rápida de todos. O HUD mostra:
+
+- **em cima à esquerda**, a tabela de posições: bandeira (largada, verde ou chegada), tempo
+  de prova e, para cada carro, o intervalo para você (+ à frente, - atrás) e a última volta;
+- **em cima à direita**, a sua volta: a diferença para a sua melhor volta no último setor
+  (verde ganhando, vermelho perdendo), os tempos atual, última, melhor e a mais rápida da
+  corrida, e os setores: **roxo** = melhor da corrida, **verde** = seu melhor, **amarelo** = mais lento;
+- **embaixo à esquerda** o mini-mapa e **embaixo à direita** o velocímetro.
+
+## Objetos da beira da pista
+
+Cada segmento tem uma **lista simplesmente encadeada** de objetos (`Obstaculo`, em
+`obstaculos.h`): o segmento aponta para o primeiro, e cada um aponta para o próximo.
+`decorarPista()`, chamada no fim de `criarPista()`, põe numa volta pela pista:
+
+- o **pórtico** em cima da linha de chegada;
+- **barreiras de pneus** por fora das curvas e **placas de 150, 100 e 50 m** antes delas;
+- **árvores** sorteadas dos dois lados (sorteio com semente fixa: ficam sempre no mesmo lugar).
+
+Tudo fica além de onde o carro consegue chegar (lateral 2,5), menos o pórtico, que passa
+por cima da pista. O `render.c` desenha os objetos junto com os rivais, do mais longe para
+o mais perto; a imagem e a largura de cada tipo estão em `ARQUIVOS_OBJETO` e
+`LARGURA_OBJETO`. A lista de cada segmento é liberada junto com ele (`liberarObstaculos`).
+
+As **zebras** só aparecem nas curvas, como na vida real: um segmento tem zebra quando vira
+pelo menos `CURVATURA_MINIMA_ZEBRA` graus (`temZebra()` em `pista.c`).
 
 ## A pista
 

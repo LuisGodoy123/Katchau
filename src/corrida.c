@@ -10,14 +10,15 @@
 #include "ia.h"
 #include "ordenacao.h"
 
-/* ---------- Grid de largada ---------- */
-#define ESPACO_ENTRE_LUGARES   (1.5f * COMPRIMENTO_SEGMENTO)   /* cada lugar um pouco atrás do anterior */
-#define LATERAL_DO_GRID        0.4f    /* esquerda -0,4 / direita +0,4 */
+/* ---------- Grid de largada (as medidas ficam em pista.h) ---------- */
 #define LUGAR_DO_JOGADOR       (TOTAL_CARROS - 1)   /* o jogador larga em último */
 
 /* ---------- Colisão ---------- */
 #define DISTANCIA_LATERAL_BATIDA  0.25f   /* mais perto que isso, os carros se tocam */
 #define PERDA_NA_BATIDA           0.8f    /* quem bate atrás fica com 80% da velocidade do outro */
+
+/* ---------- Intervalo entre carros ---------- */
+#define VELOCIDADE_DE_REFERENCIA  9200.0f   /* média de uma volta (~517 mil unidades em ~56 s): converte distância em tempo */
 
 /* ---------- Contagem regressiva ---------- */
 #define SEGUNDOS_DE_CONTAGEM   3.0f    /* 3, 2, 1... KATCHAU! */
@@ -50,23 +51,26 @@ const FichaTecnica *fichaDoCarro(int numero) {
 
 /*
  * colocarNoGrid
- * Põe o carro no seu lugar de largada. O grid fica logo DEPOIS da
- * linha de chegada, em zigue-zague (um à esquerda, um à direita, cada
- * um um pouco atrás do outro): o lugar 0 (pole) é o mais à frente.
- * Quem larga na frente sai alguns metros adiantado, e a distância
- * percorrida já começa contando esses metros, para a classificação
- * da largada sair certa e sem empates.
+ * Põe o carro no seu lugar de largada, que fica ANTES da linha de
+ * chegada (como num autódromo de verdade), no colchete pintado no
+ * asfalto: o lugar 0 (pole) é o mais perto da linha.
+ *
+ * Como o carro ainda vai cruzar a linha logo depois da largada, ele
+ * começa com voltas = -1: esse primeiro cruzamento só abre a volta 1
+ * (veja registrarVolta). A distância percorrida começa negativa, do
+ * tamanho do que falta até a linha, para a classificação da largada
+ * sair certa (quem está mais perto da linha, na frente).
  * Recebe: o carro (já criado na linha de chegada) e o lugar (0 = pole).
  * Devolve: nada.
  */
 static void colocarNoGrid(Carro *carro, int lugar) {
-    float distanciaDaLinha = (TOTAL_CARROS - 1 - lugar) * ESPACO_ENTRE_LUGARES;
+    float distanciaAteALinha = distanciaDoLugarAteALinha(lugar);
 
-    moverNaPista(&carro->posicao, distanciaDaLinha);
-    carro->distanciaPercorrida = distanciaDaLinha;
+    moverNaPista(&carro->posicao, -distanciaAteALinha);   /* anda para trás, atravessando a linha */
+    carro->distanciaPercorrida = -distanciaAteALinha;
+    carro->voltas = -1;
 
-    /* Lugares pares à esquerda, ímpares à direita */
-    carro->deslocamentoLateral = (lugar % 2 == 0) ? -LATERAL_DO_GRID : LATERAL_DO_GRID;
+    carro->deslocamentoLateral = lateralDoLugar(lugar);
     carro->linhaAlvo = carro->deslocamentoLateral;
 }
 
@@ -113,20 +117,109 @@ void iniciarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador) {
         rival++;
     }
 
+    corrida->totalSegmentos = contarSegmentos(pista);
+    corrida->voltaMaisRapida = 0.0f;
+    for (int s = 0; s < TOTAL_SETORES; s++) {
+        corrida->melhoresSetoresDaCorrida[s] = 0.0f;
+    }
+    for (int i = 0; i < TOTAL_CARROS; i++) {
+        Carro *carro = corrida->classificacao[i];
+        carro->setorAtual = carro->posicao.segmento->indice * TOTAL_SETORES / corrida->totalSegmentos;
+    }
+
     ordenarCarrosPorDistancia(corrida->classificacao, TOTAL_CARROS);
+}
+
+/*
+ * somaDosSetores
+ * Recebe: um vetor de tempos de setor e até qual setor somar (inclusive).
+ * Devolve: a soma.
+ */
+static float somaDosSetores(const float setores[], int ate) {
+    float soma = 0.0f;
+    for (int s = 0; s <= ate; s++) {
+        soma += setores[s];
+    }
+    return soma;
+}
+
+/*
+ * atualizarSetores
+ * Vê se o carro passou para outro setor (a volta é dividida em 3 partes
+ * iguais de segmentos) e, se passou, guarda o tempo do setor que acabou:
+ *   - atualiza o melhor setor do carro e o melhor da corrida;
+ *   - calcula a diferença para a melhor volta do carro naquele ponto
+ *     (soma dos setores desta volta - soma dos da melhor volta).
+ * Sair do grid e cruzar a linha pela primeira vez não fecha setor:
+ * o setor 1 da volta 1 conta desde a largada, como a volta.
+ * Chamada ANTES de registrarVolta, que ainda compara com a melhor volta antiga.
+ * Recebe: a corrida, o carro e se ele acabou de cruzar a linha.
+ * Devolve: nada.
+ */
+static void atualizarSetores(Corrida *corrida, Carro *carro, int cruzouALinha) {
+    int setor = carro->posicao.segmento->indice * TOTAL_SETORES / corrida->totalSegmentos;
+    if (setor == carro->setorAtual) {
+        return;
+    }
+    int terminado = carro->setorAtual;
+    carro->setorAtual = setor;
+    if (carro->voltas <= 0 && (cruzouALinha || carro->voltas < 0)) {
+        return;   /* ainda saindo do grid: a volta 1 só começou agora */
+    }
+
+    float tempo = corrida->tempoDeCorrida - carro->inicioDoSetor;
+    carro->inicioDoSetor = corrida->tempoDeCorrida;
+    carro->setoresDaVolta[terminado] = tempo;
+
+    if (carro->melhoresSetores[terminado] == 0.0f || tempo < carro->melhoresSetores[terminado]) {
+        carro->melhoresSetores[terminado] = tempo;
+    }
+    if (corrida->melhoresSetoresDaCorrida[terminado] == 0.0f ||
+        tempo < corrida->melhoresSetoresDaCorrida[terminado]) {
+        corrida->melhoresSetoresDaCorrida[terminado] = tempo;
+    }
+
+    if (carro->melhorVolta > 0.0f) {
+        carro->diferenca = somaDosSetores(carro->setoresDaVolta, terminado)
+                           - somaDosSetores(carro->setoresDaMelhorVolta, terminado);
+        carro->temDiferenca = 1;
+    }
 }
 
 /*
  * registrarVolta
  * Guarda quanto tempo durou a volta que o carro acabou de completar.
- * Na última volta, guarda também o tempo de chegada.
- * Recebe: o carro (com carro->voltas já somado) e o tempo atual da corrida.
+ * Na última volta, guarda também o tempo de chegada. O primeiro
+ * cruzamento da linha (saindo do grid) não é volta: como no F1, a
+ * volta 1 é contada desde a largada até a linha na volta seguinte.
+ * Também atualiza a melhor volta do carro (com os setores dela) e a
+ * volta mais rápida da corrida.
+ * Recebe: a corrida e o carro (com carro->voltas já somado).
  * Devolve: nada.
  */
-static void registrarVolta(Carro *carro, float tempoDeCorrida) {
+static void registrarVolta(Corrida *corrida, Carro *carro) {
+    float tempoDeCorrida = corrida->tempoDeCorrida;
+    if (carro->voltas == 0) {
+        return;   /* acabou de cruzar a linha saindo do grid: começou a volta 1, que conta desde a largada */
+    }
     int indiceDaVolta = carro->voltas - 1;   /* volta 1 fica na posição 0 */
+    float tempoDaVolta = tempoDeCorrida - carro->inicioDaVolta;
     if (indiceDaVolta >= 0 && indiceDaVolta < TOTAL_VOLTAS) {
-        carro->temposDeVolta[indiceDaVolta] = tempoDeCorrida - carro->inicioDaVolta;
+        carro->temposDeVolta[indiceDaVolta] = tempoDaVolta;
+    }
+
+    /* Melhor volta: guarda também os setores dela, para comparar as próximas */
+    if (carro->melhorVolta == 0.0f || tempoDaVolta < carro->melhorVolta) {
+        carro->melhorVolta = tempoDaVolta;
+        for (int s = 0; s < TOTAL_SETORES; s++) {
+            carro->setoresDaMelhorVolta[s] = carro->setoresDaVolta[s];
+        }
+    }
+    if (corrida->voltaMaisRapida == 0.0f || carro->melhorVolta < corrida->voltaMaisRapida) {
+        corrida->voltaMaisRapida = carro->melhorVolta;
+    }
+    for (int s = 0; s < TOTAL_SETORES; s++) {
+        carro->setoresDaVolta[s] = 0.0f;   /* volta nova, setores zerados */
     }
     if (carro->voltas == TOTAL_VOLTAS) {
         carro->tempoDeChegada = tempoDeCorrida;
@@ -211,16 +304,20 @@ void atualizarCorrida(Corrida *corrida, Comandos comandosJogador, float tempoQua
     }
 
     /* 1) Jogador */
-    if (atualizarCarro(&corrida->jogador, comandosJogador, tempoQuadro) > 0) {
-        registrarVolta(&corrida->jogador, corrida->tempoDeCorrida);
+    int cruzou = atualizarCarro(&corrida->jogador, comandosJogador, tempoQuadro) > 0;
+    atualizarSetores(corrida, &corrida->jogador, cruzou);
+    if (cruzou) {
+        registrarVolta(corrida, &corrida->jogador);
     }
 
     /* 2) Rivais: a IA olha o carro logo à frente de cada um */
     for (int i = 0; i < TOTAL_RIVAIS; i++) {
         Carro *rival = &corrida->rivais[i];
         Comandos comandosIA = atualizarIA(rival, carroDaFrente(corrida, rival));
-        if (atualizarCarro(rival, comandosIA, tempoQuadro) > 0) {
-            registrarVolta(rival, corrida->tempoDeCorrida);
+        cruzou = atualizarCarro(rival, comandosIA, tempoQuadro) > 0;
+        atualizarSetores(corrida, rival, cruzou);
+        if (cruzou) {
+            registrarVolta(corrida, rival);
         }
     }
 
@@ -259,6 +356,9 @@ int todosChegaram(Corrida *corrida) {
  */
 int voltaAtual(Carro *carro) {
     int volta = carro->voltas + 1;
+    if (volta < 1) {
+        volta = 1;   /* ainda no grid, antes de cruzar a linha */
+    }
     if (volta > TOTAL_VOLTAS) {
         volta = TOTAL_VOLTAS;
     }
@@ -293,4 +393,56 @@ Carro *carroDaFrente(Corrida *corrida, Carro *carro) {
         return NULL;
     }
     return corrida->classificacao[posicao - 2];   /* posição 2 -> índice 0 */
+}
+
+/*
+ * intervaloEmSegundos
+ * Quanto um carro está à frente (> 0) ou atrás (< 0) de outro, em
+ * segundos, para o painel de posições. Se os dois já chegaram, é a
+ * diferença dos tempos de chegada; senão, a diferença de distância
+ * convertida pela velocidade média de uma volta.
+ * Recebe: o carro e o carro de referência (o jogador).
+ * Devolve: o intervalo em segundos.
+ */
+float intervaloEmSegundos(Carro *carro, Carro *referencia) {
+    if (carro->tempoDeChegada > 0.0f && referencia->tempoDeChegada > 0.0f) {
+        return referencia->tempoDeChegada - carro->tempoDeChegada;
+    }
+    return (carro->distanciaPercorrida - referencia->distanciaPercorrida) / VELOCIDADE_DE_REFERENCIA;
+}
+
+/*
+ * situacaoDoSetor
+ * Como foi um setor na volta que o carro está fazendo agora.
+ * Recebe: a corrida, o carro e o setor (0 a 2).
+ * Devolve: pendente, mais lento, melhor pessoal ou melhor da corrida.
+ */
+SituacaoDoSetor situacaoDoSetor(Corrida *corrida, Carro *carro, int setor) {
+    float tempo = carro->setoresDaVolta[setor];
+    if (tempo == 0.0f) {
+        return SETOR_PENDENTE;
+    }
+    if (tempo <= corrida->melhoresSetoresDaCorrida[setor]) {
+        return SETOR_MELHOR_DA_CORRIDA;
+    }
+    if (tempo <= carro->melhoresSetores[setor]) {
+        return SETOR_MELHOR_PESSOAL;
+    }
+    return SETOR_MAIS_LENTO;
+}
+
+/*
+ * bandeiraDaCorrida
+ * Recebe: a corrida.
+ * Devolve: largada (na contagem), verde (correndo) ou quadriculada
+ *          (depois que o 1º colocado completou a prova).
+ */
+Bandeira bandeiraDaCorrida(Corrida *corrida) {
+    if (corrida->contagemRegressiva > 0.0f) {
+        return BANDEIRA_LARGADA;
+    }
+    if (corrida->classificacao[0]->tempoDeChegada > 0.0f) {
+        return BANDEIRA_QUADRICULADA;
+    }
+    return BANDEIRA_VERDE;
 }

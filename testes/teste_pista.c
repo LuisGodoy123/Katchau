@@ -21,6 +21,7 @@
 #include "corrida.h"
 #include "ordenacao.h"
 #include "ia.h"
+#include "obstaculos.h"
 
 #define TOTAL_VOLTAS          3
 #define GRAUS_VOLTA_COMPLETA  -360.0f  /* Interlagos é anti-horário: vira 360 graus para a esquerda */
@@ -167,11 +168,19 @@ static void testarAutodromo(int modoDetalhado) {
               "buscar(ultimo) devolve o anterior da largada");
     verificar(buscarSegmento(pista, total) == NULL, "buscar indice inexistente devolve NULL");
 
-    /* Imprime os trechos: agrupa segmentos seguidos com a mesma curvatura */
+    /* Imprime os trechos: agrupa segmentos seguidos com o mesmo nome.
+     * Como as curvas são suavizadas (a curvatura muda aos poucos), o que
+     * se mostra é quanto o trecho vira no total e o ponto mais fechado. */
     printf("\n     Trechos da pista:\n");
     Segmento *inicioTrecho = pista->largada;
+    float anguloDoTrecho = 0.0f;
+    float maisFechado = 0.0f;
     atual = pista->largada;
     do {
+        anguloDoTrecho += atual->curvatura;
+        if (fabsf(atual->curvatura) > fabsf(maisFechado)) {
+            maisFechado = atual->curvatura;
+        }
         if (modoDetalhado) {
             printf("       segmento %4d | curvatura %6.3f | altura %6.1f m | %s%s\n",
                    atual->indice, atual->curvatura, atual->altura / UNIDADES_POR_METRO,
@@ -180,12 +189,14 @@ static void testarAutodromo(int modoDetalhado) {
         }
         Segmento *seguinte = proximoSegmento(atual);
         int trechoAcabou = (seguinte == pista->largada) ||
-                           (seguinte->curvatura != atual->curvatura);
+                           (strcmp(seguinte->nomeTrecho, atual->nomeTrecho) != 0);
         if (trechoAcabou) {
-            printf("       segmentos %4d a %4d: %-18s %-16s (%6.3f graus/segmento)\n",
+            printf("       segmentos %4d a %4d: %-18s %-16s (vira %7.1f graus; no maximo %6.3f/segmento)\n",
                    inicioTrecho->indice, atual->indice, atual->nomeTrecho,
-                   descreverCurvatura(atual->curvatura), atual->curvatura);
+                   descreverCurvatura(anguloDoTrecho), anguloDoTrecho, maisFechado);
             inicioTrecho = seguinte;
+            anguloDoTrecho = 0.0f;
+            maisFechado = 0.0f;
         }
         atual = seguinte;
     } while (atual != pista->largada);
@@ -275,10 +286,25 @@ static void testarCarro(void) {
     atualizarCarro(&carro, virarDireita, quadro);
     verificar(carro.deslocamentoLateral == 0.0f, "parado, o carro nao vira");
 
-    for (int i = 0; i < 60 * 10; i++) {
+    /* Arrancada de F1: forte no começo, cada vez mais fraca perto da máxima */
+    float tempo100 = 0.0f, tempo200 = 0.0f, tempo300 = 0.0f;
+    for (int i = 1; i <= 60 * 20; i++) {
         atualizarCarro(&carro, acelerar, quadro);
+        int kmh = velocidadeEmKmh(&carro);
+        if (tempo100 == 0.0f && kmh >= 100) tempo100 = i * quadro;
+        if (tempo200 == 0.0f && kmh >= 200) tempo200 = i * quadro;
+        if (tempo300 == 0.0f && kmh >= 300) tempo300 = i * quadro;
     }
+    printf("     0-100 km/h: %.1f s   0-200: %.1f s   0-300: %.1f s\n", tempo100, tempo200, tempo300);
+    verificar(tempo100 > 2.0f && tempo100 < 3.0f, "0-100 km/h em 2 a 3 s (como um F1)");
+    verificar(tempo300 > 9.0f && tempo300 < 13.0f, "0-300 km/h em 9 a 13 s, nao em 5");
+    verificar(tempo200 - tempo100 < tempo300 - tempo200,
+              "de 200 a 300 demora mais que de 100 a 200 (o ar segura o carro)");
     verificar(carro.velocidade == carro.velocidadeMaxima, "acelerando, chega na velocidade maxima e para ali");
+    FichaTecnica ficha = { "Teste", "", 12000.0f, 2400.0f, 0.5f };
+    float calculado = tempoAteVelocidade(&ficha, 4000.0f);
+    printf("     0-100 km/h mostrado na garagem: %.2f s\n", calculado);
+    verificar(fabsf(calculado - tempo100) < 0.05f, "a garagem mostra o mesmo 0-100 km/h da corrida");
     verificar(velocidadeEmKmh(&carro) == 300, "velocidade maxima = 300 km/h");
 
     for (int i = 0; i < 60 * 2; i++) {
@@ -602,6 +628,258 @@ static void testarVolante(void) {
     liberarPista(reta);
 }
 
+static void testarObjetosDaPista(void) {
+    printf("\n12) Objetos da beira da pista (lista simples por segmento)\n");
+
+    /* A lista de um segmento sozinha */
+    Pista *reta = criarPistaVazia();
+    adicionarTrecho(reta, "Reta de teste", 3, RETA, 0.0f, 0.0f);
+    Segmento *segmento = reta->largada;
+    verificar(contarObstaculos(segmento) == 0, "segmento novo nao tem objetos");
+    adicionarObstaculo(segmento, OBJETO_ARVORE, 3.0f);
+    adicionarObstaculo(segmento, OBJETO_PNEUS, -2.7f);
+    verificar(contarObstaculos(segmento) == 2, "dois objetos adicionados, dois na lista");
+    verificar(segmento->obstaculos->tipo == OBJETO_PNEUS,
+              "o ultimo adicionado fica no comeco da lista");
+    liberarObstaculos(segmento);
+    verificar(segmento->obstaculos == NULL, "liberar deixa a lista vazia");
+    adicionarObstaculo(segmento, OBJETO_ARVORE, 3.0f);
+    liberarPista(reta);   /* tem que liberar os objetos junto (veja no valgrind) */
+
+    /* Zebras: so nas curvas */
+    Pista *pista = criarPista();
+    int comZebra = 0;
+    int zebraErrada = 0;
+    Segmento *atual = pista->largada;
+    do {
+        if (temZebra(atual)) {
+            comZebra++;
+            if (atual->curvatura == RETA) {
+                zebraErrada++;
+            }
+        }
+        atual = proximoSegmento(atual);
+    } while (atual != pista->largada);
+    printf("     segmentos com zebra: %d de %d\n", comZebra, contarSegmentos(pista));
+    verificar(!temZebra(pista->largada), "a reta dos boxes nao tem zebra");
+    verificar(zebraErrada == 0, "nenhuma reta tem zebra");
+    verificar(comZebra > 0 && comZebra < contarSegmentos(pista) / 2,
+              "zebra em parte da pista, nao nela toda");
+
+    /* Decoracao de Interlagos */
+    int contagem[TOTAL_TIPOS_OBJETO] = { 0 };
+    int noCaminho = 0;
+    atual = pista->largada;
+    do {
+        for (Obstaculo *objeto = atual->obstaculos; objeto != NULL; objeto = objeto->proximo) {
+            contagem[objeto->tipo]++;
+            float lado = fabsf(objeto->deslocamentoLateral);
+            int ficaDePe = objeto->tipo != OBJETO_PORTICO && objeto->tipo != OBJETO_MARCA_GRID;
+            if (ficaDePe && lado <= 2.5f) {
+                noCaminho++;   /* o carro anda ate 2,5 (LIMITE_LATERAL em carro.c) */
+            }
+        }
+        atual = proximoSegmento(atual);
+    } while (atual != pista->largada);
+    printf("     arvores: %d  pneus: %d  placas: %d/%d/%d\n",
+           contagem[OBJETO_ARVORE], contagem[OBJETO_PNEUS],
+           contagem[OBJETO_PLACA_150], contagem[OBJETO_PLACA_100], contagem[OBJETO_PLACA_50]);
+    verificar(contagem[OBJETO_PORTICO] == 1, "um portico so");
+    int porticoNaLargada = 0;
+    for (Obstaculo *objeto = pista->largada->obstaculos; objeto != NULL; objeto = objeto->proximo) {
+        if (objeto->tipo == OBJETO_PORTICO) {
+            porticoNaLargada = 1;
+        }
+    }
+    verificar(porticoNaLargada, "o portico fica na linha de chegada");
+    verificar(contagem[OBJETO_ARVORE] > 100, "a pista tem arvores");
+    verificar(contagem[OBJETO_PNEUS] > 0, "as curvas tem barreiras de pneus");
+    verificar(contagem[OBJETO_PLACA_50] > 0 && contagem[OBJETO_PLACA_50] >= contagem[OBJETO_PLACA_150],
+              "placas de frenagem antes das curvas (a de 50 m sempre que tem a de 150 m)");
+    verificar(noCaminho == 0, "nenhum objeto de pe fica onde o carro pode passar (fora o portico)");
+    verificar(contagem[OBJETO_MARCA_GRID] == LUGARES_NO_GRID, "um colchete pintado para cada lugar do grid");
+
+    Pista *outra = criarPista();
+    verificar(contarObstaculos(buscarSegmento(outra, 500)) == contarObstaculos(buscarSegmento(pista, 500)),
+              "a decoracao e sempre igual (sorteio com semente fixa)");
+    liberarPista(outra);
+    liberarPista(pista);
+}
+
+static void testarDirigibilidade(void) {
+    printf("\n13) Dirigibilidade: curvas suaves, direcao e derrapagem\n");
+    Pista *pista = criarPista();
+    float quadro = 1.0f / 60.0f;
+
+    /* Curvas suaves: entre dois segmentos vizinhos a curvatura muda pouco */
+    float maiorSalto = 0.0f;
+    Segmento *atual = pista->largada;
+    do {
+        float salto = fabsf(proximoSegmento(atual)->curvatura - atual->curvatura);
+        if (salto > maiorSalto) {
+            maiorSalto = salto;
+        }
+        atual = proximoSegmento(atual);
+    } while (atual != pista->largada);
+    printf("     maior mudanca de curvatura entre vizinhos: %.3f graus/segmento\n", maiorSalto);
+    verificar(maiorSalto < 0.3f, "a curva entra e sai aos poucos (sem degrau)");
+
+    /* Direção em baixa velocidade: a 100 km/h vira mais que 1/3 do máximo */
+    Pista *reta = criarPistaVazia();
+    adicionarTrecho(reta, "Reta de teste", 50, RETA, 0.0f, 0.0f);
+    Carro devagar = criarCarro("Teste", 0, reta->largada, 0.0f, 12000.0f, 2400.0f, 0.5f);
+    Carro rapido = devagar;
+    devagar.velocidade = 4000.0f;   /* 100 km/h */
+    rapido.velocidade = 12000.0f;   /* 300 km/h */
+    devagar.volante = 1.0f;
+    rapido.volante = 1.0f;
+    Comandos direitaSemPedal = { 0, 0, 0, 1 };
+    atualizarCarro(&devagar, direitaSemPedal, quadro);
+    atualizarCarro(&rapido, direitaSemPedal, quadro);
+    float proporcao = devagar.deslocamentoLateral / rapido.deslocamentoLateral;
+    printf("     a 100 km/h o carro vira %.0f%% do que vira a 300 km/h\n", proporcao * 100.0f);
+    verificar(proporcao > 0.5f, "a 100 km/h a direcao ja responde bem (mais de 50%)");
+
+    /* Derrapagem: na reta não tem; na curva mais fechada, em alta, tem */
+    verificar(rapido.derrapagem == 0.0f, "na reta o carro nao derrapa");
+    Segmento *maisFechada = pista->largada;
+    atual = pista->largada;
+    do {
+        if (fabsf(atual->curvatura) > fabsf(maisFechada->curvatura)) {
+            maisFechada = atual;
+        }
+        atual = proximoSegmento(atual);
+    } while (atual != pista->largada);
+    Carro naCurva = criarCarro("Teste", 0, maisFechada, 0.0f, 12000.0f, 2400.0f, 0.5f);
+    naCurva.velocidade = naCurva.velocidadeMaxima;
+    Comandos nenhum = { 0, 0, 0, 0 };
+    atualizarCarro(&naCurva, nenhum, quadro);
+    printf("     %s a 300 km/h: derrapagem %.2f; velocidade segura %d km/h\n",
+           maisFechada->nomeTrecho, naCurva.derrapagem,
+           converterParaKmh(velocidadeSeguraNaCurva(&naCurva, maisFechada->curvatura)));
+    verificar(naCurva.derrapagem == 1.0f, "a 300 km/h na curva mais fechada o carro derrapa");
+
+    Carro seguro = criarCarro("Teste", 0, maisFechada, 0.0f, 12000.0f, 2400.0f, 0.5f);
+    seguro.velocidade = velocidadeSeguraNaCurva(&seguro, maisFechada->curvatura) * 0.9f;
+    atualizarCarro(&seguro, nenhum, quadro);
+    verificar(seguro.derrapagem < 1.0f, "abaixo da velocidade segura o volante ainda vence a curva");
+
+    liberarPista(reta);
+    liberarPista(pista);
+}
+
+static void testarGridDeLargada(void) {
+    printf("\n14) Grid de largada antes da linha de chegada\n");
+    Pista *pista = criarPista();
+    Corrida corrida;
+    iniciarCorrida(&corrida, pista, 0);
+    int total = contarSegmentos(pista);
+
+    verificar(TOTAL_CARROS <= LUGARES_NO_GRID, "o grid tem lugar para todos os carros");
+
+    int todosAntes = 1;
+    int noColchete = 1;
+    for (int i = 0; i < TOTAL_CARROS; i++) {
+        Carro *carro = corrida.classificacao[i];
+        /* antes da linha = nos últimos segmentos da volta */
+        if (carro->posicao.segmento->indice < total / 2 || carro->voltas != -1) {
+            todosAntes = 0;
+        }
+        int temMarca = 0;
+        for (Obstaculo *objeto = carro->posicao.segmento->obstaculos; objeto != NULL; objeto = objeto->proximo) {
+            if (objeto->tipo == OBJETO_MARCA_GRID && objeto->deslocamentoLateral == carro->deslocamentoLateral) {
+                temMarca = 1;
+            }
+        }
+        if (!temMarca) {
+            noColchete = 0;
+        }
+    }
+    verificar(todosAntes, "todos os carros largam antes da linha de chegada");
+    verificar(noColchete, "cada carro larga em cima do seu colchete");
+    verificar(corrida.classificacao[0]->distanciaPercorrida == -distanciaDoLugarAteALinha(0),
+              "o pole e quem esta mais perto da linha");
+    verificar(voltaAtual(&corrida.jogador) == 1, "no grid o HUD mostra a volta 1");
+
+    /* Anda até o jogador cruzar a linha pela primeira vez */
+    float quadro = 1.0f / 60.0f;
+    Comandos acelerar = { 1, 0, 0, 0 };
+    int quadros = 0;
+    while (corrida.jogador.voltas < 0 && quadros < 60 * 30) {
+        atualizarCorrida(&corrida, acelerar, quadro);
+        quadros++;
+    }
+    verificar(corrida.jogador.voltas == 0 && voltaAtual(&corrida.jogador) == 1,
+              "cruzar a linha saindo do grid nao conta volta: comeca a volta 1");
+    verificar(corrida.jogador.temposDeVolta[0] == 0.0f, "e nenhum tempo de volta e registrado ainda");
+
+    liberarPista(pista);
+}
+
+static void testarSetoresEIntervalos(void) {
+    printf("\n15) Setores, melhor volta e intervalos (para o HUD)\n");
+    Pista *pista = criarPista();
+    Corrida corrida;
+    iniciarCorrida(&corrida, pista, 0);
+    float quadro = 1.0f / 60.0f;
+
+    verificar(bandeiraDaCorrida(&corrida) == BANDEIRA_LARGADA, "na contagem regressiva a bandeira e de largada");
+    for (int i = 0; i < 60 * 5; i++) {
+        atualizarCorrida(&corrida, atualizarIA(&corrida.jogador, carroDaFrente(&corrida, &corrida.jogador)), quadro);
+    }
+    verificar(bandeiraDaCorrida(&corrida) == BANDEIRA_VERDE, "correndo, a bandeira e verde");
+
+    /* Guarda os setores da volta 2 quando ela termina */
+    float setoresDaVolta2[TOTAL_SETORES] = { 0 };
+    int quadros = 0;
+    while (!todosChegaram(&corrida) && quadros < 60 * 60 * 10) {
+        int voltasAntes = corrida.jogador.voltas;
+        float copia[TOTAL_SETORES];
+        for (int s = 0; s < TOTAL_SETORES; s++) {
+            copia[s] = corrida.jogador.setoresDaVolta[s];
+        }
+        float s3Antes = corrida.jogador.inicioDoSetor;
+        atualizarCorrida(&corrida, atualizarIA(&corrida.jogador, carroDaFrente(&corrida, &corrida.jogador)), quadro);
+        if (voltasAntes == 1 && corrida.jogador.voltas == 2) {
+            for (int s = 0; s < TOTAL_SETORES - 1; s++) {
+                setoresDaVolta2[s] = copia[s];
+            }
+            setoresDaVolta2[TOTAL_SETORES - 1] = corrida.tempoDeCorrida - s3Antes;
+        }
+        quadros++;
+    }
+
+    Carro *jogador = &corrida.jogador;
+    float soma = setoresDaVolta2[0] + setoresDaVolta2[1] + setoresDaVolta2[2];
+    printf("     volta 2: %.2f s = S1 %.2f + S2 %.2f + S3 %.2f\n", jogador->temposDeVolta[1],
+           setoresDaVolta2[0], setoresDaVolta2[1], setoresDaVolta2[2]);
+    verificar(fabsf(soma - jogador->temposDeVolta[1]) < 0.05f, "os 3 setores somam o tempo da volta");
+
+    float menor = jogador->temposDeVolta[0];
+    for (int i = 1; i < TOTAL_VOLTAS; i++) {
+        menor = fminf(menor, jogador->temposDeVolta[i]);
+    }
+    verificar(fabsf(jogador->melhorVolta - menor) < 0.001f, "a melhor volta do jogador e a menor das 3");
+
+    float maisRapida = 0.0f;
+    for (int i = 0; i < TOTAL_CARROS; i++) {
+        float melhor = corrida.classificacao[i]->melhorVolta;
+        if (maisRapida == 0.0f || melhor < maisRapida) {
+            maisRapida = melhor;
+        }
+    }
+    printf("     volta mais rapida da corrida: %.2f s\n", corrida.voltaMaisRapida);
+    verificar(fabsf(corrida.voltaMaisRapida - maisRapida) < 0.001f, "a volta mais rapida e a menor de todos");
+    verificar(jogador->temDiferenca, "depois da 1a volta existe diferenca para a melhor volta");
+
+    verificar(intervaloEmSegundos(jogador, jogador) == 0.0f, "o intervalo do jogador para ele mesmo e zero");
+    verificar(intervaloEmSegundos(corrida.classificacao[0], corrida.classificacao[TOTAL_CARROS - 1]) > 0.0f,
+              "o lider esta a frente (+) do ultimo");
+    verificar(bandeiraDaCorrida(&corrida) == BANDEIRA_QUADRICULADA, "no fim, bandeira quadriculada");
+
+    liberarPista(pista);
+}
+
 int main(int argc, char *argv[]) {
     int modoDetalhado = (argc > 1 && strcmp(argv[1], "-v") == 0);
 
@@ -617,6 +895,10 @@ int main(int argc, char *argv[]) {
     testarMergeSort();
     testarEscolhaDaGaragem();
     testarVolante();
+    testarObjetosDaPista();
+    testarDirigibilidade();
+    testarGridDeLargada();
+    testarSetoresEIntervalos();
 
     if (totalFalhas == 0) {
         printf("\nTodos os testes passaram.\n");

@@ -15,7 +15,7 @@ LOGICA = src/pista.c src/obstaculos.c src/carro.c src/ia.c \
          src/ordenacao.c src/corrida.c
 
 # Módulos que desenham na tela
-DESENHO = src/render.c src/hud.c src/menu.c
+DESENHO = src/render.c src/hud.c src/menu.c src/visual.c
 
 FONTES = src/main.c $(LOGICA) $(DESENHO)
 OBJETOS = $(FONTES:src/%.c=build/%.o)

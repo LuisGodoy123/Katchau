@@ -1,9 +1,13 @@
 /*
  * hud.h
  * ------------------------------------------------------------------
- * Informações por cima da corrida: volta, velocidade, tempo, o
- * mini-mapa com a posição dos carros e a tela de chegada. Versão simples da Fase 3; na Fase 5 entram o
- * velocímetro de verdade, a posição (5º/8) e o mini-mapa.
+ * Informações por cima da corrida, nos quatro cantos da tela:
+ *   - em cima à esquerda: a tabela de posições (bandeira, tempo de prova,
+ *     intervalo de cada carro para o jogador e a última volta);
+ *   - em cima à direita: a volta do jogador (diferença para a melhor
+ *     volta, tempos e os 3 setores coloridos, como no F1);
+ *   - embaixo à esquerda: o mini-mapa; embaixo à direita: o velocímetro.
+ * E também a contagem regressiva e o painel de chegada.
  * ------------------------------------------------------------------
  */
 

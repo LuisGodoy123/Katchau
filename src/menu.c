@@ -8,71 +8,80 @@
  * de ponteiros para FichaTecnica, reordenado por ordenarFichasPorAtributo()
  * toda vez que o jogador troca o critério (velocidade, aceleração ou
  * aderência).
+ *
+ * O visual (cores da logo, fontes, painéis inclinados, quadriculado)
+ * vem do visual.c.
  * ------------------------------------------------------------------
  */
 
 #include <stdio.h>
+#include <math.h>
 #include "raylib.h"
 #include "menu.h"
 #include "render.h"
 #include "hud.h"
+#include "visual.h"
 
-/* ---------- Cores e tamanhos comuns ---------- */
-#define COR_DESTAQUE          YELLOW
-#define COR_TEXTO             RAYWHITE
-#define COR_TEXTO_APAGADO     LIGHTGRAY
-#define COR_PAINEL            Fade(BLACK, 0.65f)
-#define COR_LINHA_MARCADA     Fade(YELLOW, 0.25f)
-#define COR_BARRA_FUNDO       Fade(RAYWHITE, 0.2f)
-#define TAMANHO_DICA          18
-#define Y_DICA                568
+/* ---------- Comuns ---------- */
+#define INCLINACAO            12.0f   /* quanto os painéis "deitam" para a frente */
+#define Y_BARRA_DICAS         560     /* topo da barra de dicas, no pé da tela */
+#define TAMANHO_DICA          15.0f
+#define ALTURA_CABECALHO      54.0f
+#define ESPACO_ENTRE_LINHAS   1.05f   /* altura de uma linha de texto quebrado, em tamanhos de letra */
+#define Y_CABECALHO           22.0f
 
 /* ---------- Menu principal ---------- */
 #define TOTAL_OPCOES          4
-#define TAMANHO_LOGO          96
-#define TAMANHO_OPCAO         28
-#define ESPACO_OPCOES         48
-#define Y_PRIMEIRA_OPCAO      250
+#define LARGURA_LOGO          440.0f
+#define Y_PRIMEIRA_OPCAO      284.0f
+#define ESPACO_OPCOES         56.0f
+#define ALTURA_OPCAO          44.0f
+#define LARGURA_OPCAO         280.0f
+#define LARGURA_OPCAO_MARCADA 320.0f
+#define X_CARTAO_CARRO        616.0f
+#define Y_CARTAO_CARRO        300.0f
+#define LARGURA_CARTAO_CARRO  168.0f
+#define ALTURA_CARTAO_CARRO   196.0f
 
 /* ---------- Garagem ---------- */
-#define Y_PRIMEIRA_LINHA      122
-#define ALTURA_LINHA          52
-#define X_LISTA               24
-#define LARGURA_LISTA         404
-#define X_BARRA_LISTA         175
-#define LARGURA_BARRA_LISTA   140
-#define X_FICHA               448
-#define LARGURA_FICHA         328
-#define LARGURA_BARRA_FICHA   150
+#define Y_ABAS                92.0f
+#define Y_PRIMEIRA_LINHA      134.0f
+#define ALTURA_LINHA          50.0f
+#define X_LISTA               16.0f
+#define LARGURA_LISTA         416.0f
+#define X_BARRA_LISTA         226.0f
+#define LARGURA_BARRA_LISTA   120.0f
+#define X_FICHA               448.0f
+#define LARGURA_FICHA         336.0f
+#define LARGURA_BARRA_FICHA   200.0f
 #define FRACAO_MINIMA_BARRA   0.15f   /* o pior carro ainda mostra um pedacinho de barra */
 #define UNIDADES_EM_100_KMH   4000.0f /* 100 km/h em unidades por segundo (KMH_POR_UNIDADE = 0,025) */
 
 /* ---------- Resultado ---------- */
-#define Y_CABECALHO           112
-#define ALTURA_LINHA_RESULTADO 42
-#define X_COLUNA_POSICAO      70
-#define X_COLUNA_PILOTO       140
-#define X_COLUNA_TEMPO        430
-#define X_COLUNA_MELHOR       590
+#define Y_TITULOS_TABELA      104.0f
+#define Y_PRIMEIRO_RESULTADO  126.0f
+#define ALTURA_LINHA_RESULTADO 46.0f
+#define X_TABELA              40.0f
+#define LARGURA_TABELA        720.0f
+#define X_COLUNA_PILOTO       112.0f
+#define X_COLUNA_TEMPO        470.0f
+#define X_COLUNA_MELHOR       620.0f
 
 static const char *TEXTOS_OPCOES[TOTAL_OPCOES] = { "CORRER", "GARAGEM", "COMO JOGAR", "SAIR" };
 static const Tela DESTINOS_OPCOES[TOTAL_OPCOES] = { TELA_CORRIDA, TELA_GARAGEM, TELA_COMO_JOGAR, TELA_SAIR };
 
+/* Os nomes dos critérios com acento (ordenacao.c, que não desenha, usa sem) */
+static const char *NOMES_CRITERIO[TOTAL_ATRIBUTOS] = { "VELOCIDADE", "ACELERAÇÃO", "ADERÊNCIA" };
+
+/* Uma dica da barra de baixo: até 4 teclas e o que elas fazem */
+typedef struct {
+    const char *teclas[4];   /* termina no primeiro NULL */
+    const char *acao;
+} Dica;
+
 /* ==================================================================
  * Funções auxiliares
  * ================================================================== */
-
-/*
- * desenharTextoCentralizado
- * Escreve um texto centralizado na horizontal, com sombra preta.
- * Recebe: o texto, a altura (y), o tamanho da fonte e a cor.
- * Devolve: nada.
- */
-static void desenharTextoCentralizado(const char *texto, int y, int tamanho, Color cor) {
-    int x = (LARGURA_TELA - MeasureText(texto, tamanho)) / 2;
-    DrawText(texto, x + 2, y + 2, tamanho, BLACK);
-    DrawText(texto, x, y, tamanho, cor);
-}
 
 /*
  * Os menus são desenhados num quadro 800x600 no meio da tela (veja
@@ -88,24 +97,156 @@ static int margemY(void) {
 
 /*
  * escurecerTela
- * Cobre a tela inteira (inclusive as sobras dos lados) com preto
- * transparente, para o texto se destacar do fundo.
- * Recebe: o quanto escurecer (0 a 1).
+ * Cobre a tela inteira (inclusive as sobras dos lados) com um degradê
+ * preto, para o texto se destacar da pista passando ao fundo.
+ * Recebe: o quanto escurecer em cima, no meio e embaixo (0 a 1).
  * Devolve: nada.
  */
-static void escurecerTela(float alfa) {
-    DrawRectangle(-margemX(), -margemY(), larguraVirtual(), alturaVirtual(), Fade(BLACK, alfa));
+static void escurecerTela(float cima, float meio, float baixo) {
+    int x = -margemX();
+    int y = -margemY();
+    int largura = larguraVirtual();
+    int metade = alturaVirtual() / 2;
+    DrawRectangleGradientV(x, y, largura, metade, Fade(BLACK, cima), Fade(BLACK, meio));
+    DrawRectangleGradientV(x, y + metade, largura, alturaVirtual() - metade, Fade(BLACK, meio), Fade(BLACK, baixo));
 }
 
 /*
- * desenharDica
- * Linha de ajuda com os controles, no pé da tela (de ponta a ponta).
- * Recebe: o texto.
+ * desenharCabecalho
+ * Faixa vermelha inclinada com o título da tela, um fio amarelo embaixo
+ * e o quadriculado de bandeira até a borda direita.
+ * Recebe: o título.
  * Devolve: nada.
  */
-static void desenharDica(const char *texto) {
-    DrawRectangle(-margemX(), Y_DICA - 8, larguraVirtual(), ALTURA_TELA + margemY() - Y_DICA + 8, COR_PAINEL);
-    desenharTextoCentralizado(texto, Y_DICA, TAMANHO_DICA, COR_TEXTO_APAGADO);
+static void desenharCabecalho(const char *titulo) {
+    float tamanho = 44.0f;
+    float fimDaFaixa = 40.0f + larguraDoTexto(FONTE_TITULO, titulo, tamanho) + 36.0f;
+    float inicio = -margemX() - INCLINACAO * 2;
+
+    desenharParalelogramo(inicio, Y_CABECALHO, fimDaFaixa - inicio, ALTURA_CABECALHO, INCLINACAO * 1.5f,
+                          COR_VERMELHO);
+    desenharParalelogramo(inicio, Y_CABECALHO, fimDaFaixa - inicio, ALTURA_CABECALHO / 2, INCLINACAO * 0.75f,
+                          Fade(WHITE, 0.10f));   /* brilho na metade de cima */
+    desenharParalelogramo(inicio, Y_CABECALHO + ALTURA_CABECALHO + 3, fimDaFaixa - inicio - 4, 5, 3,
+                          COR_AMARELO);
+    escrever(FONTE_TITULO, titulo, 40.0f, Y_CABECALHO + 3, tamanho, COR_TEXTO_CLARO);
+
+    float xQuadriculado = fimDaFaixa + 40.0f;
+    desenharQuadriculado(xQuadriculado, Y_CABECALHO + 15, LARGURA_TELA + margemX() - xQuadriculado,
+                         24.0f, 12.0f);
+}
+
+/*
+ * desenharBarraDeDicas
+ * Barra escura no pé da tela, com um fio quadriculado em cima e as
+ * dicas de controle (teclas desenhadas + ação) centralizadas.
+ * Recebe: as dicas e quantas são.
+ * Devolve: nada.
+ */
+static void desenharBarraDeDicas(const Dica dicas[], int total) {
+    float x0 = -margemX();
+    float largura = larguraVirtual();
+    DrawRectangleRec((Rectangle){ x0, Y_BARRA_DICAS, largura, ALTURA_TELA + margemY() - Y_BARRA_DICAS },
+                     Fade(COR_GRAFITE, 0.92f));
+    desenharQuadriculado(x0, Y_BARRA_DICAS - 8, largura, 8.0f, 4.0f);
+
+    /* Primeiro mede tudo, para centralizar */
+    float espacoTecla = 4.0f, espacoAcao = 8.0f, espacoDica = 30.0f;
+    float larguraTotal = 0.0f;
+    for (int i = 0; i < total; i++) {
+        for (int t = 0; t < 4 && dicas[i].teclas[t] != NULL; t++) {
+            larguraTotal += larguraDaTecla(dicas[i].teclas[t]) + espacoTecla;
+        }
+        larguraTotal += espacoAcao + larguraDoTexto(FONTE_FORTE, dicas[i].acao, TAMANHO_DICA);
+        if (i < total - 1) {
+            larguraTotal += espacoDica;
+        }
+    }
+
+    float x = (LARGURA_TELA - larguraTotal) / 2.0f;
+    float y = Y_BARRA_DICAS + 9.0f;
+    for (int i = 0; i < total; i++) {
+        for (int t = 0; t < 4 && dicas[i].teclas[t] != NULL; t++) {
+            x += desenharTecla(x, y, dicas[i].teclas[t]) + espacoTecla;
+        }
+        x += espacoAcao;
+        escrever(FONTE_FORTE, dicas[i].acao, x, y + 2, TAMANHO_DICA, COR_TEXTO_FRACO);
+        x += larguraDoTexto(FONTE_FORTE, dicas[i].acao, TAMANHO_DICA) + espacoDica;
+    }
+}
+
+/*
+ * desenharSetas
+ * Duas setinhas amarelas que andam sem parar, apontando para a opção
+ * marcada (como num menu de fliperama).
+ * Recebe: onde começam (x), a altura do meio (y) e o sentido (+1 aponta
+ *         para a direita, -1 para a esquerda).
+ * Devolve: nada.
+ */
+static void desenharSetas(float x, float centroY, float sentido) {
+    float tempo = (float) GetTime();
+    for (int i = 0; i < 2; i++) {
+        float fase = fmodf(tempo * 1.6f + i * 0.5f, 1.0f);
+        float ponta = x + sentido * (fase * 12.0f + 7.0f);
+        float base = ponta - sentido * 7.0f;
+        Color cor = Fade(COR_AMARELO, 1.0f - fase * 0.7f);
+        DrawLineEx((Vector2){ base, centroY - 7 }, (Vector2){ ponta, centroY }, 3.0f, cor);
+        DrawLineEx((Vector2){ ponta, centroY }, (Vector2){ base, centroY + 7 }, 3.0f, cor);
+    }
+}
+
+/*
+ * escreverComQuebra
+ * Escreve um texto em várias linhas, quebrando entre as palavras para
+ * não passar da largura dada.
+ * Recebe: fonte, texto, canto superior esquerdo, tamanho, largura máxima e cor.
+ * Devolve: a altura (y) logo abaixo da última linha.
+ */
+static float escreverComQuebra(TipoFonte fonte, const char *texto, float x, float y, float tamanho,
+                               float larguraMaxima, Color cor) {
+    char linha[256] = "";
+    char tentativa[256];
+    char palavra[64];
+    const char *letra = texto;
+
+    while (*letra != '\0') {
+        while (*letra == ' ') {
+            letra++;
+        }
+        int n = 0;
+        while (*letra != '\0' && *letra != ' ' && n < (int) sizeof(palavra) - 1) {
+            palavra[n++] = *letra++;
+        }
+        palavra[n] = '\0';
+        if (n == 0) {
+            break;
+        }
+
+        snprintf(tentativa, sizeof(tentativa), "%s%s%s", linha, linha[0] ? " " : "", palavra);
+        if (linha[0] != '\0' && larguraDoTexto(fonte, tentativa, tamanho) > larguraMaxima) {
+            escrever(fonte, linha, x, y, tamanho, cor);   /* a palavra não cabe: fecha a linha */
+            y += tamanho * ESPACO_ENTRE_LINHAS;
+            snprintf(linha, sizeof(linha), "%s", palavra);
+        } else {
+            snprintf(linha, sizeof(linha), "%s", tentativa);
+        }
+    }
+    if (linha[0] != '\0') {
+        escrever(fonte, linha, x, y, tamanho, cor);
+        y += tamanho * ESPACO_ENTRE_LINHAS;
+    }
+    return y;
+}
+
+/*
+ * desenharPainel
+ * Painel escuro de fundo com um fio vermelho em cima.
+ * Recebe: posição e tamanho.
+ * Devolve: nada.
+ */
+static void desenharPainel(float x, float y, float largura, float altura) {
+    DrawRectangleRec((Rectangle){ x, y, largura, altura }, COR_PAINEL);
+    DrawRectangleRec((Rectangle){ x, y, largura, 3.0f }, COR_VERMELHO);
 }
 
 /*
@@ -195,41 +336,87 @@ Tela atualizarMenuPrincipal(EstadoMenu *menu) {
 }
 
 /*
+ * desenharOpcao
+ * Um botão do menu principal. O marcado é vermelho, mais largo, com um
+ * fio amarelo na frente e setinhas andando dos dois lados.
+ * Recebe: o texto, a altura (y) e se está marcado.
+ * Devolve: nada.
+ */
+static void desenharOpcao(const char *texto, float y, int marcado) {
+    float centro = LARGURA_TELA / 2.0f;
+    float largura = marcado ? LARGURA_OPCAO_MARCADA : LARGURA_OPCAO;
+    float x = centro - largura / 2.0f - INCLINACAO / 2.0f;
+
+    if (marcado) {
+        desenharParalelogramo(x, y, largura, ALTURA_OPCAO, INCLINACAO, COR_VERMELHO);
+        desenharParalelogramo(x + INCLINACAO / 2, y, largura, ALTURA_OPCAO / 2, INCLINACAO / 2,
+                              Fade(WHITE, 0.14f));
+        desenharParalelogramo(x - 12, y, 7, ALTURA_OPCAO, INCLINACAO, COR_AMARELO);
+        desenharParalelogramo(x + largura + 5, y, 7, ALTURA_OPCAO, INCLINACAO, COR_AMARELO);
+        escreverCentralizado(FONTE_TITULO, texto, centro, y + 3, 36.0f, COR_TEXTO_CLARO);
+        desenharSetas(x - 40, y + ALTURA_OPCAO / 2, 1.0f);
+        desenharSetas(x + largura + INCLINACAO + 40, y + ALTURA_OPCAO / 2, -1.0f);
+    } else {
+        desenharParalelogramo(x, y, largura, ALTURA_OPCAO, INCLINACAO, COR_PAINEL);
+        desenharContornoParalelogramo(x, y, largura, ALTURA_OPCAO, INCLINACAO, 1.5f, Fade(COR_CROMO, 0.35f));
+        escreverCentralizado(FONTE_TITULO, texto, centro, y + 7, 30.0f, COR_TEXTO_FRACO);
+    }
+}
+
+/*
+ * desenharCartaoDoCarro
+ * Cartão no canto, para lembrar com qual carro o jogador vai correr.
+ * Recebe: o número do carro.
+ * Devolve: nada.
+ */
+static void desenharCartaoDoCarro(int numero) {
+    float x = X_CARTAO_CARRO, y = Y_CARTAO_CARRO;
+    float centro = x + LARGURA_CARTAO_CARRO / 2.0f;
+
+    desenharParalelogramo(x, y, LARGURA_CARTAO_CARRO, ALTURA_CARTAO_CARRO, 0, COR_PAINEL);
+    desenharParalelogramo(x - 6, y, LARGURA_CARTAO_CARRO + 6, 26, 8, COR_VERMELHO);
+    escreverCentralizado(FONTE_FORTE, "SEU CARRO", centro, y + 3, 17.0f, COR_TEXTO_CLARO);
+
+    desenharBrilho(centro, y + 96, 76, Fade(COR_AMARELO, 0.35f));
+    DrawEllipse((int) centro, (int) (y + 140), 70, 9, Fade(BLACK, 0.55f));
+    desenharCarroParado(numero, centro, y + 142, 0.85f);
+
+    escreverCentralizado(FONTE_TITULO, fichaDoCarro(numero)->nome, centro, y + 148, 30.0f, COR_AMARELO);
+}
+
+/*
  * desenharMenuPrincipal
- * Logo, opções e o carro escolhido. A pista passando ao fundo é
+ * Logo, botões e o carro escolhido. A pista passando ao fundo é
  * desenhada antes, pelo main.c.
  * Recebe: o estado do menu.
  * Devolve: nada.
  */
 void desenharMenuPrincipal(EstadoMenu *menu) {
-    escurecerTela(0.3f);
+    escurecerTela(0.55f, 0.15f, 0.7f);
 
-    desenharTextoCentralizado("KATCHAU", 60, TAMANHO_LOGO, COR_DESTAQUE);
-    desenharTextoCentralizado("corrida em Interlagos", 160, 22, COR_TEXTO);
+    /* A logo flutua devagar */
+    float flutuar = sinf((float) GetTime() * 1.6f) * 3.0f;
+    desenharLogo(LARGURA_TELA / 2.0f, 6.0f + flutuar, LARGURA_LOGO);
 
-    /* Painel das opções */
-    int larguraPainel = 340;
-    int alturaPainel = TOTAL_OPCOES * ESPACO_OPCOES + 24;
-    int xPainel = (LARGURA_TELA - larguraPainel) / 2;
-    DrawRectangleRounded((Rectangle){ xPainel, Y_PRIMEIRA_OPCAO - 16, larguraPainel, alturaPainel },
-                         0.15f, 8, COR_PAINEL);
+    /* "CORRIDA EM INTERLAGOS" entre dois quadriculados */
+    const char *subtitulo = "CORRIDA EM INTERLAGOS";
+    float tamanho = 20.0f;
+    float meio = larguraDoTexto(FONTE_FORTE, subtitulo, tamanho) / 2.0f;
+    escreverCentralizado(FONTE_FORTE, subtitulo, LARGURA_TELA / 2.0f, 228.0f, tamanho, COR_CROMO);
+    desenharQuadriculado(LARGURA_TELA / 2.0f - meio - 86, 238.0f, 70.0f, 10.0f, 5.0f);
+    desenharQuadriculado(LARGURA_TELA / 2.0f + meio + 16, 238.0f, 70.0f, 10.0f, 5.0f);
 
     for (int i = 0; i < TOTAL_OPCOES; i++) {
-        int y = Y_PRIMEIRA_OPCAO + i * ESPACO_OPCOES;
-        if (i == menu->opcaoMenu) {
-            DrawRectangle(xPainel + 12, y - 8, larguraPainel - 24, ESPACO_OPCOES - 6, COR_LINHA_MARCADA);
-            desenharTextoCentralizado(TextFormat("> %s <", TEXTOS_OPCOES[i]), y, TAMANHO_OPCAO, COR_DESTAQUE);
-        } else {
-            desenharTextoCentralizado(TEXTOS_OPCOES[i], y, TAMANHO_OPCAO, COR_TEXTO);
-        }
+        desenharOpcao(TEXTOS_OPCOES[i], Y_PRIMEIRA_OPCAO + i * ESPACO_OPCOES, i == menu->opcaoMenu);
     }
 
-    /* Carro escolhido, embaixo, para lembrar com qual o jogador vai correr */
-    const FichaTecnica *ficha = fichaDoCarro(menu->carroEscolhido);
-    desenharTextoCentralizado(TextFormat("Seu carro: %s", ficha->nome), 446, 20, COR_TEXTO);
-    desenharCarroParado(menu->carroEscolhido, LARGURA_TELA / 2.0f, 556, 0.7f);
+    desenharCartaoDoCarro(menu->carroEscolhido);
 
-    desenharDica("CIMA/BAIXO: escolher     ENTER: confirmar");
+    Dica dicas[] = {
+        { { "CIMA", "BAIXO", NULL }, "ESCOLHER" },
+        { { "ENTER", NULL }, "CONFIRMAR" },
+    };
+    desenharBarraDeDicas(dicas, 2);
 }
 
 /* ==================================================================
@@ -313,8 +500,8 @@ static float fracaoDoAtributo(const FichaTecnica *ficha, Atributo atributo) {
 /*
  * textoDoAtributo
  * O valor do atributo do jeito que o jogador entende:
- *   velocidade -> km/h; aceleração -> segundos de 0 a 100 km/h;
- *   aderência -> porcentagem.
+ *   velocidade -> km/h; aceleração -> segundos de 0 a 100 km/h (com a
+ *   mesma curva de aceleração da corrida); aderência -> porcentagem.
  * Recebe: a ficha e o atributo.
  * Devolve: o texto (válido até a próxima chamada de TextFormat).
  */
@@ -323,8 +510,7 @@ static const char *textoDoAtributo(const FichaTecnica *ficha, Atributo atributo)
         case ATRIBUTO_VELOCIDADE:
             return TextFormat("%d km/h", converterParaKmh(ficha->velocidadeMaxima));
         case ATRIBUTO_ACELERACAO: {
-            /* Com vírgula (1,43 s): o ponto da fonte da raylib quase some */
-            int centesimos = (int) (UNIDADES_EM_100_KMH / ficha->aceleracao * 100 + 0.5f);
+            int centesimos = (int) (tempoAteVelocidade(ficha, UNIDADES_EM_100_KMH) * 100 + 0.5f);
             return TextFormat("%d,%02d s", centesimos / 100, centesimos % 100);
         }
         case ATRIBUTO_ADERENCIA:
@@ -335,41 +521,32 @@ static const char *textoDoAtributo(const FichaTecnica *ficha, Atributo atributo)
 }
 
 /*
- * desenharBarra
- * Barra horizontal de atributo: fundo apagado e parte cheia colorida.
- * Recebe: posição, largura total, altura, fração cheia e cor.
- * Devolve: nada.
- */
-static void desenharBarra(int x, int y, int largura, int altura, float fracao, Color cor) {
-    DrawRectangle(x, y, largura, altura, COR_BARRA_FUNDO);
-    DrawRectangle(x, y, (int) (largura * fracao), altura, cor);
-}
-
-/*
  * desenharAbasDeCriterio
- * Os três critérios lado a lado; o ativo fica destacado.
+ * Os três critérios lado a lado, em etiquetas inclinadas; o ativo fica
+ * amarelo.
  * Recebe: o critério ativo.
  * Devolve: nada.
  */
 static void desenharAbasDeCriterio(Atributo criterio) {
-    int y = 74;
-    int x = X_LISTA;
-    DrawText("ORDENAR POR:", x, y + 4, 18, COR_TEXTO_APAGADO);
-    x += MeasureText("ORDENAR POR:", 18) + 16;
+    float x = 24.0f;
+    escrever(FONTE_FORTE, "ORDENAR POR", x, Y_ABAS + 5, 15.0f, COR_TEXTO_FRACO);
+    x += larguraDoTexto(FONTE_FORTE, "ORDENAR POR", 15.0f) + 16.0f;
 
+    float tamanho = 19.0f;
     for (int atributo = 0; atributo < TOTAL_ATRIBUTOS; atributo++) {
-        const char *nome = nomeDoAtributo((Atributo) atributo);
-        int largura = MeasureText(nome, 20) + 20;
+        const char *nome = NOMES_CRITERIO[atributo];
+        float largura = larguraDoTexto(FONTE_FORTE, nome, tamanho) + 28.0f;
         if (atributo == (int) criterio) {
-            DrawRectangle(x, y, largura, 28, COR_DESTAQUE);
-            DrawText(nome, x + 10, y + 4, 20, BLACK);
+            desenharParalelogramo(x, Y_ABAS, largura, 28, 9, COR_AMARELO);
+            escreverCentralizado(FONTE_FORTE, nome, x + 4 + largura / 2, Y_ABAS + 2, tamanho, COR_GRAFITE);
         } else {
-            DrawRectangleLines(x, y, largura, 28, COR_TEXTO_APAGADO);
-            DrawText(nome, x + 10, y + 4, 20, COR_TEXTO);
+            desenharParalelogramo(x, Y_ABAS, largura, 28, 9, COR_PAINEL);
+            desenharContornoParalelogramo(x, Y_ABAS, largura, 28, 9, 1.5f, Fade(COR_CROMO, 0.4f));
+            escreverCentralizado(FONTE_FORTE, nome, x + 4 + largura / 2, Y_ABAS + 2, tamanho, COR_TEXTO_CLARO);
         }
-        x += largura + 10;
+        x += largura + 10.0f;
     }
-    DrawText("(Merge Sort)", x + 6, y + 6, 16, COR_TEXTO_APAGADO);
+    escrever(FONTE_TEXTO, "ordenado com Merge Sort", x + 8, Y_ABAS + 6, 14.0f, COR_TEXTO_FRACO);
 }
 
 /*
@@ -379,65 +556,76 @@ static void desenharAbasDeCriterio(Atributo criterio) {
  * Devolve: nada.
  */
 static void desenharListaDaGaragem(EstadoMenu *menu) {
-    DrawRectangle(X_LISTA - 8, Y_PRIMEIRA_LINHA - 8, LARGURA_LISTA + 16,
-                  TOTAL_CARROS * ALTURA_LINHA + 8, COR_PAINEL);
+    desenharPainel(X_LISTA, Y_PRIMEIRA_LINHA - 6, LARGURA_LISTA, TOTAL_CARROS * ALTURA_LINHA + 10);
 
     for (int i = 0; i < TOTAL_CARROS; i++) {
         const FichaTecnica *ficha = menu->garagem[i];
-        int y = Y_PRIMEIRA_LINHA + i * ALTURA_LINHA;
+        float y = Y_PRIMEIRA_LINHA + i * ALTURA_LINHA;
         int ehMarcado = (i == menu->selecionado);
         int ehEscolhido = (numeroDaFicha(ficha) == menu->carroEscolhido);
 
         if (ehMarcado) {
-            DrawRectangle(X_LISTA - 4, y - 4, LARGURA_LISTA + 8, ALTURA_LINHA - 4, COR_LINHA_MARCADA);
+            desenharParalelogramo(X_LISTA + 4, y + 2, LARGURA_LISTA - 16, ALTURA_LINHA - 4, 10, COR_VERMELHO);
+            desenharParalelogramo(X_LISTA - 2, y + 2, 6, ALTURA_LINHA - 4, 10, COR_AMARELO);
         }
 
-        Color corNome = ehMarcado ? COR_DESTAQUE : COR_TEXTO;
-        DrawText(TextFormat("%d. %s", i + 1, ficha->nome), X_LISTA + 6, y + 4, 20, corNome);
+        /* Número da posição numa etiqueta */
+        Color fundoNumero = ehMarcado ? COR_AMARELO : COR_GRAFITE;
+        Color corNumero = ehMarcado ? COR_GRAFITE : COR_CROMO;
+        desenharParalelogramo(X_LISTA + 14, y + 9, 34, 30, 7, fundoNumero);
+        escreverCentralizado(FONTE_TITULO, TextFormat("%d", i + 1), X_LISTA + 34, y + 8, 26.0f, corNumero);
+
+        escrever(FONTE_TITULO, ficha->nome, X_LISTA + 60, y + (ehEscolhido ? 2 : 9), 26.0f,
+                 ehMarcado ? COR_TEXTO_CLARO : COR_CROMO);
         if (ehEscolhido) {
-            DrawText("SEU CARRO", X_LISTA + 6, y + 26, 14, COR_DESTAQUE);
+            escrever(FONTE_FORTE, "SEU CARRO", X_LISTA + 61, y + 29, 13.0f, COR_AMARELO);
         }
 
-        desenharBarra(X_BARRA_LISTA, y + 8, LARGURA_BARRA_LISTA, 14,
-                      fracaoDoAtributo(ficha, menu->criterio), corNome);
-        DrawText(textoDoAtributo(ficha, menu->criterio),
-                 X_BARRA_LISTA + LARGURA_BARRA_LISTA + 10, y + 6, 18, COR_TEXTO);
+        desenharBarraDeBlocos(X_BARRA_LISTA, y + 18, LARGURA_BARRA_LISTA, 13,
+                              fracaoDoAtributo(ficha, menu->criterio), ehMarcado ? COR_AMARELO : COR_CROMO);
+        escreverADireita(FONTE_FORTE, textoDoAtributo(ficha, menu->criterio),
+                         X_LISTA + LARGURA_LISTA - 14, y + 12, 21.0f, COR_TEXTO_CLARO);
     }
 }
 
 /*
  * desenharFichaMarcada
- * Painel da direita: o carro marcado em tamanho grande e os três atributos.
+ * Painel da direita: o carro marcado em tamanho grande, iluminado, e os
+ * três atributos.
  * Recebe: o estado do menu.
  * Devolve: nada.
  */
 static void desenharFichaMarcada(EstadoMenu *menu) {
     const FichaTecnica *ficha = menu->garagem[menu->selecionado];
     int numero = numeroDaFicha(ficha);
-
-    DrawRectangle(X_FICHA - 8, Y_PRIMEIRA_LINHA - 8, LARGURA_FICHA + 16,
-                  TOTAL_CARROS * ALTURA_LINHA + 8, COR_PAINEL);
-
+    float topo = Y_PRIMEIRA_LINHA - 6;
     float centroX = X_FICHA + LARGURA_FICHA / 2.0f;
-    desenharCarroParado(numero, centroX, 260, 1.3f);
 
-    int y = 278;
-    int largura = MeasureText(ficha->nome, 32);
-    DrawText(ficha->nome, (int) (centroX - largura / 2.0f), y, 32, COR_DESTAQUE);
-    largura = MeasureText(ficha->descricao, 18);
-    DrawText(ficha->descricao, (int) (centroX - largura / 2.0f), y + 40, 18, COR_TEXTO);
+    desenharPainel(X_FICHA, topo, LARGURA_FICHA, TOTAL_CARROS * ALTURA_LINHA + 10);
+    escrever(FONTE_FORTE, "FICHA TÉCNICA", X_FICHA + 14, topo + 10, 14.0f, COR_TEXTO_FRACO);
 
-    y += 82;
+    /* Holofote e sombra embaixo do carro */
+    desenharBrilho(centroX, topo + 110, 120, Fade(COR_AMARELO, 0.32f));
+    DrawEllipse((int) centroX, (int) (topo + 168), 110, 12, Fade(BLACK, 0.6f));
+    desenharCarroParado(numero, centroX, topo + 170, 1.15f);
+
+    escreverCentralizado(FONTE_TITULO, ficha->nome, centroX, topo + 172, 42.0f, COR_AMARELO);
+    escreverCentralizado(FONTE_TEXTO, ficha->descricao, centroX, topo + 220, 18.0f, COR_CROMO);
+
+    float y = topo + 256;
     for (int atributo = 0; atributo < TOTAL_ATRIBUTOS; atributo++) {
-        int linha = y + atributo * 46;
-        Color cor = (atributo == (int) menu->criterio) ? COR_DESTAQUE : COR_TEXTO;
-        DrawText(nomeDoAtributo((Atributo) atributo), X_FICHA + 8, linha, 16, cor);
-        desenharBarra(X_FICHA + 8, linha + 20, LARGURA_BARRA_FICHA, 12,
-                      fracaoDoAtributo(ficha, (Atributo) atributo), cor);
-        DrawText(textoDoAtributo(ficha, (Atributo) atributo),
-                 X_FICHA + 18 + LARGURA_BARRA_FICHA, linha + 16, 18, COR_TEXTO);
+        float linha = y + atributo * 46;
+        int ativo = (atributo == (int) menu->criterio);
+        Color cor = ativo ? COR_AMARELO : COR_CROMO;
+        escrever(FONTE_FORTE, NOMES_CRITERIO[atributo], X_FICHA + 16, linha, 15.0f,
+                 ativo ? COR_AMARELO : COR_TEXTO_FRACO);
+        desenharBarraDeBlocos(X_FICHA + 16, linha + 21, LARGURA_BARRA_FICHA, 14,
+                              fracaoDoAtributo(ficha, (Atributo) atributo), cor);
+        escreverADireita(FONTE_FORTE, textoDoAtributo(ficha, (Atributo) atributo),
+                         X_FICHA + LARGURA_FICHA - 16, linha + 14, 22.0f, COR_TEXTO_CLARO);
     }
-    DrawText("aceleracao: segundos de 0 a 100 km/h", X_FICHA + 8, y + 3 * 46 - 4, 14, COR_TEXTO_APAGADO);
+    escrever(FONTE_TEXTO, "aceleração: segundos de 0 a 100 km/h", X_FICHA + 16, y + 3 * 46 - 2, 14.0f,
+             COR_TEXTO_FRACO);
 }
 
 /*
@@ -446,16 +634,20 @@ static void desenharFichaMarcada(EstadoMenu *menu) {
  * Devolve: nada.
  */
 void desenharGaragem(EstadoMenu *menu) {
-    escurecerTela(0.45f);
+    escurecerTela(0.7f, 0.55f, 0.75f);
 
-    DrawText("GARAGEM", X_LISTA + 2, 22, 40, BLACK);
-    DrawText("GARAGEM", X_LISTA, 20, 40, COR_DESTAQUE);
-
+    desenharCabecalho("GARAGEM");
     desenharAbasDeCriterio(menu->criterio);
     desenharListaDaGaragem(menu);
     desenharFichaMarcada(menu);
 
-    desenharDica("CIMA/BAIXO: carro   ESQ/DIR: ordenar   ENTER: escolher   ESC: voltar");
+    Dica dicas[] = {
+        { { "CIMA", "BAIXO", NULL }, "CARRO" },
+        { { "ESQ", "DIR", NULL }, "ORDENAR" },
+        { { "ENTER", NULL }, "ESCOLHER" },
+        { { "ESC", NULL }, "VOLTAR" },
+    };
+    desenharBarraDeDicas(dicas, 4);
 }
 
 /* ==================================================================
@@ -476,41 +668,74 @@ Tela atualizarComoJogar(void) {
 }
 
 /*
+ * desenharTituloDePainel
+ * Título amarelo de um painel, com um traço vermelho embaixo.
+ * Recebe: o texto e o canto superior esquerdo.
+ * Devolve: nada.
+ */
+static void desenharTituloDePainel(const char *texto, float x, float y) {
+    escrever(FONTE_TITULO, texto, x, y, 28.0f, COR_AMARELO);
+    desenharParalelogramo(x, y + 36, 60, 4, 3, COR_VERMELHO);
+}
+
+/*
  * desenharComoJogar
- * Controles e dicas.
+ * Controles (com as teclas desenhadas) e dicas de pilotagem.
  * Recebe: nada (o fundo é desenhado antes, pelo main.c).
  * Devolve: nada.
  */
 void desenharComoJogar(void) {
-    escurecerTela(0.45f);
+    escurecerTela(0.7f, 0.55f, 0.75f);
+    desenharCabecalho("COMO JOGAR");
 
-    desenharTextoCentralizado("COMO JOGAR", 30, 40, COR_DESTAQUE);
+    /* ---- Controles ---- */
+    float x = 24.0f, topo = 100.0f;
+    desenharPainel(x, topo, 352, 444);
+    desenharTituloDePainel("CONTROLES", x + 20, topo + 14);
 
-    int x = 110;
-    DrawRectangleRounded((Rectangle){ x - 30, 96, LARGURA_TELA - 2 * (x - 30), 440 }, 0.06f, 8, COR_PAINEL);
-
-    const char *teclas[] = { "CIMA ou W", "BAIXO ou S", "ESQ/DIR ou A/D", "ESC" };
-    const char *acoes[] = { "acelerar", "frear", "virar", "abandonar a corrida" };
-    for (int i = 0; i < 4; i++) {
-        DrawText(teclas[i], x, 120 + i * 36, 22, COR_DESTAQUE);
-        DrawText(acoes[i], x + 240, 120 + i * 36, 22, COR_TEXTO);
+    const char *teclas[][4] = {
+        { "CIMA", "W", NULL },
+        { "BAIXO", "S", NULL },
+        { "ESQ", "DIR", "A", "D" },
+        { "ESC", NULL },
+        { "ENTER", NULL },
+    };
+    const char *acoes[] = { "ACELERAR", "FREAR", "VIRAR", "ABANDONAR A CORRIDA", "CONFIRMAR NOS MENUS" };
+    for (int i = 0; i < 5; i++) {
+        float y = topo + 78 + i * 70;
+        float xTecla = x + 20;
+        for (int t = 0; t < 4 && teclas[i][t] != NULL; t++) {
+            xTecla += desenharTecla(xTecla, y, teclas[i][t]) + 5;
+        }
+        escrever(FONTE_TITULO, acoes[i], x + 140, y - 2, 20.0f, COR_TEXTO_CLARO);
+        if (i < 4) {
+            DrawRectangleRec((Rectangle){ x + 20, y + 44, 312, 1 }, Fade(COR_CROMO, 0.15f));
+        }
     }
+
+    /* ---- Dicas ---- */
+    x = 392.0f;
+    desenharPainel(x, topo, 384, 444);
+    desenharTituloDePainel("DICAS", x + 20, topo + 14);
 
     const char *dicas[] = {
-        TextFormat("- %d voltas em Interlagos contra 7 rivais.", TOTAL_VOLTAS),
-        "  Voce larga em ultimo.",
-        "- Curva fechada em alta velocidade joga o carro",
-        "  para fora: freie antes de entrar nela.",
-        "- Na grama o carro nao passa de 75 km/h.",
-        "- Bater na traseira de outro carro tira velocidade.",
-        "- Na garagem, compare velocidade, aceleracao",
-        "  e aderencia antes de escolher o seu carro.",
+        TextFormat("%d voltas em Interlagos contra 7 rivais. Você larga em último.", TOTAL_VOLTAS),
+        "O carro acelera como um F1: forte na saída e cada vez menos perto dos 300 km/h.",
+        "Freie antes das curvas fechadas. Fumaça nos pneus quer dizer que o carro está quase escapando.",
+        "Na grama (sai poeira) o carro não passa de 75 km/h.",
+        "Bater na traseira de outro carro tira velocidade.",
+        "Na garagem, compare velocidade, aceleração e aderência antes de escolher.",
     };
-    for (int i = 0; i < 8; i++) {
-        DrawText(dicas[i], x, 280 + i * 30, 20, COR_TEXTO);
+    float y = topo + 72;
+    for (int i = 0; i < 6; i++) {
+        desenharParalelogramo(x + 20, y + 6, 10, 10, 4, COR_VERMELHO);
+        y = escreverComQuebra(FONTE_TEXTO, dicas[i], x + 40, y, 19.0f, 320, COR_TEXTO_CLARO) + 14;
     }
 
-    desenharDica("ENTER ou ESC: voltar ao menu");
+    Dica barra[] = {
+        { { "ENTER", "ESC", NULL }, "VOLTAR AO MENU" },
+    };
+    desenharBarraDeDicas(barra, 1);
 }
 
 /* ==================================================================
@@ -549,41 +774,66 @@ static float melhorVolta(Carro *carro) {
 }
 
 /*
+ * corDoPodio
+ * Recebe: a posição (0 = 1º lugar).
+ * Devolve: ouro, prata ou bronze para o pódio; grafite para o resto.
+ */
+static Color corDoPodio(int posicao) {
+    switch (posicao) {
+        case 0: return COR_OURO;
+        case 1: return COR_PRATA;
+        case 2: return COR_BRONZE;
+        default: return COR_GRAFITE;
+    }
+}
+
+/*
  * desenharLinhaDoResultado
- * Uma linha da tabela: posição, piloto, tempo total e melhor volta.
- * Quem ainda não chegou mostra em que volta está.
+ * Uma linha da tabela: posição (com a cor do pódio), piloto, tempo total
+ * e melhor volta. Quem ainda não chegou mostra em que volta está.
  * Recebe: a corrida, a posição (0 = 1º lugar) e a altura da linha.
  * Devolve: nada.
  */
-static void desenharLinhaDoResultado(Corrida *corrida, int posicao, int y) {
+static void desenharLinhaDoResultado(Corrida *corrida, int posicao, float y) {
     Carro *carro = corrida->classificacao[posicao];
     int ehJogador = (carro == &corrida->jogador);
-    Color cor = ehJogador ? COR_DESTAQUE : COR_TEXTO;
     char tempo[32];
 
     if (ehJogador) {
-        DrawRectangle(X_COLUNA_POSICAO - 16, y - 8, LARGURA_TELA - 2 * (X_COLUNA_POSICAO - 16),
-                      ALTURA_LINHA_RESULTADO - 4, COR_LINHA_MARCADA);
+        desenharParalelogramo(X_TABELA, y + 2, LARGURA_TABELA, ALTURA_LINHA_RESULTADO - 6, 10, COR_VERMELHO);
+        desenharParalelogramo(X_TABELA - 8, y + 2, 6, ALTURA_LINHA_RESULTADO - 6, 10, COR_AMARELO);
+    } else {
+        desenharParalelogramo(X_TABELA, y + 2, LARGURA_TABELA, ALTURA_LINHA_RESULTADO - 6, 10,
+                              Fade(COR_GRAFITE, posicao % 2 == 0 ? 0.85f : 0.7f));
     }
 
-    DrawText(TextFormat("%do", posicao + 1), X_COLUNA_POSICAO, y, 22, cor);
-    DrawText(ehJogador ? TextFormat("%s (VOCE)", carro->nome) : carro->nome,
-             X_COLUNA_PILOTO, y, 22, cor);
+    Color podio = corDoPodio(posicao);
+    desenharParalelogramo(X_TABELA + 12, y + 7, 46, 30, 7, podio);
+    escreverCentralizado(FONTE_TITULO, TextFormat("%dº", posicao + 1), X_TABELA + 38, y + 6, 24.0f,
+                         posicao < 3 ? COR_GRAFITE : COR_CROMO);
 
+    escrever(FONTE_TITULO, carro->nome, X_COLUNA_PILOTO, y + 6, 26.0f, COR_TEXTO_CLARO);
+    if (ehJogador) {
+        float x = X_COLUNA_PILOTO + larguraDoTexto(FONTE_TITULO, carro->nome, 26.0f) + 12;
+        desenharParalelogramo(x, y + 12, 52, 20, 5, COR_AMARELO);
+        escreverCentralizado(FONTE_FORTE, "VOCÊ", x + 28, y + 12, 15.0f, COR_GRAFITE);
+    }
+
+    Color corTempo = ehJogador ? COR_TEXTO_CLARO : COR_CROMO;
     if (carro->voltas >= TOTAL_VOLTAS) {
         formatarTempo(carro->tempoDeChegada, tempo, sizeof(tempo));
-        DrawText(tempo, X_COLUNA_TEMPO, y, 22, cor);
+        escrever(FONTE_FORTE, tempo, X_COLUNA_TEMPO, y + 8, 22.0f, corTempo);
     } else {
-        DrawText(TextFormat("volta %d/%d", voltaAtual(carro), TOTAL_VOLTAS),
-                 X_COLUNA_TEMPO, y, 22, COR_TEXTO_APAGADO);
+        escrever(FONTE_FORTE, TextFormat("VOLTA %d/%d", voltaAtual(carro), TOTAL_VOLTAS),
+                 X_COLUNA_TEMPO, y + 8, 22.0f, COR_TEXTO_FRACO);
     }
 
     float melhor = melhorVolta(carro);
     if (melhor > 0.0f) {
         formatarTempo(melhor, tempo, sizeof(tempo));
-        DrawText(tempo, X_COLUNA_MELHOR, y, 22, cor);
+        escrever(FONTE_FORTE, tempo, X_COLUNA_MELHOR, y + 8, 22.0f, corTempo);
     } else {
-        DrawText("-", X_COLUNA_MELHOR, y, 22, COR_TEXTO_APAGADO);
+        escrever(FONTE_FORTE, "-", X_COLUNA_MELHOR, y + 8, 22.0f, COR_TEXTO_FRACO);
     }
 }
 
@@ -598,28 +848,35 @@ static void desenharLinhaDoResultado(Corrida *corrida, int posicao, int y) {
  * Devolve: nada.
  */
 void desenharResultado(Corrida *corrida) {
-    escurecerTela(0.6f);
+    escurecerTela(0.75f, 0.6f, 0.8f);
 
     if (corrida->posicaoFinal == 1) {
-        desenharTextoCentralizado("KATCHAU! VOCE VENCEU!", 28, 40, COR_DESTAQUE);
+        desenharCabecalho("VOCÊ VENCEU!");
     } else {
-        desenharTextoCentralizado(TextFormat("VOCE CHEGOU EM %do", corrida->posicaoFinal), 28, 40, COR_DESTAQUE);
+        desenharCabecalho(TextFormat("VOCÊ CHEGOU EM %dº", corrida->posicaoFinal));
     }
 
-    int y = Y_CABECALHO - 30;
-    DrawText("POS", X_COLUNA_POSICAO, y, 18, COR_TEXTO_APAGADO);
-    DrawText("PILOTO", X_COLUNA_PILOTO, y, 18, COR_TEXTO_APAGADO);
-    DrawText("TEMPO", X_COLUNA_TEMPO, y, 18, COR_TEXTO_APAGADO);
-    DrawText("MELHOR VOLTA", X_COLUNA_MELHOR, y, 18, COR_TEXTO_APAGADO);
+    escrever(FONTE_FORTE, "POS", X_TABELA + 22, Y_TITULOS_TABELA - 8, 14.0f, COR_TEXTO_FRACO);
+    escrever(FONTE_FORTE, "PILOTO", X_COLUNA_PILOTO, Y_TITULOS_TABELA - 8, 14.0f, COR_TEXTO_FRACO);
+    escrever(FONTE_FORTE, "TEMPO", X_COLUNA_TEMPO, Y_TITULOS_TABELA - 8, 14.0f, COR_TEXTO_FRACO);
+    escrever(FONTE_FORTE, "MELHOR VOLTA", X_COLUNA_MELHOR, Y_TITULOS_TABELA - 8, 14.0f, COR_TEXTO_FRACO);
 
     for (int posicao = 0; posicao < TOTAL_CARROS; posicao++) {
-        desenharLinhaDoResultado(corrida, posicao, Y_CABECALHO + posicao * ALTURA_LINHA_RESULTADO);
+        desenharLinhaDoResultado(corrida, posicao, Y_PRIMEIRO_RESULTADO + posicao * ALTURA_LINHA_RESULTADO);
     }
 
     if (!todosChegaram(corrida)) {
-        desenharTextoCentralizado("os outros carros ainda estao terminando a prova...", 462, 18,
-                                  COR_TEXTO_APAGADO);
+        /* Pisca devagar, para mostrar que a tabela ainda vai mudar */
+        float alfa = 0.55f + 0.45f * sinf((float) GetTime() * 3.0f);
+        const char *aviso = "OS OUTROS CARROS AINDA ESTÃO TERMINANDO A PROVA...";
+        float largura = larguraDoTexto(FONTE_FORTE, aviso, 16.0f) + 40;
+        desenharParalelogramo(LARGURA_TELA / 2.0f - largura / 2, 502, largura, 26, 8, Fade(COR_GRAFITE, 0.9f));
+        escreverCentralizado(FONTE_FORTE, aviso, LARGURA_TELA / 2.0f + 4, 505, 16.0f, Fade(COR_CROMO, alfa));
     }
 
-    desenharDica("ENTER: correr de novo     ESC: menu");
+    Dica dicas[] = {
+        { { "ENTER", NULL }, "CORRER DE NOVO" },
+        { { "ESC", NULL }, "MENU" },
+    };
+    desenharBarraDeDicas(dicas, 2);
 }

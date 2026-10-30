@@ -27,6 +27,11 @@
 #define CURVA_FECHADA   1.5f   /* 60 segmentos fazem 90 graus  */
 #define CURVA_ABERTA    0.5f   /* 180 segmentos fazem 90 graus */
 
+/* Na vida real a zebra só existe nas curvas. Aqui, um segmento tem zebra
+ * quando vira pelo menos isto: a Reta Oposta (-0,04) e a Subida dos
+ * Boxes (-0,16) quase não viram e ficam sem; todas as curvas passam de 0,5. */
+#define CURVATURA_MINIMA_ZEBRA  0.3f
+
 /* Comprimento de cada segmento em "unidades de mundo".
  * Serve para o desenho (Fase 2) e para medir quanto um carro andou. */
 #define COMPRIMENTO_SEGMENTO  200.0f
@@ -36,8 +41,17 @@
 #define SEGMENTOS_POR_METRO   0.6f
 #define UNIDADES_POR_METRO    (COMPRIMENTO_SEGMENTO * SEGMENTOS_POR_METRO)
 
-/* Declarada só pelo nome por enquanto; a lista de obstáculos
- * de cada segmento é criada na Fase 5 (obstaculos.c). */
+/* Grid de largada, pintado no asfalto ANTES da linha de chegada, em
+ * zigue-zague (pares à esquerda, ímpares à direita). O lugar 0 (pole) é
+ * o mais perto da linha. As distâncias são múltiplas do segmento, então
+ * cada lugar cai bem no começo de um segmento. */
+#define LUGARES_NO_GRID       8
+#define DISTANCIA_DA_POLE     COMPRIMENTO_SEGMENTO            /* da pole até a linha */
+#define ESPACO_ENTRE_LUGARES  (2.0f * COMPRIMENTO_SEGMENTO)   /* de um lugar ao seguinte */
+#define LATERAL_DO_GRID       0.4f                            /* -0,4 à esquerda, +0,4 à direita */
+
+/* Declarada só pelo nome: a struct fica em obstaculos.h (objetos da
+ * beira da pista), que por sua vez precisa do Segmento daqui. */
 struct Obstaculo;
 
 /* Um nó da lista: um pedaço curto da pista. */
@@ -47,7 +61,7 @@ typedef struct Segmento {
     int ehLinhaDeChegada;           /* 1 no segmento da largada/chegada, 0 nos outros */
     float altura;                   /* altura do chão no começo do segmento (unidades de mundo) */
     const char *nomeTrecho;         /* nome da parte do autódromo ("S do Senna", "Junção"...) */
-    struct Obstaculo *obstaculos;   /* lista simples de obstáculos (Fase 5) */
+    struct Obstaculo *obstaculos;   /* lista simples dos objetos da beira (obstaculos.c) */
     struct Segmento *proximo;       /* segmento seguinte (o último aponta para o primeiro) */
     struct Segmento *anterior;      /* segmento anterior (o primeiro aponta para o último) */
 } Segmento;
@@ -80,6 +94,9 @@ Segmento *buscarSegmento(Pista *pista, int indice);
 Segmento *proximoSegmento(Segmento *segmento);
 Segmento *segmentoAnterior(Segmento *segmento);
 int contarSegmentos(Pista *pista);
+int temZebra(Segmento *segmento);
+float distanciaDoLugarAteALinha(int lugar);
+float lateralDoLugar(int lugar);
 void liberarPista(Pista *pista);
 
 /* ---------- Andar pela pista ---------- */

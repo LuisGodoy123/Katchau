@@ -21,6 +21,7 @@
 #include "render.h"
 #include "hud.h"
 #include "menu.h"
+#include "visual.h"
 
 /*
  * lerComandosDoTeclado
@@ -91,6 +92,7 @@ int main(int argc, char *argv[]) {
      * é aberto de outro lugar (por exemplo, com duplo clique). */
     ChangeDirectory(GetApplicationDirectory());
     carregarTexturas();
+    carregarVisual();   /* fontes e logo dos menus */
 
     Pista *pista = criarPista();
     Corrida corrida;
@@ -183,6 +185,7 @@ int main(int argc, char *argv[]) {
 
     liberarPista(pista);
     descarregarTexturas();
+    descarregarVisual();
     CloseWindow();
     return 0;
 }

@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "pista.h"
+#include "obstaculos.h"
 
 /* ==================================================================
  * Funções auxiliares (static = só podem ser usadas dentro deste arquivo)
@@ -110,6 +111,56 @@ void adicionarTrecho(Pista *pista, const char *nome, int quantidade, float curva
     }
 }
 
+/* Metade da janela da suavização das curvas: cada segmento passa a ter a
+ * média da curvatura dele e dos 10 vizinhos de cada lado (21 ao todo).
+ * A entrada e a saída das curvas viram rampas de ~21 segmentos (~35 m). */
+#define RAIO_DA_SUAVIZACAO  10
+
+/*
+ * suavizarCurvas
+ * Sem isto, a curvatura salta de 0 para o valor da curva no primeiro
+ * segmento dela: o carro leva o empurrão inteiro de uma vez e a estrada
+ * "dobra" de repente na tela. Aqui cada segmento recebe a média da
+ * curvatura dos vizinhos (média móvel), o que troca o degrau por uma
+ * rampa. A média móvel numa lista circular não muda a soma das
+ * curvaturas, então a volta continua virando -360 graus.
+ *
+ * As curvaturas originais vão antes para um vetor: a média precisa dos
+ * valores antigos dos vizinhos, e a lista não tem acesso por índice.
+ * Recebe: a pista.
+ * Devolve: nada (altera a curvatura de cada segmento).
+ */
+static void suavizarCurvas(Pista *pista) {
+    int total = contarSegmentos(pista);
+    if (total == 0) {
+        return;
+    }
+
+    float *original = (float *) malloc(total * sizeof(float));
+    if (original == NULL) {
+        printf("Erro: memoria insuficiente para suavizar a pista.\n");
+        exit(1);
+    }
+
+    Segmento *atual = pista->largada;
+    for (int i = 0; i < total; i++) {
+        original[i] = atual->curvatura;
+        atual = atual->proximo;
+    }
+
+    int janela = 2 * RAIO_DA_SUAVIZACAO + 1;
+    for (int i = 0; i < total; i++) {
+        float soma = 0.0f;
+        for (int vizinho = -RAIO_DA_SUAVIZACAO; vizinho <= RAIO_DA_SUAVIZACAO; vizinho++) {
+            soma += original[(i + vizinho + total) % total];   /* dá a volta, como a lista */
+        }
+        atual->curvatura = soma / janela;   /* "atual" voltou à largada, e anda junto com i */
+        atual = atual->proximo;
+    }
+
+    free(original);
+}
+
 /* Um trecho do autódromo com as medidas do mundo real. */
 typedef struct {
     const char *nome;
@@ -158,7 +209,8 @@ static const TrechoReal TRECHOS_INTERLAGOS[] = {
 
 /*
  * criarPista
- * Monta o Autódromo de Interlagos a partir da tabela TRECHOS_INTERLAGOS.
+ * Monta o Autódromo de Interlagos a partir da tabela TRECHOS_INTERLAGOS,
+ * suaviza a entrada e a saída das curvas e põe os objetos da beira da pista.
  * Cada trecho em metros vira um bloco de segmentos:
  *   quantidade = metros * SEGMENTOS_POR_METRO
  *   curvatura  = ângulo do trecho / quantidade (graus por segmento)
@@ -181,6 +233,8 @@ Pista *criarPista(void) {
         alturaAtual = alturaFinal;
     }
 
+    suavizarCurvas(pista);
+    decorarPista(pista);   /* árvores, pórtico, placas... (depois: as zebras dependem das curvas) */
     return pista;
 }
 
@@ -245,6 +299,7 @@ int removerSegmento(Pista *pista, Segmento *segmento) {
     /* Caso 1: único segmento (ele é o próprio vizinho) */
     if (segmento->proximo == segmento) {
         pista->largada = NULL;
+        liberarObstaculos(segmento);
         free(segmento);
         return 1;
     }
@@ -261,7 +316,7 @@ int removerSegmento(Pista *pista, Segmento *segmento) {
     segmento->anterior->proximo = segmento->proximo;
     segmento->proximo->anterior = segmento->anterior;
 
-    /* Fase 5: aqui também será liberada a lista de obstáculos */
+    liberarObstaculos(segmento);
     free(segmento);
 
     renumerarSegmentos(pista);
@@ -330,6 +385,36 @@ int contarSegmentos(Pista *pista) {
     } while (atual != pista->largada);
 
     return total;
+}
+
+/*
+ * temZebra
+ * Diz se o segmento é parte de uma curva, onde a pista tem zebra.
+ * Recebe: o segmento.
+ * Devolve: 1 se tem zebra, 0 se é reta (ou quase).
+ */
+int temZebra(Segmento *segmento) {
+    return segmento->curvatura >= CURVATURA_MINIMA_ZEBRA ||
+           segmento->curvatura <= -CURVATURA_MINIMA_ZEBRA;
+}
+
+/*
+ * distanciaDoLugarAteALinha
+ * Quanto um lugar do grid fica ANTES da linha de chegada.
+ * Recebe: o lugar (0 = pole).
+ * Devolve: a distância em unidades de mundo (sempre múltipla do segmento).
+ */
+float distanciaDoLugarAteALinha(int lugar) {
+    return DISTANCIA_DA_POLE + lugar * ESPACO_ENTRE_LUGARES;
+}
+
+/*
+ * lateralDoLugar
+ * Recebe: o lugar do grid (0 = pole).
+ * Devolve: o deslocamento lateral dele (pares à esquerda, ímpares à direita).
+ */
+float lateralDoLugar(int lugar) {
+    return (lugar % 2 == 0) ? -LATERAL_DO_GRID : LATERAL_DO_GRID;
 }
 
 /*
@@ -407,7 +492,7 @@ void liberarPista(Pista *pista) {
         Segmento *atual = pista->largada;
         while (atual != NULL) {
             Segmento *seguinte = atual->proximo;   /* guarda antes de liberar */
-            /* Fase 5: aqui também será liberada a lista de obstáculos */
+            liberarObstaculos(atual);
             free(atual);
             atual = seguinte;
         }
