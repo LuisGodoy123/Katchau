@@ -51,9 +51,11 @@ static Tela atualizarTelaDaCorrida(Corrida *corrida, float tempoQuadro) {
     atualizarCorrida(corrida, lerComandosDoTeclado(), tempoQuadro);
 
     if (IsKeyPressed(KEY_ESCAPE)) {
+        tocarSom(SOM_VOLTAR);
         return TELA_MENU;
     }
     if (corrida->terminou && (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER))) {
+        tocarSom(SOM_CONFIRMAR);
         return TELA_RESULTADO;
     }
     return TELA_CORRIDA;

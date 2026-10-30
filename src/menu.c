@@ -418,7 +418,7 @@ Tela atualizarMenuPrincipal(EstadoMenu *menu) {
         menu->opcaoMenu = sobre;
     }
     if (menu->opcaoMenu != opcaoAnterior) {
-        tocarSomCursor();
+        tocarSom(SOM_CURSOR);
     }
 
     /* Cada opção acende ao ser marcada e apaga ao perder a marcação */
@@ -428,9 +428,11 @@ Tela atualizarMenuPrincipal(EstadoMenu *menu) {
 
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && sobre >= 0) {
         menu->opcaoMenu = sobre;
+        tocarSom(SOM_CONFIRMAR);
         return DESTINOS_OPCOES[sobre];
     }
     if (apertouConfirmar()) {
+        tocarSom(SOM_CONFIRMAR);
         return DESTINOS_OPCOES[menu->opcaoMenu];
     }
     return TELA_MENU;
@@ -622,24 +624,27 @@ Tela atualizarGaragem(EstadoMenu *menu) {
         menu->selecionado = linha;
     }
     if (menu->selecionado != linhaAnterior) {
-        tocarSomCursor();
+        tocarSom(SOM_CURSOR);
     }
     /* O mouse entrando numa aba ou no VOLTAR também faz o "tic" */
     if ((aba >= 0 && aba != menu->abaAnterior) || (voltar && !menu->voltarAnterior)) {
-        tocarSomCursor();
+        tocarSom(SOM_CURSOR);
     }
     menu->abaAnterior = aba;
     menu->voltarAnterior = voltar;
 
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
         if (voltar) {
+            tocarSom(SOM_VOLTAR);
             return TELA_MENU;
         }
         if (aba >= 0 && aba != (int) menu->criterio) {
             menu->criterio = (Atributo) aba;
             reordenarGaragem(menu);
+            tocarSom(SOM_CONFIRMAR);
         } else if (aba < 0 && linha >= 0) {
             menu->carroEscolhido = numeroDaFicha(menu->garagem[linha]);
+            tocarSom(SOM_CONFIRMAR);
             return TELA_MENU;
         }
     }
@@ -656,19 +661,21 @@ Tela atualizarGaragem(EstadoMenu *menu) {
     if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_D)) {
         menu->criterio = (menu->criterio + 1) % TOTAL_ATRIBUTOS;
         reordenarGaragem(menu);
-        tocarSomCursor();
+        tocarSom(SOM_CURSOR);
     }
     if (IsKeyPressed(KEY_LEFT) || IsKeyPressed(KEY_A)) {
         menu->criterio = (menu->criterio + TOTAL_ATRIBUTOS - 1) % TOTAL_ATRIBUTOS;
         reordenarGaragem(menu);
-        tocarSomCursor();
+        tocarSom(SOM_CURSOR);
     }
 
     if (apertouConfirmar()) {
         menu->carroEscolhido = numeroDaFicha(menu->garagem[menu->selecionado]);
+        tocarSom(SOM_CONFIRMAR);
         return TELA_MENU;
     }
     if (apertouVoltar()) {
+        tocarSom(SOM_VOLTAR);
         return TELA_MENU;
     }
     return TELA_GARAGEM;
@@ -904,6 +911,7 @@ void desenharGaragem(EstadoMenu *menu) {
  */
 Tela atualizarComoJogar(void) {
     if (apertouConfirmar() || apertouVoltar()) {
+        tocarSom(SOM_VOLTAR);
         return TELA_MENU;
     }
     return TELA_COMO_JOGAR;
@@ -992,9 +1000,11 @@ void desenharComoJogar(void) {
  */
 Tela atualizarResultado(void) {
     if (apertouConfirmar()) {
+        tocarSom(SOM_CONFIRMAR);
         return TELA_CORRIDA;
     }
     if (apertouVoltar()) {
+        tocarSom(SOM_VOLTAR);
         return TELA_MENU;
     }
     return TELA_RESULTADO;

@@ -9,13 +9,17 @@
 #include "audio.h"
 
 #define ARQUIVO_MUSICA_MENU   "recursos/sons/menu_theme.mp3"
-#define ARQUIVO_SOM_CURSOR    "recursos/sons/cursor.wav"
-#define VOLUME_SOM_CURSOR     0.7f
+#define VOLUME_SONS           0.7f   /* volume dos efeitos (0 a 1) */
 #define VOLUME_MUSICA_MENU    0.6f   /* volume máximo da música (0 a 1) */
 #define VELOCIDADE_FADE       1.5f   /* 1/s: o fade leva ~0,7 s */
 
-static Sound somCursor;
-static int somCursorCarregado = 0;
+static const char *ARQUIVOS_SONS[TOTAL_SONS] = {
+    "recursos/sons/cursor.wav",
+    "recursos/sons/confirmar.wav",
+    "recursos/sons/voltar.wav"
+};
+static Sound sons[TOTAL_SONS];
+static int somCarregado[TOTAL_SONS];
 static Music musicaMenu;
 static int musicaCarregada = 0;
 static int iniciada = 0;     /* já foi dado o Play alguma vez */
@@ -36,11 +40,13 @@ void carregarAudio(void) {
         return;
     }
 
-    if (FileExists(ARQUIVO_SOM_CURSOR)) {
-        somCursor = LoadSound(ARQUIVO_SOM_CURSOR);
-        somCursorCarregado = IsSoundValid(somCursor);
-        if (somCursorCarregado) {
-            SetSoundVolume(somCursor, VOLUME_SOM_CURSOR);
+    for (int i = 0; i < TOTAL_SONS; i++) {
+        if (FileExists(ARQUIVOS_SONS[i])) {
+            sons[i] = LoadSound(ARQUIVOS_SONS[i]);
+            somCarregado[i] = IsSoundValid(sons[i]);
+            if (somCarregado[i]) {
+                SetSoundVolume(sons[i], VOLUME_SONS);
+            }
         }
     }
 
@@ -91,16 +97,16 @@ void atualizarAudio(int musicaDoMenu) {
 }
 
 /*
- * tocarSomCursor
- * O "tic" de quando o cursor passa para outra opção do menu. Se tocar de
- * novo antes de acabar, recomeça (passar rápido pelas opções não empilha sons).
- * Recebe: nada.
+ * tocarSom
+ * Toca um efeito dos menus. Se o mesmo som tocar de novo antes de acabar,
+ * recomeça (passar rápido pelas opções não empilha sons).
+ * Recebe: qual som.
  * Devolve: nada.
  */
-void tocarSomCursor(void) {
-    if (somCursorCarregado) {
-        StopSound(somCursor);
-        PlaySound(somCursor);
+void tocarSom(TipoSom som) {
+    if (somCarregado[som]) {
+        StopSound(sons[som]);
+        PlaySound(sons[som]);
     }
 }
 
@@ -112,9 +118,11 @@ void tocarSomCursor(void) {
  * Devolve: nada.
  */
 void descarregarAudio(void) {
-    if (somCursorCarregado) {
-        UnloadSound(somCursor);
-        somCursorCarregado = 0;
+    for (int i = 0; i < TOTAL_SONS; i++) {
+        if (somCarregado[i]) {
+            UnloadSound(sons[i]);
+            somCarregado[i] = 0;
+        }
     }
     if (musicaCarregada) {
         UnloadMusicStream(musicaMenu);
