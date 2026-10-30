@@ -12,7 +12,7 @@ CFLAGS = -std=c99 -Wall -Wextra -g -Isrc
 
 # Módulos de lógica: não usam a raylib (regra 2 do roadmap)
 LOGICA = src/pista.c src/obstaculos.c src/carro.c src/ia.c \
-         src/ordenacao.c src/corrida.c
+         src/ordenacao.c src/corrida.c src/motor.c
 
 # Módulos que desenham na tela
 DESENHO = src/render.c src/hud.c src/menu.c src/visual.c src/audio.c

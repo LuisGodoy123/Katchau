@@ -5,7 +5,8 @@
  * audio.h
  * ------------------------------------------------------------------
  * Sons do KATCHAU: os efeitos dos menus (cursor, confirmar e voltar), o
- * motor esquentando e o "3... 2... 1... GO!" da largada (o motor é
+ * motor do carro (que acompanha a rotação e a carga do jogador), o motor
+ * esquentando e o "3... 2... 1... GO!" da largada (o motor é
  * provisório, até haver o som do carro), a música de fundo da corrida e a
  * música dos menus, que toca nas telas de menu, some aos poucos quando a
  * corrida começa e volta de onde parou quando o jogador retorna aos menus.
@@ -26,6 +27,7 @@ void carregarAudio(void);
 void atualizarAudio(int musicaDoMenu);
 void tocarSom(TipoSom som);
 void atualizarSonsDaCorrida(int motorAtivo, int contagemAtiva, int musicaAtiva);
+void atualizarSomDoMotor(int ativo, float giro, float carga);
 void descarregarAudio(void);
 
 #endif

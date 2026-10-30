@@ -120,7 +120,8 @@ src/
   hud.c/.h         posições, volta e setores, mini-mapa e velocímetro  (fases 3 a 6)
   menu.c/.h        menu, garagem, como jogar e tela de resultado       (fase 6)
   visual.c/.h      identidade visual: cores, fontes, logo e formas     (fase 6)
-  audio.c/.h       música dos menus (toca nos menus, some na corrida)
+  motor.c/.h       rotação, marcha e carga do motor do jogador (lógica do som do carro)
+  audio.c/.h       música, efeitos dos menus, largada e o som do motor do carro
 testes/
   teste_pista.c    testa pista, carro, corrida, IA e ordenação no terminal
 recursos/

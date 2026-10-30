@@ -18,6 +18,7 @@
 #include "pista.h"
 #include "carro.h"
 #include "corrida.h"
+#include "motor.h"
 #include "render.h"
 #include "hud.h"
 #include "menu.h"
@@ -100,6 +101,8 @@ int main(int argc, char *argv[]) {
 
     Pista *pista = criarPista();
     Corrida corrida;
+    Motor motor;   /* rotação e carga do motor do jogador, para o som */
+    iniciarMotor(&motor);
     EstadoMenu menu;
     iniciarMenu(&menu);
     Tela tela = TELA_MENU;
@@ -138,6 +141,7 @@ int main(int argc, char *argv[]) {
         /* Entrar na corrida (do menu ou do "correr de novo") sempre começa uma nova */
         if (proxima == TELA_CORRIDA && tela != TELA_CORRIDA) {
             iniciarCorrida(&corrida, pista, menu.carroEscolhido);
+            iniciarMotor(&motor);
         }
         tela = proxima;
 
@@ -152,14 +156,21 @@ int main(int argc, char *argv[]) {
         /* A música toca nos menus e some quando a corrida começa */
         atualizarAudio(tela == TELA_MENU || tela == TELA_GARAGEM || tela == TELA_COMO_JOGAR);
 
-        /* Sons da corrida: o motor toca desde que a corrida abre até o fim do KATCHAU!;
-         * o "3... 2... 1... GO!" começa junto com o número 3 na tela;
-         * a música de fundo entra na largada e sai quando o jogador chega */
-        int naLargada = (tela == TELA_CORRIDA &&
-                         (corrida.contagemRegressiva > 0.0f || corrida.tempoDeCorrida < DURACAO_GRITO_LARGADA));
-        int naContagem = (naLargada && corrida.contagemRegressiva < NUMEROS_DA_CONTAGEM * SEGUNDOS_POR_NUMERO);
-        int naCorrida = (tela == TELA_CORRIDA && corrida.contagemRegressiva <= 0.0f && !corrida.terminou);
-        atualizarSonsDaCorrida(naLargada, naContagem, naCorrida);
+        /* Sons da corrida:
+         *  - antes do GO, o motor em marcha lenta (som provisório) e o "3... 2... 1... GO!",
+         *    que começa junto com o número 3 na tela e vai até o fim do KATCHAU!;
+         *  - do GO em diante, o motor de verdade, que segue a rotação e a carga do carro do
+         *    jogador, e a música de fundo (que sai quando o jogador chega) */
+        int naCorrida = (tela == TELA_CORRIDA);
+        int antesDoGo = (naCorrida && corrida.contagemRegressiva > 0.0f);
+        int depoisDoGo = (naCorrida && corrida.contagemRegressiva <= 0.0f);
+        int naContagem = (naCorrida && corrida.contagemRegressiva < NUMEROS_DA_CONTAGEM * SEGUNDOS_POR_NUMERO &&
+                          (antesDoGo || corrida.tempoDeCorrida < DURACAO_GRITO_LARGADA));
+        if (naCorrida) {
+            atualizarMotor(&motor, &corrida.jogador, tempoQuadro);
+        }
+        atualizarSonsDaCorrida(antesDoGo, naContagem, depoisDoGo && !corrida.terminou);
+        atualizarSomDoMotor(depoisDoGo, motor.giro, motor.carga);
 
         /* ---- 2) Desenhar a tela atual ----
          * Primeiro o "mundo" (pista e carros), na resolução real da tela.

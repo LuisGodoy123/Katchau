@@ -22,6 +22,7 @@
 #include "ordenacao.h"
 #include "ia.h"
 #include "obstaculos.h"
+#include "motor.h"
 
 #define TOTAL_VOLTAS          3
 #define GRAUS_VOLTA_COMPLETA  -360.0f  /* Interlagos é anti-horário: vira 360 graus para a esquerda */
@@ -880,6 +881,81 @@ static void testarSetoresEIntervalos(void) {
     liberarPista(pista);
 }
 
+/* ---------- Motor (rotação, marcha e carga para o som) ---------- */
+static void testarMotor(void) {
+    printf("\n[Teste] Motor do jogador (rotacao, marchas e carga)\n");
+
+    Carro carro = { 0 };
+    carro.velocidadeMaxima = 12000.0f;
+    Motor motor;
+    iniciarMotor(&motor);
+    float quadro = 1.0f / 60.0f;
+
+    /* Parado e sem acelerar: marcha lenta, na 1ª, sem carga */
+    for (int i = 0; i < 60; i++) {
+        atualizarMotor(&motor, &carro, quadro);
+    }
+    verificar(motor.marcha == 0 && motor.giro < 0.2f && motor.carga < 0.05f, "parado: 1a marcha, rotacao baixa, sem carga");
+
+    /* Pé no fundo parado: a rotação sobe antes do carro andar */
+    carro.ultimosComandos.acelerar = 1;
+    for (int i = 0; i < 60; i++) {
+        atualizarMotor(&motor, &carro, quadro);
+    }
+    verificar(motor.giro > 0.45f && motor.carga > 0.9f, "pe no fundo parado: o motor sobe e pega carga");
+
+    /* Arrancada: a velocidade sobe até a máxima, as marchas vão passando */
+    int trocas = 0, quedas = 0, ultimaMarcha = motor.marcha, giroMaximo = 0;
+    float giroAntes = motor.giro, maiorQueda = 0.0f;
+    int marchaMontonica = 1;
+    for (int i = 0; i < 60 * 14; i++) {
+        carro.velocidade += (carro.velocidadeMaxima / 12.0f) * quadro;
+        if (carro.velocidade > carro.velocidadeMaxima) {
+            carro.velocidade = carro.velocidadeMaxima;
+        }
+        atualizarMotor(&motor, &carro, quadro);
+        if (motor.marcha != ultimaMarcha) {
+            if (motor.marcha < ultimaMarcha) {
+                marchaMontonica = 0;
+            }
+            trocas++;
+            ultimaMarcha = motor.marcha;
+        }
+        if (motor.giro < giroAntes - 0.01f) {
+            quedas++;
+            if (giroAntes - motor.giro > maiorQueda) {
+                maiorQueda = giroAntes - motor.giro;
+            }
+        }
+        if (motor.giro > 1.0f) {
+            giroMaximo = 1;
+        }
+        giroAntes = motor.giro;
+    }
+    verificar(motor.marcha == TOTAL_MARCHAS - 1, "na velocidade maxima o motor esta na ultima marcha");
+    verificar(trocas == TOTAL_MARCHAS - 1 && marchaMontonica, "acelerando, o cambio sobe uma marcha por vez, sem voltar");
+    verificar(quedas > 0 && motor.giro > 0.9f, "a rotacao cai quando o cambio troca e volta ao limite no fim");
+    verificar(!giroMaximo, "a rotacao nunca passa de 1");
+
+    /* Soltar o pé: a carga some e a rotação cai */
+    carro.ultimosComandos.acelerar = 0;
+    for (int i = 0; i < 30; i++) {
+        atualizarMotor(&motor, &carro, quadro);
+    }
+    verificar(motor.carga < 0.05f, "pe fora do acelerador: sem carga");
+
+    /* Freando forte, o motor reduz as marchas até a 1ª */
+    carro.ultimosComandos.frear = 1;
+    for (int i = 0; i < 60 * 4; i++) {
+        carro.velocidade -= 12000.0f * quadro;
+        if (carro.velocidade < 0.0f) {
+            carro.velocidade = 0.0f;
+        }
+        atualizarMotor(&motor, &carro, quadro);
+    }
+    verificar(motor.marcha == 0 && motor.giro < 0.2f, "parado de novo: volta para a 1a e para a marcha lenta");
+}
+
 int main(int argc, char *argv[]) {
     int modoDetalhado = (argc > 1 && strcmp(argv[1], "-v") == 0);
 
@@ -899,6 +975,7 @@ int main(int argc, char *argv[]) {
     testarDirigibilidade();
     testarGridDeLargada();
     testarSetoresEIntervalos();
+    testarMotor();
 
     if (totalFalhas == 0) {
         printf("\nTodos os testes passaram.\n");

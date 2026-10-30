@@ -5,6 +5,7 @@
  * ------------------------------------------------------------------
  */
 
+#include <math.h>
 #include "raylib.h"
 #include "audio.h"
 
@@ -38,6 +39,25 @@ static SomDeCorrida somCorrida[TOTAL_SONS_CORRIDA] = {
     [CORRIDA_MUSICA] = { .arquivo = "recursos/sons/musica_corrida.mp3", .volumeMaximo = 0.5f,
                          .velocidadeFade = 1.0f, .repetir = 1 },
 };
+
+/* O motor do carro: dois loops da mesma rotação, um com o motor sob carga e
+ * outro aliviado (freio-motor). Os dois tocam sempre e o volume de cada um
+ * segue o pé do piloto; o tom dos dois segue a rotação. */
+#define ARQUIVO_MOTOR_ACELERANDO "recursos/sons/motor_acelerando.wav"
+#define ARQUIVO_MOTOR_ALIVIANDO  "recursos/sons/motor_aliviando.wav"
+#define VOLUME_MOTOR             0.65f   /* volume máximo do motor (0 a 1) */
+#define VOLUME_ALIVIADO          0.80f   /* o loop aliviado soa mais forte que o outro; aqui ele é baixado */
+#define PITCH_MARCHA_LENTA       0.70f   /* tom dos loops com a rotação mínima (1.0 = como gravado) */
+#define PITCH_LIMITADOR          2.00f   /* ...e no limitador */
+#define VELOCIDADE_ENTRADA_MOTOR 4.0f    /* 1/s: o motor entra em ~0,25 s */
+#define VELOCIDADE_SAIDA_MOTOR   3.0f    /* 1/s: e sai em ~0,3 s */
+
+static Music motorAcelerando;
+static Music motorAliviando;
+static int motorSomCarregado = 0;
+static int motorSomTocando = 0;
+static int motorSomAtivoAntes = 0;
+static float entradaMotor = 0.0f;   /* 0 a 1: o fade de entrada e saída */
 
 static const char *ARQUIVOS_SONS[TOTAL_SONS] = {
     "recursos/sons/cursor.wav",
@@ -84,6 +104,14 @@ void carregarAudio(void) {
                 somCorrida[i].musica.looping = somCorrida[i].repetir;
             }
         }
+    }
+
+    if (FileExists(ARQUIVO_MOTOR_ACELERANDO) && FileExists(ARQUIVO_MOTOR_ALIVIANDO)) {
+        motorAcelerando = LoadMusicStream(ARQUIVO_MOTOR_ACELERANDO);
+        motorAliviando = LoadMusicStream(ARQUIVO_MOTOR_ALIVIANDO);
+        motorSomCarregado = IsMusicValid(motorAcelerando) && IsMusicValid(motorAliviando);
+        motorAcelerando.looping = true;
+        motorAliviando.looping = true;
     }
 
     if (!FileExists(ARQUIVO_MUSICA_MENU)) {
@@ -199,6 +227,63 @@ void atualizarSonsDaCorrida(int motorAtivo, int contagemAtiva, int musicaAtiva) 
 }
 
 /*
+ * atualizarSomDoMotor
+ * Chamar uma vez por quadro. Liga os dois loops do motor do carro e faz
+ * o som acompanhar o motor:
+ *   - o tom sobe com a rotação (e cai quando o câmbio troca de marcha);
+ *   - com o pé no fundo toca o loop "acelerando" e, ao soltar ou frear,
+ *     o som passa aos poucos para o "aliviando" (mistura de potência igual);
+ *   - o motor fica mais alto quanto mais gira.
+ * Ao ficar inativo, o som some em ~0,3 s e para.
+ * Recebe: se o motor deve soar, a rotação e a carga (0 a 1, de motor.h).
+ * Devolve: nada.
+ */
+void atualizarSomDoMotor(int ativo, float giro, float carga) {
+    if (!motorSomCarregado) {
+        return;
+    }
+
+    if (ativo && !motorSomAtivoAntes) {
+        StopMusicStream(motorAcelerando);
+        StopMusicStream(motorAliviando);
+        PlayMusicStream(motorAcelerando);
+        PlayMusicStream(motorAliviando);
+        motorSomTocando = 1;
+        entradaMotor = 0.0f;
+    }
+    motorSomAtivoAntes = ativo;
+    if (!motorSomTocando) {
+        return;
+    }
+
+    float passo = GetFrameTime();
+    if (ativo) {
+        entradaMotor = fminf(entradaMotor + passo * VELOCIDADE_ENTRADA_MOTOR, 1.0f);
+    } else {
+        entradaMotor -= passo * VELOCIDADE_SAIDA_MOTOR;
+        if (entradaMotor <= 0.0f) {
+            StopMusicStream(motorAcelerando);
+            StopMusicStream(motorAliviando);
+            motorSomTocando = 0;
+            entradaMotor = 0.0f;
+            return;
+        }
+    }
+
+    giro = fminf(fmaxf(giro, 0.0f), 1.0f);
+    carga = fminf(fmaxf(carga, 0.0f), 1.0f);
+    float pitch = PITCH_MARCHA_LENTA + (PITCH_LIMITADOR - PITCH_MARCHA_LENTA) * giro;
+    float forca = VOLUME_MOTOR * entradaMotor * (0.5f + 0.5f * giro);
+
+    SetMusicPitch(motorAcelerando, pitch);
+    SetMusicPitch(motorAliviando, pitch);
+    SetMusicVolume(motorAcelerando, forca * sqrtf(carga));
+    SetMusicVolume(motorAliviando, forca * VOLUME_ALIVIADO * sqrtf(1.0f - carga));
+    UpdateMusicStream(motorAcelerando);
+    UpdateMusicStream(motorAliviando);
+}
+
+/*
  * descarregarAudio
  * Devolve a memória dos sons e fecha o dispositivo de som. Chamar antes
  * de CloseWindow.
@@ -217,6 +302,11 @@ void descarregarAudio(void) {
             UnloadMusicStream(somCorrida[i].musica);
             somCorrida[i].carregado = 0;
         }
+    }
+    if (motorSomCarregado) {
+        UnloadMusicStream(motorAcelerando);
+        UnloadMusicStream(motorAliviando);
+        motorSomCarregado = 0;
     }
     if (musicaCarregada) {
         UnloadMusicStream(musicaMenu);
