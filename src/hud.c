@@ -550,9 +550,12 @@ static void desenharVelocimetro(Corrida *corrida) {
 static void desenharContagemRegressiva(Corrida *corrida) {
     const char *texto = NULL;
     if (corrida->contagemRegressiva > 0.0f) {
-        /* Cada número ocupa SEGUNDOS_POR_NUMERO: com 1,5 s por número, 4,4 s restantes
-         * mostra "3"; 2,9 s mostra "2"; 1,4 s mostra "1" */
-        texto = TextFormat("%d", (int) (corrida->contagemRegressiva / SEGUNDOS_POR_NUMERO) + 1);
+        /* Nos primeiros ESPERA_ANTES_DA_CONTAGEM segundos não aparece nada (só o motor).
+         * Depois cada número ocupa SEGUNDOS_POR_NUMERO: com 1 s por número, 2,9 s
+         * restantes mostra "3"; 1,9 s mostra "2"; 0,9 s mostra "1" */
+        if (corrida->contagemRegressiva < NUMEROS_DA_CONTAGEM * SEGUNDOS_POR_NUMERO) {
+            texto = TextFormat("%d", (int) (corrida->contagemRegressiva / SEGUNDOS_POR_NUMERO) + 1);
+        }
     } else if (corrida->tempoDeCorrida < DURACAO_GRITO_LARGADA) {
         texto = "KATCHAU!";
     }

@@ -152,9 +152,12 @@ int main(int argc, char *argv[]) {
         /* A música toca nos menus e some quando a corrida começa */
         atualizarAudio(tela == TELA_MENU || tela == TELA_GARAGEM || tela == TELA_COMO_JOGAR);
 
-        /* O motor esquentando toca só no 3, 2, 1 e no KATCHAU! da largada */
-        atualizarSomDaLargada(tela == TELA_CORRIDA &&
-                              (corrida.contagemRegressiva > 0.0f || corrida.tempoDeCorrida < DURACAO_GRITO_LARGADA));
+        /* Sons da largada: o motor toca desde que a corrida abre até o fim do KATCHAU!;
+         * o "3... 2... 1... GO!" começa junto com o número 3 na tela */
+        int naLargada = (tela == TELA_CORRIDA &&
+                         (corrida.contagemRegressiva > 0.0f || corrida.tempoDeCorrida < DURACAO_GRITO_LARGADA));
+        int naContagem = (naLargada && corrida.contagemRegressiva < NUMEROS_DA_CONTAGEM * SEGUNDOS_POR_NUMERO);
+        atualizarSonsDaLargada(naLargada, naContagem);
 
         /* ---- 2) Desenhar a tela atual ----
          * Primeiro o "mundo" (pista e carros), na resolução real da tela.
