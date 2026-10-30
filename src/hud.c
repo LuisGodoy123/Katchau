@@ -65,6 +65,21 @@ void comecarInterface(int centralizada) {
 }
 
 /*
+ * posicaoDoMouseNaInterface
+ * Onde o mouse está, em coordenadas do quadro 800x600 centralizado dos
+ * menus (o mesmo sistema de comecarInterface(1)).
+ * Recebe: onde guardar o x e o y.
+ * Devolve: nada.
+ */
+void posicaoDoMouseNaInterface(float *x, float *y) {
+    float zoom = escalaDaInterface();
+    float deslocX = (GetScreenWidth() - LARGURA_TELA * zoom) / 2.0f;
+    float deslocY = (GetScreenHeight() - ALTURA_TELA * zoom) / 2.0f;
+    *x = (GetMouseX() - deslocX) / zoom;
+    *y = (GetMouseY() - deslocY) / zoom;
+}
+
+/*
  * terminarInterface
  * Volta a desenhar em pixels reais da tela.
  * Recebe: nada.

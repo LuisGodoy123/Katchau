@@ -24,9 +24,12 @@ typedef enum {
     TELA_SAIR
 } Tela;
 
+#define TOTAL_OPCOES 4   /* CORRER, GARAGEM, COMO JOGAR, SAIR */
+
 /* O que as telas de menu precisam lembrar entre um quadro e outro. */
 typedef struct {
     int opcaoMenu;                              /* item marcado no menu principal */
+    float destaque[TOTAL_OPCOES];               /* 0 a 1: quanto cada opção já "acendeu" (animação) */
     int carroEscolhido;                         /* número do carro do jogador (0 a 7) */
     Atributo criterio;                          /* por qual atributo a garagem está ordenada */
     const FichaTecnica *garagem[TOTAL_CARROS];  /* as fichas, na ordem do Merge Sort */

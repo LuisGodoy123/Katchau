@@ -31,8 +31,8 @@
 #define Y_CABECALHO           22.0f
 
 /* ---------- Menu principal ---------- */
-#define TOTAL_OPCOES          4
-#define LARGURA_LOGO          440.0f
+#define VELOCIDADE_DESTAQUE   7.0f    /* 1/s: a animação de uma opção leva ~0,15 s */
+#define LARGURA_LOGO         440.0f
 #define Y_PRIMEIRA_OPCAO      284.0f
 #define ESPACO_OPCOES         56.0f
 #define ALTURA_OPCAO          44.0f
@@ -312,6 +312,9 @@ static int numeroDaFicha(const FichaTecnica *ficha) {
  */
 void iniciarMenu(EstadoMenu *menu) {
     menu->opcaoMenu = 0;
+    for (int i = 0; i < TOTAL_OPCOES; i++) {
+        menu->destaque[i] = (i == menu->opcaoMenu) ? 1.0f : 0.0f;
+    }
     menu->carroEscolhido = 0;
     menu->criterio = ATRIBUTO_VELOCIDADE;
     for (int numero = 0; numero < TOTAL_CARROS; numero++) {
@@ -322,13 +325,59 @@ void iniciarMenu(EstadoMenu *menu) {
 }
 
 /*
+ * opcaoSobOMouse
+ * Descobre qual botão do menu principal está embaixo do mouse. A área de
+ * cada botão é sempre a do tamanho "marcado", para o botão não piscar
+ * quando o mouse está na borda enquanto ele cresce.
+ * Recebe: nada.
+ * Devolve: o índice da opção, ou -1 se o mouse não está em nenhuma.
+ */
+static int opcaoSobOMouse(void) {
+    float mouseX, mouseY;
+    posicaoDoMouseNaInterface(&mouseX, &mouseY);
+
+    float x = (LARGURA_TELA - LARGURA_OPCAO_MARCADA) / 2.0f - INCLINACAO / 2.0f;
+    for (int i = 0; i < TOTAL_OPCOES; i++) {
+        float y = Y_PRIMEIRA_OPCAO + i * ESPACO_OPCOES;
+        if (mouseX >= x && mouseX <= x + LARGURA_OPCAO_MARCADA + INCLINACAO &&
+            mouseY >= y && mouseY <= y + ALTURA_OPCAO) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+/*
  * atualizarMenuPrincipal
- * Cima/baixo trocam a opção; ENTER entra nela.
+ * Cima/baixo ou o mouse trocam a opção; ENTER ou o clique entram nela.
+ * O mouse só marca uma opção quando se mexe, para não brigar com o
+ * teclado quando ele está parado em cima de um botão.
  * Recebe: o estado do menu.
  * Devolve: a próxima tela.
  */
 Tela atualizarMenuPrincipal(EstadoMenu *menu) {
     menu->opcaoMenu = andarNaLista(menu->opcaoMenu, TOTAL_OPCOES);
+
+    Vector2 movimento = GetMouseDelta();
+    int sobre = opcaoSobOMouse();
+    if (sobre >= 0 && (movimento.x != 0.0f || movimento.y != 0.0f)) {
+        menu->opcaoMenu = sobre;
+    }
+
+    /* Cada opção acende ao ser marcada e apaga ao perder a marcação */
+    float passo = GetFrameTime() * VELOCIDADE_DESTAQUE;
+    for (int i = 0; i < TOTAL_OPCOES; i++) {
+        if (i == menu->opcaoMenu) {
+            menu->destaque[i] = fminf(menu->destaque[i] + passo, 1.0f);
+        } else {
+            menu->destaque[i] = fmaxf(menu->destaque[i] - passo, 0.0f);
+        }
+    }
+
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && sobre >= 0) {
+        menu->opcaoMenu = sobre;
+        return DESTINOS_OPCOES[sobre];
+    }
     if (apertouConfirmar()) {
         return DESTINOS_OPCOES[menu->opcaoMenu];
     }
@@ -337,29 +386,39 @@ Tela atualizarMenuPrincipal(EstadoMenu *menu) {
 
 /*
  * desenharOpcao
- * Um botão do menu principal. O marcado é vermelho, mais largo, com um
- * fio amarelo na frente e setinhas andando dos dois lados.
- * Recebe: o texto, a altura (y) e se está marcado.
+ * Um botão do menu principal. Conforme o destaque sobe de 0 a 1, o botão
+ * cresce (com um pequeno "tranco" no meio), fica vermelho, ganha o fio
+ * amarelo na frente e, no fim, as setinhas andando dos dois lados.
+ * Recebe: o texto, a altura (y) e o destaque (0 a 1).
  * Devolve: nada.
  */
-static void desenharOpcao(const char *texto, float y, int marcado) {
+static void desenharOpcao(const char *texto, float y, float destaque) {
     float centro = LARGURA_TELA / 2.0f;
-    float largura = marcado ? LARGURA_OPCAO_MARCADA : LARGURA_OPCAO;
+    float suave = destaque * destaque * (3.0f - 2.0f * destaque);   /* começa e termina devagar */
+    float tranco = sinf(destaque * PI) * 6.0f;                      /* incha um pouco no meio da animação */
+    float largura = LARGURA_OPCAO + (LARGURA_OPCAO_MARCADA - LARGURA_OPCAO) * suave + tranco;
     float x = centro - largura / 2.0f - INCLINACAO / 2.0f;
 
-    if (marcado) {
-        desenharParalelogramo(x, y, largura, ALTURA_OPCAO, INCLINACAO, COR_VERMELHO);
+    desenharParalelogramo(x, y, largura, ALTURA_OPCAO, INCLINACAO, ColorLerp(COR_PAINEL, COR_VERMELHO, suave));
+    if (suave < 1.0f) {
+        desenharContornoParalelogramo(x, y, largura, ALTURA_OPCAO, INCLINACAO, 1.5f,
+                                      Fade(COR_CROMO, 0.35f * (1.0f - suave)));
+    }
+    if (suave > 0.0f) {
+        float recuo = (1.0f - suave) * 10.0f;   /* os fios amarelos deslizam para o lugar */
         desenharParalelogramo(x + INCLINACAO / 2, y, largura, ALTURA_OPCAO / 2, INCLINACAO / 2,
-                              Fade(WHITE, 0.14f));
-        desenharParalelogramo(x - 12, y, 7, ALTURA_OPCAO, INCLINACAO, COR_AMARELO);
-        desenharParalelogramo(x + largura + 5, y, 7, ALTURA_OPCAO, INCLINACAO, COR_AMARELO);
-        escreverCentralizado(FONTE_TITULO, texto, centro, y + 3, 36.0f, COR_TEXTO_CLARO);
+                              Fade(WHITE, 0.14f * suave));
+        desenharParalelogramo(x - 12 + recuo, y, 7, ALTURA_OPCAO, INCLINACAO, Fade(COR_AMARELO, suave));
+        desenharParalelogramo(x + largura + 5 - recuo, y, 7, ALTURA_OPCAO, INCLINACAO, Fade(COR_AMARELO, suave));
+    }
+
+    float tamanho = 30.0f + 6.0f * suave;
+    escreverCentralizado(FONTE_TITULO, texto, centro, y + 7 - 4 * suave, tamanho,
+                         ColorLerp(COR_TEXTO_FRACO, COR_TEXTO_CLARO, suave));
+
+    if (destaque >= 1.0f) {
         desenharSetas(x - 40, y + ALTURA_OPCAO / 2, 1.0f);
         desenharSetas(x + largura + INCLINACAO + 40, y + ALTURA_OPCAO / 2, -1.0f);
-    } else {
-        desenharParalelogramo(x, y, largura, ALTURA_OPCAO, INCLINACAO, COR_PAINEL);
-        desenharContornoParalelogramo(x, y, largura, ALTURA_OPCAO, INCLINACAO, 1.5f, Fade(COR_CROMO, 0.35f));
-        escreverCentralizado(FONTE_TITULO, texto, centro, y + 7, 30.0f, COR_TEXTO_FRACO);
     }
 }
 
@@ -407,7 +466,7 @@ void desenharMenuPrincipal(EstadoMenu *menu) {
     desenharQuadriculado(LARGURA_TELA / 2.0f + meio + 16, 238.0f, 70.0f, 10.0f, 5.0f);
 
     for (int i = 0; i < TOTAL_OPCOES; i++) {
-        desenharOpcao(TEXTOS_OPCOES[i], Y_PRIMEIRA_OPCAO + i * ESPACO_OPCOES, i == menu->opcaoMenu);
+        desenharOpcao(TEXTOS_OPCOES[i], Y_PRIMEIRA_OPCAO + i * ESPACO_OPCOES, menu->destaque[i]);
     }
 
     desenharCartaoDoCarro(menu->carroEscolhido);

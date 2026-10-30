@@ -137,6 +137,13 @@ int main(int argc, char *argv[]) {
         }
         tela = proxima;
 
+        /* O mouse só aparece (e só funciona) no menu principal */
+        if (tela == TELA_MENU && IsCursorHidden()) {
+            ShowCursor();
+        } else if (tela != TELA_MENU && !IsCursorHidden()) {
+            HideCursor();
+        }
+
         /* ---- 2) Desenhar a tela atual ----
          * Primeiro o "mundo" (pista e carros), na resolução real da tela.
          * Depois a interface (HUD e menus), na tela virtual 800x600 que
