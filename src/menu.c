@@ -21,6 +21,7 @@
 #include "render.h"
 #include "hud.h"
 #include "visual.h"
+#include "audio.h"
 
 /* ---------- Comuns ---------- */
 #define INCLINACAO            12.0f   /* quanto os painéis "deitam" para a frente */
@@ -373,6 +374,8 @@ void iniciarMenu(EstadoMenu *menu) {
     for (int i = 0; i < TOTAL_ATRIBUTOS; i++) {
         menu->destaqueAba[i] = 0.0f;
     }
+    menu->abaAnterior = -1;
+    menu->voltarAnterior = 0;
     menu->destaqueVoltar = 0.0f;
 }
 
@@ -407,11 +410,15 @@ static int opcaoSobOMouse(void) {
  * Devolve: a próxima tela.
  */
 Tela atualizarMenuPrincipal(EstadoMenu *menu) {
+    int opcaoAnterior = menu->opcaoMenu;
     menu->opcaoMenu = andarNaLista(menu->opcaoMenu, TOTAL_OPCOES);
 
     int sobre = opcaoSobOMouse();
     if (sobre >= 0 && mouseSeMexeu()) {
         menu->opcaoMenu = sobre;
+    }
+    if (menu->opcaoMenu != opcaoAnterior) {
+        tocarSomCursor();
     }
 
     /* Cada opção acende ao ser marcada e apaga ao perder a marcação */
@@ -603,6 +610,7 @@ static int sobreOVoltar(float mouseX, float mouseY) {
  * Devolve: a próxima tela.
  */
 Tela atualizarGaragem(EstadoMenu *menu) {
+    int linhaAnterior = menu->selecionado;
     menu->selecionado = andarNaLista(menu->selecionado, TOTAL_CARROS);
 
     float mouseX, mouseY;
@@ -613,6 +621,16 @@ Tela atualizarGaragem(EstadoMenu *menu) {
     if (linha >= 0 && mouseSeMexeu()) {
         menu->selecionado = linha;
     }
+    if (menu->selecionado != linhaAnterior) {
+        tocarSomCursor();
+    }
+    /* O mouse entrando numa aba ou no VOLTAR também faz o "tic" */
+    if ((aba >= 0 && aba != menu->abaAnterior) || (voltar && !menu->voltarAnterior)) {
+        tocarSomCursor();
+    }
+    menu->abaAnterior = aba;
+    menu->voltarAnterior = voltar;
+
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
         if (voltar) {
             return TELA_MENU;
@@ -638,10 +656,12 @@ Tela atualizarGaragem(EstadoMenu *menu) {
     if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_D)) {
         menu->criterio = (menu->criterio + 1) % TOTAL_ATRIBUTOS;
         reordenarGaragem(menu);
+        tocarSomCursor();
     }
     if (IsKeyPressed(KEY_LEFT) || IsKeyPressed(KEY_A)) {
         menu->criterio = (menu->criterio + TOTAL_ATRIBUTOS - 1) % TOTAL_ATRIBUTOS;
         reordenarGaragem(menu);
+        tocarSomCursor();
     }
 
     if (apertouConfirmar()) {

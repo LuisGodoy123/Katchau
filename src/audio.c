@@ -1,7 +1,7 @@
 /*
  * audio.c
  * ------------------------------------------------------------------
- * Música dos menus. Veja audio.h.
+ * Sons e música dos menus. Veja audio.h.
  * ------------------------------------------------------------------
  */
 
@@ -9,9 +9,13 @@
 #include "audio.h"
 
 #define ARQUIVO_MUSICA_MENU   "recursos/sons/menu_theme.mp3"
+#define ARQUIVO_SOM_CURSOR    "recursos/sons/cursor.wav"
+#define VOLUME_SOM_CURSOR     0.7f
 #define VOLUME_MUSICA_MENU    0.6f   /* volume máximo da música (0 a 1) */
 #define VELOCIDADE_FADE       1.5f   /* 1/s: o fade leva ~0,7 s */
 
+static Sound somCursor;
+static int somCursorCarregado = 0;
 static Music musicaMenu;
 static int musicaCarregada = 0;
 static int iniciada = 0;     /* já foi dado o Play alguma vez */
@@ -28,7 +32,19 @@ static float fade = 0.0f;    /* 0 (mudo) a 1 (volume máximo) */
  */
 void carregarAudio(void) {
     InitAudioDevice();
-    if (!IsAudioDeviceReady() || !FileExists(ARQUIVO_MUSICA_MENU)) {
+    if (!IsAudioDeviceReady()) {
+        return;
+    }
+
+    if (FileExists(ARQUIVO_SOM_CURSOR)) {
+        somCursor = LoadSound(ARQUIVO_SOM_CURSOR);
+        somCursorCarregado = IsSoundValid(somCursor);
+        if (somCursorCarregado) {
+            SetSoundVolume(somCursor, VOLUME_SOM_CURSOR);
+        }
+    }
+
+    if (!FileExists(ARQUIVO_MUSICA_MENU)) {
         return;
     }
     musicaMenu = LoadMusicStream(ARQUIVO_MUSICA_MENU);
@@ -75,13 +91,31 @@ void atualizarAudio(int musicaDoMenu) {
 }
 
 /*
+ * tocarSomCursor
+ * O "tic" de quando o cursor passa para outra opção do menu. Se tocar de
+ * novo antes de acabar, recomeça (passar rápido pelas opções não empilha sons).
+ * Recebe: nada.
+ * Devolve: nada.
+ */
+void tocarSomCursor(void) {
+    if (somCursorCarregado) {
+        StopSound(somCursor);
+        PlaySound(somCursor);
+    }
+}
+
+/*
  * descarregarAudio
- * Devolve a memória da música e fecha o dispositivo de som. Chamar antes
+ * Devolve a memória dos sons e fecha o dispositivo de som. Chamar antes
  * de CloseWindow.
  * Recebe: nada.
  * Devolve: nada.
  */
 void descarregarAudio(void) {
+    if (somCursorCarregado) {
+        UnloadSound(somCursor);
+        somCursorCarregado = 0;
+    }
     if (musicaCarregada) {
         UnloadMusicStream(musicaMenu);
         musicaCarregada = 0;
