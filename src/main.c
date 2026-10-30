@@ -137,10 +137,11 @@ int main(int argc, char *argv[]) {
         }
         tela = proxima;
 
-        /* O mouse só aparece (e só funciona) no menu principal */
-        if (tela == TELA_MENU && IsCursorHidden()) {
+        /* O mouse só aparece (e só funciona) no menu principal e na garagem */
+        int usaMouse = (tela == TELA_MENU || tela == TELA_GARAGEM);
+        if (usaMouse && IsCursorHidden()) {
             ShowCursor();
-        } else if (tela != TELA_MENU && !IsCursorHidden()) {
+        } else if (!usaMouse && !IsCursorHidden()) {
             HideCursor();
         }
 

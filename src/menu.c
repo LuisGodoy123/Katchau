@@ -49,6 +49,11 @@
 #define ALTURA_LINHA          50.0f
 #define X_LISTA               16.0f
 #define LARGURA_LISTA         416.0f
+#define LARGURA_VOLTAR        120.0f
+#define ALTURA_VOLTAR         30.0f
+#define X_VOLTAR              (LARGURA_TELA - 20.0f - LARGURA_VOLTAR)
+#define Y_VOLTAR              (Y_CABECALHO + 12.0f)
+#define ALTURA_ABA            28.0f
 #define X_BARRA_LISTA         226.0f
 #define LARGURA_BARRA_LISTA   120.0f
 #define X_FICHA               448.0f
@@ -285,6 +290,46 @@ static int andarNaLista(int marcado, int tamanho) {
 }
 
 /*
+ * mouseSeMexeu
+ * Recebe: nada.
+ * Devolve: 1 se o mouse andou desde o quadro anterior.
+ */
+static int mouseSeMexeu(void) {
+    Vector2 movimento = GetMouseDelta();
+    return movimento.x != 0.0f || movimento.y != 0.0f;
+}
+
+/*
+ * animarDestaque
+ * Faz o destaque de um item subir (aceso) ou descer (apagado) aos poucos.
+ * Recebe: o destaque atual (0 a 1) e se o item deve estar aceso.
+ * Devolve: o novo destaque.
+ */
+static float animarDestaque(float destaque, int aceso) {
+    float passo = GetFrameTime() * VELOCIDADE_DESTAQUE;
+    return aceso ? fminf(destaque + passo, 1.0f) : fmaxf(destaque - passo, 0.0f);
+}
+
+/*
+ * suavizar
+ * Faz a animação começar e terminar devagar.
+ * Recebe: o destaque (0 a 1).
+ * Devolve: o valor suavizado (0 a 1).
+ */
+static float suavizar(float destaque) {
+    return destaque * destaque * (3.0f - 2.0f * destaque);
+}
+
+/*
+ * dentroDoRetangulo
+ * Recebe: o ponto (x, y) e o retângulo (canto superior esquerdo, largura, altura).
+ * Devolve: 1 se o ponto está dentro.
+ */
+static int dentroDoRetangulo(float x, float y, float rx, float ry, float largura, float altura) {
+    return x >= rx && x <= rx + largura && y >= ry && y <= ry + altura;
+}
+
+/*
  * numeroDaFicha
  * Descobre o número do carro (0 a 7) de uma ficha da garagem.
  * Recebe: a ficha.
@@ -322,6 +367,13 @@ void iniciarMenu(EstadoMenu *menu) {
     }
     ordenarFichasPorAtributo(menu->garagem, TOTAL_CARROS, menu->criterio);
     menu->selecionado = 0;
+    for (int i = 0; i < TOTAL_CARROS; i++) {
+        menu->destaqueLinha[i] = (i == menu->selecionado) ? 1.0f : 0.0f;
+    }
+    for (int i = 0; i < TOTAL_ATRIBUTOS; i++) {
+        menu->destaqueAba[i] = 0.0f;
+    }
+    menu->destaqueVoltar = 0.0f;
 }
 
 /*
@@ -339,8 +391,7 @@ static int opcaoSobOMouse(void) {
     float x = (LARGURA_TELA - LARGURA_OPCAO_MARCADA) / 2.0f - INCLINACAO / 2.0f;
     for (int i = 0; i < TOTAL_OPCOES; i++) {
         float y = Y_PRIMEIRA_OPCAO + i * ESPACO_OPCOES;
-        if (mouseX >= x && mouseX <= x + LARGURA_OPCAO_MARCADA + INCLINACAO &&
-            mouseY >= y && mouseY <= y + ALTURA_OPCAO) {
+        if (dentroDoRetangulo(mouseX, mouseY, x, y, LARGURA_OPCAO_MARCADA + INCLINACAO, ALTURA_OPCAO)) {
             return i;
         }
     }
@@ -358,20 +409,14 @@ static int opcaoSobOMouse(void) {
 Tela atualizarMenuPrincipal(EstadoMenu *menu) {
     menu->opcaoMenu = andarNaLista(menu->opcaoMenu, TOTAL_OPCOES);
 
-    Vector2 movimento = GetMouseDelta();
     int sobre = opcaoSobOMouse();
-    if (sobre >= 0 && (movimento.x != 0.0f || movimento.y != 0.0f)) {
+    if (sobre >= 0 && mouseSeMexeu()) {
         menu->opcaoMenu = sobre;
     }
 
     /* Cada opção acende ao ser marcada e apaga ao perder a marcação */
-    float passo = GetFrameTime() * VELOCIDADE_DESTAQUE;
     for (int i = 0; i < TOTAL_OPCOES; i++) {
-        if (i == menu->opcaoMenu) {
-            menu->destaque[i] = fminf(menu->destaque[i] + passo, 1.0f);
-        } else {
-            menu->destaque[i] = fmaxf(menu->destaque[i] - passo, 0.0f);
-        }
+        menu->destaque[i] = animarDestaque(menu->destaque[i], i == menu->opcaoMenu);
     }
 
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && sobre >= 0) {
@@ -394,7 +439,7 @@ Tela atualizarMenuPrincipal(EstadoMenu *menu) {
  */
 static void desenharOpcao(const char *texto, float y, float destaque) {
     float centro = LARGURA_TELA / 2.0f;
-    float suave = destaque * destaque * (3.0f - 2.0f * destaque);   /* começa e termina devagar */
+    float suave = suavizar(destaque);
     float tranco = sinf(destaque * PI) * 6.0f;                      /* incha um pouco no meio da animação */
     float largura = LARGURA_OPCAO + (LARGURA_OPCAO_MARCADA - LARGURA_OPCAO) * suave + tranco;
     float x = centro - largura / 2.0f - INCLINACAO / 2.0f;
@@ -501,15 +546,94 @@ static void reordenarGaragem(EstadoMenu *menu) {
     }
 }
 
+#define TAMANHO_ABA 19.0f
+
+/*
+ * geometriaDaAba
+ * Onde fica a etiqueta de um critério (as abas ficam lado a lado, cada
+ * uma com a largura do seu texto). Serve para desenhar e para o mouse.
+ * Recebe: o atributo e onde guardar o x e a largura.
+ * Devolve: nada.
+ */
+static void geometriaDaAba(int atributo, float *x, float *largura) {
+    float xAtual = 24.0f + larguraDoTexto(FONTE_FORTE, "ORDENAR POR", 15.0f) + 16.0f;
+    for (int i = 0; i < atributo; i++) {
+        xAtual += larguraDoTexto(FONTE_FORTE, NOMES_CRITERIO[i], TAMANHO_ABA) + 28.0f + 10.0f;
+    }
+    *x = xAtual;
+    *largura = larguraDoTexto(FONTE_FORTE, NOMES_CRITERIO[atributo], TAMANHO_ABA) + 28.0f;
+}
+
+/*
+ * abaSobOMouse / linhaSobOMouse / sobreOVoltar
+ * Dizem o que está embaixo do mouse na garagem (coordenadas do quadro 800x600).
+ * Recebe: a posição do mouse.
+ * Devolve: o índice da aba / da linha (ou -1), e 1 ou 0 para o botão VOLTAR.
+ */
+static int abaSobOMouse(float mouseX, float mouseY) {
+    for (int atributo = 0; atributo < TOTAL_ATRIBUTOS; atributo++) {
+        float x, largura;
+        geometriaDaAba(atributo, &x, &largura);
+        if (dentroDoRetangulo(mouseX, mouseY, x, Y_ABAS, largura + 9.0f, ALTURA_ABA)) {
+            return atributo;
+        }
+    }
+    return -1;
+}
+static int linhaSobOMouse(float mouseX, float mouseY) {
+    for (int i = 0; i < TOTAL_CARROS; i++) {
+        if (dentroDoRetangulo(mouseX, mouseY, X_LISTA, Y_PRIMEIRA_LINHA + i * ALTURA_LINHA, LARGURA_LISTA,
+                              ALTURA_LINHA)) {
+            return i;
+        }
+    }
+    return -1;
+}
+static int sobreOVoltar(float mouseX, float mouseY) {
+    return dentroDoRetangulo(mouseX, mouseY, X_VOLTAR, Y_VOLTAR, LARGURA_VOLTAR + INCLINACAO, ALTURA_VOLTAR);
+}
+
 /*
  * atualizarGaragem
  * Cima/baixo marcam um carro; esquerda/direita trocam o critério de
  * ordenação; ENTER escolhe o carro marcado; ESC volta ao menu.
+ * Com o mouse: passar por cima marca a linha; clicar numa linha escolhe o
+ * carro, numa aba troca o critério e em VOLTAR volta ao menu.
  * Recebe: o estado do menu.
  * Devolve: a próxima tela.
  */
 Tela atualizarGaragem(EstadoMenu *menu) {
     menu->selecionado = andarNaLista(menu->selecionado, TOTAL_CARROS);
+
+    float mouseX, mouseY;
+    posicaoDoMouseNaInterface(&mouseX, &mouseY);
+    int linha = linhaSobOMouse(mouseX, mouseY);
+    int aba = abaSobOMouse(mouseX, mouseY);
+    int voltar = sobreOVoltar(mouseX, mouseY);
+    if (linha >= 0 && mouseSeMexeu()) {
+        menu->selecionado = linha;
+    }
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        if (voltar) {
+            return TELA_MENU;
+        }
+        if (aba >= 0 && aba != (int) menu->criterio) {
+            menu->criterio = (Atributo) aba;
+            reordenarGaragem(menu);
+        } else if (aba < 0 && linha >= 0) {
+            menu->carroEscolhido = numeroDaFicha(menu->garagem[linha]);
+            return TELA_MENU;
+        }
+    }
+
+    /* Linhas, abas e o botão acendem com o mouse (ou a marcação) e apagam ao sair */
+    for (int i = 0; i < TOTAL_CARROS; i++) {
+        menu->destaqueLinha[i] = animarDestaque(menu->destaqueLinha[i], i == menu->selecionado);
+    }
+    for (int i = 0; i < TOTAL_ATRIBUTOS; i++) {
+        menu->destaqueAba[i] = animarDestaque(menu->destaqueAba[i], i == aba);
+    }
+    menu->destaqueVoltar = animarDestaque(menu->destaqueVoltar, voltar);
 
     if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_D)) {
         menu->criterio = (menu->criterio + 1) % TOTAL_ATRIBUTOS;
@@ -582,30 +706,65 @@ static const char *textoDoAtributo(const FichaTecnica *ficha, Atributo atributo)
 /*
  * desenharAbasDeCriterio
  * Os três critérios lado a lado, em etiquetas inclinadas; o ativo fica
- * amarelo.
- * Recebe: o critério ativo.
+ * amarelo e a que está embaixo do mouse cresce e fica vermelha.
+ * Recebe: o estado do menu.
  * Devolve: nada.
  */
-static void desenharAbasDeCriterio(Atributo criterio) {
-    float x = 24.0f;
-    escrever(FONTE_FORTE, "ORDENAR POR", x, Y_ABAS + 5, 15.0f, COR_TEXTO_FRACO);
-    x += larguraDoTexto(FONTE_FORTE, "ORDENAR POR", 15.0f) + 16.0f;
+static void desenharAbasDeCriterio(EstadoMenu *menu) {
+    escrever(FONTE_FORTE, "ORDENAR POR", 24.0f, Y_ABAS + 5, 15.0f, COR_TEXTO_FRACO);
 
-    float tamanho = 19.0f;
+    float xFim = 0.0f;
     for (int atributo = 0; atributo < TOTAL_ATRIBUTOS; atributo++) {
-        const char *nome = NOMES_CRITERIO[atributo];
-        float largura = larguraDoTexto(FONTE_FORTE, nome, tamanho) + 28.0f;
-        if (atributo == (int) criterio) {
-            desenharParalelogramo(x, Y_ABAS, largura, 28, 9, COR_AMARELO);
-            escreverCentralizado(FONTE_FORTE, nome, x + 4 + largura / 2, Y_ABAS + 2, tamanho, COR_GRAFITE);
+        float x, largura;
+        geometriaDaAba(atributo, &x, &largura);
+        float suave = suavizar(menu->destaqueAba[atributo]);
+        float cresce = 6.0f * suave;
+        x -= cresce / 2.0f;
+        largura += cresce;
+        float y = Y_ABAS - suave * 2.0f;
+
+        if (atributo == (int) menu->criterio) {
+            desenharParalelogramo(x, y, largura, ALTURA_ABA, 9, ColorLerp(COR_AMARELO, WHITE, suave * 0.35f));
+            escreverCentralizado(FONTE_FORTE, NOMES_CRITERIO[atributo], x + 4 + largura / 2, y + 2, TAMANHO_ABA,
+                                 COR_GRAFITE);
         } else {
-            desenharParalelogramo(x, Y_ABAS, largura, 28, 9, COR_PAINEL);
-            desenharContornoParalelogramo(x, Y_ABAS, largura, 28, 9, 1.5f, Fade(COR_CROMO, 0.4f));
-            escreverCentralizado(FONTE_FORTE, nome, x + 4 + largura / 2, Y_ABAS + 2, tamanho, COR_TEXTO_CLARO);
+            desenharParalelogramo(x, y, largura, ALTURA_ABA, 9, ColorLerp(COR_PAINEL, COR_VERMELHO, suave));
+            desenharContornoParalelogramo(x, y, largura, ALTURA_ABA, 9, 1.5f,
+                                          Fade(COR_CROMO, 0.4f * (1.0f - suave)));
+            escreverCentralizado(FONTE_FORTE, NOMES_CRITERIO[atributo], x + 4 + largura / 2, y + 2, TAMANHO_ABA,
+                                 COR_TEXTO_CLARO);
         }
-        x += largura + 10.0f;
+        xFim = x + largura + 10.0f;
     }
-    escrever(FONTE_TEXTO, "ordenado com Merge Sort", x + 8, Y_ABAS + 6, 14.0f, COR_TEXTO_FRACO);
+    escrever(FONTE_TEXTO, "ordenado com Merge Sort", xFim + 8, Y_ABAS + 6, 14.0f, COR_TEXTO_FRACO);
+}
+
+/*
+ * desenharBotaoVoltar
+ * Botão no canto do cabeçalho. Ao passar o mouse ele cresce, fica amarelo
+ * e a setinha da esquerda dá um pulinho.
+ * Recebe: o destaque (0 a 1).
+ * Devolve: nada.
+ */
+static void desenharBotaoVoltar(float destaque) {
+    float suave = suavizar(destaque);
+    float cresce = 10.0f * suave;
+    float x = X_VOLTAR - cresce / 2.0f;
+    float largura = LARGURA_VOLTAR + cresce;
+
+    desenharParalelogramo(x, Y_VOLTAR, largura, ALTURA_VOLTAR, 9, ColorLerp(COR_GRAFITE, COR_AMARELO, suave));
+    desenharContornoParalelogramo(x, Y_VOLTAR, largura, ALTURA_VOLTAR, 9, 1.5f,
+                                  ColorLerp(Fade(COR_CROMO, 0.5f), COR_AMARELO, suave));
+    escreverCentralizado(FONTE_FORTE, "VOLTAR", x + 8 + largura / 2, Y_VOLTAR + 3, 18.0f,
+                         ColorLerp(COR_TEXTO_CLARO, COR_GRAFITE, suave));
+
+    /* Setinha para a esquerda, que se afasta e volta enquanto o mouse está em cima */
+    float pulo = suave * (2.0f + 3.0f * fabsf(sinf((float) GetTime() * 6.0f)));
+    float ponta = x + 14.0f - pulo;
+    float meio = Y_VOLTAR + ALTURA_VOLTAR / 2.0f;
+    Color cor = ColorLerp(COR_AMARELO, COR_GRAFITE, suave);
+    DrawLineEx((Vector2){ ponta + 6, meio - 6 }, (Vector2){ ponta, meio }, 2.5f, cor);
+    DrawLineEx((Vector2){ ponta, meio }, (Vector2){ ponta + 6, meio + 6 }, 2.5f, cor);
 }
 
 /*
@@ -620,28 +779,31 @@ static void desenharListaDaGaragem(EstadoMenu *menu) {
     for (int i = 0; i < TOTAL_CARROS; i++) {
         const FichaTecnica *ficha = menu->garagem[i];
         float y = Y_PRIMEIRA_LINHA + i * ALTURA_LINHA;
-        int ehMarcado = (i == menu->selecionado);
         int ehEscolhido = (numeroDaFicha(ficha) == menu->carroEscolhido);
+        float suave = suavizar(menu->destaqueLinha[i]);
 
-        if (ehMarcado) {
-            desenharParalelogramo(X_LISTA + 4, y + 2, LARGURA_LISTA - 16, ALTURA_LINHA - 4, 10, COR_VERMELHO);
-            desenharParalelogramo(X_LISTA - 2, y + 2, 6, ALTURA_LINHA - 4, 10, COR_AMARELO);
+        if (suave > 0.0f) {
+            /* A marcação entra deslizando da esquerda enquanto acende */
+            float recuo = (1.0f - suave) * 16.0f;
+            desenharParalelogramo(X_LISTA + 4 - recuo, y + 2, LARGURA_LISTA - 16, ALTURA_LINHA - 4, 10,
+                                  Fade(COR_VERMELHO, suave));
+            desenharParalelogramo(X_LISTA - 2 - recuo, y + 2, 6, ALTURA_LINHA - 4, 10, Fade(COR_AMARELO, suave));
         }
 
         /* Número da posição numa etiqueta */
-        Color fundoNumero = ehMarcado ? COR_AMARELO : COR_GRAFITE;
-        Color corNumero = ehMarcado ? COR_GRAFITE : COR_CROMO;
+        Color fundoNumero = ColorLerp(COR_GRAFITE, COR_AMARELO, suave);
+        Color corNumero = ColorLerp(COR_CROMO, COR_GRAFITE, suave);
         desenharParalelogramo(X_LISTA + 14, y + 9, 34, 30, 7, fundoNumero);
         escreverCentralizado(FONTE_TITULO, TextFormat("%d", i + 1), X_LISTA + 34, y + 8, 26.0f, corNumero);
 
         escrever(FONTE_TITULO, ficha->nome, X_LISTA + 60, y + (ehEscolhido ? 2 : 9), 26.0f,
-                 ehMarcado ? COR_TEXTO_CLARO : COR_CROMO);
+                 ColorLerp(COR_CROMO, COR_TEXTO_CLARO, suave));
         if (ehEscolhido) {
             escrever(FONTE_FORTE, "SEU CARRO", X_LISTA + 61, y + 29, 13.0f, COR_AMARELO);
         }
 
         desenharBarraDeBlocos(X_BARRA_LISTA, y + 18, LARGURA_BARRA_LISTA, 13,
-                              fracaoDoAtributo(ficha, menu->criterio), ehMarcado ? COR_AMARELO : COR_CROMO);
+                              fracaoDoAtributo(ficha, menu->criterio), ColorLerp(COR_CROMO, COR_AMARELO, suave));
         escreverADireita(FONTE_FORTE, textoDoAtributo(ficha, menu->criterio),
                          X_LISTA + LARGURA_LISTA - 14, y + 12, 21.0f, COR_TEXTO_CLARO);
     }
@@ -696,7 +858,8 @@ void desenharGaragem(EstadoMenu *menu) {
     escurecerTela(0.7f, 0.55f, 0.75f);
 
     desenharCabecalho("GARAGEM");
-    desenharAbasDeCriterio(menu->criterio);
+    desenharBotaoVoltar(menu->destaqueVoltar);
+    desenharAbasDeCriterio(menu);
     desenharListaDaGaragem(menu);
     desenharFichaMarcada(menu);
 

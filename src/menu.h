@@ -34,6 +34,9 @@ typedef struct {
     Atributo criterio;                          /* por qual atributo a garagem está ordenada */
     const FichaTecnica *garagem[TOTAL_CARROS];  /* as fichas, na ordem do Merge Sort */
     int selecionado;                            /* linha marcada na garagem */
+    float destaqueLinha[TOTAL_CARROS];          /* animação (0 a 1) de cada linha da garagem */
+    float destaqueAba[TOTAL_ATRIBUTOS];         /* animação (0 a 1) de cada aba de critério */
+    float destaqueVoltar;                       /* animação (0 a 1) do botão VOLTAR */
 } EstadoMenu;
 
 void iniciarMenu(EstadoMenu *menu);
