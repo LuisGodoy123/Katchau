@@ -32,6 +32,7 @@ void atualizarSonsDaCorrida(int motorAtivo, int contagemAtiva, int musicaAtiva);
 void atualizarSomDoMotor(int ativo, float giro, float carga);
 void atualizarMusicaDaVitoria(float segundosAteALinha, int venceu);
 int musicaDaVitoriaTocando(void);
+void pausarSonsDaCorrida(int pausar);
 void descarregarAudio(void);
 
 #endif

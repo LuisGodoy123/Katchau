@@ -11,6 +11,7 @@
 #include "config.h"
 #include "hud.h"
 #include "visual.h"
+#include "controle.h"
 
 /* ==================================================================
  * Tela virtual: o HUD e os menus foram desenhados para 800x600.
@@ -640,8 +641,9 @@ void desenharFimDeCorrida(Corrida *corrida) {
                          ehMelhor ? COR_AMARELO : COR_TEXTO_CLARO);
     }
 
-    float larguraDica = larguraDaTecla("ENTER") + 8 + larguraDoTexto(FONTE_FORTE, "VER O RESULTADO", 15.0f);
+    const char *tecla = nomeNoControle("ENTER");   /* "A" com o controle ligado */
+    float larguraDica = larguraDaTecla(tecla) + 8 + larguraDoTexto(FONTE_FORTE, "VER O RESULTADO", 15.0f);
     float xDica = centro - larguraDica / 2.0f;
-    xDica += desenharTecla(xDica, y + altura - 40, "ENTER") + 8;
+    xDica += desenharTecla(xDica, y + altura - 40, tecla) + 8;
     escrever(FONTE_FORTE, "VER O RESULTADO", xDica, y + altura - 39, 15.0f, COR_TEXTO_FRACO);
 }

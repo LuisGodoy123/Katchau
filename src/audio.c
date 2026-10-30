@@ -398,6 +398,42 @@ int musicaDaVitoriaTocando(void) {
 }
 
 /*
+ * pausarSonsDaCorrida
+ * Congela (ou solta) todos os sons da corrida de uma vez: o motor, a
+ * contagem, a música de fundo e a da vitória. Ao soltar, cada um volta
+ * do ponto exato em que parou (o "3, 2, 1" continua junto com os números
+ * e o refrão continua sincronizado). Enquanto estiver pausado, o main.c
+ * não chama as funções de atualizar os sons da corrida.
+ * Recebe: 1 para pausar, 0 para continuar.
+ * Devolve: nada.
+ */
+void pausarSonsDaCorrida(int pausar) {
+    Music *musicas[TOTAL_SONS_CORRIDA + 3];
+    int total = 0;
+    for (int i = 0; i < TOTAL_SONS_CORRIDA; i++) {
+        if (somCorrida[i].carregado) {
+            musicas[total++] = &somCorrida[i].musica;
+        }
+    }
+    if (motorSomCarregado) {
+        musicas[total++] = &motorAcelerando;
+        musicas[total++] = &motorAliviando;
+    }
+    if (musicaVitoriaCarregada) {
+        musicas[total++] = &musicaVitoria;
+    }
+
+    /* Pausar ou continuar um som que não está tocando não faz nada */
+    for (int i = 0; i < total; i++) {
+        if (pausar) {
+            PauseMusicStream(*musicas[i]);
+        } else {
+            ResumeMusicStream(*musicas[i]);
+        }
+    }
+}
+
+/*
  * descarregarAudio
  * Devolve a memória dos sons e fecha o dispositivo de som. Chamar antes
  * de CloseWindow.

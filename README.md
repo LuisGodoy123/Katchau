@@ -60,13 +60,18 @@ tamanho real (`comecarInterface()` em `hud.c`).
 
 **Na corrida**
 
-| Tecla | Ação |
-|-------|------|
-| ↑ ou W | Acelerar |
-| ↓ ou S | Frear |
-| ← → ou A D | Virar (o volante gira aos poucos e volta sozinho ao centro) |
-| ENTER | Ver o resultado (depois da chegada) |
-| ESC   | Abandonar a corrida e voltar ao menu |
+| Tecla | Controle | Ação |
+|-------|----------|------|
+| ↑ ou W | RT ou A | Acelerar |
+| ↓ ou S | LT ou X | Frear |
+| ← → ou A D | analógico esquerdo ou direcional | Virar (o volante gira aos poucos e volta sozinho ao centro) |
+| ENTER | A | Ver o resultado (depois da chegada) |
+| ESC   | START | Pausar: a corrida e os sons congelam; escolha CONTINUAR ou MENU PRINCIPAL (ESC de novo continua) |
+
+O controle (Xbox, PlayStation ou parecido, por USB ou Bluetooth) funciona junto com o
+teclado, sem configurar nada. Os nomes da tabela são os do controle de Xbox; no de
+PlayStation ficam nos mesmos lugares (R2/✕, L2/□, ○). Nos menus, direcional ou analógico
+andam, **A** confirma e **B** volta; com o controle ligado, as dicas da tela mostram os botões.
 
 **Nos menus**
 
@@ -98,7 +103,9 @@ chama a função `atualizar...()` dela, que devolve para qual tela ir, e depois 
 MENU ──> GARAGEM ──> MENU
   │──> COMO JOGAR ──> MENU
   └──> CORRIDA ──(chegada + ENTER)──> RESULTADO ──(ENTER)──> CORRIDA
-          └──(ESC)──> MENU                   └──(ESC)──> MENU
+          └──(ESC)──> PAUSA                  └──(ESC)──> MENU
+                        ├──(CONTINUAR ou ESC)──> CORRIDA, de onde parou
+                        └──(MENU PRINCIPAL)───> MENU
 ```
 
 Na tela de resultado a corrida continua ao fundo, e a tabela se completa conforme
@@ -122,6 +129,7 @@ src/
   visual.c/.h      identidade visual: cores, fontes, logo e formas     (fase 6)
   motor.c/.h       rotação, marcha e carga do motor do jogador (lógica do som do carro)
   audio.c/.h       música, efeitos dos menus, largada e o som do motor do carro
+  controle.c/.h    controle (gamepad): comandos do carro e botões dos menus
 testes/
   teste_pista.c    testa pista, carro, corrida, IA e ordenação no terminal
 recursos/
@@ -137,7 +145,7 @@ ferramentas/
   gerar_sprites.py script do Blender: modelo 3D (.glb) vira sprite PNG
 ```
 
-Regra: só `render.c`, `hud.c`, `menu.c`, `visual.c` e `audio.c` incluem `raylib.h` (além do `main.c`, que abre
+Regra: só `render.c`, `hud.c`, `menu.c`, `visual.c`, `audio.c` e `controle.c` incluem `raylib.h` (além do `main.c`, que abre
 a janela). O resto é lógica pura e pode ser testado no terminal.
 
 ## Sprites dos carros

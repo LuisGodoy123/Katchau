@@ -22,6 +22,7 @@
 #include "hud.h"
 #include "visual.h"
 #include "audio.h"
+#include "controle.h"
 
 /* ---------- Comuns ---------- */
 #define INCLINACAO            12.0f   /* quanto os painéis "deitam" para a frente */
@@ -43,6 +44,10 @@
 #define Y_CARTAO_CARRO        300.0f
 #define LARGURA_CARTAO_CARRO  168.0f
 #define ALTURA_CARTAO_CARRO   196.0f
+
+/* ---------- Pausa ---------- */
+#define Y_TITULO_PAUSA        176.0f
+#define Y_PRIMEIRA_OPCAO_PAUSA 270.0f
 
 /* ---------- Garagem ---------- */
 #define Y_ABAS                92.0f
@@ -75,6 +80,8 @@
 
 static const char *TEXTOS_OPCOES[TOTAL_OPCOES] = { "CORRER", "GARAGEM", "COMO JOGAR", "SAIR" };
 static const Tela DESTINOS_OPCOES[TOTAL_OPCOES] = { TELA_CORRIDA, TELA_GARAGEM, TELA_COMO_JOGAR, TELA_SAIR };
+static const char *TEXTOS_PAUSA[TOTAL_OPCOES_PAUSA] = { "CONTINUAR", "MENU PRINCIPAL" };
+static const EscolhaDaPausa ESCOLHAS_PAUSA[TOTAL_OPCOES_PAUSA] = { PAUSA_CONTINUAR, PAUSA_SAIR };
 
 /* Os nomes dos critérios com acento (ordenacao.c, que não desenha, usa sem) */
 static const char *NOMES_CRITERIO[TOTAL_ATRIBUTOS] = { "VELOCIDADE", "ACELERAÇÃO", "ADERÊNCIA" };
@@ -161,7 +168,7 @@ static void desenharBarraDeDicas(const Dica dicas[], int total) {
     float larguraTotal = 0.0f;
     for (int i = 0; i < total; i++) {
         for (int t = 0; t < 4 && dicas[i].teclas[t] != NULL; t++) {
-            larguraTotal += larguraDaTecla(dicas[i].teclas[t]) + espacoTecla;
+            larguraTotal += larguraDaTecla(nomeNoControle(dicas[i].teclas[t])) + espacoTecla;
         }
         larguraTotal += espacoAcao + larguraDoTexto(FONTE_FORTE, dicas[i].acao, TAMANHO_DICA);
         if (i < total - 1) {
@@ -173,7 +180,7 @@ static void desenharBarraDeDicas(const Dica dicas[], int total) {
     float y = Y_BARRA_DICAS + 9.0f;
     for (int i = 0; i < total; i++) {
         for (int t = 0; t < 4 && dicas[i].teclas[t] != NULL; t++) {
-            x += desenharTecla(x, y, dicas[i].teclas[t]) + espacoTecla;
+            x += desenharTecla(x, y, nomeNoControle(dicas[i].teclas[t])) + espacoTecla;
         }
         x += espacoAcao;
         escrever(FONTE_FORTE, dicas[i].acao, x, y + 2, TAMANHO_DICA, COR_TEXTO_FRACO);
@@ -256,22 +263,31 @@ static void desenharPainel(float x, float y, float largura, float altura) {
 }
 
 /*
- * apertouParaCima / apertouParaBaixo / apertouConfirmar / apertouVoltar
- * Teclas aceitas nas telas de menu (setas ou WASD).
+ * apertouParaCima / apertouParaBaixo / apertouParaEsquerda / apertouParaDireita /
+ * apertouConfirmar / apertouVoltar
+ * Teclas aceitas nas telas de menu (setas ou WASD) e os botões do
+ * controle que fazem o mesmo (direcional ou analógico, A e B).
  * Recebe: nada.
- * Devolve: 1 se a tecla foi apertada neste quadro.
+ * Devolve: 1 se a tecla ou o botão foi apertado neste quadro.
  */
 static int apertouParaCima(void) {
-    return IsKeyPressed(KEY_UP) || IsKeyPressed(KEY_W);
+    return IsKeyPressed(KEY_UP) || IsKeyPressed(KEY_W) || controleApertou(BOTAO_CIMA);
 }
 static int apertouParaBaixo(void) {
-    return IsKeyPressed(KEY_DOWN) || IsKeyPressed(KEY_S);
+    return IsKeyPressed(KEY_DOWN) || IsKeyPressed(KEY_S) || controleApertou(BOTAO_BAIXO);
+}
+static int apertouParaEsquerda(void) {
+    return IsKeyPressed(KEY_LEFT) || IsKeyPressed(KEY_A) || controleApertou(BOTAO_ESQUERDA);
+}
+static int apertouParaDireita(void) {
+    return IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_D) || controleApertou(BOTAO_DIREITA);
 }
 static int apertouConfirmar(void) {
-    return IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER) || IsKeyPressed(KEY_SPACE);
+    return IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER) || IsKeyPressed(KEY_SPACE) ||
+           controleApertou(BOTAO_CONFIRMAR);
 }
 static int apertouVoltar(void) {
-    return IsKeyPressed(KEY_ESCAPE) || IsKeyPressed(KEY_BACKSPACE);
+    return IsKeyPressed(KEY_ESCAPE) || IsKeyPressed(KEY_BACKSPACE) || controleApertou(BOTAO_VOLTAR);
 }
 
 /*
@@ -377,23 +393,25 @@ void iniciarMenu(EstadoMenu *menu) {
     menu->abaAnterior = -1;
     menu->voltarAnterior = 0;
     menu->destaqueVoltar = 0.0f;
+    abrirPausa(menu);
 }
 
 /*
  * opcaoSobOMouse
- * Descobre qual botão do menu principal está embaixo do mouse. A área de
- * cada botão é sempre a do tamanho "marcado", para o botão não piscar
- * quando o mouse está na borda enquanto ele cresce.
- * Recebe: nada.
+ * Descobre qual botão de uma coluna de botões (a do menu principal ou a
+ * da pausa) está embaixo do mouse. A área de cada botão é sempre a do
+ * tamanho "marcado", para o botão não piscar quando o mouse está na
+ * borda enquanto ele cresce.
+ * Recebe: a altura (y) do primeiro botão e quantos botões há.
  * Devolve: o índice da opção, ou -1 se o mouse não está em nenhuma.
  */
-static int opcaoSobOMouse(void) {
+static int opcaoSobOMouse(float yPrimeira, int totalOpcoes) {
     float mouseX, mouseY;
     posicaoDoMouseNaInterface(&mouseX, &mouseY);
 
     float x = (LARGURA_TELA - LARGURA_OPCAO_MARCADA) / 2.0f - INCLINACAO / 2.0f;
-    for (int i = 0; i < TOTAL_OPCOES; i++) {
-        float y = Y_PRIMEIRA_OPCAO + i * ESPACO_OPCOES;
+    for (int i = 0; i < totalOpcoes; i++) {
+        float y = yPrimeira + i * ESPACO_OPCOES;
         if (dentroDoRetangulo(mouseX, mouseY, x, y, LARGURA_OPCAO_MARCADA + INCLINACAO, ALTURA_OPCAO)) {
             return i;
         }
@@ -413,7 +431,7 @@ Tela atualizarMenuPrincipal(EstadoMenu *menu) {
     int opcaoAnterior = menu->opcaoMenu;
     menu->opcaoMenu = andarNaLista(menu->opcaoMenu, TOTAL_OPCOES);
 
-    int sobre = opcaoSobOMouse();
+    int sobre = opcaoSobOMouse(Y_PRIMEIRA_OPCAO, TOTAL_OPCOES);
     if (sobre >= 0 && mouseSeMexeu()) {
         menu->opcaoMenu = sobre;
     }
@@ -658,12 +676,12 @@ Tela atualizarGaragem(EstadoMenu *menu) {
     }
     menu->destaqueVoltar = animarDestaque(menu->destaqueVoltar, voltar);
 
-    if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_D)) {
+    if (apertouParaDireita()) {
         menu->criterio = (menu->criterio + 1) % TOTAL_ATRIBUTOS;
         reordenarGaragem(menu);
         tocarSom(SOM_CURSOR);
     }
-    if (IsKeyPressed(KEY_LEFT) || IsKeyPressed(KEY_A)) {
+    if (apertouParaEsquerda()) {
         menu->criterio = (menu->criterio + TOTAL_ATRIBUTOS - 1) % TOTAL_ATRIBUTOS;
         reordenarGaragem(menu);
         tocarSom(SOM_CURSOR);
@@ -930,7 +948,8 @@ static void desenharTituloDePainel(const char *texto, float x, float y) {
 
 /*
  * desenharComoJogar
- * Controles (com as teclas desenhadas) e dicas de pilotagem.
+ * Controles (com as teclas desenhadas, ou os botões, se houver um
+ * controle ligado) e dicas de pilotagem.
  * Recebe: nada (o fundo é desenhado antes, pelo main.c).
  * Devolve: nada.
  */
@@ -943,14 +962,22 @@ void desenharComoJogar(void) {
     desenharPainel(x, topo, 352, 444);
     desenharTituloDePainel("CONTROLES", x + 20, topo + 14);
 
-    const char *teclas[][4] = {
+    static const char *TECLAS[][4] = {
         { "CIMA", "W", NULL },
         { "BAIXO", "S", NULL },
         { "ESQ", "DIR", "A", "D" },
         { "ESC", NULL },
         { "ENTER", NULL },
     };
-    const char *acoes[] = { "ACELERAR", "FREAR", "VIRAR", "ABANDONAR A CORRIDA", "CONFIRMAR NOS MENUS" };
+    static const char *BOTOES[][4] = {   /* nomes do controle de Xbox */
+        { "RT", "A", NULL },
+        { "LT", "X", NULL },
+        { "ESQ", "DIR", "ANALOG", NULL },
+        { "START", NULL },
+        { "A", NULL },
+    };
+    const char *(*teclas)[4] = controleConectado() ? BOTOES : TECLAS;
+    const char *acoes[] = { "ACELERAR", "FREAR", "VIRAR", "PAUSAR A CORRIDA", "CONFIRMAR NOS MENUS" };
     for (int i = 0; i < 5; i++) {
         float y = topo + 78 + i * 70;
         float xTecla = x + 20;
@@ -986,6 +1013,90 @@ void desenharComoJogar(void) {
         { { "ENTER", "ESC", NULL }, "VOLTAR AO MENU" },
     };
     desenharBarraDeDicas(barra, 1);
+}
+
+/* ==================================================================
+ * Pausa
+ * ================================================================== */
+
+/*
+ * abrirPausa
+ * Prepara a pausa: "CONTINUAR" já vem marcado.
+ * Recebe: o estado do menu.
+ * Devolve: nada.
+ */
+void abrirPausa(EstadoMenu *menu) {
+    menu->opcaoPausa = 0;
+    for (int i = 0; i < TOTAL_OPCOES_PAUSA; i++) {
+        menu->destaquePausa[i] = (i == 0) ? 1.0f : 0.0f;
+    }
+}
+
+/*
+ * atualizarPausa
+ * Cima/baixo ou o mouse trocam a opção; ENTER (A) ou o clique escolhem.
+ * ESC (B ou START no controle) fecha a pausa e continua a corrida.
+ * Recebe: o estado do menu.
+ * Devolve: o que o jogador escolheu (PAUSA_NADA enquanto não escolhe).
+ */
+EscolhaDaPausa atualizarPausa(EstadoMenu *menu) {
+    int opcaoAnterior = menu->opcaoPausa;
+    menu->opcaoPausa = andarNaLista(menu->opcaoPausa, TOTAL_OPCOES_PAUSA);
+
+    int sobre = opcaoSobOMouse(Y_PRIMEIRA_OPCAO_PAUSA, TOTAL_OPCOES_PAUSA);
+    if (sobre >= 0 && mouseSeMexeu()) {
+        menu->opcaoPausa = sobre;
+    }
+    if (menu->opcaoPausa != opcaoAnterior) {
+        tocarSom(SOM_CURSOR);
+    }
+    for (int i = 0; i < TOTAL_OPCOES_PAUSA; i++) {
+        menu->destaquePausa[i] = animarDestaque(menu->destaquePausa[i], i == menu->opcaoPausa);
+    }
+
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && sobre >= 0) {
+        tocarSom(SOM_CONFIRMAR);
+        return ESCOLHAS_PAUSA[sobre];
+    }
+    if (apertouConfirmar()) {
+        tocarSom(SOM_CONFIRMAR);
+        return ESCOLHAS_PAUSA[menu->opcaoPausa];
+    }
+    if (apertouVoltar() || controleApertou(BOTAO_START)) {
+        tocarSom(SOM_VOLTAR);
+        return PAUSA_CONTINUAR;
+    }
+    return PAUSA_NADA;
+}
+
+/*
+ * desenharPausa
+ * Escurece a corrida parada e mostra "PAUSA" com os dois botões, no
+ * mesmo estilo do menu principal. A corrida (congelada) é desenhada
+ * antes, pelo main.c.
+ * Recebe: o estado do menu.
+ * Devolve: nada.
+ */
+void desenharPausa(EstadoMenu *menu) {
+    escurecerTela(0.75f, 0.6f, 0.8f);
+
+    float centro = LARGURA_TELA / 2.0f;
+    float tamanho = 64.0f;
+    float meio = larguraDoTexto(FONTE_TITULO, "PAUSA", tamanho) / 2.0f;
+    escreverCentralizado(FONTE_TITULO, "PAUSA", centro, Y_TITULO_PAUSA, tamanho, COR_TEXTO_CLARO);
+    desenharQuadriculado(centro - meio - 96, Y_TITULO_PAUSA + 32, 76.0f, 10.0f, 5.0f);
+    desenharQuadriculado(centro + meio + 20, Y_TITULO_PAUSA + 32, 76.0f, 10.0f, 5.0f);
+
+    for (int i = 0; i < TOTAL_OPCOES_PAUSA; i++) {
+        desenharOpcao(TEXTOS_PAUSA[i], Y_PRIMEIRA_OPCAO_PAUSA + i * ESPACO_OPCOES, menu->destaquePausa[i]);
+    }
+
+    Dica dicas[] = {
+        { { "CIMA", "BAIXO", NULL }, "ESCOLHER" },
+        { { "ENTER", NULL }, "CONFIRMAR" },
+        { { "ESC", NULL }, "CONTINUAR" },
+    };
+    desenharBarraDeDicas(dicas, 3);
 }
 
 /* ==================================================================

@@ -24,42 +24,63 @@
 #include "menu.h"
 #include "visual.h"
 #include "audio.h"
+#include "controle.h"
 
 /* Na vitória, o painel de chegada espera um pouco para o jogador ver o
  * confete e o refrão entrando */
 #define ATRASO_DO_PAINEL_NA_VITORIA  2.5f   /* segundos depois de cruzar a linha */
 
 /*
- * lerComandosDoTeclado
+ * lerComandos
  * Traduz as teclas apertadas para os comandos do carro.
- * Setas ou WASD funcionam.
+ * Setas ou WASD funcionam, e o controle também (controle.c).
  * Recebe: nada.
  * Devolve: os comandos deste quadro.
  */
-static Comandos lerComandosDoTeclado(void) {
+static Comandos lerComandos(void) {
     Comandos comandos;
     comandos.acelerar = IsKeyDown(KEY_UP) || IsKeyDown(KEY_W);
     comandos.frear = IsKeyDown(KEY_DOWN) || IsKeyDown(KEY_S);
     comandos.esquerda = IsKeyDown(KEY_LEFT) || IsKeyDown(KEY_A);
     comandos.direita = IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D);
+    somarComandosDoControle(&comandos);
     return comandos;
 }
 
 /*
  * atualizarTelaDaCorrida
  * Um quadro da corrida: o jogador dirige, a IA dirige os rivais.
- * ESC abandona a corrida; depois da chegada, ENTER vai ao resultado.
- * Recebe: a corrida e o tempo do quadro.
+ * ESC (ou START) pausa: a corrida e os sons congelam e o jogador escolhe
+ * entre continuar e voltar ao menu principal. Depois da chegada, ENTER
+ * (ou A) vai ao resultado.
+ * Recebe: a corrida, o estado do menu (para a pausa), se a corrida está
+ *         pausada (é alterado aqui) e o tempo do quadro.
  * Devolve: a próxima tela.
  */
-static Tela atualizarTelaDaCorrida(Corrida *corrida, float tempoQuadro) {
-    atualizarCorrida(corrida, lerComandosDoTeclado(), tempoQuadro);
-
-    if (IsKeyPressed(KEY_ESCAPE)) {
-        tocarSom(SOM_VOLTAR);
-        return TELA_MENU;
+static Tela atualizarTelaDaCorrida(Corrida *corrida, EstadoMenu *menu, int *pausada, float tempoQuadro) {
+    if (*pausada) {
+        EscolhaDaPausa escolha = atualizarPausa(menu);
+        if (escolha == PAUSA_CONTINUAR) {
+            *pausada = 0;
+            pausarSonsDaCorrida(0);
+        } else if (escolha == PAUSA_SAIR) {
+            *pausada = 0;   /* os sons pausados somem sozinhos na volta ao menu */
+            return TELA_MENU;
+        }
+        return TELA_CORRIDA;
     }
-    if (corrida->terminou && (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER))) {
+
+    if (IsKeyPressed(KEY_ESCAPE) || controleApertou(BOTAO_START)) {
+        tocarSom(SOM_CONFIRMAR);
+        *pausada = 1;
+        abrirPausa(menu);
+        pausarSonsDaCorrida(1);
+        return TELA_CORRIDA;
+    }
+
+    atualizarCorrida(corrida, lerComandos(), tempoQuadro);
+    if (corrida->terminou && (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER) ||
+                              controleApertou(BOTAO_CONFIRMAR))) {
         tocarSom(SOM_CONFIRMAR);
         return TELA_RESULTADO;
     }
@@ -111,11 +132,13 @@ int main(int argc, char *argv[]) {
     iniciarMenu(&menu);
     Tela tela = TELA_MENU;
     int venceuAntes = 0;   /* para soltar o confete uma vez só, no quadro da vitória */
+    int pausada = 0;       /* a corrida está na pausa (ESC) */
 
     /* Laço principal: roda uma vez por quadro até escolher SAIR ou fechar a janela */
     while (tela != TELA_SAIR && !WindowShouldClose()) {
         /* Tempo do último quadro, para a velocidade não depender do FPS */
         float tempoQuadro = GetFrameTime();
+        atualizarControle();   /* acha o controle e lê o analógico, antes das telas perguntarem */
 
         /* ---- 1) Atualizar a tela atual e descobrir a próxima ---- */
         Tela proxima = tela;
@@ -130,7 +153,7 @@ int main(int argc, char *argv[]) {
                 proxima = atualizarComoJogar();
                 break;
             case TELA_CORRIDA:
-                proxima = atualizarTelaDaCorrida(&corrida, tempoQuadro);
+                proxima = atualizarTelaDaCorrida(&corrida, &menu, &pausada, tempoQuadro);
                 break;
             case TELA_RESULTADO: {
                 /* A corrida continua ao fundo até todos os rivais chegarem */
@@ -159,8 +182,8 @@ int main(int argc, char *argv[]) {
         }
         venceuAntes = venceu;
 
-        /* O mouse só aparece (e só funciona) no menu principal e na garagem */
-        int usaMouse = (tela == TELA_MENU || tela == TELA_GARAGEM);
+        /* O mouse só aparece (e só funciona) no menu principal, na garagem e na pausa */
+        int usaMouse = (tela == TELA_MENU || tela == TELA_GARAGEM || (tela == TELA_CORRIDA && pausada));
         if (usaMouse && IsCursorHidden()) {
             ShowCursor();
         } else if (!usaMouse && !IsCursorHidden()) {
@@ -178,19 +201,21 @@ int main(int argc, char *argv[]) {
          *  - chegando em 1º na última volta, a música da vitória entra baixinho no lugar
          *    da música de fundo e o refrão cai junto com a bandeirada; daí em diante só
          *    ela toca (o motor sai, mesmo com a IA levando o carro) */
-        int naCorrida = (tela == TELA_CORRIDA);
-        int antesDoGo = (naCorrida && corrida.contagemRegressiva > 0.0f);
-        int depoisDoGo = (naCorrida && corrida.contagemRegressiva <= 0.0f);
-        int naContagem = (naCorrida && corrida.contagemRegressiva < NUMEROS_DA_CONTAGEM * SEGUNDOS_POR_NUMERO &&
-                          (antesDoGo || corrida.tempoDeCorrida < DURACAO_GRITO_LARGADA));
-        if (naCorrida) {
-            atualizarMotor(&motor, &corrida.jogador, tempoQuadro);
+        if (!pausada) {   /* na pausa, os sons da corrida ficam congelados (pausarSonsDaCorrida) */
+            int naCorrida = (tela == TELA_CORRIDA);
+            int antesDoGo = (naCorrida && corrida.contagemRegressiva > 0.0f);
+            int depoisDoGo = (naCorrida && corrida.contagemRegressiva <= 0.0f);
+            int naContagem = (naCorrida && corrida.contagemRegressiva < NUMEROS_DA_CONTAGEM * SEGUNDOS_POR_NUMERO &&
+                              (antesDoGo || corrida.tempoDeCorrida < DURACAO_GRITO_LARGADA));
+            if (naCorrida) {
+                atualizarMotor(&motor, &corrida.jogador, tempoQuadro);
+            }
+            float segundosAteALinha = naCorrida ? segundosAteAVitoria(&corrida) : -1.0f;
+            atualizarMusicaDaVitoria(segundosAteALinha, venceu);
+            atualizarSonsDaCorrida(antesDoGo, naContagem,
+                                   depoisDoGo && !corrida.terminou && !musicaDaVitoriaTocando());
+            atualizarSomDoMotor(depoisDoGo && !venceu, motor.giro, motor.carga);
         }
-        float segundosAteALinha = naCorrida ? segundosAteAVitoria(&corrida) : -1.0f;
-        atualizarMusicaDaVitoria(segundosAteALinha, venceu);
-        atualizarSonsDaCorrida(antesDoGo, naContagem,
-                               depoisDoGo && !corrida.terminou && !musicaDaVitoriaTocando());
-        atualizarSomDoMotor(depoisDoGo && !venceu, motor.giro, motor.carga);
 
         /* ---- 2) Desenhar a tela atual ----
          * Primeiro o "mundo" (pista e carros), na resolução real da tela.
@@ -225,8 +250,13 @@ int main(int argc, char *argv[]) {
                                                     > ATRASO_DO_PAINEL_NA_VITORIA)) {
                     desenharFimDeCorrida(&corrida);
                 }
-                desenharConfetes(tempoQuadro);
+                desenharConfetes(pausada ? 0.0f : tempoQuadro);   /* na pausa, o confete para no ar */
                 terminarInterface();
+                if (pausada) {
+                    comecarInterface(1);
+                    desenharPausa(&menu);
+                    terminarInterface();
+                }
                 break;
             case TELA_RESULTADO:
                 desenharVisaoDoJogador(&corrida);   /* a corrida continua ao fundo */

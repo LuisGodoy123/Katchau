@@ -25,6 +25,14 @@ typedef enum {
 } Tela;
 
 #define TOTAL_OPCOES 4   /* CORRER, GARAGEM, COMO JOGAR, SAIR */
+#define TOTAL_OPCOES_PAUSA 2   /* CONTINUAR, MENU PRINCIPAL */
+
+/* O que o jogador escolheu na pausa neste quadro */
+typedef enum {
+    PAUSA_NADA,        /* ainda escolhendo */
+    PAUSA_CONTINUAR,   /* volta para a corrida, de onde parou */
+    PAUSA_SAIR         /* abandona a corrida e vai ao menu principal */
+} EscolhaDaPausa;
 
 /* O que as telas de menu precisam lembrar entre um quadro e outro. */
 typedef struct {
@@ -39,6 +47,8 @@ typedef struct {
     int abaAnterior;                            /* aba sob o mouse no quadro anterior (-1 = nenhuma) */
     int voltarAnterior;                         /* o mouse estava no VOLTAR no quadro anterior? */
     float destaqueVoltar;                       /* animação (0 a 1) do botão VOLTAR */
+    int opcaoPausa;                             /* item marcado na pausa */
+    float destaquePausa[TOTAL_OPCOES_PAUSA];    /* animação (0 a 1) de cada botão da pausa */
 } EstadoMenu;
 
 void iniciarMenu(EstadoMenu *menu);
@@ -51,6 +61,10 @@ void desenharGaragem(EstadoMenu *menu);
 
 Tela atualizarComoJogar(void);
 void desenharComoJogar(void);
+
+void abrirPausa(EstadoMenu *menu);
+EscolhaDaPausa atualizarPausa(EstadoMenu *menu);
+void desenharPausa(EstadoMenu *menu);
 
 Tela atualizarResultado(void);
 void desenharResultado(Corrida *corrida);
