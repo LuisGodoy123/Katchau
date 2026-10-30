@@ -12,6 +12,9 @@
 #define VOLUME_SONS           0.7f   /* volume dos efeitos (0 a 1) */
 #define VOLUME_MUSICA_MENU    0.6f   /* volume máximo da música (0 a 1) */
 #define VELOCIDADE_FADE       1.5f   /* 1/s: o fade leva ~0,7 s */
+#define ARQUIVO_MOTOR_LARGADA "recursos/sons/motor_largada.wav"
+#define VOLUME_MOTOR_LARGADA  0.8f   /* volume do motor esquentando (0 a 1) */
+#define VELOCIDADE_FADE_MOTOR 3.0f   /* 1/s: ao acabar a largada, o motor some em ~0,3 s */
 
 static const char *ARQUIVOS_SONS[TOTAL_SONS] = {
     "recursos/sons/cursor.wav",
@@ -20,6 +23,11 @@ static const char *ARQUIVOS_SONS[TOTAL_SONS] = {
 };
 static Sound sons[TOTAL_SONS];
 static int somCarregado[TOTAL_SONS];
+static Music motorLargada;   /* tocado como "música" para poder baixar o volume aos poucos */
+static int motorCarregado = 0;
+static int motorTocando = 0;
+static int largadaAtivaAntes = 0;
+static float volumeMotor = 0.0f;
 static Music musicaMenu;
 static int musicaCarregada = 0;
 static int iniciada = 0;     /* já foi dado o Play alguma vez */
@@ -47,6 +55,14 @@ void carregarAudio(void) {
             if (somCarregado[i]) {
                 SetSoundVolume(sons[i], VOLUME_SONS);
             }
+        }
+    }
+
+    if (FileExists(ARQUIVO_MOTOR_LARGADA)) {
+        motorLargada = LoadMusicStream(ARQUIVO_MOTOR_LARGADA);
+        motorCarregado = IsMusicValid(motorLargada);
+        if (motorCarregado) {
+            motorLargada.looping = false;
         }
     }
 
@@ -111,6 +127,40 @@ void tocarSom(TipoSom som) {
 }
 
 /*
+ * atualizarSomDaLargada
+ * Chamar uma vez por quadro. O som do motor esquentando começa do início
+ * quando a contagem começa e, quando a largada acaba, some em poucos
+ * décimos de segundo. (Provisório: não é o som definitivo do carro.)
+ * Recebe: 1 durante o 3, 2, 1 e o KATCHAU!, 0 no resto do jogo.
+ * Devolve: nada.
+ */
+void atualizarSomDaLargada(int ativo) {
+    if (!motorCarregado) {
+        return;
+    }
+
+    if (ativo && !largadaAtivaAntes) {
+        StopMusicStream(motorLargada);
+        PlayMusicStream(motorLargada);
+        motorTocando = 1;
+        volumeMotor = 1.0f;
+    } else if (!ativo && motorTocando) {
+        volumeMotor -= GetFrameTime() * VELOCIDADE_FADE_MOTOR;
+        if (volumeMotor <= 0.0f) {
+            StopMusicStream(motorLargada);
+            motorTocando = 0;
+            volumeMotor = 0.0f;
+        }
+    }
+    largadaAtivaAntes = ativo;
+
+    if (motorTocando) {
+        SetMusicVolume(motorLargada, volumeMotor * VOLUME_MOTOR_LARGADA);
+        UpdateMusicStream(motorLargada);
+    }
+}
+
+/*
  * descarregarAudio
  * Devolve a memória dos sons e fecha o dispositivo de som. Chamar antes
  * de CloseWindow.
@@ -123,6 +173,10 @@ void descarregarAudio(void) {
             UnloadSound(sons[i]);
             somCarregado[i] = 0;
         }
+    }
+    if (motorCarregado) {
+        UnloadMusicStream(motorLargada);
+        motorCarregado = 0;
     }
     if (musicaCarregada) {
         UnloadMusicStream(musicaMenu);

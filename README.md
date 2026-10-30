@@ -125,7 +125,7 @@ testes/
   teste_pista.c    testa pista, carro, corrida, IA e ordenação no terminal
 recursos/
   fontes/          Racing Sans One e Saira Condensed (licença OFL, arquivos *_licenca.txt)
-  sons/            menu_theme.mp3, a música dos menus
+  sons/            música dos menus, efeitos dos menus e motor da largada (*.wav, *.mp3)
   texturas/        PNGs do jogo (ver recursos/texturas/README.md)
     logo/          katchau.png, a logo do menu principal
     estrada/       asfalto, grama, zebra e faixa

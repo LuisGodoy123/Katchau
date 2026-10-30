@@ -94,7 +94,6 @@ void terminarInterface(void) {
 #define MARGEM_HUD            12
 #define COR_TEXTO_HUD         COR_TEXTO_CLARO
 #define TAMANHO_CONTAGEM      96
-#define DURACAO_GRITO_LARGADA 1.5f   /* segundos em que o KATCHAU! fica na tela depois da largada */
 
 /* O HUD é discreto, como nas transmissões: painéis pequenos, letra
  * pequena (Saira Condensed) e nada de faixas grandes por cima da pista. */

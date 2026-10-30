@@ -4,8 +4,9 @@
 /*
  * audio.h
  * ------------------------------------------------------------------
- * Sons do KATCHAU: os efeitos dos menus (cursor, confirmar e voltar) e a
- * música dos menus, que toca nas telas de menu, some aos poucos quando a
+ * Sons do KATCHAU: os efeitos dos menus (cursor, confirmar e voltar), o
+ * motor esquentando durante a contagem da largada (provisório, até haver
+ * o som do carro) e a música dos menus, que toca nas telas de menu, some aos poucos quando a
  * corrida começa e volta de onde parou quando o jogador retorna aos menus.
  *
  * Módulo que usa a raylib (parte de áudio).
@@ -23,6 +24,7 @@ typedef enum {
 void carregarAudio(void);
 void atualizarAudio(int musicaDoMenu);
 void tocarSom(TipoSom som);
+void atualizarSomDaLargada(int ativo);
 void descarregarAudio(void);
 
 #endif

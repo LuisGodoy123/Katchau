@@ -11,5 +11,6 @@
 
 /* Corrida */
 #define TOTAL_VOLTAS     3
+#define DURACAO_GRITO_LARGADA 1.5f   /* segundos em que o KATCHAU! fica na tela depois da largada */
 
 #endif

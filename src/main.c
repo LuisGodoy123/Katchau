@@ -152,6 +152,10 @@ int main(int argc, char *argv[]) {
         /* A música toca nos menus e some quando a corrida começa */
         atualizarAudio(tela == TELA_MENU || tela == TELA_GARAGEM || tela == TELA_COMO_JOGAR);
 
+        /* O motor esquentando toca só no 3, 2, 1 e no KATCHAU! da largada */
+        atualizarSomDaLargada(tela == TELA_CORRIDA &&
+                              (corrida.contagemRegressiva > 0.0f || corrida.tempoDeCorrida < DURACAO_GRITO_LARGADA));
+
         /* ---- 2) Desenhar a tela atual ----
          * Primeiro o "mundo" (pista e carros), na resolução real da tela.
          * Depois a interface (HUD e menus), na tela virtual 800x600 que
