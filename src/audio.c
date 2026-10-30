@@ -12,26 +12,31 @@
 #define VOLUME_SONS           0.7f   /* volume dos efeitos (0 a 1) */
 #define VOLUME_MUSICA_MENU    0.6f   /* volume máximo da música (0 a 1) */
 #define VELOCIDADE_FADE       1.5f   /* 1/s: o fade leva ~0,7 s */
-#define VELOCIDADE_FADE_LARGADA 3.0f   /* 1/s: ao acabar, o som da largada some em ~0,3 s */
+#define VELOCIDADE_FADE_PADRAO 3.0f   /* 1/s: ao acabar, o som da largada some em ~0,3 s */
 
-/* Os sons que acompanham a largada. Cada um começa do início quando o
- * jogo manda e some depressa quando o jogo avisa que acabou. São tocados
- * como "música" (e não como Sound) para poder baixar o volume aos poucos. */
+/* Os sons da corrida: o motor e a contagem da largada e a música de fundo.
+ * Cada um começa do início quando o jogo manda e some aos poucos quando o
+ * jogo avisa que acabou. São tocados como "música" (e não como Sound) para
+ * poder baixar o volume aos poucos. */
 typedef struct {
     const char *arquivo;
-    float volumeMaximo;   /* 0 a 1 */
+    float volumeMaximo;     /* 0 a 1 */
+    float velocidadeFade;   /* 1/s na saída; 0 usa VELOCIDADE_FADE_PADRAO */
+    int repetir;            /* 1 para recomeçar sozinho quando chega ao fim */
     Music musica;
     int carregado;
     int tocando;
     int ativoAntes;
     float volume;         /* 0 a 1: o fade de saída */
-} SomDaLargada;
+} SomDeCorrida;
 
-enum { LARGADA_MOTOR, LARGADA_CONTAGEM, TOTAL_SONS_LARGADA };
+enum { CORRIDA_MOTOR, CORRIDA_CONTAGEM, CORRIDA_MUSICA, TOTAL_SONS_CORRIDA };
 
-static SomDaLargada somLargada[TOTAL_SONS_LARGADA] = {
-    [LARGADA_MOTOR] = { .arquivo = "recursos/sons/motor_largada.wav", .volumeMaximo = 0.5f },   /* provisório */
-    [LARGADA_CONTAGEM] = { .arquivo = "recursos/sons/contagem_largada.mp3", .volumeMaximo = 1.0f },
+static SomDeCorrida somCorrida[TOTAL_SONS_CORRIDA] = {
+    [CORRIDA_MOTOR] = { .arquivo = "recursos/sons/motor_largada.wav", .volumeMaximo = 0.5f },   /* provisório */
+    [CORRIDA_CONTAGEM] = { .arquivo = "recursos/sons/contagem_largada.mp3", .volumeMaximo = 1.0f },
+    [CORRIDA_MUSICA] = { .arquivo = "recursos/sons/musica_corrida.mp3", .volumeMaximo = 0.5f,
+                         .velocidadeFade = 1.0f, .repetir = 1 },
 };
 
 static const char *ARQUIVOS_SONS[TOTAL_SONS] = {
@@ -71,12 +76,12 @@ void carregarAudio(void) {
         }
     }
 
-    for (int i = 0; i < TOTAL_SONS_LARGADA; i++) {
-        if (FileExists(somLargada[i].arquivo)) {
-            somLargada[i].musica = LoadMusicStream(somLargada[i].arquivo);
-            somLargada[i].carregado = IsMusicValid(somLargada[i].musica);
-            if (somLargada[i].carregado) {
-                somLargada[i].musica.looping = false;
+    for (int i = 0; i < TOTAL_SONS_CORRIDA; i++) {
+        if (FileExists(somCorrida[i].arquivo)) {
+            somCorrida[i].musica = LoadMusicStream(somCorrida[i].arquivo);
+            somCorrida[i].carregado = IsMusicValid(somCorrida[i].musica);
+            if (somCorrida[i].carregado) {
+                somCorrida[i].musica.looping = somCorrida[i].repetir;
             }
         }
     }
@@ -142,13 +147,13 @@ void tocarSom(TipoSom som) {
 }
 
 /*
- * atualizarSomDaLargada
- * Um quadro de um dos sons da largada: começa do início quando "ativo"
- * passa de 0 para 1 e, quando volta a 0, some em poucos décimos de segundo.
+ * atualizarSomDeCorrida
+ * Um quadro de um dos sons da corrida: começa do início quando "ativo"
+ * passa de 0 para 1 e, quando volta a 0, vai sumindo até parar.
  * Recebe: o som e se ele deve estar tocando.
  * Devolve: nada.
  */
-static void atualizarSomDaLargada(SomDaLargada *som, int ativo) {
+static void atualizarSomDeCorrida(SomDeCorrida *som, int ativo) {
     if (!som->carregado) {
         return;
     }
@@ -159,7 +164,8 @@ static void atualizarSomDaLargada(SomDaLargada *som, int ativo) {
         som->tocando = 1;
         som->volume = 1.0f;
     } else if (!ativo && som->tocando) {
-        som->volume -= GetFrameTime() * VELOCIDADE_FADE_LARGADA;
+        float velocidade = (som->velocidadeFade > 0.0f) ? som->velocidadeFade : VELOCIDADE_FADE_PADRAO;
+        som->volume -= GetFrameTime() * velocidade;
         if (som->volume <= 0.0f) {
             StopMusicStream(som->musica);
             som->tocando = 0;
@@ -175,18 +181,21 @@ static void atualizarSomDaLargada(SomDaLargada *som, int ativo) {
 }
 
 /*
- * atualizarSonsDaLargada
+ * atualizarSonsDaCorrida
  * Chamar uma vez por quadro.
  *   - o motor esquentando (provisório, até haver o som definitivo do
  *     carro) toca desde que a corrida abre até o fim do KATCHAU!;
  *   - o "3... 2... 1... GO!" toca a partir do momento em que o número 3
- *     aparece, e seus bips caem junto com os números na tela.
- * Recebe: se o motor deve tocar e se a contagem deve tocar (1 ou 0).
+ *     aparece, e seus bips caem junto com os números na tela;
+ *   - a música de fundo toca durante a corrida, da largada até o jogador
+ *     cruzar a linha de chegada.
+ * Recebe: se o motor, a contagem e a música devem tocar (1 ou 0).
  * Devolve: nada.
  */
-void atualizarSonsDaLargada(int motorAtivo, int contagemAtiva) {
-    atualizarSomDaLargada(&somLargada[LARGADA_MOTOR], motorAtivo);
-    atualizarSomDaLargada(&somLargada[LARGADA_CONTAGEM], contagemAtiva);
+void atualizarSonsDaCorrida(int motorAtivo, int contagemAtiva, int musicaAtiva) {
+    atualizarSomDeCorrida(&somCorrida[CORRIDA_MOTOR], motorAtivo);
+    atualizarSomDeCorrida(&somCorrida[CORRIDA_CONTAGEM], contagemAtiva);
+    atualizarSomDeCorrida(&somCorrida[CORRIDA_MUSICA], musicaAtiva);
 }
 
 /*
@@ -203,10 +212,10 @@ void descarregarAudio(void) {
             somCarregado[i] = 0;
         }
     }
-    for (int i = 0; i < TOTAL_SONS_LARGADA; i++) {
-        if (somLargada[i].carregado) {
-            UnloadMusicStream(somLargada[i].musica);
-            somLargada[i].carregado = 0;
+    for (int i = 0; i < TOTAL_SONS_CORRIDA; i++) {
+        if (somCorrida[i].carregado) {
+            UnloadMusicStream(somCorrida[i].musica);
+            somCorrida[i].carregado = 0;
         }
     }
     if (musicaCarregada) {
