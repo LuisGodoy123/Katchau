@@ -6,11 +6,13 @@
  */
 
 #include <string.h>
+#include <math.h>
 #include "raylib.h"
 #include "controle.h"
 
 #define MAXIMO_DE_CONTROLES   4
-#define ZONA_MORTA_DIRECAO    0.35f   /* analógico na corrida: menos que isso é "reto" */
+#define ZONA_MORTA_DIRECAO    0.12f   /* analógico na corrida: menos que isso é "reto" (folga do controle) */
+#define PRECISAO_NO_CENTRO    0.6f    /* 0 = resposta reta; perto de 1 = bem mais fino perto do centro */
 #define LIMITE_NO_MENU        0.60f   /* analógico no menu: passou disso, conta um toque... */
 #define SOLTURA_NO_MENU       0.30f   /* ...e só conta outro depois de voltar para menos disso */
 
@@ -94,12 +96,37 @@ int controleApertou(BotaoDoControle botao) {
 }
 
 /*
+ * direcaoDoAnalogico
+ * Transforma a inclinação do analógico em quanto girar o volante:
+ *   - abaixo da zona morta é 0 (o analógico nunca para exatamente no centro);
+ *   - dali até o fim, a inclinação é esticada de 0 a 1, sem pulo na borda
+ *     da zona morta;
+ *   - e passa por uma curva: perto do centro o volante gira menos que a
+ *     inclinação (correções finas na reta), e no fim chega a 1.
+ * Recebe: a inclinação do eixo X (-1 a +1).
+ * Devolve: a direção, de -1 a +1.
+ */
+static float direcaoDoAnalogico(float x) {
+    float tamanho = fabsf(x);
+    if (tamanho < ZONA_MORTA_DIRECAO) {
+        return 0.0f;
+    }
+    float esticado = (tamanho - ZONA_MORTA_DIRECAO) / (1.0f - ZONA_MORTA_DIRECAO);
+    if (esticado > 1.0f) {
+        esticado = 1.0f;
+    }
+    float curva = esticado * ((1.0f - PRECISAO_NO_CENTRO) + PRECISAO_NO_CENTRO * esticado);
+    return (x < 0.0f) ? -curva : curva;
+}
+
+/*
  * somarComandosDoControle
  * Junta o controle aos comandos que já vieram do teclado: o que estiver
  * apertado em qualquer um dos dois vale.
  *   - acelerar: gatilho direito (RT) ou A;
  *   - frear: gatilho esquerdo (LT) ou X;
- *   - virar: analógico esquerdo (passando da zona morta) ou direcional.
+ *   - virar: o direcional gira o volante todo, como as setas; o analógico
+ *     esquerdo gira só o quanto está inclinado (comandos->direcao).
  * Recebe: os comandos do quadro (já com o teclado).
  * Devolve: nada (altera os comandos).
  */
@@ -107,15 +134,13 @@ void somarComandosDoControle(Comandos *comandos) {
     if (controle < 0) {
         return;
     }
-    float x = GetGamepadAxisMovement(controle, GAMEPAD_AXIS_LEFT_X);
     comandos->acelerar |= IsGamepadButtonDown(controle, GAMEPAD_BUTTON_RIGHT_TRIGGER_2) ||
                           IsGamepadButtonDown(controle, GAMEPAD_BUTTON_RIGHT_FACE_DOWN);
     comandos->frear |= IsGamepadButtonDown(controle, GAMEPAD_BUTTON_LEFT_TRIGGER_2) ||
                        IsGamepadButtonDown(controle, GAMEPAD_BUTTON_RIGHT_FACE_LEFT);
-    comandos->esquerda |= x < -ZONA_MORTA_DIRECAO ||
-                          IsGamepadButtonDown(controle, GAMEPAD_BUTTON_LEFT_FACE_LEFT);
-    comandos->direita |= x > ZONA_MORTA_DIRECAO ||
-                         IsGamepadButtonDown(controle, GAMEPAD_BUTTON_LEFT_FACE_RIGHT);
+    comandos->esquerda |= IsGamepadButtonDown(controle, GAMEPAD_BUTTON_LEFT_FACE_LEFT);
+    comandos->direita |= IsGamepadButtonDown(controle, GAMEPAD_BUTTON_LEFT_FACE_RIGHT);
+    comandos->direcao = direcaoDoAnalogico(GetGamepadAxisMovement(controle, GAMEPAD_AXIS_LEFT_X));
 }
 
 /*

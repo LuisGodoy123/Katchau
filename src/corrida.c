@@ -18,8 +18,13 @@
 #define DISTANCIA_LATERAL_BATIDA  0.25f   /* mais perto que isso, os carros se tocam */
 #define PERDA_NA_BATIDA           0.8f    /* quem bate atrás fica com 80% da velocidade do outro */
 
+/* ---------- Vácuo ---------- */
+#define DISTANCIA_DO_VACUO        3600.0f   /* ~30 m: mais perto que isso atrás de alguém, pega vácuo */
+#define LARGURA_DO_VACUO          0.35f     /* tem que estar quase na mesma linha do carro da frente */
+#define RAPIDEZ_DO_VACUO          3.0f      /* o vácuo entra e sai em ~1/3 s, sem tranco */
+
 /* ---------- Intervalo entre carros ---------- */
-#define VELOCIDADE_DE_REFERENCIA  9200.0f   /* média de uma volta (~517 mil unidades em ~56 s): converte distância em tempo */
+#define VELOCIDADE_DE_REFERENCIA  9600.0f   /* média de uma volta (~517 mil unidades em ~54 s): converte distância em tempo */
 
 /* ---------- Contagem regressiva ---------- */
 /* Um respiro só com o motor, depois 3, 2, 1... KATCHAU! */
@@ -284,8 +289,54 @@ static void verificarBatidas(Corrida *corrida) {
 }
 
 /*
+ * forcaDoVacuo
+ * Procura o carro mais próximo logo à frente, na mesma linha. Quanto
+ * mais perto, mais forte o vácuo (1 colado, 0 a DISTANCIA_DO_VACUO).
+ * Recebe: a corrida e o carro.
+ * Devolve: de 0 a 1.
+ */
+static float forcaDoVacuo(Corrida *corrida, Carro *carro) {
+    float forca = 0.0f;
+    for (int i = 0; i < TOTAL_CARROS; i++) {
+        Carro *outro = corrida->classificacao[i];
+        float distancia = outro->distanciaPercorrida - carro->distanciaPercorrida;
+        float diferencaLateral = fabsf(outro->deslocamentoLateral - carro->deslocamentoLateral);
+        if (outro == carro || distancia <= 0.0f || distancia >= DISTANCIA_DO_VACUO
+            || diferencaLateral >= LARGURA_DO_VACUO) {
+            continue;
+        }
+        float destaVez = 1.0f - distancia / DISTANCIA_DO_VACUO;
+        if (destaVez > forca) {
+            forca = destaVez;
+        }
+    }
+    return forca;
+}
+
+/*
+ * atualizarVacuo
+ * Leva o vácuo de cada carro, aos poucos, para a força de agora. O
+ * carro usa esse valor para subir a velocidade máxima (veja carro.c).
+ * Recebe: a corrida e o tempo do quadro.
+ * Devolve: nada (altera o campo vacuo de cada carro).
+ */
+static void atualizarVacuo(Corrida *corrida, float tempoQuadro) {
+    float passo = RAPIDEZ_DO_VACUO * tempoQuadro;
+    for (int i = 0; i < TOTAL_CARROS; i++) {
+        Carro *carro = corrida->classificacao[i];
+        float alvo = forcaDoVacuo(corrida, carro);
+        if (carro->vacuo < alvo) {
+            carro->vacuo = fminf(carro->vacuo + passo, alvo);
+        } else {
+            carro->vacuo = fmaxf(carro->vacuo - passo, alvo);
+        }
+    }
+}
+
+/*
  * atualizarCorrida
  * Avança a corrida um quadro:
+ *   0) mede o vácuo de cada carro;
  *   1) move o jogador com os comandos do teclado;
  *   2) move cada rival com os comandos da IA;
  *   3) trata as batidas;
@@ -303,6 +354,10 @@ static void verificarBatidas(Corrida *corrida) {
 void atualizarCorrida(Corrida *corrida, Comandos comandosJogador, float tempoQuadro) {
     if (corrida->contagemRegressiva > 0.0f) {
         corrida->contagemRegressiva -= tempoQuadro;
+        /* Parado no grid: acelerar só sobe o conta-giros (e acende as lanternas) */
+        corrida->jogador.ultimosComandos = comandosJogador;
+        atualizarMotor(&corrida->jogador.motor, 0.0f, comandosJogador.acelerar && !comandosJogador.frear,
+                       tempoQuadro);
         return;
     }
 
@@ -310,9 +365,12 @@ void atualizarCorrida(Corrida *corrida, Comandos comandosJogador, float tempoQua
     if (jogadorVenceu(corrida)) {
         comandosJogador = atualizarIA(&corrida->jogador, carroDaFrente(corrida, &corrida->jogador));
     } else if (corrida->terminou) {
-        Comandos nenhumComando = { 0, 0, 0, 0 };
+        Comandos nenhumComando = { 0, 0, 0, 0, 0.0f };
         comandosJogador = nenhumComando;
     }
+
+    /* 0) Vácuo, antes de mover: todos medem com os carros no mesmo lugar */
+    atualizarVacuo(corrida, tempoQuadro);
 
     /* 1) Jogador */
     int cruzou = atualizarCarro(&corrida->jogador, comandosJogador, tempoQuadro) > 0;

@@ -30,14 +30,14 @@ UnloadTexture(carro);   /* antes do CloseWindow() */
 |            | `zebra.png`            | 256x64   | zebra vermelha e branca da borda            |
 |            | `faixa.png`            | 8x64     | faixa branca do meio da pista               |
 | `fundo/`   | `ceu.png`              | 2560x960 | céu com nuvens (camada mais distante)       |
-|            | `morros.png`           | 2560x480 | morros verdes (camada mais próxima)         |
+|            | `morros.png`           | 2560x480 | morros verdes em 3 camadas (a mais próxima) |
 |            | `cidade.png`           | 2560x480 | prédios de São Paulo (camada do meio)       |
 | `carro/`   | `carro_reto.png`       | 120x64   | carro (fórmula) de trás, reto               |
 |            | `carro_esquerda.png`   | 120x64   | carro virando para a esquerda               |
 |            | `carro_direita.png`    | 120x64   | carro virando para a direita                |
 | `sprites/` | `arvore.png`           | 288x416  | árvore na beira da pista                    |
 |            | `portico.png`          | 960x440  | pórtico da largada/chegada                  |
-|            | `pneus.png`            | 448x176  | barreira de pneus                           |
+|            | `pneus.png`            | 896x288  | barreira: pilhas de pneus deitados          |
 |            | `placa_50.png`         | 128x224  | placa de frenagem 50 m                      |
 |            | `placa_100.png`        | 128x224  | placa de frenagem 100 m                     |
 |            | `placa_150.png`        | 128x224  | placa de frenagem 150 m                     |
@@ -45,16 +45,25 @@ UnloadTexture(carro);   /* antes do CloseWindow() */
 
 ## Como gerar de novo
 
-O asfalto, a grama, a zebra, o fundo e os sprites são desenhados por código
-em `ferramentas/gerar_texturas.py` (o carro e a faixa, não). Para mudar uma
-imagem, mude o desenho no script e rode (precisa de Python 3 com numpy; o
-Python do Blender já tem):
+Os **morros** (`fundo/morros.png`) são desenhados por código em
+`ferramentas/gerar_morros.py`: três camadas de cristas lisas, no estilo da
+cidade, que emendam sem costura nas bordas. Para mudar a altura, as cores ou
+o formato, mude as `CAMADAS` no script e rode (precisa de Python 3 com numpy;
+o Python do Blender já tem):
+
+A **barreira de pneus** (`sprites/pneus.png`) sai de `ferramentas/gerar_pneus.py`:
+6 pilhas de 5 pneus deitados, vistas de lado e um pouco de cima, com o pneu do topo
+pintado (vermelho e branco, alternando). O número de pilhas, de pneus, as cores e o
+achatamento ficam nas constantes do começo do script.
 
 ```sh
 PY=/Applications/Blender.app/Contents/Resources/5.2/python/bin/python3.13
-$PY ferramentas/gerar_texturas.py              # tudo
-$PY ferramentas/gerar_texturas.py --so fundo   # só um grupo: estrada, fundo ou sprites
+$PY ferramentas/gerar_morros.py
+$PY ferramentas/gerar_pneus.py
 ```
+
+As outras imagens não têm script no repositório: para trocá-las, substitua o PNG
+mantendo o nome.
 
 O `render.c` não depende do tamanho das imagens: a grama usa a largura da
 textura e o fundo converte para a largura de referência `LARGURA_FUNDO`

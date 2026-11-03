@@ -6,7 +6,8 @@
  *     intervalo de cada carro para o jogador e a última volta);
  *   - em cima à direita: a volta do jogador (diferença para a melhor
  *     volta, tempos e os 3 setores coloridos, como no F1);
- *   - embaixo à esquerda: o mini-mapa; embaixo à direita: o velocímetro.
+ *   - embaixo à esquerda: o mini-mapa; embaixo à direita: o painel do motor
+ *     (velocidade, conta-giros e marcha).
  * E também a contagem regressiva e o painel de chegada.
  * ------------------------------------------------------------------
  */

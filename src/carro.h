@@ -17,6 +17,7 @@
 
 #include "config.h"
 #include "pista.h"
+#include "motor.h"
 
 #define TAMANHO_NOME        20
 #define LIMITE_PISTA        1.0f   /* além disso (para qualquer lado) é grama */
@@ -32,12 +33,15 @@ typedef struct {
     float aderencia;               /* de 0 a 1 */
 } FichaTecnica;
 
-/* O que o piloto quer fazer neste quadro: 1 = sim, 0 = não. */
+/* O que o piloto quer fazer neste quadro: 1 = sim, 0 = não.
+ * As setas (esquerda/direita) giram o volante todo; o analógico do
+ * controle diz quanto girar, em "direcao". */
 typedef struct {
     int acelerar;
     int frear;
     int esquerda;
     int direita;
+    float direcao;                 /* analógico: -1 todo à esquerda a +1 todo à direita (0 = só as setas) */
 } Comandos;
 
 typedef struct {
@@ -53,6 +57,8 @@ typedef struct {
     float velocidade;              /* unidades de mundo por segundo */
     float volante;                 /* -1 todo à esquerda, 0 reto, +1 todo à direita; anda aos poucos */
     float derrapagem;              /* 0 com folga; sobe até 1 quando a curva está vencendo o volante */
+    float vacuo;                   /* 0 no ar limpo, até 1 colado atrás de outro carro (corrida.c preenche) */
+    Motor motor;                   /* rotação e marcha (o câmbio corta a potência na troca) */
     int voltas;                    /* voltas completadas */
     float temposDeVolta[TOTAL_VOLTAS];
     float inicioDaVolta;           /* momento da corrida em que a volta atual começou */
@@ -83,6 +89,9 @@ int estaForaDaPista(Carro *carro);
 int velocidadeEmKmh(Carro *carro);
 int converterParaKmh(float velocidade);
 float velocidadeSeguraNaCurva(Carro *carro, float curvatura);
+float velocidadeSeguraAcelerando(Carro *carro, float curvatura);
+float velocidadeMaximaNoVacuo(Carro *carro);
+float velocidadeParaFrearAte(float alvo, float distancia);
 float tempoAteVelocidade(const FichaTecnica *ficha, float velocidade);
 
 #endif

@@ -73,6 +73,11 @@ teclado, sem configurar nada. Os nomes da tabela são os do controle de Xbox; no
 PlayStation ficam nos mesmos lugares (R2/✕, L2/□, ○). Nos menus, direcional ou analógico
 andam, **A** confirma e **B** volta; com o controle ligado, as dicas da tela mostram os botões.
 
+O **analógico é proporcional**: meio inclinado, o volante gira só até a metade (as setas e o
+direcional sempre giram tudo). Tem uma folga pequena no centro (12%), e perto dele a resposta é
+mais fina que no fim do curso, para corrigir a linha na reta sem ziguezague
+(`direcaoDoAnalogico` em `controle.c`; o campo `direcao` dos `Comandos` leva o valor ao carro).
+
 **Nos menus**
 
 | Tecla | Ação |
@@ -127,7 +132,7 @@ src/
   hud.c/.h         posições, volta e setores, mini-mapa e velocímetro  (fases 3 a 6)
   menu.c/.h        menu, garagem, como jogar e tela de resultado       (fase 6)
   visual.c/.h      identidade visual: cores, fontes, logo e formas     (fase 6)
-  motor.c/.h       rotação, marcha e carga do motor do jogador (lógica do som do carro)
+  motor.c/.h       rotação, marcha e carga do motor (câmbio de cada carro; também comanda o som)
   audio.c/.h       música, efeitos dos menus, largada e o som do motor do carro
   controle.c/.h    controle (gamepad): comandos do carro e botões dos menus
 testes/
@@ -188,14 +193,40 @@ viram os rivais, e o jogador larga em último. A "volta limpa" é o tempo de uma
 
 | Carro | Cor | Jeito | Volta limpa |
 |---|---|---|---|
-| Katchau | vermelho | o carro da casa, equilibrado (o padrão) | 55,9 s |
-| Barão | amarelo | esportivo arrogante, voa na reta | 55,7 s |
-| Neon | roxo | gruda nas curvas | 55,2 s |
-| Trovão | azul | arranca forte | 55,8 s |
-| Zé Pistão | laranja | certinho em tudo | 56,6 s |
-| Fuscão | verde-água | lento, mas não sai da pista | 56,7 s |
-| Bolinha | rosa | esperto na largada | 57,5 s |
-| Ferrugem | marrom | picape enferrujada | 58,3 s |
+| Katchau | vermelho | o carro da casa, equilibrado (o padrão) | 53,8 s |
+| Barão | amarelo | esportivo arrogante, voa na reta | 53,6 s |
+| Neon | roxo | gruda nas curvas | 53,3 s |
+| Trovão | azul | arranca forte | 53,7 s |
+| Zé Pistão | laranja | certinho em tudo | 54,4 s |
+| Fuscão | verde-água | lento, mas não sai da pista | 54,8 s |
+| Bolinha | rosa | esperto na largada | 55,2 s |
+| Ferrugem | marrom | picape enferrujada | 56,2 s |
+
+## Pilotagem
+
+A física é de fliperama (`carro.c`), mas tem algumas coisas que recompensam quem pilota bem:
+
+- **Freio de verdade.** O freio tira ~5 g, como um F1: de 300 a 100 km/h são uns 90 m, então
+  as placas de 150, 100 e 50 m antes das curvas servem para achar o ponto de frenagem. Tirar o
+  pé quase não freia (só o ar e o atrito: ~1 g a 300 km/h, bem menos em baixa), então quem
+  quer perder velocidade usa o freio. A IA calcula, pela mesma física, de onde precisa começar
+  a frear para cada curva (`velocidadeParaFrearAte`).
+- **Câmbio.** Todo carro tem um câmbio automático de 7 marchas (`motor.c`, dentro do `Carro`),
+  que sobe na linha vermelha (8.000 rpm). Em cada troca a potência é cortada por 0,16 s: dá
+  para sentir o "tranco" de cada marcha.
+
+- **O pé muda a curva.** Acelerando, o carro "sai de frente" e é empurrado para fora com
+  força total; aliviando, o empurrão cai 10%, e freando, 20%. O certo é frear antes, aliviar no
+  meio e acelerar na saída. A IA faz o mesmo: só acelera na curva abaixo do limite de quem acelera
+  (`velocidadeSeguraAcelerando`).
+- **Passar do limite custa velocidade.** Quando a curva empurra mais do que o volante segura,
+  o pneu arrasta e o carro perde velocidade, proporcional a quanto passou. Com menos velocidade
+  o empurrão cai e o carro volta a obedecer. Entrar quente é uma aposta, não grama na certa.
+- **Vácuo.** Até ~30 m atrás de outro carro, na mesma linha, o ar segura menos: a velocidade
+  máxima sobe até 6% (300 → 318 km/h) e aparece **VÁCUO** em cima do velocímetro. Para passar,
+  é só sair de lado antes de bater na traseira. Saindo do vácuo, o excesso vai embora aos poucos.
+
+O teste 17 confere o pé na curva, a derrapagem e o vácuo; o teste 18, o freio, o alívio e o câmbio.
 
 ## Onde a ordenação entra na lógica
 
@@ -243,7 +274,13 @@ melhor setor e a volta mais rápida de todos. O HUD mostra:
 - **em cima à direita**, a sua volta: a diferença para a sua melhor volta no último setor
   (verde ganhando, vermelho perdendo), os tempos atual, última, melhor e a mais rápida da
   corrida, e os setores: **roxo** = melhor da corrida, **verde** = seu melhor, **amarelo** = mais lento;
-- **embaixo à esquerda** o mini-mapa e **embaixo à direita** o velocímetro.
+- **embaixo à esquerda** o mini-mapa e **embaixo à direita** o painel do motor, minimalista, tudo
+  dentro de um mostrador redondo: um conta-giros de 0 a 9 mil rpm com ponteiro e faixa vermelha em volta,
+  a velocidade grande no meio (amarela no vácuo) e a marcha num círculo vermelho embaixo (N no grid;
+  pisca em branco perto do limite e dá um pulo quando troca). O câmbio é automático, de 7 marchas (`motor.c`; cada carro tem o seu): sobe a marcha quando o
+  ponteiro chega na linha vermelha, em **8.000 rpm** (`RPM_DA_TROCA` em `motor.h`, que também marca
+  onde começa a faixa vermelha do mostrador). As marchas de cada carro cobrem frações da própria
+  velocidade máxima. O motor do jogador também comanda o som.
 
 ## Vitória
 

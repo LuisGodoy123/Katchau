@@ -1,34 +1,39 @@
 /*
  * motor.h
  * ------------------------------------------------------------------
- * O motor do carro do jogador, só a parte que o som precisa: em que
- * rotação ele está, qual marcha e se o piloto está com o pé no fundo.
+ * O motor e o câmbio automático de cada carro: em que rotação ele está,
+ * qual marcha e se o piloto está com o pé no fundo.
  *
- * O jogo não simula câmbio de verdade (o carro tem só velocidade). Aqui a
- * rotação é deduzida da velocidade: cada marcha cobre uma faixa de
- * velocidade, a rotação sobe até perto do limite, o câmbio troca e a
+ * A rotação é deduzida da velocidade: cada marcha cobre uma faixa de
+ * velocidade, a rotação sobe até a linha vermelha, o câmbio troca e a
  * rotação cai, como num carro de verdade. Cada carro usa a própria
  * velocidade máxima como fim da última marcha.
  *
- * Este módulo NÃO usa a raylib: o audio.c transforma estes números em som.
+ * Todo carro tem um motor (carro.h). Durante a troca de marcha o carro.c
+ * corta a potência por um instante; o audio.c transforma a rotação e a
+ * carga do motor do jogador em som, e o hud.c mostra o conta-giros.
+ *
+ * Este módulo NÃO usa a raylib.
  * ------------------------------------------------------------------
  */
 
 #ifndef MOTOR_H
 #define MOTOR_H
 
-#include "carro.h"
 
-#define TOTAL_MARCHAS 6
+#define TOTAL_MARCHAS 7
+#define RPM_MAXIMO    9000.0f   /* giro 1 = 9 mil rpm (o fim do conta-giros) */
+#define RPM_DA_TROCA  8000.0f   /* a linha vermelha: o câmbio sobe a marcha aqui */
 
 typedef struct {
     int marcha;            /* 0 a TOTAL_MARCHAS - 1 */
-    float giro;            /* rotação: 0 = o mínimo da marcha lenta, 1 = limitador */
+    float giro;            /* rotação: 0 a 1 (1 = RPM_MAXIMO, o limitador) */
     float carga;           /* 0 = aliviado / freando, 1 = pé no fundo (com folga na troca) */
     float tempoDeTroca;    /* segundos que faltam para acabar a troca de marcha (0 = engatado) */
 } Motor;
 
 void iniciarMotor(Motor *motor);
-void atualizarMotor(Motor *motor, const Carro *carro, float tempoQuadro);
+void atualizarMotor(Motor *motor, float fracaoDaVelocidade, int pedeAcelerar, float tempoQuadro);
+int estaTrocandoDeMarcha(const Motor *motor);
 
 #endif

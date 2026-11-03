@@ -1,18 +1,18 @@
 /*
  * motor.c
  * ------------------------------------------------------------------
- * Rotação, marcha e carga do motor do jogador. Veja motor.h.
+ * Rotação, marcha e carga do motor de cada carro. Veja motor.h.
  * ------------------------------------------------------------------
  */
 
 #include "motor.h"
 
 /* Até que fração da velocidade máxima cada marcha vai, com o motor no limite */
-static const float TETO_DA_MARCHA[TOTAL_MARCHAS] = { 0.22f, 0.38f, 0.54f, 0.70f, 0.85f, 1.00f };
+static const float TETO_DA_MARCHA[TOTAL_MARCHAS] = { 0.20f, 0.33f, 0.46f, 0.59f, 0.72f, 0.86f, 1.00f };
 
 #define GIRO_MARCHA_LENTA   0.12f   /* rotação parado, sem acelerar */
 #define GIRO_ARRANCADA      0.55f   /* rotação com o pé no fundo parado ou saindo na 1ª */
-#define GIRO_PARA_SUBIR     0.96f   /* a esta rotação o câmbio engata a marcha seguinte */
+#define GIRO_PARA_SUBIR     (RPM_DA_TROCA / RPM_MAXIMO)   /* na linha vermelha o câmbio engata a marcha seguinte */
 #define GIRO_PARA_REDUZIR   0.72f   /* abaixo desta (na marcha de baixo) reduz */
 #define DURACAO_DA_TROCA    0.16f   /* segundos de pé levantado durante a troca */
 #define SUBIDA_DO_GIRO      10.0f   /* quão rápido a rotação sobe (1/s) */
@@ -65,11 +65,12 @@ void iniciarMotor(Motor *motor) {
  * para onde a marcha manda (com inércia, então ela cai de verdade quando o
  * câmbio troca) e acompanha o pé do piloto. Quem freia ou solta o
  * acelerador alivia a carga.
- * Recebe: o motor, o carro do jogador e o tempo do quadro.
+ * Recebe: o motor, a velocidade como fração da máxima do carro, se o
+ *         piloto está acelerando (e não freando) e o tempo do quadro.
  * Devolve: nada.
  */
-void atualizarMotor(Motor *motor, const Carro *carro, float tempoQuadro) {
-    float fracao = carro->velocidade / carro->velocidadeMaxima;
+void atualizarMotor(Motor *motor, float fracaoDaVelocidade, int pedeAcelerar, float tempoQuadro) {
+    float fracao = fracaoDaVelocidade;
     if (fracao < 0.0f) {
         fracao = 0.0f;
     }
@@ -77,13 +78,16 @@ void atualizarMotor(Motor *motor, const Carro *carro, float tempoQuadro) {
         fracao = 1.0f;
     }
 
-    /* Câmbio: sobe ao chegar perto do limite, reduz quando a rotação da marcha de baixo seria boa */
+    /* Câmbio: sobe quando o ponteiro chega na linha vermelha (a rotação de
+     * verdade, com inércia, e não a que a marcha pede), e reduz quando a
+     * rotação da marcha de baixo seria boa */
     if (motor->tempoDeTroca > 0.0f) {
         motor->tempoDeTroca -= tempoQuadro;
         if (motor->tempoDeTroca < 0.0f) {
             motor->tempoDeTroca = 0.0f;
         }
-    } else if (motor->marcha < TOTAL_MARCHAS - 1 && giroNaMarcha(motor->marcha, fracao) >= GIRO_PARA_SUBIR) {
+    } else if (motor->marcha < TOTAL_MARCHAS - 1 && motor->giro >= GIRO_PARA_SUBIR
+               && giroNaMarcha(motor->marcha, fracao) >= GIRO_PARA_SUBIR) {
         motor->marcha++;
         motor->tempoDeTroca = DURACAO_DA_TROCA;
     } else if (motor->marcha > 0 && giroNaMarcha(motor->marcha - 1, fracao) < GIRO_PARA_REDUZIR) {
@@ -92,7 +96,6 @@ void atualizarMotor(Motor *motor, const Carro *carro, float tempoQuadro) {
     }
 
     /* Rotação */
-    int pedeAcelerar = carro->ultimosComandos.acelerar && !carro->ultimosComandos.frear;
     float alvo = giroNaMarcha(motor->marcha, fracao);
     if (motor->marcha == 0 && pedeAcelerar && alvo < GIRO_ARRANCADA) {
         alvo = GIRO_ARRANCADA;   /* saindo da largada: o motor sobe antes do carro */
@@ -107,4 +110,13 @@ void atualizarMotor(Motor *motor, const Carro *carro, float tempoQuadro) {
     float alvoCarga = (pedeAcelerar && motor->tempoDeTroca <= 0.0f) ? 1.0f : 0.0f;
     float rapidezCarga = (alvoCarga > motor->carga) ? SUBIDA_DA_CARGA : QUEDA_DA_CARGA;
     motor->carga = aproximar(motor->carga, alvoCarga, rapidezCarga, tempoQuadro);
+}
+
+/*
+ * estaTrocandoDeMarcha
+ * Recebe: o motor.
+ * Devolve: 1 durante a troca de marcha (a potência está cortada), 0 engatado.
+ */
+int estaTrocandoDeMarcha(const Motor *motor) {
+    return motor->tempoDeTroca > 0.0f;
 }

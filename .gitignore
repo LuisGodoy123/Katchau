@@ -9,3 +9,6 @@ katchau.zip
 .DS_Store
 .vscode/
 .idea/
+
+# Cache do Python (ferramentas/)
+__pycache__/

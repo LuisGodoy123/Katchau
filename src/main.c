@@ -18,7 +18,6 @@
 #include "pista.h"
 #include "carro.h"
 #include "corrida.h"
-#include "motor.h"
 #include "render.h"
 #include "hud.h"
 #include "menu.h"
@@ -38,7 +37,7 @@
  * Devolve: os comandos deste quadro.
  */
 static Comandos lerComandos(void) {
-    Comandos comandos;
+    Comandos comandos = { 0, 0, 0, 0, 0.0f };
     comandos.acelerar = IsKeyDown(KEY_UP) || IsKeyDown(KEY_W);
     comandos.frear = IsKeyDown(KEY_DOWN) || IsKeyDown(KEY_S);
     comandos.esquerda = IsKeyDown(KEY_LEFT) || IsKeyDown(KEY_A);
@@ -126,8 +125,6 @@ int main(int argc, char *argv[]) {
 
     Pista *pista = criarPista();
     Corrida corrida;
-    Motor motor;   /* rotação e carga do motor do jogador, para o som */
-    iniciarMotor(&motor);
     EstadoMenu menu;
     iniciarMenu(&menu);
     Tela tela = TELA_MENU;
@@ -157,7 +154,7 @@ int main(int argc, char *argv[]) {
                 break;
             case TELA_RESULTADO: {
                 /* A corrida continua ao fundo até todos os rivais chegarem */
-                Comandos nenhumComando = { 0, 0, 0, 0 };
+                Comandos nenhumComando = { 0, 0, 0, 0, 0.0f };
                 atualizarCorrida(&corrida, nenhumComando, tempoQuadro);
                 proxima = atualizarResultado();
                 break;
@@ -169,7 +166,6 @@ int main(int argc, char *argv[]) {
         /* Entrar na corrida (do menu ou do "correr de novo") sempre começa uma nova */
         if (proxima == TELA_CORRIDA && tela != TELA_CORRIDA) {
             iniciarCorrida(&corrida, pista, menu.carroEscolhido);
-            iniciarMotor(&motor);
             limparConfetes();
         }
         tela = proxima;
@@ -207,14 +203,13 @@ int main(int argc, char *argv[]) {
             int depoisDoGo = (naCorrida && corrida.contagemRegressiva <= 0.0f);
             int naContagem = (naCorrida && corrida.contagemRegressiva < NUMEROS_DA_CONTAGEM * SEGUNDOS_POR_NUMERO &&
                               (antesDoGo || corrida.tempoDeCorrida < DURACAO_GRITO_LARGADA));
-            if (naCorrida) {
-                atualizarMotor(&motor, &corrida.jogador, tempoQuadro);
-            }
             float segundosAteALinha = naCorrida ? segundosAteAVitoria(&corrida) : -1.0f;
             atualizarMusicaDaVitoria(segundosAteALinha, venceu);
             atualizarSonsDaCorrida(antesDoGo, naContagem,
                                    depoisDoGo && !corrida.terminou && !musicaDaVitoriaTocando());
-            atualizarSomDoMotor(depoisDoGo && !venceu, motor.giro, motor.carga);
+            Motor *motor = &corrida.jogador.motor;   /* cada carro tem o seu; o som é o do jogador */
+            atualizarSomDoMotor(depoisDoGo && !venceu, naCorrida ? motor->giro : 0.0f,
+                                naCorrida ? motor->carga : 0.0f);
         }
 
         /* ---- 2) Desenhar a tela atual ----

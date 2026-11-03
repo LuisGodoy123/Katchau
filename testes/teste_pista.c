@@ -274,9 +274,9 @@ static void testarCarro(void) {
     printf("\n5) Carro andando pela pista\n");
     Pista *pista = criarPista();
     float quadro = 1.0f / 60.0f;
-    Comandos acelerar = { 1, 0, 0, 0 };
-    Comandos frear = { 0, 1, 0, 0 };
-    Comandos virarDireita = { 0, 0, 0, 1 };
+    Comandos acelerar = { 1, 0, 0, 0, 0.0f };
+    Comandos frear = { 0, 1, 0, 0, 0.0f };
+    Comandos virarDireita = { 0, 0, 0, 1, 0.0f };
 
     /* Para medir velocidade, um "oval" só de retas: sem curva, nada
      * empurra o carro para a grama. */
@@ -351,7 +351,7 @@ static void testarCorridaCompleta(void) {
     int quadros = 0;
     while (!corrida.terminou && quadros < quadrosMaximos) {
         /* Acelera sempre e corrige o volante para o centro */
-        Comandos comandos = { 1, 0, 0, 0 };
+        Comandos comandos = { 1, 0, 0, 0, 0.0f };
         comandos.esquerda = corrida.jogador.deslocamentoLateral > 0.1f;
         comandos.direita = corrida.jogador.deslocamentoLateral < -0.1f;
         atualizarCorrida(&corrida, comandos, quadro);
@@ -372,7 +372,7 @@ static void testarCorridaCompleta(void) {
 
     float tempoNaChegada = corrida.jogador.tempoDeChegada;
     float velocidadeNaChegada = corrida.jogador.velocidade;
-    Comandos acelerar = { 1, 0, 0, 0 };
+    Comandos acelerar = { 1, 0, 0, 0, 0.0f };
     atualizarCorrida(&corrida, acelerar, quadro);
     verificar(corrida.jogador.tempoDeChegada == tempoNaChegada, "depois do fim o tempo do jogador nao muda");
     verificar(corrida.jogador.velocidade < velocidadeNaChegada, "depois do fim o acelerador e ignorado");
@@ -562,7 +562,7 @@ static void testarEscolhaDaGaragem(void) {
     verificar(cadaUmUmaVez, "os 8 carros estao na corrida, sem repetir");
 
     /* Contagem regressiva: ninguém anda antes de ela acabar */
-    Comandos acelerar = { 1, 0, 0, 0 };
+    Comandos acelerar = { 1, 0, 0, 0, 0.0f };
     float distanciaAntes = corrida.jogador.distanciaPercorrida;
     atualizarCorrida(&corrida, acelerar, 1.0f);
     verificar(corrida.jogador.distanciaPercorrida == distanciaAntes && corrida.tempoDeCorrida == 0.0f,
@@ -578,7 +578,7 @@ static void testarEscolhaDaGaragem(void) {
     }
     /* Depois de todos chegarem, os carros continuam andando: a ordem não pode mudar */
     for (int i = 0; i < 60 * 20; i++) {
-        Comandos nenhum = { 0, 0, 0, 0 };
+        Comandos nenhum = { 0, 0, 0, 0, 0.0f };
         atualizarCorrida(&corrida, nenhum, quadro);
     }
 
@@ -609,8 +609,8 @@ static void testarVolante(void) {
     Carro carro = criarCarro("Teste", 0, reta->largada, 0.0f, 12000.0f, 2400.0f, 0.5f);
     carro.velocidade = carro.velocidadeMaxima;
     float quadro = 1.0f / 60.0f;
-    Comandos direita = { 0, 0, 0, 1 };
-    Comandos nenhum = { 0, 0, 0, 0 };
+    Comandos direita = { 0, 0, 0, 1, 0.0f };
+    Comandos nenhum = { 0, 0, 0, 0, 0.0f };
 
     atualizarCarro(&carro, direita, quadro);
     verificar(carro.volante > 0.0f && carro.volante < 1.0f,
@@ -625,6 +625,33 @@ static void testarVolante(void) {
         atualizarCarro(&carro, nenhum, quadro);
     }
     verificar(carro.volante == 0.0f, "soltando a seta, o volante volta sozinho ao centro");
+
+    /* Analógico: o volante para onde o analógico manda, não no fim */
+    Comandos meioDireita = { 0, 0, 0, 0, 0.5f };
+    for (int i = 0; i < 60; i++) {
+        atualizarCarro(&carro, meioDireita, quadro);
+    }
+    verificar(fabsf(carro.volante - 0.5f) < 0.001f, "analogico pela metade: o volante para na metade");
+    Carro inteiro = carro, metade = carro;
+    inteiro.volante = 1.0f;
+    inteiro.deslocamentoLateral = metade.deslocamentoLateral = 0.0f;
+    Comandos tudoDireita = { 0, 0, 0, 0, 1.0f };
+    atualizarCarro(&inteiro, tudoDireita, quadro);
+    atualizarCarro(&metade, meioDireita, quadro);
+    verificar(fabsf(metade.deslocamentoLateral * 2.0f - inteiro.deslocamentoLateral) < 0.001f,
+              "com metade do volante o carro vira metade");
+
+    Comandos poucoDireita = { 0, 0, 0, 0, 0.2f };
+    for (int i = 0; i < 60; i++) {
+        atualizarCarro(&carro, poucoDireita, quadro);
+    }
+    verificar(fabsf(carro.volante - 0.2f) < 0.001f, "aliviando o analogico, o volante desce junto (e para em 0,2)");
+
+    Comandos setaEAnalogico = { 0, 0, 1, 0, 0.3f };   /* seta para a esquerda, analógico um pouco à direita */
+    for (int i = 0; i < 60; i++) {
+        atualizarCarro(&carro, setaEAnalogico, quadro);
+    }
+    verificar(carro.volante == -1.0f, "seta e analogico juntos: vale o que pede mais");
 
     liberarPista(reta);
 }
@@ -734,7 +761,7 @@ static void testarDirigibilidade(void) {
     rapido.velocidade = 12000.0f;   /* 300 km/h */
     devagar.volante = 1.0f;
     rapido.volante = 1.0f;
-    Comandos direitaSemPedal = { 0, 0, 0, 1 };
+    Comandos direitaSemPedal = { 0, 0, 0, 1, 0.0f };
     atualizarCarro(&devagar, direitaSemPedal, quadro);
     atualizarCarro(&rapido, direitaSemPedal, quadro);
     float proporcao = devagar.deslocamentoLateral / rapido.deslocamentoLateral;
@@ -753,7 +780,7 @@ static void testarDirigibilidade(void) {
     } while (atual != pista->largada);
     Carro naCurva = criarCarro("Teste", 0, maisFechada, 0.0f, 12000.0f, 2400.0f, 0.5f);
     naCurva.velocidade = naCurva.velocidadeMaxima;
-    Comandos nenhum = { 0, 0, 0, 0 };
+    Comandos nenhum = { 0, 0, 0, 0, 0.0f };
     atualizarCarro(&naCurva, nenhum, quadro);
     printf("     %s a 300 km/h: derrapagem %.2f; velocidade segura %d km/h\n",
            maisFechada->nomeTrecho, naCurva.derrapagem,
@@ -804,7 +831,7 @@ static void testarGridDeLargada(void) {
 
     /* Anda até o jogador cruzar a linha pela primeira vez */
     float quadro = 1.0f / 60.0f;
-    Comandos acelerar = { 1, 0, 0, 0 };
+    Comandos acelerar = { 1, 0, 0, 0, 0.0f };
     int quadros = 0;
     while (corrida.jogador.voltas < 0 && quadros < 60 * 30) {
         atualizarCorrida(&corrida, acelerar, quadro);
@@ -894,6 +921,7 @@ static void testarVoltaDaVitoria(void) {
     Pista *pista = criarPista();
     static Corrida corrida;
     iniciarCorrida(&corrida, pista, 2);
+    corrida.jogador.velocidadeMaxima *= 1.05f;   /* um pouco melhor que a IA, para vencer o pelotão */
     float quadro = 1.0f / 60.0f;
     float estimativaA6s = -1.0f, tempoA6s = 0.0f;
 
@@ -905,7 +933,7 @@ static void testarVoltaDaVitoria(void) {
         }
         atualizarCorrida(&corrida, atualizarIA(&corrida.jogador, carroDaFrente(&corrida, &corrida.jogador)), quadro);
     }
-    verificar(jogadorVenceu(&corrida), "o carro 2 dirigido pela IA vence");
+    verificar(jogadorVenceu(&corrida), "o carro 2 dirigido pela IA (5% mais rapido) vence");
     float real = corrida.jogador.tempoDeChegada - tempoA6s;
     printf("     a ~6 s da linha: estimativa %.2f s, real %.2f s\n", estimativaA6s, real);
     verificar(estimativaA6s >= 0.0f && fabsf(estimativaA6s - real) < 0.3f, "estimativa ate a linha erra menos de 0,3 s");
@@ -916,7 +944,7 @@ static void testarVoltaDaVitoria(void) {
     for (int i = 0; i < TOTAL_VOLTAS; i++) {
         tempos[i] = corrida.jogador.temposDeVolta[i];
     }
-    Comandos nenhumComando = { 0, 0, 0, 0 };
+    Comandos nenhumComando = { 0, 0, 0, 0, 0.0f };
     for (int i = 0; i < 60 * 130; i++) {
         atualizarCorrida(&corrida, nenhumComando, quadro);   /* o teclado nao manda mais */
     }
@@ -943,14 +971,16 @@ static void testarMotor(void) {
 
     /* Parado e sem acelerar: marcha lenta, na 1ª, sem carga */
     for (int i = 0; i < 60; i++) {
-        atualizarMotor(&motor, &carro, quadro);
+        atualizarMotor(&motor, carro.velocidade / carro.velocidadeMaxima,
+                       carro.ultimosComandos.acelerar && !carro.ultimosComandos.frear, quadro);
     }
     verificar(motor.marcha == 0 && motor.giro < 0.2f && motor.carga < 0.05f, "parado: 1a marcha, rotacao baixa, sem carga");
 
     /* Pé no fundo parado: a rotação sobe antes do carro andar */
     carro.ultimosComandos.acelerar = 1;
     for (int i = 0; i < 60; i++) {
-        atualizarMotor(&motor, &carro, quadro);
+        atualizarMotor(&motor, carro.velocidade / carro.velocidadeMaxima,
+                       carro.ultimosComandos.acelerar && !carro.ultimosComandos.frear, quadro);
     }
     verificar(motor.giro > 0.45f && motor.carga > 0.9f, "pe no fundo parado: o motor sobe e pega carga");
 
@@ -958,13 +988,19 @@ static void testarMotor(void) {
     int trocas = 0, quedas = 0, ultimaMarcha = motor.marcha, giroMaximo = 0;
     float giroAntes = motor.giro, maiorQueda = 0.0f;
     int marchaMontonica = 1;
+    int trocaNaLinha = 1;   /* toda subida de marcha acontece com o ponteiro em ~8000 rpm */
     for (int i = 0; i < 60 * 14; i++) {
         carro.velocidade += (carro.velocidadeMaxima / 12.0f) * quadro;
         if (carro.velocidade > carro.velocidadeMaxima) {
             carro.velocidade = carro.velocidadeMaxima;
         }
-        atualizarMotor(&motor, &carro, quadro);
+        atualizarMotor(&motor, carro.velocidade / carro.velocidadeMaxima,
+                       carro.ultimosComandos.acelerar && !carro.ultimosComandos.frear, quadro);
         if (motor.marcha != ultimaMarcha) {
+            float rpmNaTroca = giroAntes * RPM_MAXIMO;
+            if (rpmNaTroca < RPM_DA_TROCA - 50.0f || rpmNaTroca > RPM_DA_TROCA + 300.0f) {
+                trocaNaLinha = 0;
+            }
             if (motor.marcha < ultimaMarcha) {
                 marchaMontonica = 0;
             }
@@ -985,12 +1021,14 @@ static void testarMotor(void) {
     verificar(motor.marcha == TOTAL_MARCHAS - 1, "na velocidade maxima o motor esta na ultima marcha");
     verificar(trocas == TOTAL_MARCHAS - 1 && marchaMontonica, "acelerando, o cambio sobe uma marcha por vez, sem voltar");
     verificar(quedas > 0 && motor.giro > 0.9f, "a rotacao cai quando o cambio troca e volta ao limite no fim");
+    verificar(trocaNaLinha, "o cambio sobe a marcha na linha vermelha (8000 rpm)");
     verificar(!giroMaximo, "a rotacao nunca passa de 1");
 
     /* Soltar o pé: a carga some e a rotação cai */
     carro.ultimosComandos.acelerar = 0;
     for (int i = 0; i < 30; i++) {
-        atualizarMotor(&motor, &carro, quadro);
+        atualizarMotor(&motor, carro.velocidade / carro.velocidadeMaxima,
+                       carro.ultimosComandos.acelerar && !carro.ultimosComandos.frear, quadro);
     }
     verificar(motor.carga < 0.05f, "pe fora do acelerador: sem carga");
 
@@ -1001,9 +1039,207 @@ static void testarMotor(void) {
         if (carro.velocidade < 0.0f) {
             carro.velocidade = 0.0f;
         }
-        atualizarMotor(&motor, &carro, quadro);
+        atualizarMotor(&motor, carro.velocidade / carro.velocidadeMaxima,
+                       carro.ultimosComandos.acelerar && !carro.ultimosComandos.frear, quadro);
     }
     verificar(motor.marcha == 0 && motor.giro < 0.2f, "parado de novo: volta para a 1a e para a marcha lenta");
+}
+
+/*
+ * testarPeVacuoEDerrapagem
+ * As três regras que deixam a pilotagem mais rica:
+ *   - acelerando na curva o carro é mais empurrado para fora que aliviando;
+ *   - passando do limite o pneu arrasta: perde velocidade e volta a obedecer;
+ *   - no vácuo a velocidade máxima sobe, e a corrida mede quem está nele.
+ */
+static void testarPeVacuoEDerrapagem(void) {
+    printf("\n17) Pe na curva, derrapagem e vacuo\n");
+    float quadro = 1.0f / 60.0f;
+    Pista *curva = criarPistaVazia();
+    adicionarTrecho(curva, "Curva longa", 400, CURVA_FECHADA, 0.0f, 0.0f);
+    Comandos acelerar = { 1, 0, 0, 0, 0.0f };
+    Comandos aliviar = { 0, 0, 0, 0, 0.0f };
+
+    /* Pé: mesma velocidade, só muda o pedal */
+    Carro noFundo = criarCarro("Teste", 0, curva->largada, 0.0f, 12000.0f, 2400.0f, 0.5f);
+    noFundo.velocidade = 6000.0f;
+    Carro aliviando = noFundo;
+    atualizarCarro(&noFundo, acelerar, quadro);
+    atualizarCarro(&aliviando, aliviar, quadro);
+    verificar(fabsf(noFundo.deslocamentoLateral) > fabsf(aliviando.deslocamentoLateral),
+              "acelerando na curva o carro e mais empurrado para fora que aliviando");
+    Carro referencia = noFundo;
+    verificar(velocidadeSeguraNaCurva(&referencia, CURVA_FECHADA)
+              > velocidadeSeguraAcelerando(&referencia, CURVA_FECHADA),
+              "o limite da curva e mais alto com o pe fora do acelerador");
+
+    /* Derrapagem: 20% acima do limite, o carro perde mais do que o atrito */
+    float segura = velocidadeSeguraNaCurva(&referencia, CURVA_FECHADA);
+    Carro dentro = criarCarro("Teste", 0, curva->largada, 0.0f, 12000.0f, 2400.0f, 0.5f);
+    dentro.velocidade = segura * 0.9f;
+    Carro passou = dentro;
+    passou.velocidade = segura * 1.2f;
+    float antesDentro = dentro.velocidade, antesPassou = passou.velocidade;
+    atualizarCarro(&dentro, aliviar, quadro);
+    atualizarCarro(&passou, aliviar, quadro);
+    float perdaDentro = antesDentro - dentro.velocidade;
+    float perdaPassou = antesPassou - passou.velocidade;
+    printf("     perda por quadro: %.0f dentro do limite, %.0f passando 20%%\n", perdaDentro, perdaPassou);
+    verificar(perdaPassou > 2.0f * perdaDentro, "passando do limite o pneu arrasta e tira velocidade");
+
+    /* ...e com o volante contra a curva, ele se recupera antes da grama */
+    Comandos contraACurva = { 0, 0, 0, 1, 0.0f };   /* curva para a direita empurra para a esquerda */
+    int quadros = 0;
+    while (passou.derrapagem >= 1.0f && quadros < 60 * 5) {
+        atualizarCarro(&passou, contraACurva, quadro);
+        quadros++;
+    }
+    printf("     recuperou em %.2f s, a %.2f da borda\n", quadros * quadro, passou.deslocamentoLateral);
+    verificar(passou.derrapagem < 1.0f && !estaForaDaPista(&passou),
+              "segurando o volante, o carro volta a obedecer sem ir para a grama");
+
+    /* Vácuo: na reta, quem está no vácuo passa da máxima da ficha */
+    Pista *reta = criarPistaVazia();
+    adicionarTrecho(reta, "Reta", 50, RETA, 0.0f, 0.0f);
+    Carro arLimpo = criarCarro("Teste", 0, reta->largada, 0.0f, 12000.0f, 2400.0f, 0.5f);
+    arLimpo.velocidade = arLimpo.velocidadeMaxima;
+    Carro naEsteira = arLimpo;
+    naEsteira.vacuo = 1.0f;
+    for (int i = 0; i < 60 * 10; i++) {
+        atualizarCarro(&arLimpo, acelerar, quadro);
+        atualizarCarro(&naEsteira, acelerar, quadro);
+    }
+    printf("     maxima: %d km/h no ar limpo, %d km/h no vacuo\n",
+           velocidadeEmKmh(&arLimpo), velocidadeEmKmh(&naEsteira));
+    verificar(arLimpo.velocidade <= arLimpo.velocidadeMaxima, "no ar limpo o carro nao passa da maxima");
+    verificar(naEsteira.velocidade > naEsteira.velocidadeMaxima * 1.04f, "no vacuo ele passa da maxima");
+
+    /* Saindo do vácuo, o excesso some aos poucos (sem tranco) */
+    naEsteira.vacuo = 0.0f;
+    float antes = naEsteira.velocidade;
+    atualizarCarro(&naEsteira, acelerar, quadro);
+    verificar(naEsteira.velocidade > naEsteira.velocidadeMaxima && naEsteira.velocidade < antes,
+              "saindo do vacuo a velocidade cai aos poucos");
+
+    /* Na corrida: colado atrás de um rival, na mesma linha, pega vácuo */
+    Pista *pista = criarPista();
+    static Corrida corrida;
+    iniciarCorrida(&corrida, pista, 0);
+    corrida.contagemRegressiva = 0.0f;
+    Carro *rival = &corrida.rivais[0];
+    Carro *jogador = &corrida.jogador;
+    moverNaPista(&rival->posicao, 20000.0f);   /* os dois bem à frente do resto do grid */
+    rival->distanciaPercorrida += 20000.0f;
+    jogador->posicao = rival->posicao;
+    moverNaPista(&jogador->posicao, -1000.0f);
+    jogador->distanciaPercorrida = rival->distanciaPercorrida - 1000.0f;
+    jogador->deslocamentoLateral = rival->deslocamentoLateral;
+    for (int i = 0; i < 20; i++) {
+        atualizarCorrida(&corrida, aliviar, quadro);
+    }
+    printf("     vacuo do jogador a ~1000 unidades do rival: %.2f\n", jogador->vacuo);
+    verificar(jogador->vacuo > 0.3f, "colado atras de um rival, o jogador pega vacuo");
+    jogador->deslocamentoLateral = rival->deslocamentoLateral + 0.8f;
+    for (int i = 0; i < 30; i++) {
+        atualizarCorrida(&corrida, aliviar, quadro);
+    }
+    verificar(jogador->vacuo == 0.0f, "saindo de lado, o vacuo acaba");
+
+    liberarPista(pista);
+    liberarPista(reta);
+    liberarPista(curva);
+}
+
+/*
+ * testarFreioAlivioECambio
+ *   - o freio é forte, mas não instantâneo: de 300 a 100 km/h leva
+ *     mais de 50 m (as placas de 150/100/50 m servem para alguma coisa);
+ *   - tirar o pé perde bem menos que frear;
+ *   - todo carro tem câmbio, e na troca a potência é cortada;
+ *   - a conta da IA para começar a frear bate com a frenagem de verdade.
+ */
+static void testarFreioAlivioECambio(void) {
+    printf("\n18) Freio, alivio e cambio no carro\n");
+    float quadro = 1.0f / 60.0f;
+    Pista *reta = criarPistaVazia();
+    adicionarTrecho(reta, "Reta", 400, RETA, 0.0f, 0.0f);
+    Comandos frear = { 0, 1, 0, 0, 0.0f };
+    Comandos aliviar = { 0, 0, 0, 0, 0.0f };
+    Comandos acelerar = { 1, 0, 0, 0, 0.0f };
+
+    /* Freio: de 300 a 100 km/h */
+    Carro freando = criarCarro("Teste", 0, reta->largada, 0.0f, 12000.0f, 2400.0f, 0.5f);
+    freando.velocidade = 12000.0f;
+    float inicio = freando.distanciaPercorrida;
+    while (velocidadeEmKmh(&freando) > 100) {
+        atualizarCarro(&freando, frear, quadro);
+    }
+    float metros = (freando.distanciaPercorrida - inicio) / UNIDADES_POR_METRO;
+    printf("     de 300 a 100 km/h freando: %.0f m\n", metros);
+    verificar(metros > 50.0f && metros < 120.0f, "frear de 300 a 100 km/h leva de 50 a 120 m");
+
+    /* Alívio: um segundo sem pedal a 300 km/h */
+    Carro aliviando = criarCarro("Teste", 0, reta->largada, 0.0f, 12000.0f, 2400.0f, 0.5f);
+    aliviando.velocidade = 12000.0f;
+    Carro comFreio = aliviando;
+    for (int i = 0; i < 60; i++) {
+        atualizarCarro(&aliviando, aliviar, quadro);
+        atualizarCarro(&comFreio, frear, quadro);
+    }
+    printf("     1 s a partir de 300 km/h: sem pedal %d km/h, freando %d km/h\n",
+           velocidadeEmKmh(&aliviando), velocidadeEmKmh(&comFreio));
+    verificar(12000.0f - aliviando.velocidade < (12000.0f - comFreio.velocidade) / 4.0f,
+              "tirar o pe perde menos de 1/4 do que o freio");
+    verificar(velocidadeEmKmh(&aliviando) > 260, "tirando o pe a 300 km/h, ainda passa de 260 km/h 1 s depois");
+
+    /* Câmbio: o carro troca de marcha sozinho e, na troca, acelera menos */
+    Carro arrancando = criarCarro("Teste", 0, reta->largada, 0.0f, 12000.0f, 2400.0f, 0.5f);
+    float ganhoEngatado = 0.0f, ganhoNaTroca = 0.0f;
+    for (int i = 0; i < 60 * 4; i++) {
+        float antes = arrancando.velocidade;
+        atualizarCarro(&arrancando, acelerar, quadro);
+        float ganho = arrancando.velocidade - antes;
+        if (estaTrocandoDeMarcha(&arrancando.motor)) {
+            ganhoNaTroca = ganho;
+        } else if (ganhoNaTroca == 0.0f) {
+            ganhoEngatado = ganho;   /* o último quadro engatado antes da primeira troca */
+        }
+    }
+    printf("     4 s acelerando: %da marcha; ganho por quadro %.0f engatado, %.0f na troca\n",
+           arrancando.motor.marcha + 1, ganhoEngatado, ganhoNaTroca);
+    verificar(arrancando.motor.marcha >= 2, "o carro troca de marcha sozinho");
+    verificar(ganhoNaTroca > 0.0f && ganhoNaTroca < ganhoEngatado * 0.5f, "na troca de marcha a potencia e cortada");
+
+    /* A conta da IA: começando na velocidade calculada, chega na alvo bem no fim da distância */
+    float alvo = 4000.0f, distancia = 6000.0f;
+    Carro planejado = criarCarro("Teste", 0, reta->largada, 0.0f, 12000.0f, 2400.0f, 0.5f);
+    planejado.velocidade = velocidadeParaFrearAte(alvo, distancia);
+    inicio = planejado.distanciaPercorrida;
+    while (planejado.distanciaPercorrida - inicio < distancia) {
+        atualizarCarro(&planejado, frear, quadro);
+    }
+    printf("     freando de %d km/h por 50 m: chega a %d km/h (alvo %d)\n",
+           converterParaKmh(velocidadeParaFrearAte(alvo, distancia)), velocidadeEmKmh(&planejado),
+           converterParaKmh(alvo));
+    verificar(fabsf(planejado.velocidade - alvo) < 200.0f, "a velocidade para frear ate a curva bate com o freio");
+
+    /* Os rivais também têm câmbio */
+    Pista *pista = criarPista();
+    static Corrida corrida;
+    iniciarCorrida(&corrida, pista, 0);
+    for (int i = 0; i < 60 * 15; i++) {
+        atualizarCorrida(&corrida, aliviar, quadro);
+    }
+    int todosTrocaram = 1;
+    for (int r = 0; r < TOTAL_RIVAIS; r++) {
+        if (corrida.rivais[r].motor.marcha < 2) {
+            todosTrocaram = 0;
+        }
+    }
+    verificar(todosTrocaram, "os rivais tambem trocam de marcha");
+
+    liberarPista(pista);
+    liberarPista(reta);
 }
 
 int main(int argc, char *argv[]) {
@@ -1027,6 +1263,8 @@ int main(int argc, char *argv[]) {
     testarSetoresEIntervalos();
     testarMotor();
     testarVoltaDaVitoria();
+    testarPeVacuoEDerrapagem();
+    testarFreioAlivioECambio();
 
     if (totalFalhas == 0) {
         printf("\nTodos os testes passaram.\n");

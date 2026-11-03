@@ -117,12 +117,17 @@ void terminarInterface(void) {
 #define ALTURA_TEMPOS_VOLTA   32.0f
 #define ALTURA_SETORES        14.0f
 
-/* ---------- Velocímetro (canto inferior direito) ---------- */
-#define RAIO_VELOCIMETRO      62.0f
-#define KMH_DO_MOSTRADOR      350.0f   /* o arco vai de 0 a 350 km/h */
-#define KMH_DA_FAIXA_VERMELHA 300.0f
-#define ANGULO_DO_ZERO        135.0f   /* graus: 0 km/h embaixo à esquerda... */
+/* ---------- Painel do motor (canto inferior direito) ---------- */
+#define RAIO_VELOCIMETRO      64.0f
+#define ANGULO_DO_ZERO        135.0f   /* graus: 0 rpm embaixo à esquerda... */
 #define VARREDURA             270.0f   /* ...e o arco gira 270 graus até embaixo à direita */
+#define INICIO_DO_PONTEIRO    0.62f    /* o ponteiro vai de 62% do raio até a borda: não cobre a velocidade */
+#define RAIO_DA_MARCHA        13.0f
+#define RPM_DA_LUZ_DE_TROCA   7400.0f  /* daqui até a linha vermelha, fora da última marcha, a marcha pisca */
+#define PISCADAS_POR_SEGUNDO  10.0f
+#define DURACAO_DO_PULO       0.25f    /* a marcha nova cresce e volta ao tamanho em 1/4 s */
+#define TAMANHO_VELOCIDADE    36.0f
+#define COR_TRACO             Fade(COR_TEXTO_CLARO, 0.55f)
 
 /* ---------- Cores do HUD ---------- */
 #define COR_FUNDO_HUD         Fade(COR_GRAFITE, 0.78f)
@@ -484,8 +489,8 @@ static void desenharPainelDaVolta(Corrida *corrida) {
 
 /*
  * pontoNoMostrador
- * Recebe: o centro do velocímetro, o raio e a fração do mostrador
- *         (0 = 0 km/h, 1 = KMH_DO_MOSTRADOR).
+ * Recebe: o centro do mostrador, o raio e a fração do arco
+ *         (0 = 0 rpm, 1 = RPM_MAXIMO).
  * Devolve: o ponto na tela (y cresce para baixo, então o ângulo gira
  *          no sentido horário).
  */
@@ -510,35 +515,125 @@ static void desenharArco(Vector2 centro, float raio, float de, float ate, float 
 }
 
 /*
- * desenharVelocimetro
- * No canto inferior direito, só o essencial: um arco que enche com a
- * velocidade (vermelho a partir de 300 km/h), a velocidade em números
- * grandes no meio e a posição do jogador embaixo.
- * Recebe: a corrida.
+ * centroDoMostrador
+ * Recebe: nada.
+ * Devolve: o centro do mostrador na tela virtual (o VÁCUO também usa).
+ */
+static Vector2 centroDoMostrador(void) {
+    return (Vector2){ larguraVirtual() - MARGEM_HUD - RAIO_VELOCIMETRO - 4,
+                      alturaVirtual() - MARGEM_HUD - RAIO_VELOCIMETRO + 4 };
+}
+
+/*
+ * desenharContaGiros
+ * Minimalista: um arco fino com um tracinho a cada 500 rpm (os de mil
+ * maiores, com o número por dentro), a faixa vermelha de RPM_DA_TROCA
+ * (onde o câmbio sobe) até o fim e um
+ * ponteiro branco curto, que corre por dentro do arco sem passar dele
+ * e sem cobrir a velocidade no meio.
+ * Recebe: o centro, o raio e a rotação (0 a 1).
  * Devolve: nada.
  */
-static void desenharVelocimetro(Corrida *corrida) {
-    Carro *jogador = &corrida->jogador;
-    float raio = RAIO_VELOCIMETRO;
-    Vector2 centro = { larguraVirtual() - MARGEM_HUD - raio - 4, alturaVirtual() - MARGEM_HUD - raio + 6 };
-    int kmh = velocidadeEmKmh(jogador);
-    float fracao = fminf(kmh / KMH_DO_MOSTRADOR, 1.0f);
-    float faixaVermelha = KMH_DA_FAIXA_VERMELHA / KMH_DO_MOSTRADOR;
+static void desenharContaGiros(Vector2 centro, float raio, float giro) {
+    float vermelho = RPM_DA_TROCA / RPM_MAXIMO;   /* a faixa vermelha começa onde o câmbio troca */
+    desenharArco(centro, raio, 0.0f, 1.0f, 1.5f, COR_TRACO);
+    desenharArco(centro, raio - 2.0f, vermelho, 1.0f, 5.0f, COR_VERMELHO);
 
-    desenharBrilho(centro.x, centro.y, raio + 6, Fade(BLACK, 0.55f));
-    desenharArco(centro, raio, 0.0f, 1.0f, 5.0f, Fade(COR_TEXTO_CLARO, 0.25f));
-    if (fracao > 0.0f) {
-        desenharArco(centro, raio, 0.0f, fminf(fracao, faixaVermelha), 5.0f, COR_TEXTO_CLARO);
-        if (fracao > faixaVermelha) {
-            desenharArco(centro, raio, faixaVermelha, fracao, 5.0f, COR_VERMELHO);
+    int totalTracos = (int) (RPM_MAXIMO / 500.0f);
+    for (int t = 0; t <= totalTracos; t++) {
+        float fracao = (float) t / totalTracos;
+        int deMil = (t % 2 == 0);
+        float comprimento = deMil ? 7.0f : 4.0f;
+        Color cor = (fracao >= vermelho) ? COR_VERMELHO : COR_TRACO;
+        DrawLineEx(pontoNoMostrador(centro, raio, fracao), pontoNoMostrador(centro, raio - comprimento, fracao),
+                   deMil ? 2.0f : 1.0f, cor);
+        if (deMil) {
+            Vector2 ponto = pontoNoMostrador(centro, raio - 15.0f, fracao);
+            escreverCentralizado(FONTE_TEXTO, TextFormat("%d", t / 2), ponto.x, ponto.y - 7.0f, 13.0f,
+                                 Fade(COR_TEXTO_CLARO, 0.8f));
         }
     }
 
-    escreverCentralizado(FONTE_FORTE, TextFormat("%d", kmh), centro.x, centro.y - 30, 38.0f, COR_TEXTO_CLARO);
-    escreverCentralizado(FONTE_TEXTO, "km/h", centro.x, centro.y + 10, 12.0f, COR_TEXTO_FRACO);
+    float fracao = fminf(fmaxf(giro, 0.0f), 1.0f);
+    DrawLineEx(pontoNoMostrador(centro, raio * INICIO_DO_PONTEIRO, fracao),
+               pontoNoMostrador(centro, raio - 1.0f, fracao), 3.0f, COR_TEXTO_CLARO);
+}
 
-    int posicao = corrida->terminou ? corrida->posicaoFinal : posicaoDoCarro(corrida, jogador);
-    escreverCentralizado(FONTE_FORTE, TextFormat("P%d", posicao), centro.x, centro.y + 26, 20.0f, COR_AMARELO);
+/*
+ * desenharMarcha
+ * A marcha, num círculo vermelho no vão de baixo do arco. Perto do
+ * limite, fora da última marcha, ele pisca em branco (hora de trocar; o
+ * câmbio do motor.c é automático e troca logo em seguida). Quando troca,
+ * o círculo dá um pulo. Na contagem regressiva o carro está no grid: N.
+ * Recebe: o centro do círculo, o motor e se a corrida já largou.
+ * Devolve: nada.
+ */
+static void desenharMarcha(Vector2 centro, const Motor *motor, int largou) {
+    static int marchaAnterior = 0;
+    static float pulo = 0.0f;   /* de 1 (acabou de trocar) a 0 */
+    if (motor->marcha != marchaAnterior) {
+        marchaAnterior = motor->marcha;
+        pulo = 1.0f;
+    }
+    pulo = fmaxf(pulo - GetFrameTime() / DURACAO_DO_PULO, 0.0f);
+
+    int pedeTroca = motor->giro * RPM_MAXIMO >= RPM_DA_LUZ_DE_TROCA && motor->marcha < TOTAL_MARCHAS - 1;
+    int brancoNaPiscada = pedeTroca && fmodf((float) GetTime() * PISCADAS_POR_SEGUNDO, 2.0f) < 1.0f;
+    Color fundo = brancoNaPiscada ? COR_TEXTO_CLARO : COR_VERMELHO;
+    Color numero = brancoNaPiscada ? COR_VERMELHO : COR_TEXTO_CLARO;
+
+    float raio = RAIO_DA_MARCHA * (1.0f + 0.2f * pulo);
+    DrawCircleV(centro, raio, fundo);
+    DrawRing(centro, raio, raio + 1.5f, 0.0f, 360.0f, 48, Fade(COR_TEXTO_CLARO, 0.8f));
+
+    const char *texto = largou ? TextFormat("%d", motor->marcha + 1) : "N";
+    float tamanho = 19.0f * (1.0f + 0.2f * pulo);
+    escreverCentralizado(FONTE_TITULO, texto, centro.x + 1.0f, centro.y - tamanho * 0.55f, tamanho, numero);
+}
+
+/*
+ * desenharVelocimetro
+ * O painel do motor, no canto inferior direito, tudo dentro de um
+ * mostrador redondo: o conta-giros com ponteiro em volta, a velocidade
+ * grande no meio e a marcha no vão de baixo do arco.
+ * Recebe: a corrida e o motor do jogador.
+ * Devolve: nada.
+ */
+static void desenharVelocimetro(Corrida *corrida, const Motor *motor) {
+    Carro *jogador = &corrida->jogador;
+    Vector2 centro = centroDoMostrador();
+    float raio = RAIO_VELOCIMETRO;
+
+    desenharBrilho(centro.x, centro.y, raio + 18.0f, Fade(BLACK, 0.45f));
+    desenharContaGiros(centro, raio, motor->giro);
+
+    /* Velocidade no meio: amarela no vácuo, quando passa da máxima da ficha */
+    const char *kmh = TextFormat("%d", velocidadeEmKmh(jogador));
+    Color cor = (jogador->vacuo > 0.3f) ? COR_AMARELO : COR_TEXTO_CLARO;
+    float y = centro.y - TAMANHO_VELOCIDADE * 0.62f;
+    escreverCentralizado(FONTE_TITULO, kmh, centro.x + 1.5f, y + 1.5f, TAMANHO_VELOCIDADE, Fade(BLACK, 0.5f));
+    escreverCentralizado(FONTE_TITULO, kmh, centro.x, y, TAMANHO_VELOCIDADE, cor);
+    escreverCentralizado(FONTE_FORTE, "KM/H", centro.x, centro.y + 12.0f, 11.0f, Fade(COR_TEXTO_CLARO, 0.7f));
+
+    Vector2 marcha = { centro.x, centro.y + raio * 0.72f };
+    desenharMarcha(marcha, motor, corrida->contagemRegressiva <= 0.0f);
+}
+
+/*
+ * desenharVacuo
+ * Em cima do velocímetro, "VÁCUO" aparece aos poucos conforme o jogador
+ * cola atrás de outro carro (e some quando ele sai da esteira).
+ * Recebe: a corrida.
+ * Devolve: nada.
+ */
+static void desenharVacuo(Corrida *corrida) {
+    float forca = corrida->jogador.vacuo;
+    if (forca < 0.05f) {
+        return;
+    }
+    Vector2 centro = centroDoMostrador();
+    escreverCentralizado(FONTE_FORTE, "VÁCUO", centro.x, centro.y - RAIO_VELOCIMETRO - 30.0f, 18.0f,
+                         Fade(COR_AMARELO, forca));
 }
 
 /*
@@ -572,7 +667,7 @@ static void desenharContagemRegressiva(Corrida *corrida) {
  * desenharHud
  * O HUD da corrida, nos quatro cantos da tela: posições (em cima à
  * esquerda), a volta (em cima à direita), o mapa (embaixo à esquerda)
- * e o velocímetro (embaixo à direita).
+ * e o painel do motor (embaixo à direita).
  * Recebe: a corrida.
  * Devolve: nada.
  */
@@ -580,7 +675,8 @@ void desenharHud(Corrida *corrida) {
     desenharPainelDePosicoes(corrida);
     desenharPainelDaVolta(corrida);
     desenharMiniMapa(corrida);
-    desenharVelocimetro(corrida);
+    desenharVelocimetro(corrida, &corrida->jogador.motor);
+    desenharVacuo(corrida);
 
     if (estaForaDaPista(&corrida->jogador)) {
         escreverCentralizado(FONTE_FORTE, "FORA DA PISTA", larguraVirtual() / 2.0f, alturaVirtual() * 0.30f,
