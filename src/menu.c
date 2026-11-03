@@ -1171,7 +1171,7 @@ void desenharComoJogar(void) {
         "O carro acelera como um F1: forte na saída e cada vez menos perto dos 300 km/h.",
         "Freie antes das curvas e alivie no meio: acelerando, o carro sai de frente. Fumaça = pneu no limite; passar dele custa velocidade.",
         "Na grama (sai poeira) o carro não passa de 75 km/h.",
-        "Colado atrás de alguém você pega vácuo e anda mais. Saia de lado para passar: bater na traseira tira velocidade.",
+        "Colado atrás de alguém você pega vácuo. Os carros são sólidos: batendo na quina ou de lado, quem toma a batida roda.",
         "Na garagem, compare velocidade, aceleração e aderência antes de escolher.",
     };
     float y = topo + 72;

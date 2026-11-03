@@ -11,6 +11,7 @@
  */
 
 #include <math.h>
+#include <stdlib.h>
 #include "carros3d.h"
 #include "raymath.h"
 #include "rlgl.h"
@@ -24,29 +25,60 @@
 #define FOLGA_DA_SOMBRA       1.35f     /* a foto cobre 1,35 vezes o comprimento do carro */
 #define RAIO_DO_DESFOQUE      4
 
-/* Cada modelo, na ordem de FICHAS (corrida.c). O comprimento é o do
- * personagem, em metros; "deitado" marca o modelo com a frente em +x. */
+/* ---------- Rodas ---------- */
+#define MAXIMO_DE_RODAS       12
+#define MENOR_QUE_A_MAIOR     0.45f     /* peça redonda menor que isso, em relação à maior roda, não é roda */
+#define MAXIMO_DE_PECAS_RODA  16        /* uma por material, somando todas as rodas */
+#define PERTO_DO_CHAO         0.10f     /* a borracha encosta no chão: em alturas do carro */
+#define MENOR_RODA            0.10f     /* em alturas do carro */
+#define REDONDA               0.35f     /* altura e comprimento da peça podem diferir só isso, em relação à altura */
+#define LARGURA_MAXIMA_RODA   0.40f     /* em larguras do carro */
+#define MESMA_RODA_DE_LADO    0.14f     /* peças mais perto que isso, de lado, são a mesma roda (em larguras) */
+#define FOLGA_DENTRO_DA_RODA  1.06f     /* a peça precisa caber no círculo da roda */
+#define FOLGA_DE_LADO_DA_RODA 0.35f     /* e não passar mais que isso (em larguras de roda) para os lados */
+#define GRAUS_DAS_RODAS_DA_FRENTE 24.0f /* com o volante todo */
+
+/* Uma ilha: um pedaço contínuo de triângulos de uma malha */
+typedef struct {
+    int triangulos;
+    Vector3 minimo, maximo;
+} Ilha;
+
+/* Uma roda: onde fica o eixo dela, no carro normalizado */
+typedef struct {
+    Vector3 centro;
+    float raio, xMinimo, xMaximo;
+} RodaDoCarro;
+
+/* As peças de uma roda que usam o mesmo material */
+typedef struct {
+    Mesh malha;        /* com o centro da roda na origem */
+    int material;
+    int roda;
+} PecaDeRoda;
+
+/* Cada modelo, na ordem de FICHAS (corrida.c). O comprimento está
+ * na ficha; "deitado" marca o modelo com a frente em +x. */
 typedef struct {
     const char *arquivo;
-    float comprimento;
     int deitado;
 } ModeloDoCarro;
 
 static const ModeloDoCarro MODELOS[TOTAL_CARROS] = {
-    { "mcqueen.glb",    4.4f, 0 },
-    { "the_king.glb",   5.3f, 0 },
-    { "doc_hudson.glb", 5.0f, 0 },
-    { "francesco.glb",  5.0f, 0 },
-    { "sally.glb",      4.4f, 0 },
-    { "ramone.glb",     5.4f, 0 },
-    { "luigi.glb",      3.0f, 0 },
-    { "guido.glb",      2.4f, 0 },
-    { "mater.glb",      5.2f, 0 },
-    { "sarge.glb",      3.4f, 0 },
-    { "fillmore.glb",   4.3f, 0 },
-    { "finn.glb",       4.6f, 1 },
-    { "wingo.glb",      4.4f, 0 },
-    { "snot_rod.glb",   4.6f, 0 },
+    { "mcqueen.glb", 0 },
+    { "the_king.glb", 0 },
+    { "doc_hudson.glb", 0 },
+    { "francesco.glb", 0 },
+    { "sally.glb", 0 },
+    { "ramone.glb", 0 },
+    { "luigi.glb", 0 },
+    { "guido.glb", 0 },
+    { "mater.glb", 0 },
+    { "sarge.glb", 0 },
+    { "fillmore.glb", 0 },
+    { "finn.glb", 1 },
+    { "wingo.glb", 0 },
+    { "snot_rod.glb", 0 },
 };
 
 static const char *VERTICES_DO_SHADER =
@@ -91,6 +123,10 @@ static float larguras[TOTAL_CARROS];    /* largura de verdade, em metros */
 static RenderTexture2D miniaturas[TOTAL_CARROS];
 static Shader shaderOpaco, shaderTranslucido, shaderDaSombra;
 static Texture2D sombras[TOTAL_CARROS];
+static RodaDoCarro rodas[TOTAL_CARROS][MAXIMO_DE_RODAS];
+static int totalDeRodas[TOTAL_CARROS];
+static PecaDeRoda pecas[TOTAL_CARROS][MAXIMO_DE_PECAS_RODA * MAXIMO_DE_RODAS];
+static int totalDePecas[TOTAL_CARROS];
 static float ladosDaSombra[TOTAL_CARROS];
 
 /*
@@ -103,6 +139,27 @@ static void desenharComShader(Model modelo, Shader shader) {
         modelo.materials[i].shader = shader;
     }
     DrawModel(modelo, (Vector3){ 0.0f, 0.0f, 0.0f }, 1.0f, WHITE);
+}
+
+/*
+ * desenharRodas
+ * Cada peça de roda gira em volta do eixo (x) e, nas rodas da frente, vira com
+ * o volante (em volta de y), a partir do centro da roda.
+ * Recebe: o número do carro, o modelo (já com os materiais no shader certo), a matriz
+ *         do carro no mundo, o ângulo das rodas e o volante.
+ * Devolve: nada.
+ */
+static void desenharRodas(int numero, Model modelo, Matrix noMundo, float anguloDasRodas, float volante) {
+    for (int i = 0; i < totalDePecas[numero]; i++) {
+        PecaDeRoda *peca = &pecas[numero][i];
+        RodaDoCarro *roda = &rodas[numero][peca->roda];
+        Matrix giro = MatrixRotateX(anguloDasRodas);
+        if (roda->centro.z > 0.0f) {
+            giro = MatrixMultiply(giro, MatrixRotateY(-volante * GRAUS_DAS_RODAS_DA_FRENTE * DEG2RAD));
+        }
+        Matrix lugar = MatrixMultiply(giro, MatrixTranslate(roda->centro.x, roda->centro.y, roda->centro.z));
+        DrawMesh(peca->malha, modelo.materials[peca->material], MatrixMultiply(lugar, noMundo));
+    }
 }
 
 /*
@@ -144,7 +201,7 @@ static void desenharSombra(int numero, Matrix noMundo) {
  * Devolve: nada.
  */
 static void prepararSombra(int numero) {
-    float lado = MODELOS[numero].comprimento * FOLGA_DA_SOMBRA;
+    float lado = fichaDoCarro(numero)->comprimento * FOLGA_DA_SOMBRA;
     Camera3D camera = { 0 };
     camera.position = (Vector3){ 0.0f, 20.0f, 0.0f };
     camera.target = (Vector3){ 0.0f, 0.0f, 0.0f };
@@ -182,7 +239,7 @@ static void prepararSombra(int numero) {
  *         na origem, rodas em y = 0, frente em +z) até o lugar dele.
  * Devolve: nada.
  */
-void desenharCarro3D(int numero, Matrix noMundo) {
+void desenharCarro3D(int numero, Matrix noMundo, float anguloDasRodas, float volante) {
     rlDrawRenderBatchActive();   /* o que já estava na fila sai antes de mudar a profundidade */
     desenharSombra(numero, noMundo);
 
@@ -190,10 +247,12 @@ void desenharCarro3D(int numero, Matrix noMundo) {
     modelo.transform = MatrixMultiply(ajuste[numero], noMundo);
 
     desenharComShader(modelo, shaderOpaco);
+    desenharRodas(numero, modelo, noMundo, anguloDasRodas, volante);
 
     BeginBlendMode(BLEND_ALPHA);
     rlDisableDepthMask();
     desenharComShader(modelo, shaderTranslucido);
+    desenharRodas(numero, modelo, noMundo, anguloDasRodas, volante);
     rlDrawRenderBatchActive();
     rlEnableDepthMask();
     EndBlendMode();
@@ -214,7 +273,7 @@ float larguraDoCarro3D(int numero) {
  * Devolve: o comprimento dele, em metros.
  */
 float comprimentoDoCarro3D(int numero) {
-    return MODELOS[numero].comprimento;
+    return fichaDoCarro(numero)->comprimento;
 }
 
 /*
@@ -229,13 +288,320 @@ static void normalizarModelo(int numero) {
     float dx = caixa.max.x - caixa.min.x;
     float dz = caixa.max.z - caixa.min.z;
     int deitado = MODELOS[numero].deitado;
-    float escala = MODELOS[numero].comprimento / (deitado ? dx : dz);
+    float escala = fichaDoCarro(numero)->comprimento / (deitado ? dx : dz);
 
     Matrix centralizar = MatrixTranslate(-(caixa.min.x + caixa.max.x) / 2.0f, -caixa.min.y,
                                          -(caixa.min.z + caixa.max.z) / 2.0f);
     Matrix girar = deitado ? MatrixRotateY(-90.0f * DEG2RAD) : MatrixIdentity();
     ajuste[numero] = MatrixMultiply(MatrixMultiply(centralizar, girar), MatrixScale(escala, escala, escala));
     larguras[numero] = (deitado ? dz : dx) * escala;
+}
+
+/*
+ * verticeNormalizado
+ * Recebe: a malha, o índice do vértice e o ajuste do carro.
+ * Devolve: o vértice no carro normalizado (rodas em y = 0, frente em +z).
+ */
+static Vector3 verticeNormalizado(Mesh malha, int vertice, Matrix ajusteDoCarro) {
+    return Vector3Transform((Vector3){ malha.vertices[vertice * 3], malha.vertices[vertice * 3 + 1], malha.vertices[vertice * 3 + 2] }, ajusteDoCarro);
+}
+
+/*
+ * verticeDoTriangulo
+ * Recebe: a malha, o triângulo e qual dos 3 cantos.
+ * Devolve: o índice do vértice (a malha pode ter índices ou não).
+ */
+static int verticeDoTriangulo(Mesh malha, int triangulo, int canto) {
+    return (malha.indices != NULL) ? malha.indices[triangulo * 3 + canto] : triangulo * 3 + canto;
+}
+
+/*
+ * acharRaiz
+ * A busca do conjunto-união: anda até o representante do grupo.
+ * Recebe: o vetor de pais e o elemento.
+ * Devolve: o representante.
+ */
+static int acharRaiz(int *pai, int a) {
+    while (pai[a] != a) {
+        pai[a] = pai[pai[a]];
+        a = pai[a];
+    }
+    return a;
+}
+
+/* Um vértice para ordenar por posição e achar os repetidos */
+typedef struct {
+    float x, y, z;
+    int indice;
+} VerticeOrdenado;
+
+static int compararVertices(const void *a, const void *b) {
+    const VerticeOrdenado *p = a, *q = b;
+    if (p->x != q->x) {
+        return (p->x < q->x) ? -1 : 1;
+    }
+    if (p->y != q->y) {
+        return (p->y < q->y) ? -1 : 1;
+    }
+    if (p->z != q->z) {
+        return (p->z < q->z) ? -1 : 1;
+    }
+    return 0;
+}
+
+/*
+ * marcarIlhas
+ * Separa os triângulos de uma malha em pedaços contínuos: dois triângulos estão
+ * no mesmo pedaço se dividem um vértice, ou um vértice no mesmo lugar (as texturas
+ * duplicam os vértices nas emendas).
+ * Recebe: a malha e o vetor a preencher com o grupo de cada vértice.
+ * Devolve: nada.
+ */
+static void marcarIlhas(Mesh malha, int *pai) {
+    for (int i = 0; i < malha.vertexCount; i++) {
+        pai[i] = i;
+    }
+    VerticeOrdenado *ordem = MemAlloc(malha.vertexCount * sizeof(VerticeOrdenado));
+    for (int i = 0; i < malha.vertexCount; i++) {
+        ordem[i] = (VerticeOrdenado){ malha.vertices[i * 3], malha.vertices[i * 3 + 1], malha.vertices[i * 3 + 2], i };
+    }
+    qsort(ordem, malha.vertexCount, sizeof(VerticeOrdenado), compararVertices);
+    for (int i = 1; i < malha.vertexCount; i++) {
+        if (compararVertices(&ordem[i - 1], &ordem[i]) == 0) {
+            pai[acharRaiz(pai, ordem[i].indice)] = acharRaiz(pai, ordem[i - 1].indice);
+        }
+    }
+    MemFree(ordem);
+    for (int t = 0; t < malha.triangleCount; t++) {
+        int a = acharRaiz(pai, verticeDoTriangulo(malha, t, 0));
+        pai[acharRaiz(pai, verticeDoTriangulo(malha, t, 1))] = a;
+        pai[acharRaiz(pai, verticeDoTriangulo(malha, t, 2))] = a;
+    }
+}
+
+/*
+ * acharRodas
+ * Acha as rodas de um carro: pedaços redondos encostados no chão. Os pedaços
+ * desse tipo no mesmo lugar (o pneu de dentro e o de fora) contam como uma roda só.
+ * Recebe: o número do carro e as medidas dele.
+ * Devolve: nada (preenche rodas e totalDeRodas).
+ */
+static void acharRodas(int numero, float largura, float altura) {
+    Model modelo = modelos[numero];
+    totalDeRodas[numero] = 0;
+    for (int m = 0; m < modelo.meshCount; m++) {
+        Mesh malha = modelo.meshes[m];
+        int *pai = MemAlloc(malha.vertexCount * sizeof(int));
+        Ilha *ilhas = MemAlloc(malha.vertexCount * sizeof(Ilha));
+        marcarIlhas(malha, pai);
+        for (int i = 0; i < malha.vertexCount; i++) {
+            ilhas[i].triangulos = 0;
+        }
+        for (int t = 0; t < malha.triangleCount; t++) {
+            int raiz = acharRaiz(pai, verticeDoTriangulo(malha, t, 0));
+            for (int c = 0; c < 3; c++) {
+                Vector3 v = verticeNormalizado(malha, verticeDoTriangulo(malha, t, c), ajuste[numero]);
+                if (ilhas[raiz].triangulos == 0 && c == 0) {
+                    ilhas[raiz].minimo = v;
+                    ilhas[raiz].maximo = v;
+                }
+                ilhas[raiz].minimo = Vector3Min(ilhas[raiz].minimo, v);
+                ilhas[raiz].maximo = Vector3Max(ilhas[raiz].maximo, v);
+            }
+            ilhas[raiz].triangulos++;
+        }
+        for (int i = 0; i < malha.vertexCount; i++) {
+            if (ilhas[i].triangulos == 0) {
+                continue;
+            }
+            Vector3 medida = Vector3Subtract(ilhas[i].maximo, ilhas[i].minimo);
+            if (ilhas[i].minimo.y > altura * PERTO_DO_CHAO || medida.y < altura * MENOR_RODA
+                || fabsf(medida.z - medida.y) > medida.y * REDONDA || medida.x > largura * LARGURA_MAXIMA_RODA) {
+                continue;
+            }
+            Vector3 centro = Vector3Scale(Vector3Add(ilhas[i].minimo, ilhas[i].maximo), 0.5f);
+            int achou = -1;
+            for (int r = 0; r < totalDeRodas[numero]; r++) {
+                RodaDoCarro *roda = &rodas[numero][r];
+                if (fabsf(roda->centro.z - centro.z) < roda->raio && fabsf(roda->centro.x - centro.x) < largura * MESMA_RODA_DE_LADO) {
+                    achou = r;
+                }
+            }
+            if (achou < 0 && totalDeRodas[numero] < MAXIMO_DE_RODAS) {
+                achou = totalDeRodas[numero]++;
+                rodas[numero][achou].raio = 0.0f;
+                rodas[numero][achou].xMinimo = ilhas[i].minimo.x;
+                rodas[numero][achou].xMaximo = ilhas[i].maximo.x;
+            }
+            if (achou >= 0) {
+                RodaDoCarro *roda = &rodas[numero][achou];
+                roda->xMinimo = fminf(roda->xMinimo, ilhas[i].minimo.x);
+                roda->xMaximo = fmaxf(roda->xMaximo, ilhas[i].maximo.x);
+                if (medida.y / 2.0f > roda->raio) {   /* o eixo é o da peça maior: o pneu */
+                    roda->raio = medida.y / 2.0f;
+                    roda->centro = centro;
+                }
+            }
+        }
+        MemFree(pai);
+        MemFree(ilhas);
+    }
+
+    /* Peças redondas bem menores que as rodas (escapamento, suporte) não são rodas */
+    float maior = 0.0f;
+    for (int r = 0; r < totalDeRodas[numero]; r++) {
+        maior = fmaxf(maior, rodas[numero][r].raio);
+    }
+    int ficaram = 0;
+    for (int r = 0; r < totalDeRodas[numero]; r++) {
+        if (rodas[numero][r].raio >= maior * MENOR_QUE_A_MAIOR) {
+            rodas[numero][ficaram++] = rodas[numero][r];
+        }
+    }
+    totalDeRodas[numero] = ficaram;
+}
+
+/*
+ * rodaDaIlha
+ * Recebe: o carro, os limites de uma ilha e sua medida.
+ * Devolve: a roda onde a ilha cabe inteira, ou -1 se ela é do resto do carro.
+ */
+static int rodaDaIlha(int numero, Ilha *ilha) {
+    for (int r = 0; r < totalDeRodas[numero]; r++) {
+        RodaDoCarro *roda = &rodas[numero][r];
+        float limite = roda->raio * FOLGA_DENTRO_DA_RODA;
+        float folgaDeLado = (roda->xMaximo - roda->xMinimo) * FOLGA_DE_LADO_DA_RODA;
+        if (fabsf(ilha->minimo.y - roda->centro.y) < limite && fabsf(ilha->maximo.y - roda->centro.y) < limite
+            && fabsf(ilha->minimo.z - roda->centro.z) < limite && fabsf(ilha->maximo.z - roda->centro.z) < limite
+            && ilha->minimo.x > roda->xMinimo - folgaDeLado && ilha->maximo.x < roda->xMaximo + folgaDeLado) {
+            return r;
+        }
+    }
+    return -1;
+}
+
+/*
+ * copiarTriangulo
+ * Acrescenta um triângulo a uma malha em construção, sem índices.
+ * Recebe: o destino (com espaço), a origem, o triângulo, a matriz dos vértices (a das
+ *         normais é a mesma, sem deslocamento) e quantos triângulos o destino já tem.
+ * Devolve: nada.
+ */
+static void copiarTriangulo(Mesh *destino, Mesh origem, int triangulo, Matrix lugar, int jaTem) {
+    Matrix giro = lugar;
+    giro.m12 = giro.m13 = giro.m14 = 0.0f;
+    for (int c = 0; c < 3; c++) {
+        int v = verticeDoTriangulo(origem, triangulo, c);
+        int d = jaTem * 3 + c;
+        Vector3 p = Vector3Transform((Vector3){ origem.vertices[v * 3], origem.vertices[v * 3 + 1], origem.vertices[v * 3 + 2] }, lugar);
+        destino->vertices[d * 3] = p.x;
+        destino->vertices[d * 3 + 1] = p.y;
+        destino->vertices[d * 3 + 2] = p.z;
+        destino->texcoords[d * 2] = (origem.texcoords != NULL) ? origem.texcoords[v * 2] : 0.0f;
+        destino->texcoords[d * 2 + 1] = (origem.texcoords != NULL) ? origem.texcoords[v * 2 + 1] : 0.0f;
+        Vector3 n = { 0.0f, 1.0f, 0.0f };
+        if (origem.normals != NULL) {
+            n = Vector3Normalize(Vector3Transform((Vector3){ origem.normals[v * 3], origem.normals[v * 3 + 1], origem.normals[v * 3 + 2] }, giro));
+        }
+        destino->normals[d * 3] = n.x;
+        destino->normals[d * 3 + 1] = n.y;
+        destino->normals[d * 3 + 2] = n.z;
+    }
+}
+
+/*
+ * malhaVazia
+ * Recebe: quantos triângulos ela vai ter.
+ * Devolve: uma malha sem índices, com espaço para eles.
+ */
+static Mesh malhaVazia(int triangulos) {
+    Mesh malha = { 0 };
+    malha.triangleCount = triangulos;
+    malha.vertexCount = triangulos * 3;
+    malha.vertices = MemAlloc(malha.vertexCount * 3 * sizeof(float));
+    malha.texcoords = MemAlloc(malha.vertexCount * 2 * sizeof(float));
+    malha.normals = MemAlloc(malha.vertexCount * 3 * sizeof(float));
+    return malha;
+}
+
+/*
+ * separarRodas
+ * Tira as rodas das malhas do modelo: cada malha fica só com o resto do carro, e
+ * as peças de cada roda viram malhas à parte, com o centro da roda na origem.
+ * Recebe: o número do carro.
+ * Devolve: nada (troca as malhas do modelo e preenche pecas).
+ */
+static void separarRodas(int numero) {
+    Model *modelo = &modelos[numero];
+    totalDePecas[numero] = 0;
+    for (int m = 0; m < modelo->meshCount; m++) {
+        Mesh malha = modelo->meshes[m];
+        int *pai = MemAlloc(malha.vertexCount * sizeof(int));
+        Ilha *ilhas = MemAlloc(malha.vertexCount * sizeof(Ilha));
+        marcarIlhas(malha, pai);
+        for (int i = 0; i < malha.vertexCount; i++) {
+            ilhas[i].triangulos = 0;
+        }
+        for (int t = 0; t < malha.triangleCount; t++) {
+            int raiz = acharRaiz(pai, verticeDoTriangulo(malha, t, 0));
+            for (int c = 0; c < 3; c++) {
+                Vector3 v = verticeNormalizado(malha, verticeDoTriangulo(malha, t, c), ajuste[numero]);
+                if (ilhas[raiz].triangulos == 0 && c == 0) {
+                    ilhas[raiz].minimo = v;
+                    ilhas[raiz].maximo = v;
+                }
+                ilhas[raiz].minimo = Vector3Min(ilhas[raiz].minimo, v);
+                ilhas[raiz].maximo = Vector3Max(ilhas[raiz].maximo, v);
+            }
+            ilhas[raiz].triangulos++;
+        }
+
+        /* Conta quantos triângulos vão para cada lugar */
+        int *rodaDoTriangulo = MemAlloc(malha.triangleCount * sizeof(int));
+        int noCorpo = 0, naRoda[MAXIMO_DE_RODAS] = { 0 };
+        for (int t = 0; t < malha.triangleCount; t++) {
+            rodaDoTriangulo[t] = rodaDaIlha(numero, &ilhas[acharRaiz(pai, verticeDoTriangulo(malha, t, 0))]);
+            if (rodaDoTriangulo[t] < 0) {
+                noCorpo++;
+            } else {
+                naRoda[rodaDoTriangulo[t]]++;
+            }
+        }
+
+        /* As peças de cada roda, com o centro da roda na origem */
+        for (int r = 0; r < totalDeRodas[numero]; r++) {
+            if (naRoda[r] == 0) {
+                continue;
+            }
+            Vector3 c = rodas[numero][r].centro;
+            Matrix lugar = MatrixMultiply(ajuste[numero], MatrixTranslate(-c.x, -c.y, -c.z));
+            Mesh peca = malhaVazia(naRoda[r]);
+            int feitos = 0;
+            for (int t = 0; t < malha.triangleCount; t++) {
+                if (rodaDoTriangulo[t] == r) {
+                    copiarTriangulo(&peca, malha, t, lugar, feitos++);
+                }
+            }
+            UploadMesh(&peca, false);
+            pecas[numero][totalDePecas[numero]++] = (PecaDeRoda){ peca, modelo->meshMaterial[m], r };
+        }
+
+        /* O resto do carro, no lugar da malha original (continua nas medidas do modelo) */
+        Mesh corpo = malhaVazia(noCorpo);
+        int feitos = 0;
+        for (int t = 0; t < malha.triangleCount; t++) {
+            if (rodaDoTriangulo[t] < 0) {
+                copiarTriangulo(&corpo, malha, t, MatrixIdentity(), feitos++);
+            }
+        }
+        UploadMesh(&corpo, false);
+        UnloadMesh(malha);
+        modelo->meshes[m] = corpo;
+
+        MemFree(rodaDoTriangulo);
+        MemFree(pai);
+        MemFree(ilhas);
+    }
 }
 
 /*
@@ -263,7 +629,7 @@ static void prepararTexturas(Model modelo) {
  * Devolve: nada.
  */
 static void prepararMiniatura(int numero) {
-    float tamanho = MODELOS[numero].comprimento;
+    float tamanho = fichaDoCarro(numero)->comprimento;
     Camera3D camera = { 0 };
     camera.position = (Vector3){ tamanho * 0.95f, tamanho * 0.48f, tamanho * 1.15f };
     camera.target = (Vector3){ 0.0f, tamanho * 0.13f, 0.0f };
@@ -276,7 +642,7 @@ static void prepararMiniatura(int numero) {
     ClearBackground(BLANK);
     BeginMode3D(camera);
     rlDisableBackfaceCulling();
-    desenharCarro3D(numero, MatrixIdentity());
+    desenharCarro3D(numero, MatrixIdentity(), 0.0f, 0.0f);
     rlEnableBackfaceCulling();
     EndMode3D();
     EndTextureMode();
@@ -317,6 +683,11 @@ void carregarCarros3D(void) {
         prepararTexturas(modelos[numero]);
         normalizarModelo(numero);
         prepararSombra(numero);
+        BoundingBox caixa = GetModelBoundingBox(modelos[numero]);
+        float escala = fichaDoCarro(numero)->comprimento / fmaxf(caixa.max.x - caixa.min.x, caixa.max.z - caixa.min.z);
+        acharRodas(numero, fichaDoCarro(numero)->largura, (caixa.max.y - caixa.min.y) * escala);
+        separarRodas(numero);
+        TraceLog(LOG_INFO, "CARRO: %s tem %d rodas, em %d pecas", fichaDoCarro(numero)->nome, totalDeRodas[numero], totalDePecas[numero]);
         prepararMiniatura(numero);
     }
 }
@@ -334,6 +705,9 @@ void descarregarCarros3D(void) {
             modelos[numero].materials[i].shader.id = rlGetShaderIdDefault();
         }
         UnloadModel(modelos[numero]);
+        for (int i = 0; i < totalDePecas[numero]; i++) {
+            UnloadMesh(pecas[numero][i].malha);
+        }
         UnloadRenderTexture(miniaturas[numero]);
         UnloadTexture(sombras[numero]);
     }

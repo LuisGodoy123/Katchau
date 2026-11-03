@@ -188,8 +188,9 @@ uma volta lançada, sozinho na pista e dirigido pela IA, usando o nitro.
 `carros3d.c` carrega os modelos e deixa todos iguais: mede cada um, escala para o comprimento do personagem
 (`MODELOS`), centraliza, põe as rodas no chão e a frente para +z. O carro no mundo segue a pista, o
 volante e o chão embaixo das rodas (`matrizDoCarro` em `render.c`). A sombra é a foto do próprio modelo visto de cima, desfocada,
-e a fumaça e a poeira são nuvens soltas no mundo (`fumaca.c`). As rodas não giram: nos modelos, elas
-vêm fundidas com outras peças. A garagem e o menu usam uma foto de cada modelo, tirada ao carregar.
+e a fumaça e a poeira são nuvens soltas no mundo (`fumaca.c`). As rodas giram de verdade: `carros3d.c` acha, ao carregar, as peças redondas encostadas no chão, separa cada roda
+do resto do modelo e a desenha girando em volta do próprio eixo; as da frente também viram com o volante. Na arrancada elas patinam, e o giro na tela
+tem um limite, porque acima dele a roda pareceria girar ao contrário. A garagem e o menu usam uma foto de cada modelo, tirada ao carregar.
 
 Os modelos são do Sketchfab, de DinseyPixarCarsModels e LukeMcQueen02, publicados como CC-BY-4.0 (o do Luigi veio
 sem autor nem licença). Os personagens são de *Carros* (Disney/Pixar). A única mudança nos arquivos foi converter as
@@ -223,6 +224,17 @@ A física é de fliperama (`carro.c`), mas tem algumas coisas que recompensam qu
   é só sair de lado antes de bater na traseira. Saindo do vácuo, o excesso vai embora aos poucos.
 
 O teste 17 confere o pé na curva, a derrapagem e o vácuo; o teste 18, o freio, o alívio e o câmbio.
+
+**Colisão e rodada.** Cada carro é uma caixa com o tamanho real do modelo, que acompanha o carro virado (`meiasMedidasDoCarro`), e
+vale em toda a volta, até com quem está uma volta atrás. Encostando, os dois se separam pelo lado em que entraram menos: por trás, quem
+vem atrás passa velocidade para o da frente; de lado, os dois levam um tranco e perdem velocidade. Uma batida forte fora do centro (na quina da
+traseira, ou de lado por trás do centro) faz o carro rodar: ele gira, ninguém o controla, perde velocidade sem parar de vez e se endireita sozinho, em
+1 a 3 s, com 3 s sem poder rodar de novo. Só rodam batidas com o jogador envolvido: entre rivais elas fechariam a pista longe dos olhos dele.
+
+**Equilíbrio.** Os carros têm jeitos diferentes, mas o mesmo ritmo: a aderência de cada um foi calculada por simulação para a volta limpa em
+Interlagos dar o mesmo tempo, e a velocidade máxima varia só 2%, porque ela decide o oval. Quem decide a corrida é o piloto. Os rivais têm
+uma `habilidade`, de 93% do limite do carro (a pole) a 86% (o último do grid, antes do jogador); para deixar o jogo mais fácil ou difícil, mude
+`HABILIDADE_DA_POLE` e `HABILIDADE_DO_ULTIMO` em `corrida.c`.
 
 ## Onde a ordenação entra na lógica
 

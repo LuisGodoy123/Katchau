@@ -59,7 +59,7 @@ void atualizarCorrida(Corrida *corrida, Comandos comandosJogador, float tempoQua
 int todosChegaram(Corrida *corrida);
 int voltaAtual(Carro *carro);
 int posicaoDoCarro(Corrida *corrida, Carro *carro);
-Carro *carroDaFrente(Corrida *corrida, Carro *carro);
+int penetracaoEntreCarros(const Corrida *corrida, const Carro *a, const Carro *b, float *naFrente, float *deLado);
 float intervaloEmSegundos(Carro *carro, Carro *referencia);
 SituacaoDoSetor situacaoDoSetor(Corrida *corrida, Carro *carro, int setor);
 Bandeira bandeiraDaCorrida(Corrida *corrida);

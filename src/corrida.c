@@ -15,9 +15,21 @@
 #define LUGAR_DO_JOGADOR       (TOTAL_CARROS - 1)   /* o jogador larga em último */
 
 /* ---------- Colisão ---------- */
-#define DISTANCIA_LATERAL_BATIDA  2.2f    /* metros de centro a centro: mais perto que isso, de lado, se tocam */
-#define COMPRIMENTO_DA_BATIDA     (4.5f * UNIDADES_POR_METRO)   /* e, na frente, mais perto que isso */
-#define PERDA_NA_BATIDA           0.8f    /* quem bate atrás fica com 80% da velocidade do outro */
+#define RESTITUICAO               0.6f      /* na traseira, quanto da diferença de velocidade passa de um para o outro */
+#define ATRITO_DE_LADO            3500.0f   /* raspando de lado, os dois perdem isso de velocidade por segundo */
+#define TRANCO_MINIMO             2.0f      /* metros por segundo: toda batida de lado separa um pouco */
+#define TRANCO_POR_FECHAMENTO     0.7f      /* mais isso vezes a velocidade com que se encontraram */
+#define FORA_DO_CENTRO            0.30f     /* contato mais fora do centro que isso (0 a 1) pode fazer rodar */
+#define GIRO_POR_TRASEIRA         0.55f     /* graus por segundo por unidade/s de batida na traseira, vezes a excentricidade */
+#define GIRO_POR_LADO             75.0f     /* graus por segundo por metro/s de batida de lado, vezes a excentricidade */
+
+/* ---------- O que a IA enxerga ---------- */
+#define ALCANCE_DA_VISAO          60.0f     /* metros à frente */
+#define DISTANCIA_AO_LADO         1.5f      /* metros de folga: mais perto que isso, o lado está ocupado */
+
+/* ---------- Dificuldade ---------- */
+#define HABILIDADE_DA_POLE        0.93f     /* quanto do limite do carro o melhor rival usa... */
+#define HABILIDADE_DO_ULTIMO      0.86f     /* ...e o pior: cai a cada lugar do grid */
 
 /* ---------- Vácuo ---------- */
 #define DISTANCIA_DO_VACUO        3600.0f   /* ~30 m: mais perto que isso atrás de alguém, pega vácuo */
@@ -33,24 +45,25 @@
 
 /* Os 14 carros do jogo. O número de cada um é a posição neste vetor e
  * define o modelo 3D (carros3d.c). O jogador escolhe um deles na garagem;
- * os outros 13 viram os rivais. A aderência pesa muito no tempo de volta,
- * então ela varia pouco. */
+ * os outros 13 viram os rivais. Os carros têm jeitos diferentes, mas o mesmo
+ * ritmo: a aderência de cada um foi calculada para a volta limpa dar o mesmo
+ * tempo em Interlagos, e a velocidade máxima varia pouco porque decide o oval. */
 static const FichaTecnica FICHAS[TOTAL_CARROS] = {
     /* nome             descrição                          vel.max   acel.    aderência */
-    { "McQueen",        "o carro da casa, equilibrado",    12000.0f, 2400.0f, 0.50f },
-    { "The King",       "veterano, voa na reta",           12500.0f, 2200.0f, 0.47f },
-    { "Doc Hudson",     "lenda, gruda nas curvas",         11700.0f, 2400.0f, 0.55f },
-    { "Francesco",      "formula, arranca forte",          12000.0f, 2700.0f, 0.49f },
-    { "Sally",          "certinha em tudo",                11800.0f, 2300.0f, 0.51f },
-    { "Ramone",         "estiloso e estavel",              11600.0f, 2350.0f, 0.52f },
-    { "Luigi",          "pequeno e esperto na largada",    11400.0f, 2800.0f, 0.51f },
-    { "Guido",          "minusculo, mas nao erra curva",   11000.0f, 2900.0f, 0.56f },
-    { "Mater",          "guincho enferrujado",             11200.0f, 2100.0f, 0.54f },
-    { "Sarge",          "jipe militar, firme no chao",     11300.0f, 2250.0f, 0.53f },
-    { "Fillmore",       "sem pressa e sem sair da pista",  11100.0f, 2300.0f, 0.58f },
-    { "Finn McMissile", "espiao, rapido em tudo",          12100.0f, 2350.0f, 0.50f },
-    { "Wingo",          "tuner, nervoso na arrancada",     11900.0f, 2500.0f, 0.48f },
-    { "Snot Rod",       "motorzao, dificil de segurar",    12200.0f, 2600.0f, 0.46f },
+    { "McQueen", "o carro da casa, equilibrado", 12000.0f, 2400.0f, 0.500f, 4.4f, 2.01f },
+    { "The King", "veterano, o melhor na reta", 12120.0f, 2250.0f, 0.499f, 5.3f, 2.32f },
+    { "Doc Hudson", "lenda, gruda nas curvas", 11900.0f, 2450.0f, 0.511f, 5.0f, 2.19f },
+    { "Francesco", "formula, arranca forte", 11980.0f, 2650.0f, 0.491f, 5.0f, 2.49f },
+    { "Sally", "certinha em tudo", 11950.0f, 2450.0f, 0.504f, 4.4f, 2.06f },
+    { "Ramone", "estiloso e estavel", 11930.0f, 2400.0f, 0.510f, 5.4f, 2.32f },
+    { "Luigi", "pequeno e esperto na largada", 11880.0f, 2700.0f, 0.499f, 3.0f, 1.7f },
+    { "Guido", "minusculo, melhor arrancada", 11880.0f, 2750.0f, 0.498f, 2.4f, 1.16f },
+    { "Mater", "guincho firme nas curvas", 11940.0f, 2300.0f, 0.515f, 5.2f, 2.46f },
+    { "Sarge", "jipe militar, firme no chao", 11920.0f, 2350.0f, 0.514f, 3.4f, 1.88f },
+    { "Fillmore", "sem pressa, gruda na pista", 11900.0f, 2350.0f, 0.516f, 4.3f, 2.06f },
+    { "Finn McMissile", "espiao, rapido na reta", 12060.0f, 2380.0f, 0.498f, 4.6f, 2.12f },
+    { "Wingo", "tuner, nervoso na arrancada", 12000.0f, 2550.0f, 0.494f, 4.4f, 2.67f },
+    { "Snot Rod", "motorzao, dificil de segurar", 12100.0f, 2500.0f, 0.485f, 4.6f, 2.53f },
 };
 
 /*
@@ -60,6 +73,17 @@ static const FichaTecnica FICHAS[TOTAL_CARROS] = {
  */
 const FichaTecnica *fichaDoCarro(int numero) {
     return &FICHAS[numero];
+}
+
+/*
+ * lateralEmMetros
+ * A largura da pista muda de um trecho para outro, então comparar dois
+ * carros só faz sentido em metros.
+ * Recebe: o carro.
+ * Devolve: o quanto ele está à direita (+) ou à esquerda (-) da linha da pista.
+ */
+static float lateralEmMetros(Carro *carro) {
+    return carro->deslocamentoLateral * larguraDoLado(carro->posicao.segmento, carro->deslocamentoLateral);
 }
 
 /*
@@ -84,7 +108,7 @@ static void colocarNoGrid(Carro *carro, int lugar) {
     carro->voltas = -1;
 
     carro->deslocamentoLateral = lateralDoLugar(lugar);
-    carro->linhaAlvo = carro->deslocamentoLateral;
+    carro->linhaAlvo = lateralEmMetros(carro);
 }
 
 /*
@@ -94,8 +118,11 @@ static void colocarNoGrid(Carro *carro, int lugar) {
  * Devolve: o carro.
  */
 static Carro criarCarroDaFicha(FichaTecnica ficha, int numero, Pista *pista) {
-    return criarCarro(ficha.nome, numero, pista->largada, 0.0f,
-                      ficha.velocidadeMaxima, ficha.aceleracao, ficha.aderencia);
+    Carro carro = criarCarro(ficha.nome, numero, pista->largada, 0.0f,
+                             ficha.velocidadeMaxima, ficha.aceleracao, ficha.aderencia);
+    carro.comprimento = ficha.comprimento;
+    carro.largura = ficha.largura;
+    return carro;
 }
 
 /*
@@ -126,6 +153,8 @@ void iniciarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador) {
         }
         corrida->rivais[rival] = criarCarroDaFicha(FICHAS[numero], numero, pista);
         colocarNoGrid(&corrida->rivais[rival], rival);   /* rivais nos lugares 0 a 6 */
+        corrida->rivais[rival].habilidade = HABILIDADE_DA_POLE
+            - (HABILIDADE_DA_POLE - HABILIDADE_DO_ULTIMO) * rival / (TOTAL_RIVAIS - 1);
         corrida->classificacao[rival + 1] = &corrida->rivais[rival];
         rival++;
     }
@@ -247,55 +276,182 @@ static void registrarVolta(Corrida *corrida, Carro *carro) {
 }
 
 /*
- * lateralEmMetros
- * A largura da pista muda de um trecho para outro, então comparar dois
- * carros só faz sentido em metros.
- * Recebe: o carro.
- * Devolve: o quanto ele está à direita (+) ou à esquerda (-) da linha da pista.
+ * distanciaNaPista
+ * A distância de um carro até outro na pista, em metros: quem está uma volta atrás,
+ * no mesmo lugar, também encosta.
+ * Recebe: a corrida e os dois carros.
+ * Devolve: de -meia volta a +meia volta (positivo = "b" está à frente de "a").
  */
-static float lateralEmMetros(Carro *carro) {
-    return carro->deslocamentoLateral * larguraDoLado(carro->posicao.segmento, carro->deslocamentoLateral);
+static float distanciaNaPista(const Corrida *corrida, const Carro *a, const Carro *b) {
+    float volta = corrida->totalSegmentos * COMPRIMENTO_SEGMENTO;
+    float d = fmodf(b->distanciaPercorrida - a->distanciaPercorrida, volta);
+    if (d > volta / 2.0f) {
+        d -= volta;
+    } else if (d < -volta / 2.0f) {
+        d += volta;
+    }
+    return d / UNIDADES_POR_METRO;
+}
+
+/*
+ * penetracaoEntreCarros
+ * O quanto as caixas de dois carros entram uma na outra.
+ * Recebe: a corrida, os dois carros e onde guardar as entradas na frente e de lado.
+ * Devolve: 1 se elas se tocam.
+ */
+int penetracaoEntreCarros(const Corrida *corrida, const Carro *a, const Carro *b, float *naFrente, float *deLado) {
+    float meioA, larguraA, meioB, larguraB;
+    meiasMedidasDoCarro(a, &meioA, &larguraA);
+    meiasMedidasDoCarro(b, &meioB, &larguraB);
+    *naFrente = meioA + meioB - fabsf(distanciaNaPista(corrida, a, b));
+    *deLado = larguraA + larguraB - fabsf(lateralEmMetros((Carro *) a) - lateralEmMetros((Carro *) b));
+    return *naFrente > 0.0f && *deLado > 0.0f;
+}
+
+/*
+ * baterNaTraseira
+ * Quem vem atrás passa velocidade para quem está na frente, e os dois se separam.
+ * Pegando fora do centro, a traseira de quem está na frente escapa: ele roda.
+ * Recebe: quem está atrás, quem está na frente, quanto as caixas entraram e se pode rodar.
+ * Devolve: nada.
+ */
+static void baterNaTraseira(Carro *atras, Carro *frente, float entrada, int podeRodar) {
+    atras->empurraoPendente -= entrada / 2.0f * UNIDADES_POR_METRO;
+    frente->empurraoPendente += entrada / 2.0f * UNIDADES_POR_METRO;
+
+    float fechando = atras->velocidade - frente->velocidade;
+    if (fechando <= 0.0f) {
+        return;
+    }
+    atras->velocidade -= fechando * RESTITUICAO;
+    frente->velocidade += fechando * RESTITUICAO;
+
+    /* Excentricidade: 0 de centro a centro, 1 raspando na quina */
+    float diferenca = lateralEmMetros(frente) - lateralEmMetros(atras);
+    float excentricidade = fabsf(diferenca) / ((atras->largura + frente->largura) / 2.0f);
+    if (podeRodar && excentricidade > FORA_DO_CENTRO) {
+        float impulso = fechando * GIRO_POR_TRASEIRA * excentricidade;
+        fazerRodar(frente, (diferenca > 0.0f) ? -impulso : impulso);
+    }
+}
+
+/*
+ * baterDeLado
+ * Os dois se separam e levam um tranco para os lados. Quem toma a batida atrás do
+ * centro, com força, roda: é a mesma manobra das corridas de verdade.
+ * Recebe: a corrida, os dois carros (b à direita de a), quanto as caixas entraram, se pode rodar
+ *         e o tempo do quadro.
+ * Devolve: nada.
+ */
+static void baterDeLado(const Corrida *corrida, Carro *a, Carro *b, float entrada, int podeRodar, float tempoQuadro) {
+    a->deslocamentoLateral -= entrada / 2.0f / larguraDoLado(a->posicao.segmento, a->deslocamentoLateral);
+    b->deslocamentoLateral += entrada / 2.0f / larguraDoLado(b->posicao.segmento, b->deslocamentoLateral);
+
+    float perda = ATRITO_DE_LADO * tempoQuadro;
+    a->velocidade = fmaxf(a->velocidade - perda, 0.0f);
+    b->velocidade = fmaxf(b->velocidade - perda, 0.0f);
+
+    float fechando = fmaxf(a->velocidadeDeLado - b->velocidadeDeLado, 0.0f);
+    float tranco = TRANCO_MINIMO + fechando * TRANCO_POR_FECHAMENTO;
+    a->velocidadeLateral = fminf(a->velocidadeLateral, -tranco / 2.0f);
+    b->velocidadeLateral = fmaxf(b->velocidadeLateral, tranco / 2.0f);
+
+    /* Quem está à frente tomou a batida na parte de trás do carro dele */
+    float d = distanciaNaPista(corrida, a, b);
+    float excentricidade = fabsf(d) / ((a->comprimento + b->comprimento) / 2.0f);
+    if (podeRodar && excentricidade > FORA_DO_CENTRO) {
+        float impulso = fechando * GIRO_POR_LADO * excentricidade;
+        if (d > 0.0f) {
+            fazerRodar(b, -impulso);     /* a traseira de b foi empurrada para a direita: o nariz vira para a esquerda */
+        } else {
+            fazerRodar(a, impulso);      /* a traseira de a foi empurrada para a esquerda: o nariz vira para a direita */
+        }
+    }
 }
 
 /*
  * tratarBatida
- * Se dois carros estão encostados (perto na frente e de lado), quem vem
- * atrás bate na traseira do outro e perde velocidade.
- * Recebe: os dois carros.
+ * Se as caixas de dois carros se tocam, separa os dois pelo lado em que entraram
+ * menos: é por ali que eles acabaram de se encontrar.
+ * Recebe: a corrida, os dois carros e o tempo do quadro.
  * Devolve: nada.
  */
-static void tratarBatida(Carro *a, Carro *b) {
-    if (fabsf(a->distanciaPercorrida - b->distanciaPercorrida) > COMPRIMENTO_DA_BATIDA) {
+static void tratarBatida(Corrida *corrida, Carro *a, Carro *b, float tempoQuadro) {
+    float naFrente, deLado;
+    if (!penetracaoEntreCarros(corrida, a, b, &naFrente, &deLado)) {
         return;
     }
-    if (fabsf(lateralEmMetros(a) - lateralEmMetros(b)) > DISTANCIA_LATERAL_BATIDA) {
-        return;
-    }
-
-    /* Descobre quem está atrás */
-    Carro *atras = a;
-    Carro *frente = b;
-    if (a->distanciaPercorrida > b->distanciaPercorrida) {
-        atras = b;
-        frente = a;
-    }
-
-    /* Só é batida se quem está atrás vem mais rápido (está alcançando) */
-    if (atras->velocidade > frente->velocidade) {
-        atras->velocidade = frente->velocidade * PERDA_NA_BATIDA;
+    /* Só roda quem bate com o jogador: rodadas entre rivais só atrapalhariam a corrida
+     * longe dos olhos dele, e fechariam a pista para todo mundo */
+    int podeRodar = (a == &corrida->jogador || b == &corrida->jogador);
+    if (naFrente < deLado) {
+        if (distanciaNaPista(corrida, a, b) > 0.0f) {
+            baterNaTraseira(a, b, naFrente, podeRodar);
+        } else {
+            baterNaTraseira(b, a, naFrente, podeRodar);
+        }
+    } else if (lateralEmMetros(a) < lateralEmMetros(b)) {
+        baterDeLado(corrida, a, b, deLado, podeRodar, tempoQuadro);
+    } else {
+        baterDeLado(corrida, b, a, deLado, podeRodar, tempoQuadro);
     }
 }
 
 /*
  * verificarBatidas
  * Testa todos os pares de carros (14 carros = 91 pares).
+ * Recebe: a corrida e o tempo do quadro.
+ * Devolve: nada.
+ */
+static void verificarBatidas(Corrida *corrida, float tempoQuadro) {
+    for (int i = 0; i < TOTAL_CARROS; i++) {
+        for (int j = i + 1; j < TOTAL_CARROS; j++) {
+            tratarBatida(corrida, corrida->classificacao[i], corrida->classificacao[j], tempoQuadro);
+        }
+    }
+}
+
+/*
+ * olharEmVolta
+ * Preenche o que cada carro enxerga para a IA decidir: quem está à frente na
+ * mesma linha, e se há alguém encostado em cada lado.
  * Recebe: a corrida.
  * Devolve: nada.
  */
-static void verificarBatidas(Corrida *corrida) {
+static void olharEmVolta(Corrida *corrida) {
     for (int i = 0; i < TOTAL_CARROS; i++) {
-        for (int j = i + 1; j < TOTAL_CARROS; j++) {
-            tratarBatida(corrida->classificacao[i], corrida->classificacao[j]);
+        Carro *carro = corrida->classificacao[i];
+        carro->distanciaAFrente = -1.0f;
+        carro->ocupadoEsquerda = 0;
+        carro->ocupadoDireita = 0;
+        float meio, meiaLargura;
+        meiasMedidasDoCarro(carro, &meio, &meiaLargura);
+
+        for (int j = 0; j < TOTAL_CARROS; j++) {
+            Carro *outro = corrida->classificacao[j];
+            if (outro == carro) {
+                continue;
+            }
+            float meioOutro, larguraOutro;
+            meiasMedidasDoCarro(outro, &meioOutro, &larguraOutro);
+            float d = distanciaNaPista(corrida, carro, outro);
+            float lado = lateralEmMetros(outro) - lateralEmMetros(carro);
+            float vaoNaFrente = fabsf(d) - meio - meioOutro;
+            float vaoDeLado = fabsf(lado) - meiaLargura - larguraOutro;
+
+            if (vaoNaFrente < DISTANCIA_AO_LADO && vaoDeLado >= -0.5f && vaoDeLado < DISTANCIA_AO_LADO * 2.0f) {
+                if (lado > 0.0f) {
+                    carro->ocupadoDireita = 1;
+                } else {
+                    carro->ocupadoEsquerda = 1;
+                }
+            }
+            if (d > 0.0f && vaoDeLado < DISTANCIA_AO_LADO && vaoNaFrente < ALCANCE_DA_VISAO
+                && (carro->distanciaAFrente < 0.0f || vaoNaFrente < carro->distanciaAFrente)) {
+                carro->distanciaAFrente = fmaxf(vaoNaFrente, 0.0f);
+                carro->velocidadeAFrente = outro->velocidade;
+                carro->lateralAFrente = lateralEmMetros(outro);
+            }
         }
     }
 }
@@ -373,8 +529,9 @@ void atualizarCorrida(Corrida *corrida, Comandos comandosJogador, float tempoQua
     }
 
     corrida->tempoDeCorrida += tempoQuadro;
+    olharEmVolta(corrida);
     if (corrida->terminou) {
-        comandosJogador = atualizarIA(&corrida->jogador, carroDaFrente(corrida, &corrida->jogador));
+        comandosJogador = atualizarIA(&corrida->jogador);
     }
 
     /* 0) Vácuo, antes de mover: todos medem com os carros no mesmo lugar */
@@ -390,7 +547,7 @@ void atualizarCorrida(Corrida *corrida, Comandos comandosJogador, float tempoQua
     /* 2) Rivais: a IA olha o carro logo à frente de cada um */
     for (int i = 0; i < TOTAL_RIVAIS; i++) {
         Carro *rival = &corrida->rivais[i];
-        Comandos comandosIA = atualizarIA(rival, carroDaFrente(corrida, rival));
+        Comandos comandosIA = atualizarIA(rival);
         cruzou = atualizarCarro(rival, comandosIA, tempoQuadro) > 0;
         atualizarSetores(corrida, rival, cruzou);
         if (cruzou) {
@@ -399,7 +556,7 @@ void atualizarCorrida(Corrida *corrida, Comandos comandosJogador, float tempoQua
     }
 
     /* 3) Batidas */
-    verificarBatidas(corrida);
+    verificarBatidas(corrida, tempoQuadro);
 
     /* 4) Classificação */
     ordenarCarrosPorDistancia(corrida->classificacao, TOTAL_CARROS);
@@ -455,21 +612,6 @@ int posicaoDoCarro(Corrida *corrida, Carro *carro) {
         }
     }
     return 0;
-}
-
-/*
- * carroDaFrente
- * Como a classificação está ordenada, o carro logo à frente é
- * simplesmente o anterior no vetor.
- * Recebe: a corrida e o carro.
- * Devolve: o carro logo à frente, ou NULL se ele for o 1º.
- */
-Carro *carroDaFrente(Corrida *corrida, Carro *carro) {
-    int posicao = posicaoDoCarro(corrida, carro);
-    if (posicao <= 1) {
-        return NULL;
-    }
-    return corrida->classificacao[posicao - 2];   /* posição 2 -> índice 0 */
 }
 
 /*

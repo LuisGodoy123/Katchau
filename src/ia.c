@@ -9,7 +9,7 @@
  *      No meio da curva, perto do limite, só alivia: acelerar ali faz
  *      o carro sair de frente (veja carro.c).
  *   2) Tem carro logo à frente, na mesma linha? -> muda de linha para
- *      ultrapassar.
+ *      ultrapassar, se o lado estiver livre; senão, freia atrás dele.
  *   3) Estou fora da minha linha? -> vira o volante na direção dela.
  * ------------------------------------------------------------------
  */
@@ -21,13 +21,16 @@
                                            /* mais que a frenagem de 313 km/h até parar) */
 #define FOLGA_NA_FRENAGEM         0.8f     /* a IA conta só 80% da distância: começa a frear um pouco antes */
 #define MARGEM_DE_FREIO           1.05f    /* só freia se passar 5% da velocidade desejada */
-#define DISTANCIA_PARA_ULTRAPASSAR 900.0f  /* carro da frente mais perto que isso: tentar passar */
-#define LARGURA_OCUPADA           0.4f     /* dois carros mais próximos que isso estão na mesma linha */
-#define DESVIO_ULTRAPASSAGEM      0.5f     /* quanto se afasta para o lado do carro da frente */
+#define DISTANCIA_PARA_ULTRAPASSAR 35.0f   /* metros: carro da frente mais perto que isso, na mesma linha: tentar passar */
+#define DESVIO_ULTRAPASSAGEM      5.2f     /* metros de centro a centro ao passar: mais que a folga do volante e a do "lado livre" */
+#define VELOCIDADE_SEM_PERIGO     1200.0f  /* abaixo de 30 km/h encostar não tem problema: não para a fila inteira */
+#define FOLGA_PARA_ULTRAPASSAR    1.01f    /* querendo andar 1% mais que o da frente, já vale tentar passar */
+#define MARGEM_ATRAS_DO_OUTRO     0.97f    /* freia um pouco antes do limite */
+#define ERRO_PARA_VOLANTE_TODO    4.0f     /* metros: longe assim da linha, volante todo; mais perto, menos */
 #define LIMITE_LINHA              0.75f    /* a IA nunca escolhe andar mais perto da borda que isso */
 #define EMBALO_PARA_O_NITRO       0.70f    /* só usa o nitro acima de 70% da máxima */
 #define TANQUE_PARA_O_NITRO       0.60f    /* e só começa com pelo menos isso no tanque */
-#define TOLERANCIA_LINHA          0.05f    /* perto assim da linha, não mexe no volante */
+#define TOLERANCIA_LINHA          0.8f     /* metros: perto assim da linha, não mexe no volante */
 
 /*
  * velocidadeDesejada
@@ -58,85 +61,105 @@ static float velocidadeDesejada(Carro *carro) {
 
 /*
  * limitarLinha
- * Impede a IA de escolher uma linha muito perto da grama.
- * Recebe: a linha desejada.
- * Devolve: a linha dentro de [-LIMITE_LINHA, LIMITE_LINHA].
+ * Impede a IA de escolher uma linha muito perto da grama ou do muro.
+ * Recebe: o segmento e a linha desejada, em metros.
+ * Devolve: a linha dentro do limite, em metros.
  */
-static float limitarLinha(float linha) {
-    if (linha < -LIMITE_LINHA) {
-        return -LIMITE_LINHA;
+static float limitarLinha(Segmento *segmento, float metros) {
+    float limite = larguraDoLado(segmento, metros) * LIMITE_LINHA;
+    if (metros < -limite) {
+        return -limite;
     }
-    if (linha > LIMITE_LINHA) {
-        return LIMITE_LINHA;
+    if (metros > limite) {
+        return limite;
     }
-    return linha;
+    return metros;
 }
 
 /*
  * escolherLinha
- * Se o carro da frente está perto e na mesma linha, escolhe o lado com
- * mais espaço para passar. Senão, mantém a linha que já tinha.
- * Recebe: o carro e o carro logo à frente na classificação (ou NULL).
+ * Se tem carro logo à frente, na mesma linha e mais lento do que este quer andar,
+ * vai para o lado com espaço. Lado com alguém encostado não serve.
+ * Recebe: o carro e a velocidade que ele quer ter.
  * Devolve: nada (altera carro->linhaAlvo).
  */
-static void escolherLinha(Carro *carro, Carro *carroDaFrente) {
-    if (carroDaFrente == NULL) {
-        return;   /* está em 1º: ninguém para ultrapassar */
+static void escolherLinha(Carro *carro, float desejada) {
+    if (carro->distanciaAFrente < 0.0f || carro->distanciaAFrente > DISTANCIA_PARA_ULTRAPASSAR
+        || desejada <= carro->velocidadeAFrente * FOLGA_PARA_ULTRAPASSAR) {
+        return;
     }
-
-    float distancia = carroDaFrente->distanciaPercorrida - carro->distanciaPercorrida;
-    float diferencaLateral = carroDaFrente->deslocamentoLateral - carro->deslocamentoLateral;
-    if (diferencaLateral < 0) {
-        diferencaLateral = -diferencaLateral;
+    float aqui = carro->deslocamentoLateral * larguraDoLado(carro->posicao.segmento, carro->deslocamentoLateral);
+    int vaiPelaDireita = (carro->lateralAFrente <= aqui);
+    if (vaiPelaDireita ? carro->ocupadoDireita : carro->ocupadoEsquerda) {
+        vaiPelaDireita = !vaiPelaDireita;
     }
-
-    int estaPerto = distancia > 0 && distancia < DISTANCIA_PARA_ULTRAPASSAR;
-    int mesmaLinha = diferencaLateral < LARGURA_OCUPADA;
-
-    if (estaPerto && mesmaLinha) {
-        /* Passa pelo lado oposto ao que o carro da frente está */
-        if (carroDaFrente->deslocamentoLateral > 0) {
-            carro->linhaAlvo = limitarLinha(carroDaFrente->deslocamentoLateral - DESVIO_ULTRAPASSAGEM);
-        } else {
-            carro->linhaAlvo = limitarLinha(carroDaFrente->deslocamentoLateral + DESVIO_ULTRAPASSAGEM);
-        }
+    if (vaiPelaDireita ? carro->ocupadoDireita : carro->ocupadoEsquerda) {
+        return;   /* os dois lados ocupados: fica atrás (veja atualizarIA) */
     }
+    carro->linhaAlvo = carro->lateralAFrente + (vaiPelaDireita ? DESVIO_ULTRAPASSAGEM : -DESVIO_ULTRAPASSAGEM);
+}
+
+/*
+ * vaiBater
+ * Recebe: o carro.
+ * Devolve: 1 se, freando agora, ele mal consegue não bater em quem está à frente.
+ */
+static int vaiBater(Carro *carro) {
+    if (carro->distanciaAFrente < 0.0f || carro->velocidade <= carro->velocidadeAFrente
+        || carro->velocidade < VELOCIDADE_SEM_PERIGO) {
+        return 0;
+    }
+    float folga = velocidadeParaFrearAte(carro->velocidadeAFrente, carro->distanciaAFrente * UNIDADES_POR_METRO * FOLGA_NA_FRENAGEM);
+    return carro->velocidade > folga * MARGEM_ATRAS_DO_OUTRO;
 }
 
 /*
  * atualizarIA
  * Decide os comandos do piloto do computador neste quadro.
- * Recebe: o carro da IA e o carro logo à frente dele (NULL se for o 1º).
+ * Recebe: o carro da IA (corrida.c já preencheu o que ele enxerga).
  * Devolve: os comandos (acelerar, frear, esquerda, direita).
  */
-Comandos atualizarIA(Carro *carro, Carro *carroDaFrente) {
+Comandos atualizarIA(Carro *carro) {
     Comandos comandos = { 0, 0, 0, 0, 0.0f, 0 };
 
     /* 1) Velocidade: acelera abaixo da desejada (e, dentro da curva,
-     *    abaixo do limite de quem acelera), freia bem acima dela */
-    float desejada = velocidadeDesejada(carro);
+     *    abaixo do limite de quem acelera), freia bem acima dela. A habilidade
+     *    diz quanto do limite do carro este piloto usa. */
+    float teto = carro->velocidadeMaxima * carro->habilidade;
+    float desejada = velocidadeDesejada(carro) * carro->habilidade;
     float podeAcelerar = velocidadeSeguraAcelerando(carro, carro->posicao.segmento->curvatura);
+    int retaLivre = (desejada >= teto);
     if (carro->velocidade < desejada && carro->velocidade < podeAcelerar) {
         comandos.acelerar = 1;
-    } else if (desejada < carro->velocidadeMaxima && carro->velocidade > desejada * MARGEM_DE_FREIO) {
-        comandos.frear = 1;   /* numa reta livre não freia: acima da máxima é vácuo ou nitro */
+    } else if (!retaLivre && carro->velocidade > desejada * MARGEM_DE_FREIO) {
+        comandos.frear = 1;   /* numa reta livre não freia: acima do teto é vácuo ou nitro */
     }
 
     /* Nitro: só com a pista livre à frente, depois de embalar, e com um bom tanque */
-    if (desejada >= carro->velocidadeMaxima && carro->velocidade > carro->velocidadeMaxima * EMBALO_PARA_O_NITRO
-        && (carro->nitroLigado || carro->nitro >= TANQUE_PARA_O_NITRO)) {
+    if (retaLivre && carro->velocidade > carro->velocidadeMaxima * EMBALO_PARA_O_NITRO
+        && carro->distanciaAFrente < 0.0f && (carro->nitroLigado || carro->nitro >= TANQUE_PARA_O_NITRO)) {
         comandos.nitro = 1;
     }
 
     /* 2) Linha: tenta ultrapassar quem está na frente */
-    escolherLinha(carro, carroDaFrente);
+    escolherLinha(carro, desejada);
 
-    /* 3) Volante: vira na direção da linha escolhida */
-    float erro = carro->linhaAlvo - carro->deslocamentoLateral;
-    if (erro > TOLERANCIA_LINHA) {
-        comandos.direita = 1;
-    } else if (erro < -TOLERANCIA_LINHA) {
-        comandos.esquerda = 1;
+    /* Sem espaço para desviar e chegando rápido: freia atrás dele */
+    if (vaiBater(carro)) {
+        comandos.acelerar = 0;
+        comandos.nitro = 0;
+        comandos.frear = 1;
+    }
+
+    /* 3) Volante: gira na direção da linha escolhida, mais perto dela com mais calma */
+    Segmento *aqui = carro->posicao.segmento;
+    float erro = limitarLinha(aqui, carro->linhaAlvo) - carro->deslocamentoLateral * larguraDoLado(aqui, carro->deslocamentoLateral);
+    if (erro > TOLERANCIA_LINHA && !carro->ocupadoDireita) {
+        comandos.direita = (erro > ERRO_PARA_VOLANTE_TODO);
+        comandos.direcao = erro / ERRO_PARA_VOLANTE_TODO;
+    } else if (erro < -TOLERANCIA_LINHA && !carro->ocupadoEsquerda) {
+        comandos.esquerda = (erro < -ERRO_PARA_VOLANTE_TODO);
+        comandos.direcao = erro / ERRO_PARA_VOLANTE_TODO;
     }
 
     return comandos;

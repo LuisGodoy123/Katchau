@@ -21,6 +21,7 @@
 
 #define TAMANHO_NOME        20
 #define LIMITE_PISTA        1.0f   /* além disso (para qualquer lado) é grama */
+#define GRAUS_DO_VOLANTE    7.0f   /* o carro aponta para onde o volante manda */
 #define TOTAL_SETORES       3      /* a volta é dividida em 3 setores, como no F1 */
 
 /* Ficha técnica de um modelo de carro. A garagem mostra e ordena
@@ -31,6 +32,8 @@ typedef struct {
     float velocidadeMaxima;        /* unidades por segundo */
     float aceleracao;              /* quanto a velocidade sobe por segundo */
     float aderencia;               /* de 0 a 1 */
+    float comprimento;             /* metros: o tamanho do modelo 3D e da caixa de colisão */
+    float largura;
 } FichaTecnica;
 
 /* O que o piloto quer fazer neste quadro: 1 = sim, 0 = não.
@@ -60,15 +63,36 @@ typedef struct {
     float derrapagem;              /* 0 com folga; sobe até 1 quando a curva está vencendo o volante */
     float vacuo;                   /* 0 no ar limpo, até 1 colado atrás de outro carro (corrida.c preenche) */
     Motor motor;                   /* rotação e marcha (o câmbio corta a potência na troca) */
+    float anguloDasRodas;          /* radianos: quanto as rodas já giraram (só para o desenho) */
     float nitro;                   /* quanto nitro tem: de 0 a 1 */
     int nitroLigado;               /* 1 enquanto está queimando */
+
+    /* ---- Colisão ---- */
+    float comprimento, largura;    /* metros: o tamanho da caixa de colisão */
+    float empurraoPendente;        /* unidades: o quanto uma batida o empurrou para a frente (ou para trás) */
+    float velocidadeLateral;       /* metros por segundo para a direita: o tranco de uma batida de lado */
+    float velocidadeDeLado;        /* metros por segundo para a direita: o quanto ele está indo para o lado */
+
+    /* ---- Rodada ---- */
+    int rodando;                   /* 1 enquanto está rodando: o piloto não manda no carro */
+    float giro;                    /* graus: quanto o carro está virado em relação à pista */
+    float velocidadeDoGiro;        /* graus por segundo */
+    float tempoSemRodar;           /* segundos até poder rodar de novo */
+    float velocidadeNaRodada;      /* a velocidade quando começou a rodar */
+
+    /* ---- O que o piloto da IA enxerga (corrida.c preenche a cada quadro) ---- */
+    float habilidade;              /* de 0 a 1: quanto do limite do carro a IA usa */
+    float distanciaAFrente;        /* metros até a traseira de quem está na mesma linha (negativo = ninguém) */
+    float velocidadeAFrente;       /* a velocidade dele */
+    float lateralAFrente;          /* metros: onde ele está na largura */
+    int ocupadoEsquerda, ocupadoDireita;   /* 1 se há um carro encostado nesse lado */
     int voltas;                    /* voltas completadas */
     float temposDeVolta[TOTAL_VOLTAS];
     float inicioDaVolta;           /* momento da corrida em que a volta atual começou */
     float tempoDeChegada;          /* momento em que completou a última volta (0 = ainda correndo) */
     float melhorVolta;             /* menor tempo de volta até agora (0 = nenhuma volta completa) */
     Comandos ultimosComandos;      /* o que o piloto fez no último quadro (lanternas de freio) */
-    float linhaAlvo;               /* só para a IA: em que ponto da largura ela quer andar */
+    float linhaAlvo;               /* só para a IA: em que ponto da largura ela quer andar, em metros */
 
     /* ---- Setores: a volta em 3 partes, para o painel da volta no HUD ---- */
     int setorAtual;                              /* 0, 1 ou 2 */
@@ -95,6 +119,9 @@ float velocidadeSeguraNaCurva(Carro *carro, float curvatura);
 float velocidadeSeguraAcelerando(Carro *carro, float curvatura);
 float velocidadeMaximaAgora(Carro *carro);
 float velocidadeParaFrearAte(float alvo, float distancia);
+float rapidezDasRodas(float velocidade, int acelerando);
+void fazerRodar(Carro *carro, float impulso);
+void meiasMedidasDoCarro(const Carro *carro, float *meioComprimento, float *meiaLargura);
 float tempoAteVelocidade(const FichaTecnica *ficha, float velocidade);
 
 #endif

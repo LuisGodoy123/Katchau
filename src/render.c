@@ -41,7 +41,6 @@
 /* ---------- Carros no mundo ---------- */
 #define ENTRE_EIXOS           0.62f    /* distância entre os eixos, em comprimentos do carro */
 #define BITOLA                0.82f    /* distância entre as rodas de um eixo, em larguras do carro */
-#define GRAUS_DO_VOLANTE      7.0f     /* o carro aponta para onde o volante manda */
 #define GRAUS_DE_ROLAGEM      2.0f     /* e inclina para fora ao virar */
 #define MERGULHO_NA_FREADA    0.025f   /* e abaixa o nariz ao frear */
 #define TREPIDACAO_NA_GRAMA   0.06f    /* metros */
@@ -175,7 +174,7 @@ static Matrix matrizDoCarro(Carro *carro) {
         y += TREPIDACAO_NA_GRAMA * sinf(carro->distanciaPercorrida * 0.05f);
     }
 
-    float rumo = (aqui.rumo + carro->volante * GRAUS_DO_VOLANTE) * DEG2RAD;
+    float rumo = (aqui.rumo + carro->giro + carro->volante * GRAUS_DO_VOLANTE) * DEG2RAD;
     Vector3 frente = Vector3Normalize((Vector3){ sinf(rumo), ladeira, -cosf(rumo) });
 
     float rolagem = atanf(inclinacao) + carro->volante * GRAUS_DE_ROLAGEM * DEG2RAD;
@@ -203,7 +202,7 @@ static void desenharCarroNoMundo(Camera3D camera, Carro *carro) {
     if (distancia < -6.0f || distancia > DISTANCIA_DOS_RIVAIS) {
         return;
     }
-    desenharCarro3D(carro->numero, matrizDoCarro(carro));
+    desenharCarro3D(carro->numero, matrizDoCarro(carro), carro->anguloDasRodas, carro->volante);
 }
 
 /*
@@ -251,6 +250,8 @@ static void soltarFumacaDoCarro(Camera3D camera, Carro *carro, float tempoQuadro
     if (estaForaDaPista(carro)) {
         forca = 0.9f;
         tipo = NUVEM_DE_POEIRA;
+    } else if (carro->rodando) {
+        forca = 1.0f;
     } else if (carro->derrapagem > INICIO_DA_FUMACA) {
         forca = (carro->derrapagem - INICIO_DA_FUMACA) / (1.0f - INICIO_DA_FUMACA);
     } else if (carro->ultimosComandos.acelerar && carro->velocidade < VELOCIDADE_DA_ARRANCADA) {

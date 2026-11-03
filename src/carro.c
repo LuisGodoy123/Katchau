@@ -60,6 +60,21 @@
 #define MINIMO_PARA_LIGAR          0.10f /* abaixo disso não liga, para não ficar piscando no fim do tanque */
 #define GANHO_DO_NITRO             0.18f /* a máxima sobe 18% (300 -> 354 km/h) */
 #define FORCA_DO_NITRO             0.90f /* soma isso vezes a "aceleracao" da ficha */
+#define COMPRIMENTO_PADRAO         4.4f  /* metros: quem cria o carro à mão recebe este tamanho */
+#define LARGURA_PADRAO             2.0f
+#define RAIO_DA_RODA               0.35f /* metros: quanto a roda gira por metro andado */
+#define GIRO_MAXIMO_DAS_RODAS     30.0f  /* radianos por segundo: mais que isso, na tela, a roda parece girar ao contrário */
+#define GIRO_PATINANDO            22.0f  /* acelerando na arrancada, a roda gira mais que o carro anda */
+#define VELOCIDADE_SEM_PATINAR  1600.0f  /* a partir de 40 km/h a roda não patina mais */
+#define HABILIDADE_PADRAO          1.0f
+#define QUEDA_DO_TRANCO            4.0f  /* 1/s: o tranco lateral de uma batida some em ~1/4 s */
+#define MENOR_GIRO_PARA_RODAR    300.0f  /* graus por segundo: abaixo disso a batida só balança */
+#define MAIOR_GIRO               900.0f
+#define QUEDA_DO_GIRO              1.7f  /* 1/s */
+#define GIRO_FINAL               220.0f  /* graus por segundo: girando menos que isso, o carro se endireita */
+#define PERDA_RODANDO           5200.0f  /* velocidade perdida por segundo com o carro todo de lado */
+#define RESTO_DA_RODADA            0.40f /* o carro nunca para de vez: sobra isso da velocidade que tinha */
+#define TEMPO_ENTRE_RODADAS        3.0f  /* segundos sem poder rodar de novo */
 #define KMH_POR_UNIDADE            0.025f /* 12000 unidades/s viram 300 km/h no velocímetro */
 
 /*
@@ -86,8 +101,25 @@ Carro criarCarro(const char *nome, int numero, Segmento *largada, float deslocam
     carro.derrapagem = 0.0f;
     carro.vacuo = 0.0f;
     iniciarMotor(&carro.motor);
+    carro.anguloDasRodas = 0.0f;
     carro.nitro = NITRO_INICIAL;
     carro.nitroLigado = 0;
+    carro.comprimento = COMPRIMENTO_PADRAO;
+    carro.largura = LARGURA_PADRAO;
+    carro.empurraoPendente = 0.0f;
+    carro.velocidadeLateral = 0.0f;
+    carro.velocidadeDeLado = 0.0f;
+    carro.rodando = 0;
+    carro.giro = 0.0f;
+    carro.velocidadeDoGiro = 0.0f;
+    carro.tempoSemRodar = 0.0f;
+    carro.velocidadeNaRodada = 0.0f;
+    carro.habilidade = HABILIDADE_PADRAO;
+    carro.distanciaAFrente = -1.0f;
+    carro.velocidadeAFrente = 0.0f;
+    carro.lateralAFrente = 0.0f;
+    carro.ocupadoEsquerda = 0;
+    carro.ocupadoDireita = 0;
     carro.voltas = 0;
     for (int i = 0; i < TOTAL_VOLTAS; i++) {
         carro.temposDeVolta[i] = 0.0f;
@@ -106,7 +138,7 @@ Carro criarCarro(const char *nome, int numero, Segmento *largada, float deslocam
     carro.tempoDeChegada = 0.0f;
     Comandos nenhumComando = { 0, 0, 0, 0, 0.0f, 0 };
     carro.ultimosComandos = nenhumComando;
-    carro.linhaAlvo = deslocamentoLateral;
+    carro.linhaAlvo = deslocamentoLateral * larguraDoLado(largada, deslocamentoLateral);
 
     carro.velocidadeMaxima = velocidadeMaxima;
     carro.aceleracao = aceleracao;
@@ -325,6 +357,10 @@ static void atualizarLateral(Carro *carro, Comandos comandos, float tempoQuadro)
                      * (1.0f - carro->aderencia) * pe;
     carro->deslocamentoLateral -= empurrao * paraMetros * tempoQuadro;
 
+    /* O tranco de uma batida de lado, que some logo */
+    carro->deslocamentoLateral += carro->velocidadeLateral / larguraDoLado(aqui, carro->deslocamentoLateral) * tempoQuadro;
+    carro->velocidadeLateral *= expf(-QUEDA_DO_TRANCO * tempoQuadro);
+
     /* Derrapagem: 0 enquanto o empurrão gasta menos de 70% da direção,
      * 1 quando gasta tudo (dali em diante o carro vai para fora) */
     float uso = 0.0f;
@@ -356,6 +392,87 @@ static void atualizarLateral(Carro *carro, Comandos comandos, float tempoQuadro)
 }
 
 /*
+ * rapidezDasRodas
+ * Com que rapidez a roda gira na tela. Em baixa velocidade é o giro de verdade;
+ * depois ele vai chegando aos poucos ao máximo que a tela mostra sem parecer
+ * que a roda anda para trás. Na arrancada, acelerando, ela patina.
+ * Recebe: a velocidade e se o piloto está acelerando.
+ * Devolve: radianos por segundo.
+ */
+float rapidezDasRodas(float velocidade, int acelerando) {
+    float deVerdade = velocidade / UNIDADES_POR_METRO / RAIO_DA_RODA;
+    float rapidez = GIRO_MAXIMO_DAS_RODAS * (1.0f - expf(-deVerdade / GIRO_MAXIMO_DAS_RODAS));
+    if (acelerando && velocidade < VELOCIDADE_SEM_PATINAR) {
+        rapidez = fmaxf(rapidez, GIRO_PATINANDO * (1.0f - velocidade / VELOCIDADE_SEM_PATINAR));
+    }
+    return rapidez;
+}
+
+/*
+ * fazerRodar
+ * Uma batida fora do centro faz o carro rodar. Batida fraca não roda, e quem
+ * acabou de rodar fica um tempo sem poder rodar de novo.
+ * Recebe: o carro e o impulso em graus por segundo (+ gira para a direita).
+ * Devolve: nada.
+ */
+void fazerRodar(Carro *carro, float impulso) {
+    if (carro->rodando || carro->tempoSemRodar > 0.0f || fabsf(impulso) < MENOR_GIRO_PARA_RODAR) {
+        return;
+    }
+    carro->rodando = 1;
+    carro->nitroLigado = 0;
+    carro->velocidadeNaRodada = carro->velocidade;
+    carro->velocidadeDoGiro = limitar(impulso, -MAIOR_GIRO, MAIOR_GIRO);
+}
+
+/*
+ * atualizarRodada
+ * Enquanto roda, o carro gira, o giro vai perdendo força e, de lado, ele perde
+ * velocidade. No fim ele se endireita sozinho e o piloto volta a mandar.
+ * Recebe: o carro e o tempo do quadro.
+ * Devolve: nada.
+ */
+static void atualizarRodada(Carro *carro, float tempoQuadro) {
+    carro->tempoSemRodar = fmaxf(carro->tempoSemRodar - tempoQuadro, 0.0f);
+    if (!carro->rodando) {
+        return;
+    }
+    if (fabsf(carro->velocidadeDoGiro) > GIRO_FINAL) {
+        carro->giro += carro->velocidadeDoGiro * tempoQuadro;
+        carro->velocidadeDoGiro *= expf(-QUEDA_DO_GIRO * tempoQuadro);
+    } else {
+        /* Termina a volta no sentido em que já estava girando */
+        float sentido = (carro->velocidadeDoGiro < 0.0f) ? -1.0f : 1.0f;
+        float alvo = sentido * ceilf(fabsf(carro->giro) / 360.0f) * 360.0f;
+        carro->giro += sentido * GIRO_FINAL * tempoQuadro;
+        if (sentido * (carro->giro - alvo) >= 0.0f) {
+            carro->giro = 0.0f;
+            carro->velocidadeDoGiro = 0.0f;
+            carro->rodando = 0;
+            carro->tempoSemRodar = TEMPO_ENTRE_RODADAS;
+            return;
+        }
+    }
+    float deLado = fabsf(sinf(carro->giro * 0.0174533f));
+    float menor = carro->velocidadeNaRodada * RESTO_DA_RODADA;
+    carro->velocidade = fmaxf(carro->velocidade - PERDA_RODANDO * deLado * tempoQuadro, fminf(menor, carro->velocidade));
+}
+
+/*
+ * meiasMedidasDoCarro
+ * A caixa de colisão do carro, alinhada com a pista: ela envolve o carro
+ * inteiro, mesmo virado pelo volante ou rodando.
+ * Recebe: o carro e onde guardar a metade do comprimento e da largura, em metros.
+ * Devolve: nada.
+ */
+void meiasMedidasDoCarro(const Carro *carro, float *meioComprimento, float *meiaLargura) {
+    float angulo = (carro->giro + carro->volante * GRAUS_DO_VOLANTE) * 0.0174533f;
+    float seno = fabsf(sinf(angulo)), cosseno = fabsf(cosf(angulo));
+    *meioComprimento = (carro->comprimento * cosseno + carro->largura * seno) / 2.0f;
+    *meiaLargura = (carro->comprimento * seno + carro->largura * cosseno) / 2.0f;
+}
+
+/*
  * atualizarCarro
  * Avança o carro um quadro: motor (marcha), velocidade, volante, lateral e depois anda
  * pela lista da pista com moverNaPista().
@@ -363,6 +480,13 @@ static void atualizarLateral(Carro *carro, Comandos comandos, float tempoQuadro)
  * Devolve: quantas voltas o carro completou neste quadro (0 ou 1).
  */
 int atualizarCarro(Carro *carro, Comandos comandos, float tempoQuadro) {
+    if (carro->rodando) {
+        Comandos nenhumComando = { 0, 0, 0, 0, 0.0f, 0 };
+        comandos = nenhumComando;
+    }
+    atualizarRodada(carro, tempoQuadro);
+    float lateralAntes = carro->deslocamentoLateral * larguraDoLado(carro->posicao.segmento, carro->deslocamentoLateral);
+
     carro->ultimosComandos = comandos;
     atualizarNitro(carro, comandos, tempoQuadro);
     atualizarMotor(&carro->motor, carro->velocidade / carro->velocidadeMaxima,
@@ -370,11 +494,30 @@ int atualizarCarro(Carro *carro, Comandos comandos, float tempoQuadro) {
     atualizarVelocidade(carro, comandos, tempoQuadro);
     atualizarVolante(carro, comandos, tempoQuadro);
     atualizarLateral(carro, comandos, tempoQuadro);
+    carro->anguloDasRodas = fmodf(carro->anguloDasRodas
+                                  + rapidezDasRodas(carro->velocidade, comandos.acelerar || carro->nitroLigado) * tempoQuadro,
+                                  2.0f * 3.14159265f);
 
-    float distancia = carro->velocidade * tempoQuadro;
+    float lateralDepois = carro->deslocamentoLateral * larguraDoLado(carro->posicao.segmento, carro->deslocamentoLateral);
+    carro->velocidadeDeLado = (tempoQuadro > 0.0f) ? (lateralDepois - lateralAntes) / tempoQuadro : 0.0f;
+
+    /* Anda, mais o que uma batida empurrou. Para trás ele não atravessa a linha
+     * de chegada, para a volta não contar duas vezes */
+    float distancia = carro->velocidade * tempoQuadro + carro->empurraoPendente;
+    carro->empurraoPendente = 0.0f;
+    if (carro->posicao.segmento->ehLinhaDeChegada && carro->posicao.distanciaNoSegmento + distancia < 0.0f) {
+        distancia = -carro->posicao.distanciaNoSegmento;
+    }
     carro->distanciaPercorrida += distancia;
 
+    /* Mudando de segmento, o carro continua no mesmo lugar em metros: se a pista
+     * alarga ou estreita daquele lado, muda a fração da largura, não o caminho dele */
+    Segmento *segmentoAntes = carro->posicao.segmento;
     int voltasGanhas = moverNaPista(&carro->posicao, distancia);
+    if (carro->posicao.segmento != segmentoAntes) {
+        carro->deslocamentoLateral *= larguraDoLado(segmentoAntes, carro->deslocamentoLateral)
+                                      / larguraDoLado(carro->posicao.segmento, carro->deslocamentoLateral);
+    }
     carro->voltas += voltasGanhas;
     return voltasGanhas;
 }
