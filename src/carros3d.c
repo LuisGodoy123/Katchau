@@ -15,6 +15,7 @@
 #include "raymath.h"
 #include "rlgl.h"
 #include "corrida.h"
+#include "noite.h"
 
 #define PASTA_DOS_MODELOS     "recursos/modelos/carros/"
 #define LADO_DA_MINIATURA     512
@@ -52,9 +53,10 @@ static const char *VERTICES_DO_SHADER =
     "#version 330\n"
     "in vec3 vertexPosition; in vec2 vertexTexCoord; in vec3 vertexNormal; in vec4 vertexColor;\n"
     "uniform mat4 mvp; uniform mat4 matModel;\n"
-    "out vec2 fragTexCoord; out vec4 fragColor; out vec3 fragNormal;\n"
+    "out vec2 fragTexCoord; out vec4 fragColor; out vec3 fragNormal; out vec3 fragPos;\n"
     "void main() { fragTexCoord = vertexTexCoord; fragColor = vertexColor;\n"
     "              fragNormal = mat3(matModel) * vertexNormal;\n"
+    "              fragPos = vec3(matModel * vec4(vertexPosition, 1.0));\n"
     "              gl_Position = mvp * vec4(vertexPosition, 1.0); }\n";
 
 /* Só o contorno do carro, em preto: é a foto da sombra */
@@ -70,16 +72,18 @@ static const char *VERTICES_DO_SHADER =
  * só mudam no corte: um desenha só o opaco, o outro só o translúcido. */
 #define PIXELS_DO_SHADER(CORTE, SAIDA) \
     "#version 330\n" \
-    "in vec2 fragTexCoord; in vec4 fragColor; in vec3 fragNormal;\n" \
+    "in vec2 fragTexCoord; in vec4 fragColor; in vec3 fragNormal; in vec3 fragPos;\n" \
     "uniform sampler2D texture0; uniform vec4 colDiffuse;\n" \
     "out vec4 finalColor;\n" \
+    GLSL_DA_LUZ_DA_NOITE \
     "void main() { vec4 cor = texture(texture0, fragTexCoord) * colDiffuse * fragColor;\n" \
     "              " CORTE "\n" \
     "              vec3 n = normalize(fragNormal);\n" \
     "              if (!gl_FrontFacing) n = -n;\n" \
     "              float sol = max(dot(n, normalize(vec3(0.35, 0.8, 0.45))), 0.0);\n" \
     "              float luz = 0.62 + 0.28 * (n.y * 0.5 + 0.5) + 0.42 * sol;\n" \
-    "              finalColor = vec4(cor.rgb * luz, " SAIDA "); }\n"
+    "              vec3 comLuz = (noite > 0.5) ? luzDaNoite(fragPos, n) * 1.45 : vec3(luz);\n" \
+    "              finalColor = vec4(cor.rgb * comLuz, " SAIDA "); }\n"
 
 static Model modelos[TOTAL_CARROS];
 static Matrix ajuste[TOTAL_CARROS];     /* do modelo como veio para o modelo normalizado */
@@ -304,6 +308,8 @@ void carregarCarros3D(void) {
     const char *pixelsTranslucido = PIXELS_DO_SHADER("if (cor.a >= 0.9 || cor.a < 0.02) discard;", "cor.a");
     shaderOpaco = LoadShaderFromMemory(VERTICES_DO_SHADER, pixelsOpaco);
     shaderTranslucido = LoadShaderFromMemory(VERTICES_DO_SHADER, pixelsTranslucido);
+    registrarShaderIluminado(shaderOpaco);
+    registrarShaderIluminado(shaderTranslucido);
     shaderDaSombra = LoadShaderFromMemory(VERTICES_DO_SHADER, PIXELS_DA_SOMBRA_TEXTO("0.82"));
 
     for (int numero = 0; numero < TOTAL_CARROS; numero++) {

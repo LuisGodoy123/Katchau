@@ -20,6 +20,7 @@
 #include "mundo.h"
 #include "carros3d.h"
 #include "fumaca.h"
+#include "noite.h"
 #include "raymath.h"
 
 /* ---------- Câmera ---------- */
@@ -62,6 +63,8 @@ static float aFrenteDaCamera(Camera3D camera, Vector3 ponto) {
     return ((ponto.x - camera.position.x) * frente.x + (ponto.y - camera.position.y) * frente.y
             + (ponto.z - camera.position.z) * frente.z) / tamanho;
 }
+
+static int cenaPausada = 0;
 
 /*
  * montarCamera
@@ -215,12 +218,28 @@ static void soltarFumacaDoCarro(Camera3D camera, Carro *carro, float tempoQuadro
 }
 
 /*
+ * congelarCena
+ * Na pausa, os flashes e a torcida param junto com a corrida.
+ * Recebe: 1 se o jogo está pausado.
+ * Devolve: nada.
+ */
+void congelarCena(int pausada) {
+    cenaPausada = pausada;
+}
+
+/*
  * desenharMundo3D
  * O cenário e os carros, vistos pela câmera.
  * Recebe: a câmera, a pista e a corrida (NULL nos menus: sem carros).
  * Devolve: nada.
  */
 static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
+    int ehNoite = (pista->id == PISTA_COPA_PISTAO);
+    if (ehNoite) {
+        atualizarNoite(cenaPausada ? 0.0f : GetFrameTime());
+    }
+    prepararLuzes(camera, ehNoite);
+
     prepararPlanosDaCamera();
     BeginMode3D(camera);
     rlDisableBackfaceCulling();
@@ -232,6 +251,9 @@ static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
         }
         desenharCarroNoMundo(camera, &corrida->jogador);
         desenharFumaca3D(camera);
+    }
+    if (ehNoite) {
+        desenharBrilhos(camera);
     }
 
     rlEnableBackfaceCulling();

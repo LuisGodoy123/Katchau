@@ -34,6 +34,7 @@ typedef enum {
     OBJETO_MARCA_GRID,   /* colchete de um lugar do grid: pintado no chão, não fica de pé */
     OBJETO_ARQUIBANCADA, /* um módulo de arquibancada, de frente para a pista */
     OBJETO_CAMAROTE,     /* um módulo de camarote */
+    OBJETO_POSTE,        /* poste de iluminação da pista */
     TOTAL_TIPOS_OBJETO
 } TipoObjeto;
 

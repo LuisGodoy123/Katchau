@@ -14,6 +14,7 @@
 #include "corrida.h"
 
 void desenharVisaoDoJogador(Corrida *corrida);
+void congelarCena(int pausada);
 void desenharPistaDeFundo(Pista *pista);
 void desenharCarroParado(int numero, float centroX, float baseY, float escala);
 

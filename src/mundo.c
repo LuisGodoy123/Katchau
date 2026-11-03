@@ -15,6 +15,7 @@
 #include "raymath.h"
 #include "rlgl.h"
 #include "obstaculos.h"
+#include "noite.h"
 
 #define PASTA_TEXTURAS        "recursos/texturas/"
 #define ARQUIVO_DO_ESTADIO    "recursos/modelos/copa_pistao.glb"
@@ -57,6 +58,9 @@
 #define MAIOR_ARVORE          1.22f
 #define AFUNDAR_NO_CHAO       0.05f
 #define MAXIMO_DE_LOTES       96
+#define MATERIAL_DOS_ASSENTOS 7         /* Material.079 do estádio: a raylib põe o padrão na frente */
+#define ALCANCE_DO_POSTE      6.65f     /* metros, do pé até a lâmpada, na direção da pista */
+#define ALTURA_DA_LAMPADA     14.0f
 #define TOPO_DA_ARQUIBANCADA  10.3f     /* a placa do setor fica no alto do fundo */
 #define MAXIMO_DE_VERTICES    60000     /* uma malha da raylib aponta os vértices com 16 bits */
 
@@ -130,6 +134,7 @@ typedef enum {
     MODELO_SETOR_R,
     MODELO_SETOR_S,
     MODELO_SETOR_V,
+    MODELO_POSTE,
     TOTAL_MODELOS_DE_OBJETO
 } ModeloDeObjeto;
 
@@ -137,7 +142,7 @@ static const char *ARQUIVOS_DOS_OBJETOS[TOTAL_MODELOS_DE_OBJETO] = {
     "arvore_1.glb", "arvore_2.glb", "arvore_3.glb", "pneus_vermelho.glb", "pneus_branco.glb",
     "placa_50.glb", "placa_100.glb", "placa_150.glb", "portico.glb", "arquibancada.glb", "camarote.glb",
     "setor_A.glb", "setor_B.glb", "setor_D.glb", "setor_G.glb", "setor_H.glb",
-    "setor_M.glb", "setor_N.glb", "setor_R.glb", "setor_S.glb", "setor_V.glb",
+    "setor_M.glb", "setor_N.glb", "setor_R.glb", "setor_S.glb", "setor_V.glb", "poste.glb",
 };
 
 /* Centenas de cópias do mesmo modelo desenhadas uma a uma pesariam: elas são
@@ -167,6 +172,7 @@ static Texture2D texturaAsfalto[2], texturaGrama;
 static Model modelosDosObjetos[TOTAL_MODELOS_DE_OBJETO];
 static LoteDeObjetos lotes[MAXIMO_DE_LOTES];
 static int totalDeLotes = 0;
+static int lotesDeInterlagos = 0;   /* os primeiros lotes são de Interlagos; os demais, do oval */
 
 /* ==================================================================
  * Construção de malhas
@@ -743,6 +749,7 @@ static void construirObjetos(Pista *pista) {
 
     MemFree(alturasDaGrade);
     alturasDaGrade = NULL;
+    lotesDeInterlagos = totalDeLotes;
 }
 
 /*
@@ -786,15 +793,47 @@ static Texture2D carregarTexturaRepetida(const char *arquivo) {
 }
 
 /*
+ * construirPostes
+ * Põe os postes do oval, de frente para a pista, e registra a lâmpada de cada um.
+ * Recebe: a pista.
+ * Devolve: nada.
+ */
+static void construirPostes(Pista *pista) {
+    Segmento *atual = pista->largada;
+    do {
+        PosicaoNaPista lugar = { atual, 0.0f };
+        for (Obstaculo *objeto = atual->obstaculos; objeto != NULL; objeto = objeto->proximo) {
+            if (objeto->tipo != OBJETO_POSTE) {
+                continue;
+            }
+            PontoNoMundo ponto = pontoNoMundo(lugar, objeto->deslocamentoLateral);
+            float rumo = ponto.rumo * DEG2RAD;
+            Vector3 paraAPista = { -cosf(rumo), 0.0f, -sinf(rumo) };
+            colocarModelo(MODELO_POSTE, (Vector3){ ponto.x, ponto.y, ponto.z }, atan2f(paraAPista.x, paraAPista.z), 1.0f);
+            adicionarLuzDePoste((Vector3){ ponto.x + paraAPista.x * ALCANCE_DO_POSTE, ponto.y + ALTURA_DA_LAMPADA,
+                                           ponto.z + paraAPista.z * ALCANCE_DO_POSTE });
+        }
+        atual = atual->proximo;
+    } while (atual != pista->largada);
+
+    Model modelo = modelosDosObjetos[MODELO_POSTE];
+    for (int i = 0; i < modelo.meshCount && i < MAXIMO_DE_PECAS; i++) {
+        fecharLote(&lotesAbertos[MODELO_POSTE][i], modelo.materials[modelo.meshMaterial[i]].maps[MATERIAL_MAP_ALBEDO].texture);
+    }
+}
+
+/*
  * carregarEstadio
- * Carrega o modelo da Copa Pistão e deixa as texturas dele nítidas ao longe.
+ * Carrega o modelo da Copa Pistão e deixa as texturas dele nítidas ao longe. A
+ * noite ilumina o modelo inteiro, e os assentos viram a torcida.
  * Recebe: a pista (para pintar a largada e o grid).
  * Devolve: nada.
  */
 static void carregarEstadio(Pista *pista) {
     estadio = LoadModel(ARQUIVO_DO_ESTADIO);
+    carregarNoite(estadio, MATERIAL_DOS_ASSENTOS, ESCALA_COPA_PISTAO);
     for (int i = 0; i < estadio.materialCount; i++) {
-        estadio.materials[i].shader = shader;
+        estadio.materials[i].shader = (i == MATERIAL_DOS_ASSENTOS) ? shaderDaTorcida() : shaderDaNoite();
         Texture2D *textura = &estadio.materials[i].maps[MATERIAL_MAP_ALBEDO].texture;
         if (textura->id != 0 && textura->id != rlGetTextureIdDefault()) {
             GenTextureMipmaps(textura);
@@ -805,6 +844,7 @@ static void carregarEstadio(Pista *pista) {
     Construcao pintura = { 0 };
     pintarLargadaEGrid(&pintura, pista);
     pinturaDoEstadio = terminarMalha(&pintura);
+    construirPostes(pista);
 }
 
 /*
@@ -875,6 +915,7 @@ void descarregarMundo(void) {
     material.shader.id = rlGetShaderIdDefault();
     UnloadMaterial(material);
     UnloadShader(shader);
+    descarregarNoite();
 }
 
 /* ==================================================================
@@ -903,13 +944,19 @@ void desenharCenario(IdPista id, Vector3 camera) {
     Matrix origem = MatrixIdentity();
     Matrix nosCilindros = MatrixTranslate(camera.x, camera.y - ABAIXO_DA_CAMERA, camera.z);
 
-    desenharMalha(cilindroDoCeu, texturaCeu, nosCilindros);
     if (id == PISTA_COPA_PISTAO) {
+        desenharMalha(cilindroDoCeu, texturaDoCeuNoturno(), nosCilindros);
         DrawModel(estadio, (Vector3){ 0.0f, 0.0f, 0.0f }, ESCALA_COPA_PISTAO, WHITE);
+        material.shader = shaderDaNoite();
         desenharMalha(pinturaDoEstadio, semTextura, origem);
+        for (int i = lotesDeInterlagos; i < totalDeLotes; i++) {
+            desenharMalha(lotes[i].malha, lotes[i].textura, origem);
+        }
+        material.shader = shader;
         return;
     }
 
+    desenharMalha(cilindroDoCeu, texturaCeu, nosCilindros);
     desenharMalha(cilindroDaCidade, texturaCidade, nosCilindros);
     desenharMalha(cilindroDosMorros, texturaMorros, nosCilindros);
     desenharMalha(interlagos.base, texturaGrama, origem);
@@ -918,7 +965,7 @@ void desenharCenario(IdPista id, Vector3 camera) {
     desenharMalha(interlagos.asfalto[0], texturaAsfalto[0], origem);
     desenharMalha(interlagos.asfalto[1], texturaAsfalto[1], origem);
     desenharMalha(interlagos.pintura, semTextura, origem);
-    for (int i = 0; i < totalDeLotes; i++) {
+    for (int i = 0; i < lotesDeInterlagos; i++) {
         desenharMalha(lotes[i].malha, lotes[i].textura, origem);
     }
 }

@@ -128,6 +128,7 @@ src/
   mundo.c/.h       cenário 3D: o modelo do estádio e as malhas de Interlagos
   carros3d.c/.h    modelos 3D dos carros, sombras e fotos para os menus
   fumaca.c/.h      fumaça dos pneus e poeira da grama
+  noite.c/.h       noite da Copa Pistão: luzes, torcida, flashes e refletores
   copa_pistao.h    traçado da Copa Pistão, medido no modelo 3D
   carro.c/.h       struct Carro, Comandos e movimento                  (fase 3)
   corrida.c/.h     grid, voltas, colisão, classificação e fim          (fases 3 e 4)
@@ -155,7 +156,7 @@ ferramentas/
   gerar_sprites.py script do Blender: modelo 3D (.glb) vira sprite PNG
 ```
 
-Regra: só `render.c`, `mundo.c`, `carros3d.c`, `fumaca.c`, `hud.c`, `menu.c`, `visual.c`, `audio.c` e `controle.c` incluem `raylib.h` (além do `main.c`, que abre
+Regra: só `render.c`, `mundo.c`, `carros3d.c`, `fumaca.c`, `noite.c`, `hud.c`, `menu.c`, `visual.c`, `audio.c` e `controle.c` incluem `raylib.h` (além do `main.c`, que abre
 a janela). O resto é lógica pura e pode ser testado no terminal.
 
 ## Os carros
@@ -331,6 +332,11 @@ muros, dos dois lados, e raspar custa velocidade. A pista do filme não tem medi
 real de Daytona, 2,5 milhas ou 4.023 m (`COMPRIMENTO_COPA_PISTAO`), e o modelo é ampliado até caber nisso
 (~43 m por unidade). O modelo não tem proporções reais: com esse tamanho, as arquibancadas ficam bem
 mais altas e a pista mais larga que as de verdade.
+
+A corrida é **à noite** (`noite.c`): luz fria da arena, céu estrelado, refletores no alto das arquibancadas e postes
+de iluminação em `poste.glb`, com a luz calculada no shader, usando os 32 postes mais perto da câmera. A **torcida** é
+desenhada no shader dos assentos do próprio modelo: cada lugar sorteia uma cor pela posição, então são dezenas de milhares
+de torcedores sem geometria nova, e os **flashes** das câmeras acendem em pontos sorteados dos assentos.
 
 Modelo: [Motor Speedway of the South](https://sketchfab.com/3d-models/motor-speedway-of-the-south-b6406f62b7b94580844fb8508cc72148),
 de DinseyPixarCarsModels, publicado como CC-BY-4.0. O estádio é do universo de *Carros* (Disney/Pixar) e

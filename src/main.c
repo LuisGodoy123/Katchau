@@ -231,6 +231,7 @@ int main(int argc, char *argv[]) {
          * comecarInterface() amplia para o tamanho da tela. */
         BeginDrawing();
         ClearBackground(BLACK);
+        congelarCena(tela == TELA_CORRIDA && pausada);
         switch (tela) {
             case TELA_MENU:
                 desenharPistaDeFundo(pistas[menu.pistaEscolhida]);
