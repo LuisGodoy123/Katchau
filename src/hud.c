@@ -129,6 +129,12 @@ void terminarInterface(void) {
 #define TAMANHO_VELOCIDADE    36.0f
 #define COR_TRACO             Fade(COR_TEXTO_CLARO, 0.55f)
 
+#define DISTANCIA_DO_ARCO_NITRO 11.0f  /* do aro do mostrador até o arco do nitro */
+#define ANGULO_DO_ARCO_NITRO  52.0f    /* graus para cima e para baixo do meio */
+#define TAMANHO_DO_LOSANGO    9.0f
+#define COR_NITRO             (Color){  60, 150, 255, 255 }
+#define COR_NITRO_LIGADO      (Color){ 150, 225, 255, 255 }
+
 /* ---------- Cores do HUD ---------- */
 #define COR_FUNDO_HUD         Fade(COR_GRAFITE, 0.78f)
 #define COR_VERDE_HUD         (Color){  40, 200,  70, 255 }
@@ -520,7 +526,7 @@ static void desenharArco(Vector2 centro, float raio, float de, float ate, float 
  * Devolve: o centro do mostrador na tela virtual (o VÁCUO também usa).
  */
 static Vector2 centroDoMostrador(void) {
-    return (Vector2){ larguraVirtual() - MARGEM_HUD - RAIO_VELOCIMETRO - 4,
+    return (Vector2){ larguraVirtual() - MARGEM_HUD - RAIO_VELOCIMETRO - 12,
                       alturaVirtual() - MARGEM_HUD - RAIO_VELOCIMETRO + 4 };
 }
 
@@ -620,6 +626,72 @@ static void desenharVelocimetro(Corrida *corrida, const Motor *motor) {
 }
 
 /*
+ * desenharArcoDoNitro
+ * Um pedaço do arco do nitro, por fora do mostrador. Os ângulos são em graus,
+ * com 0 apontando para a direita e crescendo para baixo.
+ * Recebe: o centro, o raio, de que ângulo até que ângulo, a grossura e a cor.
+ * Devolve: nada.
+ */
+static void desenharArcoDoNitro(Vector2 centro, float raio, float de, float ate, float grossura, Color cor) {
+    int passos = (int) (fabsf(ate - de) / 3.0f) + 1;
+    for (int i = 0; i < passos; i++) {
+        float a0 = (de + (ate - de) * i / passos) * DEG2RAD;
+        float a1 = (de + (ate - de) * (i + 1) / passos) * DEG2RAD;
+        DrawLineEx((Vector2){ centro.x + cosf(a0) * raio, centro.y + sinf(a0) * raio },
+                   (Vector2){ centro.x + cosf(a1) * raio, centro.y + sinf(a1) * raio }, grossura, cor);
+    }
+}
+
+/*
+ * desenharNitro
+ * O nitro, colado no mostrador: um arco fino do lado direito, que enche de baixo
+ * para cima, com um losango e um raio no meio. Queimando, ele acende; sem
+ * o mínimo para ligar, fica apagado.
+ * Recebe: a corrida.
+ * Devolve: nada.
+ */
+static void desenharNitro(Corrida *corrida) {
+    Carro *jogador = &corrida->jogador;
+    Vector2 centro = centroDoMostrador();
+    float raio = RAIO_VELOCIMETRO + DISTANCIA_DO_ARCO_NITRO;
+
+    Color cor = COR_NITRO;
+    if (jogador->nitroLigado) {
+        cor = COR_NITRO_LIGADO;
+    } else if (jogador->nitro < 0.10f) {
+        cor = Fade(COR_NITRO, 0.5f);
+    }
+
+    /* O arco: a parte vazia em cima, escura, e a cheia subindo de baixo */
+    float cheio = ANGULO_DO_ARCO_NITRO - 2.0f * ANGULO_DO_ARCO_NITRO * jogador->nitro;
+    desenharArcoDoNitro(centro, raio, -ANGULO_DO_ARCO_NITRO, ANGULO_DO_ARCO_NITRO, 3.5f, Fade(COR_GRAFITE, 0.8f));
+    if (jogador->nitro > 0.0f) {
+        desenharArcoDoNitro(centro, raio, ANGULO_DO_ARCO_NITRO, cheio, 3.5f, cor);
+    }
+
+    /* As duas pontas, viradas para fora */
+    for (int ponta = -1; ponta <= 1; ponta += 2) {
+        float a = ponta * ANGULO_DO_ARCO_NITRO * DEG2RAD;
+        DrawLineEx((Vector2){ centro.x + cosf(a) * (raio - 1.5f), centro.y + sinf(a) * (raio - 1.5f) },
+                   (Vector2){ centro.x + cosf(a) * (raio + 5.0f), centro.y + sinf(a) * (raio + 5.0f) }, 2.5f,
+                   (ponta > 0) ? cor : COR_TEXTO_FRACO);
+    }
+
+    /* O losango com o raio, no meio do arco */
+    Vector2 meio = { centro.x + raio, centro.y };
+    if (jogador->nitroLigado) {
+        desenharBrilho(meio.x, meio.y, 20.0f, Fade(COR_NITRO, 0.7f));
+    }
+    DrawPoly(meio, 4, TAMANHO_DO_LOSANGO, 0.0f, COR_GRAFITE);
+    DrawPolyLinesEx(meio, 4, TAMANHO_DO_LOSANGO, 0.0f, 1.5f, cor);
+    Vector2 raioDoIcone[4] = { { meio.x + 1.6f, meio.y - 4.6f }, { meio.x - 1.8f, meio.y + 0.4f },
+                               { meio.x + 1.8f, meio.y - 0.4f }, { meio.x - 1.6f, meio.y + 4.6f } };
+    for (int i = 0; i < 3; i++) {
+        DrawLineEx(raioDoIcone[i], raioDoIcone[i + 1], 1.5f, jogador->nitroLigado ? COR_TEXTO_CLARO : cor);
+    }
+}
+
+/*
  * desenharVacuo
  * Em cima do velocímetro, "VÁCUO" aparece aos poucos conforme o jogador
  * cola atrás de outro carro (e some quando ele sai da esteira).
@@ -677,6 +749,7 @@ void desenharHud(Corrida *corrida) {
     desenharMiniMapa(corrida);
     desenharVelocimetro(corrida, &corrida->jogador.motor);
     desenharVacuo(corrida);
+    desenharNitro(corrida);
 
     if (estaForaDaPista(&corrida->jogador)) {
         escreverCentralizado(FONTE_FORTE, "FORA DA PISTA", larguraVirtual() / 2.0f, alturaVirtual() * 0.30f,

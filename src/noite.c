@@ -39,8 +39,6 @@
 #define LARGURA_DO_CEU        2048
 #define ALTURA_DO_CEU         512
 #define ESTRELAS              1500
-#define COR_DO_CEU_EM_CIMA    (Color){   3,   5,  14, 255 }
-#define COR_DO_CEU_EMBAIXO    (Color){  10,  16,  34, 255 }
 
 #define CENTRO_DO_OVAL_X      (-0.66f) /* em unidades do modelo */
 
@@ -202,13 +200,13 @@ static Texture2D gerarEstrela(void) {
 
 /*
  * gerarCeu
- * O céu escuro, um pouco mais claro no horizonte, com estrelas de brilhos
- * diferentes. Só a metade de cima tem estrelas: a de baixo é coberta.
+ * O céu preto, com estrelas de brilhos diferentes. É preto como o fundo da
+ * tela, para não aparecer a emenda em cima do cilindro.
  * Recebe: nada.
  * Devolve: a textura.
  */
 static Texture2D gerarCeu(void) {
-    Image imagem = GenImageGradientLinear(LARGURA_DO_CEU, ALTURA_DO_CEU, 0, COR_DO_CEU_EM_CIMA, COR_DO_CEU_EMBAIXO);
+    Image imagem = GenImageColor(LARGURA_DO_CEU, ALTURA_DO_CEU, BLACK);
     for (int i = 0; i < ESTRELAS; i++) {
         unsigned char forca = (unsigned char) GetRandomValue(70, 255);
         ImageDrawPixel(&imagem, GetRandomValue(0, LARGURA_DO_CEU - 1), GetRandomValue(0, ALTURA_DO_CEU - 1),

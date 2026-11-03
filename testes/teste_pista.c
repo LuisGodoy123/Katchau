@@ -23,6 +23,7 @@
 #include "ia.h"
 #include "obstaculos.h"
 #include "motor.h"
+#include "olhar.h"
 
 #define TOTAL_VOLTAS          3
 #define GRAUS_VOLTA_COMPLETA  -360.0f  /* Interlagos é anti-horário: vira 360 graus para a esquerda */
@@ -274,9 +275,9 @@ static void testarCarro(void) {
     printf("\n5) Carro andando pela pista\n");
     Pista *pista = criarPista();
     float quadro = 1.0f / 60.0f;
-    Comandos acelerar = { 1, 0, 0, 0, 0.0f };
-    Comandos frear = { 0, 1, 0, 0, 0.0f };
-    Comandos virarDireita = { 0, 0, 0, 1, 0.0f };
+    Comandos acelerar = { 1, 0, 0, 0, 0.0f, 0 };
+    Comandos frear = { 0, 1, 0, 0, 0.0f, 0 };
+    Comandos virarDireita = { 0, 0, 0, 1, 0.0f, 0 };
 
     /* Para medir velocidade, um "oval" só de retas: sem curva, nada
      * empurra o carro para a grama. */
@@ -351,7 +352,7 @@ static void testarCorridaCompleta(void) {
     int quadros = 0;
     while (!corrida.terminou && quadros < quadrosMaximos) {
         /* Acelera sempre e corrige o volante para o centro */
-        Comandos comandos = { 1, 0, 0, 0, 0.0f };
+        Comandos comandos = { 1, 0, 0, 0, 0.0f, 0 };
         comandos.esquerda = corrida.jogador.deslocamentoLateral > 0.1f;
         comandos.direita = corrida.jogador.deslocamentoLateral < -0.1f;
         atualizarCorrida(&corrida, comandos, quadro);
@@ -371,11 +372,10 @@ static void testarCorridaCompleta(void) {
     verificar(voltaAtual(&corrida.jogador) == TOTAL_VOLTAS, "volta mostrada nunca passa de 3/3");
 
     float tempoNaChegada = corrida.jogador.tempoDeChegada;
-    float velocidadeNaChegada = corrida.jogador.velocidade;
-    Comandos acelerar = { 1, 0, 0, 0, 0.0f };
-    atualizarCorrida(&corrida, acelerar, quadro);
+    Comandos pisarNoFreio = { 0, 1, 0, 0, 0.0f, 0 };
+    atualizarCorrida(&corrida, pisarNoFreio, quadro);
     verificar(corrida.jogador.tempoDeChegada == tempoNaChegada, "depois do fim o tempo do jogador nao muda");
-    verificar(corrida.jogador.velocidade < velocidadeNaChegada, "depois do fim o acelerador e ignorado");
+    verificar(!corrida.jogador.ultimosComandos.frear, "depois do fim o teclado e ignorado: quem dirige e a IA");
 
     liberarPista(pista);
 }
@@ -562,7 +562,7 @@ static void testarEscolhaDaGaragem(void) {
     verificar(cadaUmUmaVez, "os 8 carros estao na corrida, sem repetir");
 
     /* Contagem regressiva: ninguém anda antes de ela acabar */
-    Comandos acelerar = { 1, 0, 0, 0, 0.0f };
+    Comandos acelerar = { 1, 0, 0, 0, 0.0f, 0 };
     float distanciaAntes = corrida.jogador.distanciaPercorrida;
     atualizarCorrida(&corrida, acelerar, 1.0f);
     verificar(corrida.jogador.distanciaPercorrida == distanciaAntes && corrida.tempoDeCorrida == 0.0f,
@@ -578,7 +578,7 @@ static void testarEscolhaDaGaragem(void) {
     }
     /* Depois de todos chegarem, os carros continuam andando: a ordem não pode mudar */
     for (int i = 0; i < 60 * 20; i++) {
-        Comandos nenhum = { 0, 0, 0, 0, 0.0f };
+        Comandos nenhum = { 0, 0, 0, 0, 0.0f, 0 };
         atualizarCorrida(&corrida, nenhum, quadro);
     }
 
@@ -609,8 +609,8 @@ static void testarVolante(void) {
     Carro carro = criarCarro("Teste", 0, reta->largada, 0.0f, 12000.0f, 2400.0f, 0.5f);
     carro.velocidade = carro.velocidadeMaxima;
     float quadro = 1.0f / 60.0f;
-    Comandos direita = { 0, 0, 0, 1, 0.0f };
-    Comandos nenhum = { 0, 0, 0, 0, 0.0f };
+    Comandos direita = { 0, 0, 0, 1, 0.0f, 0 };
+    Comandos nenhum = { 0, 0, 0, 0, 0.0f, 0 };
 
     atualizarCarro(&carro, direita, quadro);
     verificar(carro.volante > 0.0f && carro.volante < 1.0f,
@@ -627,7 +627,7 @@ static void testarVolante(void) {
     verificar(carro.volante == 0.0f, "soltando a seta, o volante volta sozinho ao centro");
 
     /* Analógico: o volante para onde o analógico manda, não no fim */
-    Comandos meioDireita = { 0, 0, 0, 0, 0.5f };
+    Comandos meioDireita = { 0, 0, 0, 0, 0.5f, 0 };
     for (int i = 0; i < 60; i++) {
         atualizarCarro(&carro, meioDireita, quadro);
     }
@@ -635,19 +635,19 @@ static void testarVolante(void) {
     Carro inteiro = carro, metade = carro;
     inteiro.volante = 1.0f;
     inteiro.deslocamentoLateral = metade.deslocamentoLateral = 0.0f;
-    Comandos tudoDireita = { 0, 0, 0, 0, 1.0f };
+    Comandos tudoDireita = { 0, 0, 0, 0, 1.0f, 0 };
     atualizarCarro(&inteiro, tudoDireita, quadro);
     atualizarCarro(&metade, meioDireita, quadro);
     verificar(fabsf(metade.deslocamentoLateral * 2.0f - inteiro.deslocamentoLateral) < 0.001f,
               "com metade do volante o carro vira metade");
 
-    Comandos poucoDireita = { 0, 0, 0, 0, 0.2f };
+    Comandos poucoDireita = { 0, 0, 0, 0, 0.2f, 0 };
     for (int i = 0; i < 60; i++) {
         atualizarCarro(&carro, poucoDireita, quadro);
     }
     verificar(fabsf(carro.volante - 0.2f) < 0.001f, "aliviando o analogico, o volante desce junto (e para em 0,2)");
 
-    Comandos setaEAnalogico = { 0, 0, 1, 0, 0.3f };   /* seta para a esquerda, analógico um pouco à direita */
+    Comandos setaEAnalogico = { 0, 0, 1, 0, 0.3f, 0 };   /* seta para a esquerda, analógico um pouco à direita */
     for (int i = 0; i < 60; i++) {
         atualizarCarro(&carro, setaEAnalogico, quadro);
     }
@@ -822,7 +822,7 @@ static void testarDirigibilidade(void) {
     rapido.velocidade = 12000.0f;   /* 300 km/h */
     devagar.volante = 1.0f;
     rapido.volante = 1.0f;
-    Comandos direitaSemPedal = { 0, 0, 0, 1, 0.0f };
+    Comandos direitaSemPedal = { 0, 0, 0, 1, 0.0f, 0 };
     atualizarCarro(&devagar, direitaSemPedal, quadro);
     atualizarCarro(&rapido, direitaSemPedal, quadro);
     float proporcao = devagar.deslocamentoLateral / rapido.deslocamentoLateral;
@@ -841,7 +841,7 @@ static void testarDirigibilidade(void) {
     } while (atual != pista->largada);
     Carro naCurva = criarCarro("Teste", 0, maisFechada, 0.0f, 12000.0f, 2400.0f, 0.5f);
     naCurva.velocidade = naCurva.velocidadeMaxima;
-    Comandos nenhum = { 0, 0, 0, 0, 0.0f };
+    Comandos nenhum = { 0, 0, 0, 0, 0.0f, 0 };
     atualizarCarro(&naCurva, nenhum, quadro);
     printf("     %s a 300 km/h: derrapagem %.2f; velocidade segura %d km/h\n",
            maisFechada->nomeTrecho, naCurva.derrapagem,
@@ -892,7 +892,7 @@ static void testarGridDeLargada(void) {
 
     /* Anda até o jogador cruzar a linha pela primeira vez */
     float quadro = 1.0f / 60.0f;
-    Comandos acelerar = { 1, 0, 0, 0, 0.0f };
+    Comandos acelerar = { 1, 0, 0, 0, 0.0f, 0 };
     int quadros = 0;
     while (corrida.jogador.voltas < 0 && quadros < 60 * 30) {
         atualizarCorrida(&corrida, acelerar, quadro);
@@ -1005,7 +1005,7 @@ static void testarVoltaDaVitoria(void) {
     for (int i = 0; i < TOTAL_VOLTAS; i++) {
         tempos[i] = corrida.jogador.temposDeVolta[i];
     }
-    Comandos nenhumComando = { 0, 0, 0, 0, 0.0f };
+    Comandos nenhumComando = { 0, 0, 0, 0, 0.0f, 0 };
     for (int i = 0; i < 60 * 130; i++) {
         atualizarCorrida(&corrida, nenhumComando, quadro);   /* o teclado nao manda mais */
     }
@@ -1118,8 +1118,8 @@ static void testarPeVacuoEDerrapagem(void) {
     float quadro = 1.0f / 60.0f;
     Pista *curva = criarPistaVazia();
     adicionarTrecho(curva, "Curva longa", 400, CURVA_FECHADA, 0.0f, 0.0f);
-    Comandos acelerar = { 1, 0, 0, 0, 0.0f };
-    Comandos aliviar = { 0, 0, 0, 0, 0.0f };
+    Comandos acelerar = { 1, 0, 0, 0, 0.0f, 0 };
+    Comandos aliviar = { 0, 0, 0, 0, 0.0f, 0 };
 
     /* Pé: mesma velocidade, só muda o pedal */
     Carro noFundo = criarCarro("Teste", 0, curva->largada, 0.0f, 12000.0f, 2400.0f, 0.5f);
@@ -1149,7 +1149,7 @@ static void testarPeVacuoEDerrapagem(void) {
     verificar(perdaPassou > 2.0f * perdaDentro, "passando do limite o pneu arrasta e tira velocidade");
 
     /* ...e com o volante contra a curva, ele se recupera antes da grama */
-    Comandos contraACurva = { 0, 0, 0, 1, 0.0f };   /* curva para a direita empurra para a esquerda */
+    Comandos contraACurva = { 0, 0, 0, 1, 0.0f, 0 };   /* curva para a direita empurra para a esquerda */
     int quadros = 0;
     while (passou.derrapagem >= 1.0f && quadros < 60 * 5) {
         atualizarCarro(&passou, contraACurva, quadro);
@@ -1224,9 +1224,9 @@ static void testarFreioAlivioECambio(void) {
     float quadro = 1.0f / 60.0f;
     Pista *reta = criarPistaVazia();
     adicionarTrecho(reta, "Reta", 400, RETA, 0.0f, 0.0f);
-    Comandos frear = { 0, 1, 0, 0, 0.0f };
-    Comandos aliviar = { 0, 0, 0, 0, 0.0f };
-    Comandos acelerar = { 1, 0, 0, 0, 0.0f };
+    Comandos frear = { 0, 1, 0, 0, 0.0f, 0 };
+    Comandos aliviar = { 0, 0, 0, 0, 0.0f, 0 };
+    Comandos acelerar = { 1, 0, 0, 0, 0.0f, 0 };
 
     /* Freio: de 300 a 100 km/h */
     Carro freando = criarCarro("Teste", 0, reta->largada, 0.0f, 12000.0f, 2400.0f, 0.5f);
@@ -1399,7 +1399,7 @@ static void testarPistasNoMundo(void) {
 
     /* Muro dos dois lados: o carro jogado contra ele para ali e perde velocidade */
     for (int lado = 0; lado < 2; lado++) {
-        Comandos virando = { 1, 0, lado == 0, lado == 1, 0.0f };
+        Comandos virando = { 1, 0, lado == 0, lado == 1, 0.0f, 0 };
         Carro carro = criarCarro("Teste", 0, oval->largada, 0.0f, 12000.0f, 2400.0f, 0.5f);
         carro.velocidade = 8000.0f;
         float antes = 0.0f;
@@ -1426,6 +1426,202 @@ static void testarPistasNoMundo(void) {
     liberarPista(oval);
 }
 
+/*
+ * testarDepoisDaChegada
+ * Em qualquer posição e nas duas pistas, a IA leva o carro depois da chegada.
+ */
+static void testarDepoisDaChegada(void) {
+    printf("\n22) Depois da chegada, a IA segue com o carro\n");
+    float quadro = 1.0f / 60.0f;
+    static Corrida corrida;
+    /* O carro 7 e lento: nao vence; com 12% a mais, o carro 1 vence */
+    struct { int carro; float ganho; int vence; } casos[2] = { { 7, 1.0f, 0 }, { 1, 1.12f, 1 } };
+
+    for (int id = 0; id < TOTAL_PISTAS; id++) {
+        Pista *pista = criarPistaPorId((IdPista) id);
+        for (int k = 0; k < 2; k++) {
+            iniciarCorrida(&corrida, pista, casos[k].carro);
+            corrida.jogador.velocidadeMaxima *= casos[k].ganho;
+            while (!corrida.terminou && corrida.tempoDeCorrida < 600.0f) {
+                atualizarCorrida(&corrida, atualizarIA(&corrida.jogador, carroDaFrente(&corrida, &corrida.jogador)), quadro);
+            }
+            int posicao = corrida.posicaoFinal;
+            float chegada = corrida.jogador.tempoDeChegada;
+            float andouAntes = corrida.jogador.distanciaPercorrida;
+            int voltasAntes = corrida.jogador.voltas;
+
+            Comandos semTeclado = { 0, 0, 0, 0, 0.0f, 0 };
+            float menor = 1e9f;
+            for (int i = 0; i < 60 * 150; i++) {
+                atualizarCorrida(&corrida, semTeclado, quadro);
+                menor = fminf(menor, corrida.jogador.velocidade);
+            }
+            float metros = (corrida.jogador.distanciaPercorrida - andouAntes) / UNIDADES_POR_METRO;
+            printf("     %s, %do lugar: %.0f m em 150 s, menor velocidade %d km/h\n", pista->nome, posicao, metros, converterParaKmh(menor));
+            verificar(jogadorVenceu(&corrida) == casos[k].vence, casos[k].vence ? "este caso e uma vitoria" : "este caso nao e uma vitoria");
+            verificar(menor > 0.0f && metros > 3000.0f, "o carro continua andando, sem parar nunca");
+            verificar(corrida.jogador.voltas > voltasAntes, "e segue dando voltas");
+            verificar(corrida.posicaoFinal == posicao && corrida.jogador.tempoDeChegada == chegada,
+                      "sem mudar a posicao nem o tempo de chegada");
+        }
+        liberarPista(pista);
+    }
+}
+
+/*
+ * testarCameraLivre
+ * O analógico direito: um giro rápido para trás, sempre contínuo.
+ */
+static void testarCameraLivre(void) {
+    printf("\n20) Camera livre (analogico direito)\n");
+    float quadro = 1.0f / 60.0f;
+    Olhar olhar = olharParaAFrente();
+
+    atualizarOlhar(&olhar, 0.05f, -0.08f, quadro);
+    verificar(olhar.giro == 0.0f && olhar.elevacao == 0.0f, "analogico solto (dentro da folga): a camera nao se mexe");
+
+    /* Todo para baixo: chega rápido, mas sem salto */
+    float maiorPasso = 0.0f, anterior = 0.0f, ateChegar = 0.0f;
+    while (fabsf(olhar.giro) < 175.0f && ateChegar < 2.0f) {
+        atualizarOlhar(&olhar, 0.0f, 1.0f, quadro);
+        maiorPasso = fmaxf(maiorPasso, fabsf(olhar.giro - anterior));
+        anterior = olhar.giro;
+        ateChegar += quadro;
+    }
+    printf("     olhar para tras: %.2f s, maior passo em um quadro %.1f graus\n", ateChegar, maiorPasso);
+    verificar(ateChegar < 0.3f, "todo para baixo: olha para tras em menos de 0,3 s");
+    verificar(maiorPasso < 60.0f, "e o giro e continuo, sem salto de um quadro");
+
+    float pontaAntes = fabsf(olhar.giro);
+    for (int i = 0; i < 30; i++) {
+        atualizarOlhar(&olhar, 0.02f, 0.99f, quadro);
+    }
+    verificar(fabsf(olhar.giro) > pontaAntes && fabsf(olhar.giro) > 178.0f, "segurando, ela fica para tras");
+
+    int passou = 0;
+    for (int i = 0; i < 60; i++) {
+        atualizarOlhar(&olhar, 0.0f, 0.0f, quadro);
+        passou = passou || (i > 30 && fabsf(olhar.giro) > 2.0f);
+    }
+    verificar(fabsf(olhar.giro) < 0.5f && !passou, "soltando: volta para a frente rapido, sem balancar");
+
+    /* A mola não depende da taxa de quadros */
+    Olhar a30 = olharParaAFrente(), a120 = olharParaAFrente();
+    for (int i = 0; i < 9; i++) {
+        atualizarOlhar(&a30, 1.0f, 0.0f, 1.0f / 30.0f);
+    }
+    for (int i = 0; i < 36; i++) {
+        atualizarOlhar(&a120, 1.0f, 0.0f, 1.0f / 120.0f);
+    }
+    printf("     0,3 s para o lado: %.1f graus a 30 fps, %.1f a 120 fps\n", a30.giro, a120.giro);
+    verificar(fabsf(a30.giro - a120.giro) < 1.0f, "o movimento e igual a 30 e a 120 quadros por segundo");
+
+    for (int i = 0; i < 120; i++) {
+        atualizarOlhar(&olhar, 1.0f, 0.0f, quadro);
+    }
+    verificar(fabsf(olhar.giro - 90.0f) < 0.5f, "todo para a direita: chega a 90 graus");
+    for (int i = 0; i < 120; i++) {
+        atualizarOlhar(&olhar, -0.5f, 0.0f, quadro);
+    }
+    verificar(olhar.giro < -5.0f && olhar.giro > -40.0f, "meio para a esquerda: gira menos que o lado todo");
+    for (int i = 0; i < 120; i++) {
+        atualizarOlhar(&olhar, 0.0f, 0.0f, quadro);
+    }
+    verificar(fabsf(olhar.giro) < 0.5f, "soltando de lado: volta suave para a frente");
+
+    for (int i = 0; i < 120; i++) {
+        atualizarOlhar(&olhar, 0.0f, -1.0f, quadro);
+    }
+    verificar(fabsf(olhar.elevacao - ELEVACAO_MAXIMA) < 0.5f && fabsf(olhar.giro) < 0.5f, "todo para cima: olha para o alto, sem girar");
+}
+
+/*
+ * testarNitro
+ * Gasta, passa da máxima, acaba, e recarrega mais rápido freando.
+ */
+static void testarNitro(void) {
+    printf("\n21) Nitro\n");
+    float quadro = 1.0f / 60.0f;
+    Pista *reta = criarPistaVazia();
+    adicionarTrecho(reta, "Reta", 400, RETA, 0.0f, 0.0f);
+    Comandos acelerar = { 1, 0, 0, 0, 0.0f, 0 };
+    Comandos comNitro = { 1, 0, 0, 0, 0.0f, 1 };
+    Comandos frear = { 0, 1, 0, 0, 0.0f, 1 };
+    Comandos aliviar = { 0, 0, 0, 0, 0.0f, 0 };
+
+    Carro carro = criarCarro("Teste", 0, reta->largada, 0.0f, 12000.0f, 2400.0f, 0.5f);
+    verificar(carro.nitro == 1.0f && !carro.nitroLigado, "larga com o tanque cheio e desligado");
+
+    /* Sem nitro, chega na máxima e para ali */
+    carro.velocidade = carro.velocidadeMaxima;
+    Carro semNitro = carro;
+    float duracao = 0.0f, maior = 0.0f;
+    while (duracao < 20.0f) {
+        atualizarCarro(&carro, comNitro, quadro);
+        atualizarCarro(&semNitro, acelerar, quadro);
+        maior = fmaxf(maior, carro.velocidade);
+        duracao += quadro;
+        if (!carro.nitroLigado) {
+            break;
+        }
+    }
+    printf("     tanque cheio: %.1f s, chegou a %d km/h (sem nitro: %d km/h)\n", duracao, converterParaKmh(maior), velocidadeEmKmh(&semNitro));
+    verificar(duracao > 3.0f && duracao < 6.0f, "o tanque cheio dura de 3 a 6 s");
+    verificar(maior > carro.velocidadeMaxima * 1.1f && semNitro.velocidade <= semNitro.velocidadeMaxima, "o nitro passa da velocidade maxima");
+
+    /* Acabou: não religa logo em seguida, mesmo apertando */
+    atualizarCarro(&carro, comNitro, quadro);
+    verificar(!carro.nitroLigado, "com o tanque vazio, o nitro nao liga");
+    float acimaDaMaxima = carro.velocidade;
+    atualizarCarro(&carro, acelerar, quadro);
+    verificar(carro.velocidade < acimaDaMaxima, "acabando o nitro, a velocidade cai aos poucos");
+
+    /* Recarga: devagar sempre, mais rápido freando */
+    Carro andando = criarCarro("Teste", 0, reta->largada, 0.0f, 12000.0f, 2400.0f, 0.5f);
+    andando.nitro = 0.0f;
+    andando.velocidade = 8000.0f;
+    Carro freando = andando;
+    for (int i = 0; i < 60; i++) {
+        atualizarCarro(&andando, aliviar, quadro);
+        atualizarCarro(&freando, frear, quadro);
+    }
+    printf("     1 s de recarga: %.0f%% andando, %.0f%% freando\n", andando.nitro * 100.0f, freando.nitro * 100.0f);
+    verificar(andando.nitro > 0.0f && andando.nitro < 0.05f, "recarrega aos poucos andando");
+    verificar(freando.nitro > andando.nitro * 3.0f, "freando, recarrega bem mais rapido");
+    verificar(!freando.nitroLigado, "frear nao deixa o nitro ligar");
+
+    /* Mesmo parado, frear não recarrega como freada */
+    Carro parado = criarCarro("Teste", 0, reta->largada, 0.0f, 12000.0f, 2400.0f, 0.5f);
+    parado.nitro = 0.0f;
+    Comandos so = { 0, 1, 0, 0, 0.0f, 0 };
+    for (int i = 0; i < 60; i++) {
+        atualizarCarro(&parado, so, quadro);
+    }
+    verificar(parado.nitro < 0.05f, "parado, segurar o freio nao enche o tanque rapido");
+
+    /* Os rivais usam: numa corrida, alguém liga o nitro e ninguém fica sem usar */
+    Pista *pista = criarPista();
+    static Corrida corrida;
+    iniciarCorrida(&corrida, pista, 0);
+    int usaram[TOTAL_RIVAIS] = { 0 }, naGrama = 0;
+    while (corrida.tempoDeCorrida < 60.0f) {
+        atualizarCorrida(&corrida, atualizarIA(&corrida.jogador, carroDaFrente(&corrida, &corrida.jogador)), quadro);
+        for (int r = 0; r < TOTAL_RIVAIS; r++) {
+            usaram[r] = usaram[r] || corrida.rivais[r].nitroLigado;
+            naGrama += estaForaDaPista(&corrida.rivais[r]);
+        }
+    }
+    int quantos = 0;
+    for (int r = 0; r < TOTAL_RIVAIS; r++) {
+        quantos += usaram[r];
+    }
+    printf("     %d de %d rivais usaram nitro no primeiro minuto; %d quadros-carro na grama\n", quantos, TOTAL_RIVAIS, naGrama);
+    verificar(quantos == TOTAL_RIVAIS, "todos os rivais usam o nitro");
+
+    liberarPista(pista);
+    liberarPista(reta);
+}
+
 int main(int argc, char *argv[]) {
     int modoDetalhado = (argc > 1 && strcmp(argv[1], "-v") == 0);
 
@@ -1450,6 +1646,9 @@ int main(int argc, char *argv[]) {
     testarPeVacuoEDerrapagem();
     testarFreioAlivioECambio();
     testarPistasNoMundo();
+    testarDepoisDaChegada();
+    testarCameraLivre();
+    testarNitro();
 
     if (totalFalhas == 0) {
         printf("\nTodos os testes passaram.\n");

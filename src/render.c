@@ -28,6 +28,7 @@
 #define CAMERA_ATRAS          8.5f     /* metros atrás do centro do carro */
 #define CAMERA_ALTURA         3.4f     /* metros acima do chão */
 #define OLHAR_PARA_BAIXO      5.0f     /* graus abaixo do horizonte */
+#define FOLGA_DA_CAMERA_NO_MURO 1.0f   /* metros: a câmera livre não encosta no muro */
 #define VELOCIDADE_CAMERA_MENU 3000.0f /* a câmera do fundo do menu anda a 75 km/h */
 #define SEGUNDOS_POR_PISTA    14.0f    /* o fundo dos menus troca de pista depois disso */
 #define DURACAO_DA_TROCA_DE_PISTA 0.7f /* segundos escurecendo e clareando */
@@ -49,6 +50,8 @@
 #define INICIO_DA_FUMACA      0.55f    /* derrapagem abaixo disso não solta fumaça */
 #define NUVENS_POR_SEGUNDO    55.0f    /* por roda, na derrapagem cheia */
 #define VELOCIDADE_DA_ARRANCADA 1600.0f /* abaixo disso (40 km/h), acelerar patina um pouco */
+#define ALTURA_DO_ESCAPAMENTO 0.42f    /* metros acima do chão */
+#define LUGAR_DO_ESCAPAMENTO  0.22f    /* do meio do carro até cada escapamento, em larguras */
 #define ALTURA_DA_NUVEM       0.25f    /* metros acima do chão */
 
 #define LARGURA_CARRO         170      /* tamanho de referência das fotos nos menus */
@@ -67,30 +70,67 @@ static float aFrenteDaCamera(Camera3D camera, Vector3 ponto) {
 }
 
 static int cenaPausada = 0;
+static Olhar olharDoJogador = { 0.0f, 0.0f, 0.0f, 0.0f };
+
+/*
+ * alturaEmVoltaDoCarro
+ * A altura do chão num ponto em volta do carro.
+ * Recebe: a posição do carro, a lateral dele em metros e quantos metros andar para a
+ *         frente e para a direita.
+ * Devolve: a altura, em metros.
+ */
+static float alturaEmVoltaDoCarro(PosicaoNaPista carro, float lateral, float frente, float direita) {
+    PosicaoNaPista lugar = carro;
+    moverNaPista(&lugar, frente * UNIDADES_POR_METRO);   /* as voltas devolvidas não importam aqui */
+    return alturaDoChao(lugar, lateral + direita);
+}
 
 /*
  * montarCamera
- * Põe a câmera atrás de um ponto da pista, olhando para ele. De lado ela
- * fica presa ao carro, que por isso aparece sempre no centro da tela; nas
- * curvas inclinadas ela inclina junto com o chão.
- * Recebe: a posição do carro e o deslocamento lateral dele.
+ * Põe a câmera em volta de um ponto da pista: normalmente atrás dele, seguindo
+ * a curva, ou para onde o jogador está olhando. De lado ela fica presa ao carro, que
+ * por isso aparece no centro da tela, e não atravessa os muros do oval. Nas curvas
+ * inclinadas ela inclina junto com o chão.
+ * Recebe: a posição do carro, o deslocamento lateral dele e o olhar.
  * Devolve: a câmera.
  */
-static Camera3D montarCamera(PosicaoNaPista carro, float lateral) {
+static Camera3D montarCamera(PosicaoNaPista carro, float lateral, Olhar olhar) {
     PosicaoNaPista atras = carro;
-    moverNaPista(&atras, -CAMERA_ATRAS * UNIDADES_POR_METRO);   /* as voltas devolvidas não importam aqui */
+    moverNaPista(&atras, -CAMERA_ATRAS * UNIDADES_POR_METRO);
     PontoNoMundo deCamera = pontoNoMundo(atras, lateral);
     PontoNoMundo doCarro = pontoNoMundo(carro, lateral);
 
+    /* A frente da pista, vista de cima, e a direita dela */
     float dx = doCarro.x - deCamera.x, dz = doCarro.z - deCamera.z;
     float comprimento = hypotf(dx, dz);
-    float ladeira = (doCarro.y - deCamera.y) / comprimento;
+    dx /= comprimento;
+    dz /= comprimento;
+    float direitaX = -dz, direitaZ = dx;
+
+    /* Para onde a câmera olha, girando em volta do carro */
+    float seno = sinf(olhar.giro * DEG2RAD), cosseno = cosf(olhar.giro * DEG2RAD);
+    float olhaX = dx * cosseno + direitaX * seno;
+    float olhaZ = dz * cosseno + direitaZ * seno;
+
+    /* A câmera fica do outro lado do carro, sem passar do muro */
+    float atrasNaPista = comprimento * cosseno;
+    float aoLado = -comprimento * seno;
+    Segmento *aqui = carro.segmento;
+    float emMetros = lateral * larguraDoLado(aqui, lateral);
+    if (aqui->temMuro) {
+        float limiteDireita = aqui->larguraDireita - FOLGA_DA_CAMERA_NO_MURO - emMetros;
+        float limiteEsquerda = -aqui->larguraEsquerda + FOLGA_DA_CAMERA_NO_MURO - emMetros;
+        aoLado = fminf(fmaxf(aoLado, limiteEsquerda), limiteDireita);
+    }
+    float chao = alturaEmVoltaDoCarro(carro, emMetros, -atrasNaPista, aoLado);
+    float ladeira = (doCarro.y - chao) / comprimento;
 
     Camera3D camera = { 0 };
-    camera.position = (Vector3){ deCamera.x, deCamera.y + CAMERA_ALTURA, deCamera.z };
-    camera.target = (Vector3){ camera.position.x + dx / comprimento,
-                               camera.position.y + ladeira - tanf(OLHAR_PARA_BAIXO * DEG2RAD),
-                               camera.position.z + dz / comprimento };
+    camera.position = (Vector3){ doCarro.x - dx * atrasNaPista + direitaX * aoLado, chao + CAMERA_ALTURA,
+                                 doCarro.z - dz * atrasNaPista + direitaZ * aoLado };
+    camera.target = (Vector3){ camera.position.x + olhaX,
+                               camera.position.y + ladeira + tanf((olhar.elevacao - OLHAR_PARA_BAIXO) * DEG2RAD),
+                               camera.position.z + olhaZ };
 
     /* O "para cima" da câmera é perpendicular ao chão inclinado */
     float rumo = doCarro.rumo * DEG2RAD;
@@ -167,6 +207,31 @@ static void desenharCarroNoMundo(Camera3D camera, Carro *carro) {
 }
 
 /*
+ * desenharChamasDoCarro
+ * O nitro: uma chama azul em cada escapamento, atrás do carro.
+ * Recebe: a câmera e o carro.
+ * Devolve: nada.
+ */
+static void desenharChamasDoCarro(Camera3D camera, Carro *carro) {
+    if (!carro->nitroLigado) {
+        return;
+    }
+    PontoNoMundo ponto = pontoNoMundo(carro->posicao, carro->deslocamentoLateral);
+    float distancia = aFrenteDaCamera(camera, (Vector3){ ponto.x, ponto.y, ponto.z });
+    if (distancia < -8.0f || distancia > DISTANCIA_DA_FUMACA) {
+        return;
+    }
+    Matrix noMundo = matrizDoCarro(carro);
+    Vector3 paraTras = { -noMundo.m8, -noMundo.m9, -noMundo.m10 };
+    float atras = comprimentoDoCarro3D(carro->numero) / 2.0f;
+    float meiaDistancia = larguraDoCarro3D(carro->numero) * LUGAR_DO_ESCAPAMENTO;
+    for (int lado = -1; lado <= 1; lado += 2) {
+        Vector3 escape = Vector3Transform((Vector3){ lado * meiaDistancia, ALTURA_DO_ESCAPAMENTO, -atras }, noMundo);
+        desenharChamaDoNitro(camera, escape, paraTras);
+    }
+}
+
+/*
  * soltarFumacaDoCarro
  * Solta as nuvens nas rodas de trás, de acordo com o que o carro está fazendo:
  * poeira na grama, fumaça na derrapagem e na arrancada forte. O número de
@@ -230,6 +295,15 @@ void congelarCena(int pausada) {
 }
 
 /*
+ * definirOlhar
+ * Recebe: para onde o jogador está olhando (o main.c lê o analógico).
+ * Devolve: nada.
+ */
+void definirOlhar(Olhar olhar) {
+    olharDoJogador = olhar;
+}
+
+/*
  * desenharMundo3D
  * O cenário e os carros, vistos pela câmera.
  * Recebe: a câmera, a pista e a corrida (NULL nos menus: sem carros).
@@ -253,6 +327,10 @@ static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
         }
         desenharCarroNoMundo(camera, &corrida->jogador);
         desenharFumaca3D(camera);
+        for (int r = 0; r < TOTAL_RIVAIS; r++) {
+            desenharChamasDoCarro(camera, &corrida->rivais[r]);
+        }
+        desenharChamasDoCarro(camera, &corrida->jogador);
     }
     if (ehNoite) {
         desenharBrilhos(camera);
@@ -270,7 +348,7 @@ static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
  */
 void desenharVisaoDoJogador(Corrida *corrida) {
     Carro *jogador = &corrida->jogador;
-    Camera3D camera = montarCamera(jogador->posicao, jogador->deslocamentoLateral);
+    Camera3D camera = montarCamera(jogador->posicao, jogador->deslocamentoLateral, olharDoJogador);
 
     /* A fumaça anda com o relógio da corrida: na pausa e na contagem, ele para.
      * Se ele voltou atrás, é uma corrida nova. */
@@ -307,7 +385,7 @@ void desenharPistaDeFundo(Pista *pista) {
         passeio->segmento = pista->largada;
     }
     moverNaPista(passeio, VELOCIDADE_CAMERA_MENU * GetFrameTime());
-    desenharMundo3D(montarCamera(*passeio, 0.0f), pista, NULL);
+    desenharMundo3D(montarCamera(*passeio, 0.0f, olharParaAFrente()), pista, NULL);
 }
 
 /*

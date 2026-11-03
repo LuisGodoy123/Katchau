@@ -64,7 +64,9 @@ tamanho real (`comecarInterface()` em `hud.c`).
 |-------|----------|------|
 | ↑ ou W | RT ou A | Acelerar |
 | ↓ ou S | LT ou X | Frear |
+| ESPAÇO | RB ou B | Nitro (segure): recarrega aos poucos, e bem mais rápido freando |
 | ← → ou A D | analógico esquerdo ou direcional | Virar (o volante gira aos poucos e volta sozinho ao centro) |
+| | analógico direito | Câmera livre: gira em volta do carro; todo para cima olha para o alto e todo para baixo olha para trás num giro rápido (soltando, volta) |
 | ENTER | A | Ver o resultado (depois da chegada) |
 | ESC   | START | Pausar: a corrida e os sons congelam; escolha CONTINUAR ou MENU PRINCIPAL (ESC de novo continua) |
 
@@ -138,6 +140,7 @@ src/
   hud.c/.h         posições, volta e setores, mini-mapa e velocímetro  (fases 3 a 6)
   menu.c/.h        menu, garagem, como jogar e tela de resultado       (fase 6)
   visual.c/.h      identidade visual: cores, fontes, logo e formas     (fase 6)
+  olhar.c/.h       câmera livre: transforma o analógico direito em ângulos
   motor.c/.h       rotação, marcha e carga do motor (câmbio de cada carro; também comanda o som)
   audio.c/.h       música, efeitos dos menus, largada e o som do motor do carro
   controle.c/.h    controle (gamepad): comandos do carro e botões dos menus
@@ -163,24 +166,24 @@ a janela). O resto é lógica pura e pode ser testado no terminal.
 
 São 14 carros (`FICHAS` em `corrida.c`), todos modelos 3D em `recursos/modelos/carros/`. Na garagem o
 jogador escolhe um; os outros 13 viram os rivais, e o jogador larga em último. A "volta limpa" é o tempo de
-uma volta lançada, sozinho na pista e dirigido pela IA.
+uma volta lançada, sozinho na pista e dirigido pela IA, usando o nitro.
 
 | Carro | Jeito | Interlagos | Copa Pistão |
 |---|---|---|---|
-| McQueen | o carro da casa, equilibrado (o padrão) | 53,8 s | 40,3 s |
-| The King | veterano, voa na reta | 53,6 s | 38,7 s |
-| Doc Hudson | lenda, gruda nas curvas | 53,3 s | 41,3 s |
-| Francesco | formula, arranca forte | 53,7 s | 40,3 s |
-| Sally | certinha em tudo | 54,4 s | 41,0 s |
-| Ramone | estiloso e estável | 54,7 s | 41,7 s |
-| Luigi | pequeno e esperto na largada | 55,2 s | 42,4 s |
-| Guido | minúsculo, mas não erra curva | 55,0 s | 43,9 s |
-| Mater | guincho enferrujado | 56,2 s | 43,1 s |
-| Sarge | jipe militar, firme no chão | 55,8 s | 42,8 s |
-| Fillmore | sem pressa e sem sair da pista | 54,8 s | 43,5 s |
-| Finn McMissile | espião, rápido em tudo | 53,5 s | 39,9 s |
-| Wingo | tuner, nervoso na arrancada | 54,8 s | 40,6 s |
-| Snot Rod | motorzão, difícil de segurar | 54,1 s | 39,6 s |
+| McQueen | o carro da casa, equilibrado (o padrão) | 52,2 s | 39,5 s |
+| The King | veterano, voa na reta | 51,8 s | 37,6 s |
+| Doc Hudson | lenda, gruda nas curvas | 51,8 s | 40,7 s |
+| Francesco | formula, arranca forte | 52,0 s | 39,6 s |
+| Sally | certinha em tudo | 52,8 s | 40,3 s |
+| Ramone | estiloso e estável | 53,2 s | 41,1 s |
+| Luigi | pequeno e esperto na largada | 53,7 s | 41,8 s |
+| Guido | minúsculo, mas não erra curva | 53,6 s | 43,4 s |
+| Mater | guincho enferrujado | 54,6 s | 42,6 s |
+| Sarge | jipe militar, firme no chão | 54,2 s | 42,2 s |
+| Fillmore | sem pressa e sem sair da pista | 53,3 s | 43,0 s |
+| Finn McMissile | espião, rápido em tudo | 51,9 s | 39,2 s |
+| Wingo | tuner, nervoso na arrancada | 53,1 s | 40,0 s |
+| Snot Rod | motorzão, difícil de segurar | 52,4 s | 38,8 s |
 
 `carros3d.c` carrega os modelos e deixa todos iguais: mede cada um, escala para o comprimento do personagem
 (`MODELOS`), centraliza, põe as rodas no chão e a frente para +z. O carro no mundo segue a pista, o
@@ -212,6 +215,9 @@ A física é de fliperama (`carro.c`), mas tem algumas coisas que recompensam qu
 - **Passar do limite custa velocidade.** Quando a curva empurra mais do que o volante segura,
   o pneu arrasta e o carro perde velocidade, proporcional a quanto passou. Com menos velocidade
   o empurrão cai e o carro volta a obedecer. Entrar quente é uma aposta, não grama na certa.
+- **Nitro.** Segurar o botão empurra forte e leva a máxima até 354 km/h (300 + 18%), por até ~4,5 s, com uma chama azul nos
+  escapamentos e um arco com um raio ao lado do velocímetro. O tanque enche em 50 s andando e em ~7 s freando, então cada freada também é recarga. Os
+  rivais usam nas retas livres, com pelo menos 60% no tanque.
 - **Vácuo.** Até ~30 m atrás de outro carro, na mesma linha, o ar segura menos: a velocidade
   máxima sobe até 6% (300 → 318 km/h) e aparece **VÁCUO** em cima do velocímetro. Para passar,
   é só sair de lado antes de bater na traseira. Saindo do vácuo, o excesso vai embora aos poucos.
@@ -279,8 +285,8 @@ falta para a linha (distância que falta ÷ velocidade). Uns 6 s antes, `audio.c
 `life_is_a_highway.mp3` bem baixo, já no ponto `1:25 - segundos que faltam`, e vai corrigindo
 se a estimativa escorregar; no quadro da bandeirada a música é cravada em **1:25** (o refrão)
 e sobe ao volume máximo, no lugar da música de fundo. Na mesma hora sai o **confete**
-(`visual.c`) e a IA assume o carro do jogador, que segue dando voltas atrás do painel de
-chegada e da tela de resultado. Essas voltas extras não entram nos tempos.
+(`visual.c`). Em qualquer posição, ao cruzar a linha, a IA assume o carro do jogador, que segue dando
+voltas atrás do painel de chegada e da tela de resultado. Essas voltas extras não entram nos tempos.
 
 ## Objetos da beira da pista
 

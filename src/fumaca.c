@@ -30,6 +30,11 @@
 #define FREIO_DO_AR          2.2f      /* ...e o ar a segura (1/s) */
 #define ESPALHAR             0.9f      /* metros por segundo, para qualquer lado */
 #define COR_DO_PNEU          (Color){ 232, 232, 236, 255 }
+#define COMPRIMENTO_DA_CHAMA  1.5f      /* metros */
+#define LARGURA_DA_CHAMA      0.70f
+#define PEDACOS_DA_CHAMA      9
+#define COR_DA_CHAMA_PERTO    (Color){ 130, 205, 255, 255 }
+#define COR_DA_CHAMA_LONGE    (Color){  20,  70, 255, 255 }
 #define COR_DA_POEIRA        (Color){ 150, 122,  78, 255 }
 
 typedef struct {
@@ -208,6 +213,39 @@ void desenharFumaca3D(Camera3D camera) {
         DrawBillboardPro(camera, imagem, origem, nuvem->posicao, cima, medida, meio, nuvem->giro,
                          Fade(ehPneu ? COR_DO_PNEU : COR_DA_POEIRA, opacidade));
     }
+    rlDrawRenderBatchActive();
+    rlEnableDepthMask();
+    EndBlendMode();
+}
+
+/*
+ * desenharChamaDoNitro
+ * A chama azul: vários borrões somando luz, do escapamento para trás, cada vez
+ * menores e mais azuis. O comprimento treme a cada quadro, como fogo.
+ * Chamar dentro de BeginMode3D, depois de tudo o que é sólido.
+ * Recebe: a câmera, a saída do escapamento e a direção para trás do carro (unitária).
+ * Devolve: nada.
+ */
+void desenharChamaDoNitro(Camera3D camera, Vector3 escape, Vector3 paraTras) {
+    rlDrawRenderBatchActive();
+    BeginBlendMode(BLEND_ADDITIVE);
+    rlDisableDepthMask();
+    float comprimento = COMPRIMENTO_DA_CHAMA * sortear(0.75f, 1.2f);
+    for (int i = 0; i < PEDACOS_DA_CHAMA; i++) {
+        float fase = (float) i / (PEDACOS_DA_CHAMA - 1);
+        float distancia = comprimento * fase;
+        Vector3 centro = { escape.x + paraTras.x * distancia, escape.y + paraTras.y * distancia + sortear(-0.03f, 0.03f),
+                           escape.z + paraTras.z * distancia };
+        float tamanho = LARGURA_DA_CHAMA * (1.0f - 0.72f * fase) * sortear(0.85f, 1.15f);
+        Color cor = ColorLerp(COR_DA_CHAMA_PERTO, COR_DA_CHAMA_LONGE, fase);
+        Texture2D imagem = imagens[GetRandomValue(0, VARIACOES_DE_IMAGEM - 1)];
+        Rectangle origem = { 0.0f, 0.0f, (float) imagem.width, (float) imagem.height };
+        DrawBillboardRec(camera, imagem, origem, centro, (Vector2){ tamanho, tamanho }, Fade(cor, 1.0f - 0.55f * fase));
+    }
+    /* O miolo branco, bem na boca do escapamento */
+    Texture2D imagem = imagens[0];
+    Rectangle origem = { 0.0f, 0.0f, (float) imagem.width, (float) imagem.height };
+    DrawBillboardRec(camera, imagem, origem, escape, (Vector2){ LARGURA_DA_CHAMA * 0.55f, LARGURA_DA_CHAMA * 0.55f }, WHITE);
     rlDrawRenderBatchActive();
     rlEnableDepthMask();
     EndBlendMode();

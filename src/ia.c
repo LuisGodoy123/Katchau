@@ -25,6 +25,8 @@
 #define LARGURA_OCUPADA           0.4f     /* dois carros mais próximos que isso estão na mesma linha */
 #define DESVIO_ULTRAPASSAGEM      0.5f     /* quanto se afasta para o lado do carro da frente */
 #define LIMITE_LINHA              0.75f    /* a IA nunca escolhe andar mais perto da borda que isso */
+#define EMBALO_PARA_O_NITRO       0.70f    /* só usa o nitro acima de 70% da máxima */
+#define TANQUE_PARA_O_NITRO       0.60f    /* e só começa com pelo menos isso no tanque */
 #define TOLERANCIA_LINHA          0.05f    /* perto assim da linha, não mexe no volante */
 
 /*
@@ -108,7 +110,7 @@ static void escolherLinha(Carro *carro, Carro *carroDaFrente) {
  * Devolve: os comandos (acelerar, frear, esquerda, direita).
  */
 Comandos atualizarIA(Carro *carro, Carro *carroDaFrente) {
-    Comandos comandos = { 0, 0, 0, 0, 0.0f };
+    Comandos comandos = { 0, 0, 0, 0, 0.0f, 0 };
 
     /* 1) Velocidade: acelera abaixo da desejada (e, dentro da curva,
      *    abaixo do limite de quem acelera), freia bem acima dela */
@@ -116,8 +118,14 @@ Comandos atualizarIA(Carro *carro, Carro *carroDaFrente) {
     float podeAcelerar = velocidadeSeguraAcelerando(carro, carro->posicao.segmento->curvatura);
     if (carro->velocidade < desejada && carro->velocidade < podeAcelerar) {
         comandos.acelerar = 1;
-    } else if (carro->velocidade > desejada * MARGEM_DE_FREIO) {
-        comandos.frear = 1;
+    } else if (desejada < carro->velocidadeMaxima && carro->velocidade > desejada * MARGEM_DE_FREIO) {
+        comandos.frear = 1;   /* numa reta livre não freia: acima da máxima é vácuo ou nitro */
+    }
+
+    /* Nitro: só com a pista livre à frente, depois de embalar, e com um bom tanque */
+    if (desejada >= carro->velocidadeMaxima && carro->velocidade > carro->velocidadeMaxima * EMBALO_PARA_O_NITRO
+        && (carro->nitroLigado || carro->nitro >= TANQUE_PARA_O_NITRO)) {
+        comandos.nitro = 1;
     }
 
     /* 2) Linha: tenta ultrapassar quem está na frente */

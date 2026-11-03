@@ -40,11 +40,12 @@
  * Devolve: os comandos deste quadro.
  */
 static Comandos lerComandos(void) {
-    Comandos comandos = { 0, 0, 0, 0, 0.0f };
+    Comandos comandos = { 0, 0, 0, 0, 0.0f, 0 };
     comandos.acelerar = IsKeyDown(KEY_UP) || IsKeyDown(KEY_W);
     comandos.frear = IsKeyDown(KEY_DOWN) || IsKeyDown(KEY_S);
     comandos.esquerda = IsKeyDown(KEY_LEFT) || IsKeyDown(KEY_A);
     comandos.direita = IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D);
+    comandos.nitro = IsKeyDown(KEY_SPACE);
     somarComandosDoControle(&comandos);
     return comandos;
 }
@@ -137,6 +138,7 @@ int main(int argc, char *argv[]) {
     iniciarMenu(&menu);
     Tela tela = TELA_MENU;
     int venceuAntes = 0;   /* para soltar o confete uma vez só, no quadro da vitória */
+    Olhar olhar = olharParaAFrente();
     int pausada = 0;       /* a corrida está na pausa (ESC) */
 
     /* Laço principal: roda uma vez por quadro até escolher SAIR ou fechar a janela */
@@ -165,7 +167,7 @@ int main(int argc, char *argv[]) {
                 break;
             case TELA_RESULTADO: {
                 /* A corrida continua ao fundo até todos os rivais chegarem */
-                Comandos nenhumComando = { 0, 0, 0, 0, 0.0f };
+                Comandos nenhumComando = { 0, 0, 0, 0, 0.0f, 0 };
                 atualizarCorrida(&corrida, nenhumComando, tempoQuadro);
                 proxima = atualizarResultado();
                 break;
@@ -179,6 +181,7 @@ int main(int argc, char *argv[]) {
             iniciarCorrida(&corrida, pistas[menu.pistaEscolhida], menu.carroEscolhido);
             limparConfetes();
             limparFumaca();
+            olhar = olharParaAFrente();
         }
         tela = proxima;
 
@@ -232,6 +235,16 @@ int main(int argc, char *argv[]) {
         BeginDrawing();
         ClearBackground(BLACK);
         congelarCena(tela == TELA_CORRIDA && pausada);
+
+        /* A câmera livre vale na corrida; na pausa ela fica onde está */
+        if (!pausada) {
+            float eixoX = 0.0f, eixoY = 0.0f;
+            if (tela == TELA_CORRIDA) {
+                lerAnalogicoDaCamera(&eixoX, &eixoY);
+            }
+            atualizarOlhar(&olhar, eixoX, eixoY, tempoQuadro);
+            definirOlhar(olhar);
+        }
         switch (tela) {
             case TELA_MENU:
                 desenharFundoAlternado(pistas);

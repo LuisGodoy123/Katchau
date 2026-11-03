@@ -21,6 +21,8 @@
  *     é mais empurrado; aliviando ou freando, ele segura melhor;
  *   - passando do limite, o pneu arrasta e o carro perde velocidade,
  *     o que acaba devolvendo o controle (caro, mas não é grama na hora);
+ *   - o nitro empurra forte e passa da velocidade máxima, enquanto durar. Ele
+ *     recarrega aos poucos o tempo todo, e bem mais rápido freando;
  *   - colado atrás de outro carro (vácuo), o ar segura menos e a
  *     velocidade máxima sobe um pouco.
  * ------------------------------------------------------------------
@@ -51,6 +53,13 @@
 #define GANHO_NO_VACUO             0.06f /* no vácuo cheio, a máxima sobe 6% (300 -> 318 km/h) */
 #define FOLGA_DO_MURO              1.4f  /* o centro do carro para a esta distância do muro (metros: meia largura do carro) */
 #define PERDA_NO_MURO           5000.0f  /* raspando no muro, perde isso de velocidade por segundo */
+#define NITRO_INICIAL              1.0f  /* larga com o tanque cheio */
+#define GASTO_DO_NITRO             0.22f /* por segundo: o tanque cheio dura ~4,5 s */
+#define RECARGA_DO_NITRO           0.02f /* por segundo: enche em 50 s andando normal... */
+#define RECARGA_FREANDO            0.14f /* ...e em ~7 s freando */
+#define MINIMO_PARA_LIGAR          0.10f /* abaixo disso não liga, para não ficar piscando no fim do tanque */
+#define GANHO_DO_NITRO             0.18f /* a máxima sobe 18% (300 -> 354 km/h) */
+#define FORCA_DO_NITRO             0.90f /* soma isso vezes a "aceleracao" da ficha */
 #define KMH_POR_UNIDADE            0.025f /* 12000 unidades/s viram 300 km/h no velocímetro */
 
 /*
@@ -77,6 +86,8 @@ Carro criarCarro(const char *nome, int numero, Segmento *largada, float deslocam
     carro.derrapagem = 0.0f;
     carro.vacuo = 0.0f;
     iniciarMotor(&carro.motor);
+    carro.nitro = NITRO_INICIAL;
+    carro.nitroLigado = 0;
     carro.voltas = 0;
     for (int i = 0; i < TOTAL_VOLTAS; i++) {
         carro.temposDeVolta[i] = 0.0f;
@@ -93,7 +104,7 @@ Carro criarCarro(const char *nome, int numero, Segmento *largada, float deslocam
     carro.diferenca = 0.0f;
     carro.temDiferenca = 0;
     carro.tempoDeChegada = 0.0f;
-    Comandos nenhumComando = { 0, 0, 0, 0, 0.0f };
+    Comandos nenhumComando = { 0, 0, 0, 0, 0.0f, 0 };
     carro.ultimosComandos = nenhumComando;
     carro.linhaAlvo = deslocamentoLateral;
 
@@ -157,6 +168,32 @@ static float perdaSemAcelerar(Carro *carro) {
 }
 
 /*
+ * atualizarNitro
+ * Liga e desliga o nitro, gasta enquanto queima e recarrega quando não está
+ * queimando: devagar sempre, e bem mais rápido freando com o carro andando.
+ * Frear desliga o nitro.
+ * Recebe: o carro, os comandos e o tempo do quadro.
+ * Devolve: nada (altera nitro e nitroLigado).
+ */
+static void atualizarNitro(Carro *carro, Comandos comandos, float tempoQuadro) {
+    int quer = comandos.nitro && !comandos.frear;
+    if (carro->nitroLigado && (!quer || carro->nitro <= 0.0f)) {
+        carro->nitroLigado = 0;
+    } else if (!carro->nitroLigado && quer && carro->nitro >= MINIMO_PARA_LIGAR) {
+        carro->nitroLigado = 1;
+    }
+
+    if (carro->nitroLigado) {
+        carro->nitro -= GASTO_DO_NITRO * tempoQuadro;
+    } else if (comandos.frear && carro->velocidade > 0.0f) {
+        carro->nitro += RECARGA_FREANDO * tempoQuadro;
+    } else {
+        carro->nitro += RECARGA_DO_NITRO * tempoQuadro;
+    }
+    carro->nitro = limitar(carro->nitro, 0.0f, 1.0f);
+}
+
+/*
  * atualizarVelocidade
  * Aplica acelerador, freio, ar e grama à velocidade.
  * Recebe: o carro, os comandos e o tempo do quadro em segundos.
@@ -164,10 +201,13 @@ static float perdaSemAcelerar(Carro *carro) {
  */
 static void atualizarVelocidade(Carro *carro, Comandos comandos, float tempoQuadro) {
     float anterior = carro->velocidade;
-    float maxima = velocidadeMaximaNoVacuo(carro);
+    float maxima = velocidadeMaximaAgora(carro);
 
-    if (comandos.acelerar) {
+    if (comandos.acelerar || carro->nitroLigado) {
         carro->velocidade += forcaDoMotor(carro->velocidade, maxima, carro->aceleracao, &carro->motor) * tempoQuadro;
+        if (carro->nitroLigado) {
+            carro->velocidade += carro->aceleracao * FORCA_DO_NITRO * tempoQuadro;
+        }
     } else if (comandos.frear) {
         carro->velocidade -= FORCA_FREIO * tempoQuadro;
     } else {
@@ -275,7 +315,7 @@ static void atualizarLateral(Carro *carro, Comandos comandos, float tempoQuadro)
      * para a esquerda, e vice-versa. Mais aderência, menos empurrão.
      * Acelerando o carro sai de frente; freando ele crava a dianteira. */
     float pe = EMPURRAO_SEM_PEDAL;
-    if (comandos.acelerar) {
+    if (comandos.acelerar || carro->nitroLigado) {
         pe = 1.0f;
     } else if (comandos.frear) {
         pe = EMPURRAO_FREANDO;
@@ -324,8 +364,9 @@ static void atualizarLateral(Carro *carro, Comandos comandos, float tempoQuadro)
  */
 int atualizarCarro(Carro *carro, Comandos comandos, float tempoQuadro) {
     carro->ultimosComandos = comandos;
+    atualizarNitro(carro, comandos, tempoQuadro);
     atualizarMotor(&carro->motor, carro->velocidade / carro->velocidadeMaxima,
-                   comandos.acelerar && !comandos.frear, tempoQuadro);
+                   (comandos.acelerar || carro->nitroLigado) && !comandos.frear, tempoQuadro);
     atualizarVelocidade(carro, comandos, tempoQuadro);
     atualizarVolante(carro, comandos, tempoQuadro);
     atualizarLateral(carro, comandos, tempoQuadro);
@@ -413,13 +454,17 @@ float velocidadeSeguraAcelerando(Carro *carro, float curvatura) {
 }
 
 /*
- * velocidadeMaximaNoVacuo
- * A máxima de verdade neste momento: a da ficha, mais o ganho do vácuo.
+ * velocidadeMaximaAgora
+ * A máxima de verdade neste momento: a da ficha, mais o vácuo e o nitro.
  * Recebe: o carro.
  * Devolve: a velocidade máxima, em unidades por segundo.
  */
-float velocidadeMaximaNoVacuo(Carro *carro) {
-    return carro->velocidadeMaxima * (1.0f + GANHO_NO_VACUO * carro->vacuo);
+float velocidadeMaximaAgora(Carro *carro) {
+    float ganho = 1.0f + GANHO_NO_VACUO * carro->vacuo;
+    if (carro->nitroLigado) {
+        ganho += GANHO_DO_NITRO;
+    }
+    return carro->velocidadeMaxima * ganho;
 }
 
 /*

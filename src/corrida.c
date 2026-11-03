@@ -25,7 +25,7 @@
 #define RAPIDEZ_DO_VACUO          3.0f      /* o vácuo entra e sai em ~1/3 s, sem tranco */
 
 /* ---------- Intervalo entre carros ---------- */
-#define VELOCIDADE_DE_REFERENCIA  9600.0f   /* média de uma volta (~517 mil unidades em ~54 s): converte distância em tempo */
+#define VELOCIDADE_DE_REFERENCIA  9900.0f   /* média de uma volta (~517 mil unidades em ~52 s): converte distância em tempo */
 
 /* ---------- Contagem regressiva ---------- */
 /* Um respiro só com o motor, depois 3, 2, 1... KATCHAU! */
@@ -356,9 +356,8 @@ static void atualizarVacuo(Corrida *corrida, float tempoQuadro) {
  *   5) verifica se o jogador terminou.
  * Antes disso, enquanto a contagem regressiva não acaba, ninguém sai
  * do lugar e o relógio não anda.
- * Depois do fim, o jogador segue sem acelerar até parar (ou, se venceu,
- * a IA assume o carro dele para a volta da vitória, que não acaba mais)
- * e os rivais continuam correndo. O relógio também continua, para cada rival ter
+ * Depois do fim, em qualquer posição, a IA assume o carro do jogador para uma
+ * volta sem fim, e os rivais continuam correndo. O relógio também continua, para cada rival ter
  * o seu tempo de chegada; o do jogador fica guardado no carro dele.
  * Recebe: a corrida, os comandos do jogador e o tempo do quadro.
  * Devolve: nada.
@@ -374,11 +373,8 @@ void atualizarCorrida(Corrida *corrida, Comandos comandosJogador, float tempoQua
     }
 
     corrida->tempoDeCorrida += tempoQuadro;
-    if (jogadorVenceu(corrida)) {
+    if (corrida->terminou) {
         comandosJogador = atualizarIA(&corrida->jogador, carroDaFrente(corrida, &corrida->jogador));
-    } else if (corrida->terminou) {
-        Comandos nenhumComando = { 0, 0, 0, 0, 0.0f };
-        comandosJogador = nenhumComando;
     }
 
     /* 0) Vácuo, antes de mover: todos medem com os carros no mesmo lugar */

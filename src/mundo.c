@@ -62,11 +62,15 @@
 #define TOPO_DA_ARQUIBANCADA  10.3f     /* a placa do setor fica no alto do fundo */
 #define MAXIMO_DE_VERTICES    60000     /* uma malha da raylib aponta os vértices com 16 bits */
 
-/* ---------- Céu e fundo (cilindros em volta da câmera) ---------- */
+/* ---------- Céu (um domo) e fundo (cilindros), em volta da câmera ---------- */
 #define LADOS_DO_CILINDRO     72
 #define RAIO_DO_CEU           9000.0f
 #define RAIO_DA_CIDADE        4200.0f
 #define RAIO_DOS_MORROS       3200.0f
+#define ANEIS_DO_CEU          32
+#define ELEVACAO_DA_BASE_DO_CEU (-12.0f)  /* graus: o céu começa abaixo do horizonte */
+#define COMECO_DA_IMAGEM_DO_CEU 0.02f     /* a imagem do céu vai até aqui, e daí para cima é a tampa */
+#define COR_DO_TOPO_DO_CEU    (Color){ 52, 112, 196, 255 }   /* a cor da linha de cima de fundo/ceu.png */
 #define REPETICOES_CEU        2.0f
 #define REPETICOES_CIDADE     5.0f
 #define REPETICOES_MORROS     4.0f
@@ -164,7 +168,7 @@ static Material material;   /* o mesmo material, trocando a textura a cada desen
 static Model estadio;
 static Mesh pinturaDoEstadio;
 static MalhasDaPista interlagos;
-static Mesh cilindroDoCeu, cilindroDaCidade, cilindroDosMorros;
+static Mesh ceuDeDia, tampaDoCeu, ceuDeNoite, cilindroDaCidade, cilindroDosMorros;
 static Texture2D texturaCeu, texturaCidade, texturaMorros;
 static Texture2D texturaAsfalto[2], texturaGrama;
 static Model modelosDosObjetos[TOTAL_MODELOS_DE_OBJETO];
@@ -771,6 +775,65 @@ static Mesh construirCilindro(float raio, float altura, float repeticoes) {
     return terminarMalha(&c);
 }
 
+/*
+ * adicionarAneisDoCeu
+ * Um pedaço do domo do céu, entre duas elevações. De dia, a imagem aparece como
+ * num cilindro em volta da câmera; à noite, as estrelas vão por igual até o alto.
+ * Recebe: a construção, as elevações em graus, a altura da imagem (0 = de noite) e a cor.
+ * Devolve: nada.
+ */
+static void adicionarAneisDoCeu(Construcao *c, float de, float ate, float alturaDaImagem, Color cor) {
+    for (int anel = 0; anel < ANEIS_DO_CEU; anel++) {
+        float e0 = de + (ate - de) * anel / ANEIS_DO_CEU;
+        float e1 = de + (ate - de) * (anel + 1) / ANEIS_DO_CEU;
+        float v0, v1;
+        if (alturaDaImagem > 0.0f) {
+            v0 = 1.0f - (RAIO_DO_CEU * tanf(e0 * DEG2RAD) + ABAIXO_DA_CAMERA) / alturaDaImagem;
+            v1 = 1.0f - (RAIO_DO_CEU * tanf(e1 * DEG2RAD) + ABAIXO_DA_CAMERA) / alturaDaImagem;
+        } else {
+            v0 = 1.0f - (e0 - de) / (ate - de);
+            v1 = 1.0f - (e1 - de) / (ate - de);
+        }
+        for (int i = 0; i < LADOS_DO_CILINDRO; i++) {
+            float a0 = 2.0f * PI * i / LADOS_DO_CILINDRO, a1 = 2.0f * PI * (i + 1) / LADOS_DO_CILINDRO;
+            float u0 = REPETICOES_CEU * i / LADOS_DO_CILINDRO, u1 = REPETICOES_CEU * (i + 1) / LADOS_DO_CILINDRO;
+            float r0 = cosf(e0 * DEG2RAD) * RAIO_DO_CEU, r1 = cosf(e1 * DEG2RAD) * RAIO_DO_CEU;
+            float y0 = sinf(e0 * DEG2RAD) * RAIO_DO_CEU, y1 = sinf(e1 * DEG2RAD) * RAIO_DO_CEU;
+            Vector3 p0 = { sinf(a0) * r0, y0, -cosf(a0) * r0 }, p1 = { sinf(a1) * r0, y0, -cosf(a1) * r0 };
+            Vector3 p2 = { sinf(a1) * r1, y1, -cosf(a1) * r1 }, p3 = { sinf(a0) * r1, y1, -cosf(a0) * r1 };
+            adicionarQuadrilatero(c, p3, p0, p1, p2, (Vector2){ u0, v1 }, (Vector2){ u0, v0 }, (Vector2){ u1, v0 }, (Vector2){ u1, v1 }, cor);
+        }
+    }
+}
+
+/*
+ * construirCeuDeDia
+ * O domo de dia: a imagem do céu até a linha de cima dela, que é uma cor só,
+ * e daí até o alto uma tampa lisa dessa cor. Sem a tampa, a imagem se espremeria
+ * em raios no ponto mais alto.
+ * Recebe: a altura da imagem no mundo.
+ * Devolve: nada (preenche ceuDeDia e tampaDoCeu).
+ */
+static void construirCeuDeDia(float alturaDaImagem) {
+    float elevacaoDoTopo = atan2f((1.0f - COMECO_DA_IMAGEM_DO_CEU) * alturaDaImagem - ABAIXO_DA_CAMERA, RAIO_DO_CEU) * RAD2DEG;
+    Construcao imagem = { 0 }, tampa = { 0 };
+    adicionarAneisDoCeu(&imagem, ELEVACAO_DA_BASE_DO_CEU, elevacaoDoTopo, alturaDaImagem, WHITE);
+    adicionarAneisDoCeu(&tampa, elevacaoDoTopo, 90.0f, 0.0f, COR_DO_TOPO_DO_CEU);
+    ceuDeDia = terminarMalha(&imagem);
+    tampaDoCeu = terminarMalha(&tampa);
+}
+
+/*
+ * construirCeuDeNoite
+ * Recebe: nada.
+ * Devolve: o domo de noite, com as estrelas até o alto.
+ */
+static Mesh construirCeuDeNoite(void) {
+    Construcao c = { 0 };
+    adicionarAneisDoCeu(&c, ELEVACAO_DA_BASE_DO_CEU, 90.0f, 0.0f, WHITE);
+    return terminarMalha(&c);
+}
+
 /* ==================================================================
  * Carregar e descarregar
  * ================================================================== */
@@ -857,7 +920,10 @@ void carregarMundo(Pista *pistas[]) {
     float voltaCeu = 2.0f * PI * RAIO_DO_CEU / REPETICOES_CEU;
     float voltaCidade = 2.0f * PI * RAIO_DA_CIDADE / REPETICOES_CIDADE;
     float voltaMorros = 2.0f * PI * RAIO_DOS_MORROS / REPETICOES_MORROS;
-    cilindroDoCeu = construirCilindro(RAIO_DO_CEU, voltaCeu * texturaCeu.height / texturaCeu.width, REPETICOES_CEU);
+    construirCeuDeDia(voltaCeu * texturaCeu.height / texturaCeu.width);
+    ceuDeNoite = construirCeuDeNoite();
+    /* Na vertical a imagem não se repete: a borda de cima não pode misturar com a de baixo */
+    rlTextureParameters(texturaCeu.id, RL_TEXTURE_WRAP_T, RL_TEXTURE_WRAP_CLAMP);
     cilindroDaCidade = construirCilindro(RAIO_DA_CIDADE, voltaCidade * texturaCidade.height / texturaCidade.width, REPETICOES_CIDADE);
     cilindroDosMorros = construirCilindro(RAIO_DOS_MORROS, voltaMorros * texturaMorros.height / texturaMorros.width, REPETICOES_MORROS);
 
@@ -890,7 +956,9 @@ void descarregarMundo(void) {
     for (int i = 0; i < TOTAL_MODELOS_DE_OBJETO; i++) {
         UnloadModel(modelosDosObjetos[i]);
     }
-    UnloadMesh(cilindroDoCeu);
+    UnloadMesh(ceuDeDia);
+    UnloadMesh(tampaDoCeu);
+    UnloadMesh(ceuDeNoite);
     UnloadMesh(cilindroDaCidade);
     UnloadMesh(cilindroDosMorros);
     UnloadTexture(texturaCeu);
@@ -931,9 +999,10 @@ void desenharCenario(IdPista id, Vector3 camera) {
     Texture2D semTextura = { 0 };
     Matrix origem = MatrixIdentity();
     Matrix nosCilindros = MatrixTranslate(camera.x, camera.y - ABAIXO_DA_CAMERA, camera.z);
+    Matrix naCamera = MatrixTranslate(camera.x, camera.y, camera.z);
 
     if (id == PISTA_COPA_PISTAO) {
-        desenharMalha(cilindroDoCeu, texturaDoCeuNoturno(), nosCilindros);
+        desenharMalha(ceuDeNoite, texturaDoCeuNoturno(), naCamera);
         DrawModel(estadio, (Vector3){ 0.0f, 0.0f, 0.0f }, ESCALA_COPA_PISTAO, WHITE);
         material.shader = shaderDaNoite();
         desenharMalha(pinturaDoEstadio, semTextura, origem);
@@ -944,7 +1013,8 @@ void desenharCenario(IdPista id, Vector3 camera) {
         return;
     }
 
-    desenharMalha(cilindroDoCeu, texturaCeu, nosCilindros);
+    desenharMalha(ceuDeDia, texturaCeu, naCamera);
+    desenharMalha(tampaDoCeu, semTextura, naCamera);
     desenharMalha(cilindroDaCidade, texturaCidade, nosCilindros);
     desenharMalha(cilindroDosMorros, texturaMorros, nosCilindros);
     desenharMalha(interlagos.base, texturaGrama, origem);

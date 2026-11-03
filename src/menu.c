@@ -1133,6 +1133,7 @@ void desenharComoJogar(void) {
         { "CIMA", "W", NULL },
         { "BAIXO", "S", NULL },
         { "ESQ", "DIR", "A", "D" },
+        { "ESPACO", NULL },
         { "ESC", NULL },
         { "ENTER", NULL },
     };
@@ -1140,13 +1141,16 @@ void desenharComoJogar(void) {
         { "RT", "A", NULL },
         { "LT", "X", NULL },
         { "ESQ", "DIR", "ANALOG", NULL },
+        { "RB", "B", NULL },
         { "START", NULL },
         { "A", NULL },
+        { "ANALOG D", NULL },
     };
     const char *(*teclas)[4] = controleConectado() ? BOTOES : TECLAS;
-    const char *acoes[] = { "ACELERAR", "FREAR", "VIRAR", "PAUSAR A CORRIDA", "CONFIRMAR NOS MENUS" };
-    for (int i = 0; i < 5; i++) {
-        float y = topo + 78 + i * 70;
+    const char *acoes[] =  { "ACELERAR", "FREAR", "VIRAR", "NITRO", "PAUSAR A CORRIDA", "CONFIRMAR NOS MENUS", "OLHAR EM VOLTA" };
+    int linhas = controleConectado() ? 7 : 6;   /* a câmera livre só existe no controle */
+    for (int i = 0; i < linhas; i++) {
+        float y = topo + 72 + i * (controleConectado() ? 51 : 60);
         float xTecla = x + 20;
         for (int t = 0; t < 4 && teclas[i][t] != NULL; t++) {
             xTecla += desenharTecla(xTecla, y, teclas[i][t]) + 5;

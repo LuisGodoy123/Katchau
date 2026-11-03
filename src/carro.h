@@ -42,6 +42,7 @@ typedef struct {
     int esquerda;
     int direita;
     float direcao;                 /* analógico: -1 todo à esquerda a +1 todo à direita (0 = só as setas) */
+    int nitro;                     /* 1 = quer usar o nitro */
 } Comandos;
 
 typedef struct {
@@ -59,6 +60,8 @@ typedef struct {
     float derrapagem;              /* 0 com folga; sobe até 1 quando a curva está vencendo o volante */
     float vacuo;                   /* 0 no ar limpo, até 1 colado atrás de outro carro (corrida.c preenche) */
     Motor motor;                   /* rotação e marcha (o câmbio corta a potência na troca) */
+    float nitro;                   /* quanto nitro tem: de 0 a 1 */
+    int nitroLigado;               /* 1 enquanto está queimando */
     int voltas;                    /* voltas completadas */
     float temposDeVolta[TOTAL_VOLTAS];
     float inicioDaVolta;           /* momento da corrida em que a volta atual começou */
@@ -90,7 +93,7 @@ int velocidadeEmKmh(Carro *carro);
 int converterParaKmh(float velocidade);
 float velocidadeSeguraNaCurva(Carro *carro, float curvatura);
 float velocidadeSeguraAcelerando(Carro *carro, float curvatura);
-float velocidadeMaximaNoVacuo(Carro *carro);
+float velocidadeMaximaAgora(Carro *carro);
 float velocidadeParaFrearAte(float alvo, float distancia);
 float tempoAteVelocidade(const FichaTecnica *ficha, float velocidade);
 

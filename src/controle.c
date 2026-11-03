@@ -125,6 +125,7 @@ static float direcaoDoAnalogico(float x) {
  * apertado em qualquer um dos dois vale.
  *   - acelerar: gatilho direito (RT) ou A;
  *   - frear: gatilho esquerdo (LT) ou X;
+ *   - nitro: botão de ombro direito (RB) ou B;
  *   - virar: o direcional gira o volante todo, como as setas; o analógico
  *     esquerdo gira só o quanto está inclinado (comandos->direcao).
  * Recebe: os comandos do quadro (já com o teclado).
@@ -138,9 +139,21 @@ void somarComandosDoControle(Comandos *comandos) {
                           IsGamepadButtonDown(controle, GAMEPAD_BUTTON_RIGHT_FACE_DOWN);
     comandos->frear |= IsGamepadButtonDown(controle, GAMEPAD_BUTTON_LEFT_TRIGGER_2) ||
                        IsGamepadButtonDown(controle, GAMEPAD_BUTTON_RIGHT_FACE_LEFT);
+    comandos->nitro |= IsGamepadButtonDown(controle, GAMEPAD_BUTTON_RIGHT_TRIGGER_1) ||
+                       IsGamepadButtonDown(controle, GAMEPAD_BUTTON_RIGHT_FACE_RIGHT);
     comandos->esquerda |= IsGamepadButtonDown(controle, GAMEPAD_BUTTON_LEFT_FACE_LEFT);
     comandos->direita |= IsGamepadButtonDown(controle, GAMEPAD_BUTTON_LEFT_FACE_RIGHT);
     comandos->direcao = direcaoDoAnalogico(GetGamepadAxisMovement(controle, GAMEPAD_AXIS_LEFT_X));
+}
+
+/*
+ * lerAnalogicoDaCamera
+ * Recebe: onde guardar a inclinação do analógico direito (y > 0 é para baixo).
+ * Devolve: nada (0 e 0 se não há controle).
+ */
+void lerAnalogicoDaCamera(float *eixoX, float *eixoY) {
+    *eixoX = (controle >= 0) ? GetGamepadAxisMovement(controle, GAMEPAD_AXIS_RIGHT_X) : 0.0f;
+    *eixoY = (controle >= 0) ? GetGamepadAxisMovement(controle, GAMEPAD_AXIS_RIGHT_Y) : 0.0f;
 }
 
 /*

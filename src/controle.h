@@ -37,6 +37,7 @@ void atualizarControle(void);
 int controleConectado(void);
 int controleApertou(BotaoDoControle botao);
 void somarComandosDoControle(Comandos *comandos);
+void lerAnalogicoDaCamera(float *eixoX, float *eixoY);
 const char *nomeNoControle(const char *tecla);
 
 #endif
