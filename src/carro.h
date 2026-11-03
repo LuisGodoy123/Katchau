@@ -46,7 +46,7 @@ typedef struct {
 
 typedef struct {
     char nome[TAMANHO_NOME];
-    int numero;                    /* 0 = jogador, 1 a 7 = rivais; define a cor no desenho */
+    int numero;                    /* qual carro é (define o modelo 3D) */
 
     /* ---- Onde está ---- */
     PosicaoNaPista posicao;        /* segmento atual (nó da lista) e quanto andou nele */

@@ -400,7 +400,7 @@ static void testarInsertionSort(void) {
     Carro *vetor[TOTAL_CARROS];
 
     /* Embaralhado */
-    float distancias[TOTAL_CARROS] = { 300, 900, 100, 700, 800, 200, 600, 400 };
+    float distancias[TOTAL_CARROS] = { 300, 900, 100, 700, 800, 200, 600, 400, 500, 50, 850, 750, 150, 650 };
     for (int i = 0; i < TOTAL_CARROS; i++) {
         carros[i].distanciaPercorrida = distancias[i];
         vetor[i] = &carros[i];
@@ -476,7 +476,7 @@ static void testarCorridaComRivais(void) {
 
     verificar(corrida.terminou, "a corrida com 8 carros termina");
     verificar(sempreOrdenada, "a classificacao ficou ordenada em todos os quadros");
-    verificar(corrida.posicaoFinal >= 1 && corrida.posicaoFinal <= TOTAL_CARROS, "posicao final entre 1 e 8");
+    verificar(corrida.posicaoFinal >= 1 && corrida.posicaoFinal <= TOTAL_CARROS, "posicao final entre 1 e o total de carros");
     verificar(mudancasDePosicao > 0, "houve ultrapassagens");
 
     liberarPista(pista);
@@ -725,6 +725,34 @@ static void testarObjetosDaPista(void) {
     verificar(contagem[OBJETO_PLACA_50] > 0 && contagem[OBJETO_PLACA_50] >= contagem[OBJETO_PLACA_150],
               "placas de frenagem antes das curvas (a de 50 m sempre que tem a de 150 m)");
     verificar(noCaminho == 0, "nenhum objeto de pe fica onde o carro pode passar (fora o portico)");
+
+    /* No mundo: nenhum objeto cai em cima de OUTRO trecho da pista, nem dentro do alcance do carro nele */
+    int emCimaDaPista = 0, dentroDoAlcance = 0, total = 0;
+    float maisPerto = 1e9f;
+    atual = pista->largada;
+    do {
+        PosicaoNaPista lugar = { atual, 0.0f };
+        for (Obstaculo *objeto = atual->obstaculos; objeto != NULL; objeto = objeto->proximo) {
+            if (objeto->tipo == OBJETO_PORTICO || objeto->tipo == OBJETO_MARCA_GRID) {
+                continue;
+            }
+            total++;
+            PontoNoMundo ponto = pontoNoMundo(lugar, objeto->deslocamentoLateral);
+            Segmento *outro = pista->largada;
+            float menor = 1e9f;
+            do {
+                menor = fminf(menor, hypotf(outro->xMundo - ponto.x, outro->zMundo - ponto.z));
+                outro = proximoSegmento(outro);
+            } while (outro != pista->largada);
+            maisPerto = fminf(maisPerto, menor);
+            emCimaDaPista += (menor < atual->larguraDireita * 1.15f);
+            dentroDoAlcance += (menor < atual->larguraDireita * 2.5f);
+        }
+        atual = proximoSegmento(atual);
+    } while (atual != pista->largada);
+    printf("     %d objetos; o mais perto da pista fica a %.1f m da linha dela\n", total, maisPerto);
+    verificar(emCimaDaPista == 0, "nenhum objeto em cima do asfalto de outro trecho");
+    verificar(dentroDoAlcance == 0, "nenhum objeto onde o carro alcanca, em nenhum trecho da pista");
     verificar(contagem[OBJETO_MARCA_GRID] == LUGARES_NO_GRID, "um colchete pintado para cada lugar do grid");
 
     Pista *outra = criarPista();
@@ -1242,6 +1270,129 @@ static void testarFreioAlivioECambio(void) {
     liberarPista(reta);
 }
 
+/*
+ * testarPistasNoMundo
+ * Cada ponto da pista tem um lugar no mundo 3D, nas duas pistas, e o oval
+ * segue o traçado medido no modelo: fecha, tem muro e a IA corre nele.
+ */
+static void testarPistasNoMundo(void) {
+    printf("\n19) As pistas no mundo 3D\n");
+    float quadro = 1.0f / 60.0f;
+
+    for (int id = 0; id < TOTAL_PISTAS; id++) {
+        Pista *pista = criarPistaPorId((IdPista) id);
+        int total = contarSegmentos(pista);
+        float maiorPasso = 0.0f;
+        Segmento *atual = pista->largada;
+        do {
+            PosicaoNaPista daqui = { atual, 0.0f }, dali = { atual->proximo, 0.0f };
+            PontoNoMundo a = pontoNoMundo(daqui, 0.0f), b = pontoNoMundo(dali, 0.0f);
+            float passo = sqrtf((b.x - a.x) * (b.x - a.x) + (b.z - a.z) * (b.z - a.z));
+            maiorPasso = fmaxf(maiorPasso, passo);
+            atual = proximoSegmento(atual);
+        } while (atual != pista->largada);
+        printf("     %s: %d segmentos, %.0f m; maior passo entre vizinhos %.2f m\n", pista->nome, total,
+               total * COMPRIMENTO_SEGMENTO / UNIDADES_POR_METRO, maiorPasso);
+        verificar((int) pista->id == id, "a pista sabe quem ela e");
+        verificar(maiorPasso < 2.0f, "a pista e continua no mundo, inclusive na emenda da volta");
+
+        /* O lado direito fica mesmo à direita de quem anda */
+        PosicaoNaPista largada = { pista->largada, 0.0f };
+        PosicaoNaPista frente = { pista->largada->proximo, 0.0f };
+        PontoNoMundo centro = pontoNoMundo(largada, 0.0f), direita = pontoNoMundo(largada, 1.0f), adiante = pontoNoMundo(frente, 0.0f);
+        float vira = (adiante.x - centro.x) * (direita.z - centro.z) - (adiante.z - centro.z) * (direita.x - centro.x);
+        verificar(vira > 0.0f, "lateral positiva e a direita do sentido da corrida");
+        liberarPista(pista);
+    }
+
+    Pista *oval = criarCopaPistao();
+    verificar(fabsf(contarSegmentos(oval) * COMPRIMENTO_SEGMENTO / UNIDADES_POR_METRO - COMPRIMENTO_COPA_PISTAO) < 15.0f,
+              "o oval tem o comprimento de Daytona: 4.023 m");
+    float soma = 0.0f, menorAltura = 1e9f, maiorAltura = -1e9f, maiorInclinacao = 0.0f, menorLargura = 1e9f, maiorLargura = 0.0f;
+    int soEsquerda = 1, comMuro = 1, comZebra = 0, curvas = 0;
+    float maiorCurva = 0.0f, maiorDireita = 0.0f;
+    Segmento *atual = oval->largada;
+    do {
+        soma += atual->curvatura;
+        menorAltura = fminf(menorAltura, atual->altura);
+        maiorAltura = fmaxf(maiorAltura, atual->altura);
+        PosicaoNaPista aqui = { atual, 0.0f };
+        maiorInclinacao = fmaxf(maiorInclinacao, pontoNoMundo(aqui, 0.6f).inclinacao);
+        menorLargura = fminf(menorLargura, atual->larguraDireita + atual->larguraEsquerda);
+        maiorLargura = fmaxf(maiorLargura, atual->larguraDireita + atual->larguraEsquerda);
+        maiorCurva = fminf(maiorCurva, atual->curvatura);
+        maiorDireita = fmaxf(maiorDireita, atual->curvatura);
+        soEsquerda = soEsquerda && atual->curvatura < 0.3f;
+        comMuro = comMuro && atual->temMuro;
+        comZebra += temZebra(atual);
+        curvas += (atual->nomeTrecho != proximoSegmento(atual)->nomeTrecho
+                   && strncmp(proximoSegmento(atual)->nomeTrecho, "Curva", 5) == 0);
+        atual = proximoSegmento(atual);
+    } while (atual != oval->largada);
+    printf("     oval: largura de %.1f a %.1f m, inclinacao ate %.1f graus, curva mais fechada %.2f, para a direita ate %.2f, %d curvas\n",
+           menorLargura, maiorLargura, atanf(maiorInclinacao) * 57.3f, maiorCurva, maiorDireita, curvas);
+    verificar(fabsf(soma - GRAUS_VOLTA_COMPLETA) < 1.0f, "o oval fecha: -360 graus, anti-horario");
+    verificar(soEsquerda, "o oval so vira para a esquerda");
+    verificar(comMuro && comZebra == 0, "muro na volta inteira, e sem zebra");
+    verificar(curvas == 4, "as 4 curvas tem nome");
+    static const char *ORDEM[] = { "Reta dos Boxes", "Curva 1", "Reta Curta", "Curva 2", "Reta Oposta", "Curva 3", "Reta Curta", "Curva 4", "Reta dos Boxes" };
+    int noTrecho = 0, naOrdem = 1;
+    atual = oval->largada;
+    do {
+        if (strcmp(atual->nomeTrecho, ORDEM[noTrecho]) != 0) {
+            noTrecho++;
+            naOrdem = naOrdem && noTrecho < 9 && strcmp(atual->nomeTrecho, ORDEM[noTrecho]) == 0;
+        }
+        atual = proximoSegmento(atual);
+    } while (atual != oval->largada && naOrdem);
+    verificar(naOrdem && noTrecho == 8, "os trechos do oval vem na ordem certa");
+    verificar(maiorInclinacao > 0.05f, "as curvas sao inclinadas, como no modelo");
+
+    /* O chão: bate com pontoNoMundo e não dá degraus ao longo da pista nem na largura */
+    float maiorDegrau = 0.0f, maiorDiferenca = 0.0f;
+    atual = oval->largada;
+    do {
+        PosicaoNaPista aqui = { atual, 0.0f }, dali = { atual->proximo, 0.0f };
+        for (float lateral = -0.95f; lateral <= 0.95f; lateral += 0.05f) {
+            maiorDegrau = fmaxf(maiorDegrau, fabsf(pontoNoMundo(dali, lateral).y - pontoNoMundo(aqui, lateral).y));
+            float metros = lateral * larguraDoLado(atual, lateral);
+            maiorDiferenca = fmaxf(maiorDiferenca, fabsf(alturaDoChao(aqui, metros) - pontoNoMundo(aqui, lateral).y));
+        }
+        atual = proximoSegmento(atual);
+    } while (atual != oval->largada);
+    printf("     chao: maior degrau entre segmentos vizinhos %.3f m\n", maiorDegrau);
+    verificar(maiorDegrau < 0.5f, "o chao nao da degraus ao longo da pista");
+    verificar(maiorDiferenca < 0.001f, "alturaDoChao e pontoNoMundo concordam");
+
+    /* Muro dos dois lados: o carro jogado contra ele para ali e perde velocidade */
+    for (int lado = 0; lado < 2; lado++) {
+        Comandos virando = { 1, 0, lado == 0, lado == 1, 0.0f };
+        Carro carro = criarCarro("Teste", 0, oval->largada, 0.0f, 12000.0f, 2400.0f, 0.5f);
+        carro.velocidade = 8000.0f;
+        float antes = 0.0f;
+        for (int i = 0; i < 60; i++) {
+            antes = carro.velocidade;
+            atualizarCarro(&carro, virando, quadro);
+        }
+        Segmento *ali = carro.posicao.segmento;
+        float largura = (carro.deslocamentoLateral > 0.0f) ? ali->larguraDireita : ali->larguraEsquerda;
+        printf("     contra o muro: sobra %.1f m do centro do carro ate ele\n", largura * (1.0f - fabsf(carro.deslocamentoLateral)));
+        verificar(largura * (1.0f - fabsf(carro.deslocamentoLateral)) > 1.3f, "o carro para antes do muro, sem entrar nele");
+        verificar(carro.velocidade < antes, "raspar no muro custa velocidade");
+    }
+
+    /* A IA corre o oval inteiro */
+    static Corrida corrida;
+    iniciarCorrida(&corrida, oval, 0);
+    while (!todosChegaram(&corrida) && corrida.tempoDeCorrida < 600.0f) {
+        atualizarCorrida(&corrida, atualizarIA(&corrida.jogador, carroDaFrente(&corrida, &corrida.jogador)), quadro);
+    }
+    printf("     volta mais rapida %.2f s; 1o em %.2f s, ultimo em %.2f s\n", corrida.voltaMaisRapida,
+           corrida.classificacao[0]->tempoDeChegada, corrida.classificacao[TOTAL_CARROS - 1]->tempoDeChegada);
+    verificar(todosChegaram(&corrida), "todos os carros completam as 3 voltas no oval");
+    liberarPista(oval);
+}
+
 int main(int argc, char *argv[]) {
     int modoDetalhado = (argc > 1 && strcmp(argv[1], "-v") == 0);
 
@@ -1265,6 +1416,7 @@ int main(int argc, char *argv[]) {
     testarVoltaDaVitoria();
     testarPeVacuoEDerrapagem();
     testarFreioAlivioECambio();
+    testarPistasNoMundo();
 
     if (totalFalhas == 0) {
         printf("\nTodos os testes passaram.\n");

@@ -2,7 +2,7 @@
 #define MENU_H
 
 /*
- * Menu: menu principal, garagem, como jogar e tela de resultado (fase 6).
+ * Menu: menu principal, garagem, escolha da pista, como jogar e tela de resultado (fase 6).
  * Módulo de desenho: pode usar a raylib.
  *
  * Cada tela tem duas funções, como o laço do main.c:
@@ -18,6 +18,7 @@
 typedef enum {
     TELA_MENU,
     TELA_GARAGEM,
+    TELA_PISTAS,
     TELA_COMO_JOGAR,
     TELA_CORRIDA,
     TELA_RESULTADO,
@@ -38,7 +39,7 @@ typedef enum {
 typedef struct {
     int opcaoMenu;                              /* item marcado no menu principal */
     float destaque[TOTAL_OPCOES];               /* 0 a 1: quanto cada opção já "acendeu" (animação) */
-    int carroEscolhido;                         /* número do carro do jogador (0 a 7) */
+    int carroEscolhido;                         /* número do carro do jogador */
     Atributo criterio;                          /* por qual atributo a garagem está ordenada */
     const FichaTecnica *garagem[TOTAL_CARROS];  /* as fichas, na ordem do Merge Sort */
     int selecionado;                            /* linha marcada na garagem */
@@ -49,6 +50,8 @@ typedef struct {
     float destaqueVoltar;                       /* animação (0 a 1) do botão VOLTAR */
     int opcaoPausa;                             /* item marcado na pausa */
     float destaquePausa[TOTAL_OPCOES_PAUSA];    /* animação (0 a 1) de cada botão da pausa */
+    int pistaEscolhida;                         /* em qual pista correr (IdPista) */
+    float destaquePista[TOTAL_PISTAS];          /* animação (0 a 1) de cada cartão de pista */
 } EstadoMenu;
 
 void iniciarMenu(EstadoMenu *menu);
@@ -58,6 +61,9 @@ void desenharMenuPrincipal(EstadoMenu *menu);
 
 Tela atualizarGaragem(EstadoMenu *menu);
 void desenharGaragem(EstadoMenu *menu);
+
+Tela atualizarEscolhaDePista(EstadoMenu *menu);
+void desenharEscolhaDePista(EstadoMenu *menu, Pista *pistas[]);
 
 Tela atualizarComoJogar(void);
 void desenharComoJogar(void);

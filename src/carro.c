@@ -49,6 +49,8 @@
 #define PERDA_NA_DERRAPAGEM    30000.0f  /* passando 10% do limite, perde 3000 por segundo (1/4 do freio)... */
 #define EXCESSO_MAXIMO             0.5f  /* ...e a perda para de crescer em 50% além do limite */
 #define GANHO_NO_VACUO             0.06f /* no vácuo cheio, a máxima sobe 6% (300 -> 318 km/h) */
+#define FOLGA_DO_MURO              1.4f  /* o centro do carro para a esta distância do muro (metros: meia largura do carro) */
+#define PERDA_NO_MURO           5000.0f  /* raspando no muro, perde isso de velocidade por segundo */
 #define KMH_POR_UNIDADE            0.025f /* 12000 unidades/s viram 300 km/h no velocímetro */
 
 /*
@@ -253,6 +255,9 @@ static float respostaDaDirecao(float proporcaoVelocidade) {
  * Também mede a derrapagem: quanto do volante a curva está "gastando".
  * Passando do limite (a curva gasta mais que o volante todo), o pneu
  * arrasta e tira velocidade, proporcional a quanto passou.
+ * O deslocamento lateral é medido em larguras da pista, e no oval cada lado
+ * tem uma largura: a conta corrige isso, para o carro andar de lado os mesmos
+ * metros por segundo em qualquer ponto (em Interlagos o fator é 1).
  * Recebe: o carro, os comandos (o pé muda o empurrão) e o tempo do quadro.
  * Devolve: nada (altera deslocamentoLateral, derrapagem e velocidade).
  */
@@ -262,7 +267,9 @@ static void atualizarLateral(Carro *carro, Comandos comandos, float tempoQuadro)
     float direcao = VELOCIDADE_DE_VIRADA * respostaDaDirecao(proporcaoVelocidade);
 
     /* Volante: o quanto vira depende de quanto o volante está girado */
-    carro->deslocamentoLateral += direcao * carro->volante * tempoQuadro;
+    Segmento *aqui = carro->posicao.segmento;
+    float paraMetros = MEIA_LARGURA_PADRAO / larguraDoLado(aqui, carro->deslocamentoLateral);
+    carro->deslocamentoLateral += direcao * carro->volante * paraMetros * tempoQuadro;
 
     /* Força centrífuga: curva para a direita (curvatura > 0) empurra
      * para a esquerda, e vice-versa. Mais aderência, menos empurrão.
@@ -276,7 +283,7 @@ static void atualizarLateral(Carro *carro, Comandos comandos, float tempoQuadro)
     float curvatura = carro->posicao.segmento->curvatura;
     float empurrao = curvatura * FORCA_CENTRIFUGA * proporcaoVelocidade * proporcaoVelocidade
                      * (1.0f - carro->aderencia) * pe;
-    carro->deslocamentoLateral -= empurrao * tempoQuadro;
+    carro->deslocamentoLateral -= empurrao * paraMetros * tempoQuadro;
 
     /* Derrapagem: 0 enquanto o empurrão gasta menos de 70% da direção,
      * 1 quando gasta tudo (dali em diante o carro vai para fora) */
@@ -295,6 +302,17 @@ static void atualizarLateral(Carro *carro, Comandos comandos, float tempoQuadro)
     }
 
     carro->deslocamentoLateral = limitar(carro->deslocamentoLateral, -LIMITE_LATERAL, LIMITE_LATERAL);
+
+    /* Muro (só no oval): o carro não passa dele, e raspar custa velocidade.
+     * A largura de cada lado muda ao longo da pista, então a conta é em metros */
+    if (aqui->temMuro) {
+        float limiteDireita = LIMITE_PISTA - FOLGA_DO_MURO / aqui->larguraDireita;
+        float limiteEsquerda = LIMITE_PISTA - FOLGA_DO_MURO / aqui->larguraEsquerda;
+        if (carro->deslocamentoLateral > limiteDireita || carro->deslocamentoLateral < -limiteEsquerda) {
+            carro->deslocamentoLateral = limitar(carro->deslocamentoLateral, -limiteEsquerda, limiteDireita);
+            carro->velocidade = fmaxf(carro->velocidade - PERDA_NO_MURO * tempoQuadro, 0.0f);
+        }
+    }
 }
 
 /*

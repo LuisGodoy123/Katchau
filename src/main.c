@@ -16,6 +16,9 @@
 #include "raylib.h"
 #include "config.h"
 #include "pista.h"
+#include "mundo.h"
+#include "carros3d.h"
+#include "fumaca.h"
 #include "carro.h"
 #include "corrida.h"
 #include "render.h"
@@ -119,11 +122,16 @@ int main(int argc, char *argv[]) {
      * Mudar para a pasta do executável faz o jogo achá-las mesmo quando
      * é aberto de outro lugar (por exemplo, com duplo clique). */
     ChangeDirectory(GetApplicationDirectory());
-    carregarTexturas();
     carregarVisual();   /* fontes e logo dos menus */
     carregarAudio();    /* música dos menus */
 
-    Pista *pista = criarPista();
+    Pista *pistas[TOTAL_PISTAS];
+    for (int i = 0; i < TOTAL_PISTAS; i++) {
+        pistas[i] = criarPistaPorId((IdPista) i);
+    }
+    carregarMundo(pistas);
+    carregarCarros3D();
+    carregarFumaca();
     Corrida corrida;
     EstadoMenu menu;
     iniciarMenu(&menu);
@@ -146,6 +154,9 @@ int main(int argc, char *argv[]) {
             case TELA_GARAGEM:
                 proxima = atualizarGaragem(&menu);
                 break;
+            case TELA_PISTAS:
+                proxima = atualizarEscolhaDePista(&menu);
+                break;
             case TELA_COMO_JOGAR:
                 proxima = atualizarComoJogar();
                 break;
@@ -165,8 +176,9 @@ int main(int argc, char *argv[]) {
 
         /* Entrar na corrida (do menu ou do "correr de novo") sempre começa uma nova */
         if (proxima == TELA_CORRIDA && tela != TELA_CORRIDA) {
-            iniciarCorrida(&corrida, pista, menu.carroEscolhido);
+            iniciarCorrida(&corrida, pistas[menu.pistaEscolhida], menu.carroEscolhido);
             limparConfetes();
+            limparFumaca();
         }
         tela = proxima;
 
@@ -179,7 +191,8 @@ int main(int argc, char *argv[]) {
         venceuAntes = venceu;
 
         /* O mouse só aparece (e só funciona) no menu principal, na garagem e na pausa */
-        int usaMouse = (tela == TELA_MENU || tela == TELA_GARAGEM || (tela == TELA_CORRIDA && pausada));
+        int usaMouse = (tela == TELA_MENU || tela == TELA_GARAGEM || tela == TELA_PISTAS
+                        || (tela == TELA_CORRIDA && pausada));
         if (usaMouse && IsCursorHidden()) {
             ShowCursor();
         } else if (!usaMouse && !IsCursorHidden()) {
@@ -187,7 +200,7 @@ int main(int argc, char *argv[]) {
         }
 
         /* A música toca nos menus e some quando a corrida começa */
-        atualizarAudio(tela == TELA_MENU || tela == TELA_GARAGEM || tela == TELA_COMO_JOGAR);
+        atualizarAudio(tela == TELA_MENU || tela == TELA_GARAGEM || tela == TELA_PISTAS || tela == TELA_COMO_JOGAR);
 
         /* Sons da corrida:
          *  - antes do GO, o motor em marcha lenta (som provisório) e o "3... 2... 1... GO!",
@@ -220,19 +233,25 @@ int main(int argc, char *argv[]) {
         ClearBackground(BLACK);
         switch (tela) {
             case TELA_MENU:
-                desenharPistaDeFundo(pista);
+                desenharPistaDeFundo(pistas[menu.pistaEscolhida]);
                 comecarInterface(1);
                 desenharMenuPrincipal(&menu);
                 terminarInterface();
                 break;
             case TELA_GARAGEM:
-                desenharPistaDeFundo(pista);
+                desenharPistaDeFundo(pistas[menu.pistaEscolhida]);
                 comecarInterface(1);
                 desenharGaragem(&menu);
                 terminarInterface();
                 break;
+            case TELA_PISTAS:
+                desenharPistaDeFundo(pistas[menu.pistaEscolhida]);
+                comecarInterface(1);
+                desenharEscolhaDePista(&menu, pistas);
+                terminarInterface();
+                break;
             case TELA_COMO_JOGAR:
-                desenharPistaDeFundo(pista);
+                desenharPistaDeFundo(pistas[menu.pistaEscolhida]);
                 comecarInterface(1);
                 desenharComoJogar();
                 terminarInterface();
@@ -266,8 +285,12 @@ int main(int argc, char *argv[]) {
         EndDrawing();
     }
 
-    liberarPista(pista);
-    descarregarTexturas();
+    descarregarFumaca();
+    descarregarCarros3D();
+    descarregarMundo();
+    for (int i = 0; i < TOTAL_PISTAS; i++) {
+        liberarPista(pistas[i]);
+    }
     descarregarVisual();
     descarregarAudio();
     CloseWindow();

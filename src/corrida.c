@@ -15,12 +15,13 @@
 #define LUGAR_DO_JOGADOR       (TOTAL_CARROS - 1)   /* o jogador larga em último */
 
 /* ---------- Colisão ---------- */
-#define DISTANCIA_LATERAL_BATIDA  0.25f   /* mais perto que isso, os carros se tocam */
+#define DISTANCIA_LATERAL_BATIDA  2.2f    /* metros de centro a centro: mais perto que isso, de lado, se tocam */
+#define COMPRIMENTO_DA_BATIDA     (4.5f * UNIDADES_POR_METRO)   /* e, na frente, mais perto que isso */
 #define PERDA_NA_BATIDA           0.8f    /* quem bate atrás fica com 80% da velocidade do outro */
 
 /* ---------- Vácuo ---------- */
 #define DISTANCIA_DO_VACUO        3600.0f   /* ~30 m: mais perto que isso atrás de alguém, pega vácuo */
-#define LARGURA_DO_VACUO          0.35f     /* tem que estar quase na mesma linha do carro da frente */
+#define LARGURA_DO_VACUO          3.0f      /* metros: tem que estar quase na mesma linha do carro da frente */
 #define RAPIDEZ_DO_VACUO          3.0f      /* o vácuo entra e sai em ~1/3 s, sem tranco */
 
 /* ---------- Intervalo entre carros ---------- */
@@ -30,21 +31,26 @@
 /* Um respiro só com o motor, depois 3, 2, 1... KATCHAU! */
 #define SEGUNDOS_DE_CONTAGEM   (ESPERA_ANTES_DA_CONTAGEM + NUMEROS_DA_CONTAGEM * SEGUNDOS_POR_NUMERO)
 
-/* Os 8 carros do jogo. O número de cada um é a posição neste vetor e
- * define a cor no desenho (0 = vermelho, 1 = amarelo...). O jogador
- * escolhe um deles na garagem; os outros 7 viram os rivais.
- * A aderência pesa muito no tempo de volta, então ela varia pouco.
- * Os nomes e o jeito de cada um são originais do KATCHAU. */
+/* Os 14 carros do jogo. O número de cada um é a posição neste vetor e
+ * define o modelo 3D (carros3d.c). O jogador escolhe um deles na garagem;
+ * os outros 13 viram os rivais. A aderência pesa muito no tempo de volta,
+ * então ela varia pouco. */
 static const FichaTecnica FICHAS[TOTAL_CARROS] = {
-    /* nome         descrição                         vel.max   acel.    aderência */
-    { "Katchau",    "o carro da casa, equilibrado",    12000.0f, 2400.0f, 0.50f },
-    { "Barao",      "esportivo arrogante, voa na reta", 12500.0f, 2200.0f, 0.47f },
-    { "Neon",       "gruda nas curvas",                11700.0f, 2400.0f, 0.55f },
-    { "Trovao",     "arranca forte",                   12000.0f, 2700.0f, 0.49f },
-    { "Ze Pistao",  "certinho em tudo",                11800.0f, 2300.0f, 0.51f },
-    { "Fuscao",     "lento, mas nao sai da pista",     11100.0f, 2300.0f, 0.58f },
-    { "Bolinha",    "pequeno e esperto na largada",    11400.0f, 2800.0f, 0.51f },
-    { "Ferrugem",   "picape enferrujada",              11200.0f, 2100.0f, 0.54f },
+    /* nome             descrição                          vel.max   acel.    aderência */
+    { "McQueen",        "o carro da casa, equilibrado",    12000.0f, 2400.0f, 0.50f },
+    { "The King",       "veterano, voa na reta",           12500.0f, 2200.0f, 0.47f },
+    { "Doc Hudson",     "lenda, gruda nas curvas",         11700.0f, 2400.0f, 0.55f },
+    { "Francesco",      "formula, arranca forte",          12000.0f, 2700.0f, 0.49f },
+    { "Sally",          "certinha em tudo",                11800.0f, 2300.0f, 0.51f },
+    { "Ramone",         "estiloso e estavel",              11600.0f, 2350.0f, 0.52f },
+    { "Luigi",          "pequeno e esperto na largada",    11400.0f, 2800.0f, 0.51f },
+    { "Guido",          "minusculo, mas nao erra curva",   11000.0f, 2900.0f, 0.56f },
+    { "Mater",          "guincho enferrujado",             11200.0f, 2100.0f, 0.54f },
+    { "Sarge",          "jipe militar, firme no chao",     11300.0f, 2250.0f, 0.53f },
+    { "Fillmore",       "sem pressa e sem sair da pista",  11100.0f, 2300.0f, 0.58f },
+    { "Finn McMissile", "espiao, rapido em tudo",          12100.0f, 2350.0f, 0.50f },
+    { "Wingo",          "tuner, nervoso na arrancada",     11900.0f, 2500.0f, 0.48f },
+    { "Snot Rod",       "motorzao, dificil de segurar",    12200.0f, 2600.0f, 0.46f },
 };
 
 /*
@@ -241,29 +247,35 @@ static void registrarVolta(Corrida *corrida, Carro *carro) {
 }
 
 /*
+ * lateralEmMetros
+ * A largura da pista muda de um trecho para outro, então comparar dois
+ * carros só faz sentido em metros.
+ * Recebe: o carro.
+ * Devolve: o quanto ele está à direita (+) ou à esquerda (-) da linha da pista.
+ */
+static float lateralEmMetros(Carro *carro) {
+    return carro->deslocamentoLateral * larguraDoLado(carro->posicao.segmento, carro->deslocamentoLateral);
+}
+
+/*
  * tratarBatida
- * Se dois carros estão no mesmo segmento e lado a lado, quem vem atrás
- * bate na traseira do outro e perde velocidade.
+ * Se dois carros estão encostados (perto na frente e de lado), quem vem
+ * atrás bate na traseira do outro e perde velocidade.
  * Recebe: os dois carros.
  * Devolve: nada.
  */
 static void tratarBatida(Carro *a, Carro *b) {
-    if (a->posicao.segmento != b->posicao.segmento) {
+    if (fabsf(a->distanciaPercorrida - b->distanciaPercorrida) > COMPRIMENTO_DA_BATIDA) {
+        return;
+    }
+    if (fabsf(lateralEmMetros(a) - lateralEmMetros(b)) > DISTANCIA_LATERAL_BATIDA) {
         return;
     }
 
-    float diferencaLateral = a->deslocamentoLateral - b->deslocamentoLateral;
-    if (diferencaLateral < 0) {
-        diferencaLateral = -diferencaLateral;
-    }
-    if (diferencaLateral > DISTANCIA_LATERAL_BATIDA) {
-        return;
-    }
-
-    /* Descobre quem está atrás dentro do segmento */
+    /* Descobre quem está atrás */
     Carro *atras = a;
     Carro *frente = b;
-    if (a->posicao.distanciaNoSegmento > b->posicao.distanciaNoSegmento) {
+    if (a->distanciaPercorrida > b->distanciaPercorrida) {
         atras = b;
         frente = a;
     }
@@ -276,7 +288,7 @@ static void tratarBatida(Carro *a, Carro *b) {
 
 /*
  * verificarBatidas
- * Testa todos os pares de carros (8 carros = 28 pares).
+ * Testa todos os pares de carros (14 carros = 91 pares).
  * Recebe: a corrida.
  * Devolve: nada.
  */
@@ -300,7 +312,7 @@ static float forcaDoVacuo(Corrida *corrida, Carro *carro) {
     for (int i = 0; i < TOTAL_CARROS; i++) {
         Carro *outro = corrida->classificacao[i];
         float distancia = outro->distanciaPercorrida - carro->distanciaPercorrida;
-        float diferencaLateral = fabsf(outro->deslocamentoLateral - carro->deslocamentoLateral);
+        float diferencaLateral = fabsf(lateralEmMetros(outro) - lateralEmMetros(carro));
         if (outro == carro || distancia <= 0.0f || distancia >= DISTANCIA_DO_VACUO
             || diferencaLateral >= LARGURA_DO_VACUO) {
             continue;
@@ -406,7 +418,7 @@ void atualizarCorrida(Corrida *corrida, Comandos comandosJogador, float tempoQua
 /*
  * todosChegaram
  * Recebe: a corrida.
- * Devolve: 1 se os 8 carros já completaram TOTAL_VOLTAS, 0 se não.
+ * Devolve: 1 se todos os carros já completaram TOTAL_VOLTAS, 0 se não.
  */
 int todosChegaram(Corrida *corrida) {
     for (int i = 0; i < TOTAL_CARROS; i++) {

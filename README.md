@@ -1,15 +1,15 @@
 # KATCHAU
 
-Jogo de corrida pseudo-3D em C com [raylib](https://www.raylib.com/). A pista é uma
+Jogo de corrida 3D em C com [raylib](https://www.raylib.com/). A pista é uma
 lista circular duplamente encadeada de segmentos.
 
 ## Estado atual
 
 - **Fase 0:** estrutura do projeto, `Makefile` e janela da raylib.
 - **Fase 1:** pista como lista circular duplamente encadeada (`src/pista.c`), testada no terminal.
-- **Fase 2:** estrada em pseudo-3D (`src/render.c`).
+- **Fase 2:** estrada em pseudo-3D (hoje em 3D de verdade, veja "O 3D").
 - **Fase 3:** carro do jogador (`src/carro.c`), corrida de 3 voltas com tempo por volta (`src/corrida.c`) e HUD simples (`src/hud.c`).
-- **Fase 4:** 7 rivais com IA (`src/ia.c`), classificação refeita a cada quadro com Insertion Sort (`src/ordenacao.c`), colisão e posição no HUD.
+- **Fase 4:** 13 rivais com IA (`src/ia.c`), classificação refeita a cada quadro com Insertion Sort (`src/ordenacao.c`), colisão e posição no HUD.
 - **Fase 5 (em parte):** Interlagos com subidas e descidas, texturas, mini-mapa, zebras só nas curvas,
   linha de chegada quadriculada e objetos na beira da pista (`src/obstaculos.c`). Falta o turbo.
 - **Fase 6:** menu principal, garagem com Merge Sort, como jogar, contagem regressiva e tela de resultado (`src/menu.c`).
@@ -107,7 +107,8 @@ chama a função `atualizar...()` dela, que devolve para qual tela ir, e depois 
 ```
 MENU ──> GARAGEM ──> MENU
   │──> COMO JOGAR ──> MENU
-  └──> CORRIDA ──(chegada + ENTER)──> RESULTADO ──(ENTER)──> CORRIDA
+  └──> PISTA ──(ESC)──> MENU
+         └──(ENTER)──> CORRIDA ──(chegada + ENTER)──> RESULTADO ──(ENTER)──> CORRIDA
           └──(ESC)──> PAUSA                  └──(ESC)──> MENU
                         ├──(CONTINUAR ou ESC)──> CORRIDA, de onde parou
                         └──(MENU PRINCIPAL)───> MENU
@@ -123,7 +124,11 @@ src/
   main.c           laço do jogo: ler teclado, atualizar, desenhar
   config.h         constantes compartilhadas (TOTAL_VOLTAS, tamanho da tela...)
   pista.c/.h       lista circular duplamente encadeada de segmentos   (fase 1)
-  render.c/.h      estrada pseudo-3D e carros na tela                  (fases 2 a 4)
+  render.c/.h      câmera, carros e sprites na corrida em 3D
+  mundo.c/.h       cenário 3D: o modelo do estádio e as malhas de Interlagos
+  carros3d.c/.h    modelos 3D dos carros, sombras e fotos para os menus
+  fumaca.c/.h      fumaça dos pneus e poeira da grama
+  copa_pistao.h    traçado da Copa Pistão, medido no modelo 3D
   carro.c/.h       struct Carro, Comandos e movimento                  (fase 3)
   corrida.c/.h     grid, voltas, colisão, classificação e fim          (fases 3 e 4)
   ia.c/.h          decisões dos rivais                                 (fase 4)
@@ -150,57 +155,41 @@ ferramentas/
   gerar_sprites.py script do Blender: modelo 3D (.glb) vira sprite PNG
 ```
 
-Regra: só `render.c`, `hud.c`, `menu.c`, `visual.c`, `audio.c` e `controle.c` incluem `raylib.h` (além do `main.c`, que abre
+Regra: só `render.c`, `mundo.c`, `carros3d.c`, `fumaca.c`, `hud.c`, `menu.c`, `visual.c`, `audio.c` e `controle.c` incluem `raylib.h` (além do `main.c`, que abre
 a janela). O resto é lógica pura e pode ser testado no terminal.
-
-## Sprites dos carros
-
-O `render.c` procura as imagens dos carros em `recursos/texturas/carro/`, nesta ordem:
-
-1. **Folha própria do carro:** `<numero>_folha.png` (ex.: `3_folha.png` para o Trovão), usada como está.
-2. **Folha compartilhada:** `carro_folha.png`, repintada com a cor de cada carro (troca o
-   vermelho da pintura pela cor dele; o carro 0 usa a original).
-3. **Três poses antigas:** `carro_reto.png`, `carro_esquerda.png` e `carro_direita.png`.
-4. Se nada disso existir, o carro é desenhado com formas simples.
-
-A **folha** é uma grade: cada linha é um ângulo de volante (de cima para baixo: todo à
-esquerda, ..., reto, ..., todo à direita) e cada coluna é um quadro do giro das rodas.
-O jogo espera **9 linhas × 4 colunas** (`ANGULOS_DA_FOLHA` e `QUADROS_DA_RODA` no
-`render.c`). A linha sai do volante gradual do carro; a coluna, da distância percorrida
-(as rodas giram mais rápido quanto mais rápido o carro anda).
-
-A vista de frente (`carro_frente.png` ou `<numero>_frente.png`) aparece na garagem e no
-menu. As folhas e as vistas de frente usam *mipmaps*, para os rivais distantes não
-ficarem serrilhados.
-
-As folhas podem ser geradas a partir de um modelo 3D `.glb` com o script do Blender
-`ferramentas/gerar_sprites.py` (as instruções estão no começo do arquivo). O mesmo
-script gera os sprites do cenário (`--modo objeto`) e as camadas do fundo (`--modo fundo`):
-
-```
-BLENDER=/Applications/Blender.app/Contents/MacOS/Blender
-$BLENDER -b -P ferramentas/gerar_sprites.py -- --modo carro \
-    --modelo carro.glb --saida recursos/texturas/carro/carro_folha.png
-$BLENDER -b -P ferramentas/gerar_sprites.py -- --modo objeto \
-    --modelo arvore.glb --saida recursos/texturas/sprites/arvore.png
-```
 
 ## Os carros
 
-São 8 carros (`FICHAS` em `corrida.c`). Na garagem o jogador escolhe um; os outros 7
-viram os rivais, e o jogador larga em último. A "volta limpa" é o tempo de uma volta lançada
-(a segunda, já em movimento) em Interlagos, sozinho na pista e dirigido pela IA.
+São 14 carros (`FICHAS` em `corrida.c`), todos modelos 3D em `recursos/modelos/carros/`. Na garagem o
+jogador escolhe um; os outros 13 viram os rivais, e o jogador larga em último. A "volta limpa" é o tempo de
+uma volta lançada, sozinho na pista e dirigido pela IA.
 
-| Carro | Cor | Jeito | Volta limpa |
+| Carro | Jeito | Interlagos | Copa Pistão |
 |---|---|---|---|
-| Katchau | vermelho | o carro da casa, equilibrado (o padrão) | 53,8 s |
-| Barão | amarelo | esportivo arrogante, voa na reta | 53,6 s |
-| Neon | roxo | gruda nas curvas | 53,3 s |
-| Trovão | azul | arranca forte | 53,7 s |
-| Zé Pistão | laranja | certinho em tudo | 54,4 s |
-| Fuscão | verde-água | lento, mas não sai da pista | 54,8 s |
-| Bolinha | rosa | esperto na largada | 55,2 s |
-| Ferrugem | marrom | picape enferrujada | 56,2 s |
+| McQueen | o carro da casa, equilibrado (o padrão) | 53,8 s | 40,3 s |
+| The King | veterano, voa na reta | 53,6 s | 38,7 s |
+| Doc Hudson | lenda, gruda nas curvas | 53,3 s | 41,3 s |
+| Francesco | formula, arranca forte | 53,7 s | 40,3 s |
+| Sally | certinha em tudo | 54,4 s | 41,0 s |
+| Ramone | estiloso e estável | 54,7 s | 41,7 s |
+| Luigi | pequeno e esperto na largada | 55,2 s | 42,4 s |
+| Guido | minúsculo, mas não erra curva | 55,0 s | 43,9 s |
+| Mater | guincho enferrujado | 56,2 s | 43,1 s |
+| Sarge | jipe militar, firme no chão | 55,8 s | 42,8 s |
+| Fillmore | sem pressa e sem sair da pista | 54,8 s | 43,5 s |
+| Finn McMissile | espião, rápido em tudo | 53,5 s | 39,9 s |
+| Wingo | tuner, nervoso na arrancada | 54,8 s | 40,6 s |
+| Snot Rod | motorzão, difícil de segurar | 54,1 s | 39,6 s |
+
+`carros3d.c` carrega os modelos e deixa todos iguais: mede cada um, escala para o comprimento do personagem
+(`MODELOS`), centraliza, põe as rodas no chão e a frente para +z. O carro no mundo segue a pista, o
+volante e o chão embaixo das rodas (`matrizDoCarro` em `render.c`). A sombra é a foto do próprio modelo visto de cima, desfocada,
+e a fumaça e a poeira são nuvens soltas no mundo (`fumaca.c`). As rodas não giram: nos modelos, elas
+vêm fundidas com outras peças. A garagem e o menu usam uma foto de cada modelo, tirada ao carregar.
+
+Os modelos são do Sketchfab, de DinseyPixarCarsModels e LukeMcQueen02, publicados como CC-BY-4.0 (o do Luigi veio
+sem autor nem licença). Os personagens são de *Carros* (Disney/Pixar). A única mudança nos arquivos foi converter as
+texturas JPEG para PNG, porque a raylib da Homebrew não lê JPEG.
 
 ## Pilotagem
 
@@ -294,25 +283,63 @@ chegada e da tela de resultado. Essas voltas extras não entram nos tempos.
 
 ## Objetos da beira da pista
 
-Cada segmento tem uma **lista simplesmente encadeada** de objetos (`Obstaculo`, em
-`obstaculos.h`): o segmento aponta para o primeiro, e cada um aponta para o próximo.
-`decorarPista()`, chamada no fim de `criarPista()`, põe numa volta pela pista:
+Cada segmento guarda os seus objetos numa **lista simples** (`obstaculos.c`), e `decorarPista` escolhe o
+que fica onde em Interlagos:
 
-- o **pórtico** em cima da linha de chegada;
+- o **pórtico** em cima da linha de chegada e os **colchetes do grid**, pintados no asfalto;
 - **barreiras de pneus** por fora das curvas e **placas de 150, 100 e 50 m** antes delas;
 - **árvores** sorteadas dos dois lados (sorteio com semente fixa: ficam sempre no mesmo lugar).
 
-Tudo fica além de onde o carro consegue chegar (lateral 2,5), menos o pórtico, que passa
-por cima da pista. O `render.c` desenha os objetos junto com os rivais, do mais longe para
-o mais perto; a imagem e a largura de cada tipo estão em `ARQUIVOS_OBJETO` e
-`LARGURA_OBJETO`. A lista de cada segmento é liberada junto com ele (`liberarObstaculos`).
+Num circuito sinuoso, o lugar de um objeto pode cair em cima de outro trecho da pista. Por isso `lugarLivre` confere
+cada um contra a volta inteira: ele só entra se ficar além de onde o carro alcança em qualquer trecho.
+
+As formas são geradas por código (`construirObjetos` em `mundo.c`) e pousam na altura exata do terreno
+desenhado: árvores facetadas, cada uma diferente; pilhas de pneus que acompanham a curva; placas e pórtico sólidos, com
+a arte de `recursos/texturas/sprites/`. O oval não tem objetos: o cenário dele já está no modelo 3D.
 
 As **zebras** só aparecem nas curvas, como na vida real: um segmento tem zebra quando vira
 pelo menos `CURVATURA_MINIMA_ZEBRA` graus (`temZebra()` em `pista.c`).
 
-## A pista
+## O 3D
 
-A pista é Interlagos: 2587 segmentos (cerca de 4.309 m), corrida no sentido anti-horário.
+A lógica é a mesma nas duas pistas: a lista circular, a corrida, o carro e a IA não usam a
+raylib. Cada segmento sabe onde está no mundo, em metros (`xMundo`, `zMundo`, `altura`, `rumo`,
+largura de cada lado e `perfil` do chão), e `pontoNoMundo()` (`pista.c`) converte qualquer posição na pista
+em um ponto 3D. O desenho usa isso:
+
+- `mundo.c` monta e desenha o cenário fixo: o modelo do estádio ou as malhas geradas a partir da lista;
+- `render.c` põe a câmera atrás do carro, andando pela lista, desenha os objetos como sprites que encaram
+  a câmera e coloca os carros (`carros3d.c`) no mundo.
+
+**A física ainda é a antiga:** o carro não tem direção própria, só a posição lateral na pista.
+
+## As pistas
+
+Escolhidas numa tela depois de CORRER (`IdPista` em `pista.h`).
+
+### Copa Pistão
+
+O oval do modelo 3D `recursos/modelos/copa_pistao.glb`, desenhado inteiro, como veio. O traçado
+(`copa_pistao.h`) foi medido nele: a pista é a faixa entre os dois muros de concreto, e a altura real do asfalto
+foi medida em 9 lugares da largura, ponto a ponto, porque o piso não é um plano (a faixa de dentro é reta e a de fora,
+inclinada). Cada carro é assentado pelas quatro rodas (`matrizDoCarro` em `render.c`). A tabela guarda uma linha lisa a distância fixa do muro de fora e a largura
+de cada lado. A inclinação das curvas (até ~8°) sai do perfil medido, e a câmera a acompanha. O carro para nos
+muros, dos dois lados, e raspar custa velocidade. A pista do filme não tem medida oficial, então a volta tem o comprimento
+real de Daytona, 2,5 milhas ou 4.023 m (`COMPRIMENTO_COPA_PISTAO`), e o modelo é ampliado até caber nisso
+(~43 m por unidade). O modelo não tem proporções reais: com esse tamanho, as arquibancadas ficam bem
+mais altas e a pista mais larga que as de verdade.
+
+Modelo: [Motor Speedway of the South](https://sketchfab.com/3d-models/motor-speedway-of-the-south-b6406f62b7b94580844fb8508cc72148),
+de DinseyPixarCarsModels, publicado como CC-BY-4.0. O estádio é do universo de *Carros* (Disney/Pixar) e
+traz os logotipos do filme. A única mudança no arquivo foi converter uma textura JPEG para PNG, porque
+a raylib da Homebrew não lê JPEG.
+
+### Interlagos
+
+As malhas são geradas da lista ao abrir o jogo (`construirInterlagos` em `mundo.c`): asfalto,
+zebras e um terreno que acompanha a altura da pista, com a cidade e os morros em volta.
+
+Interlagos tem 2587 segmentos (cerca de 4.309 m), corrida no sentido anti-horário.
 Cada segmento guarda sua curvatura em graus (negativo para a esquerda, positivo para a
 direita), a altura do chão e o nome do trecho. A soma das curvaturas de uma volta dá
 -360 graus, e o desnível é de 56 m, do S do Senna à Descida do Lago.

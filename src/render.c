@@ -1,40 +1,14 @@
 /*
  * render.c
  * ------------------------------------------------------------------
- * Estrada em pseudo-3D e carros. Veja render.h para a ideia geral.
+ * A visão da corrida, em 3D de verdade, e os carros. Veja render.h.
  *
- * Como funciona a projeção (a "mágica" do pseudo-3D):
- *
- *   A câmera fica a ALTURA_CAMERA acima do chão. Um ponto do chão que
- *   está a uma distância z à frente aparece na tela multiplicado por
- *
- *        escala = PROFUNDIDADE_CAMERA / z
- *
- *   Longe (z grande) -> escala pequena -> ponto perto do horizonte
- *   e estrada estreita. Perto (z pequeno) -> escala grande -> ponto
- *   embaixo na tela e estrada larga. É só isso: uma divisão por z.
- *
- * Como funcionam as curvas:
- *
- *   A estrada nunca vira de verdade. Cada segmento empurra o centro
- *   da estrada um pouco para o lado, e esse empurrão vai crescendo
- *   (dx += curvatura). Somando os empurrões, os segmentos distantes
- *   ficam bem deslocados e a estrada parece curvar.
- *
- * Como funcionam as subidas e descidas:
- *
- *   Cada segmento tem uma altura. Na projeção, em vez da altura fixa
- *   da câmera, usamos a diferença entre a altura da câmera e a do
- *   ponto: um ponto mais alto que o chão sob a câmera sobe na tela,
- *   um mais baixo desce. Atrás de uma lombada, a estrada fica escondida
- *   pela parte mais perto, que é desenhada por cima.
- *
- * Texturas:
- *
- *   As imagens de recursos/texturas são carregadas uma vez, no começo
- *   (carregarTexturas). Se alguma não for encontrada, aquela parte do
- *   desenho volta a usar as cores sólidas, então o jogo nunca quebra
- *   por falta de imagem.
+ *   - O cenário fixo (estádio, asfalto, terreno, objetos, céu) vem de mundo.c.
+ *   - A câmera anda pela lista circular da pista: fica atrás do carro,
+ *     no ponto da pista CAMERA_ATRAS antes dele, e acima dele.
+ *   - Todos os carros são modelos 3D (carros3d.c), colocados no mundo
+ *     pela posição deles na lista.
+ *   - A fumaça e a poeira são nuvens no mundo (fumaca.c).
  * ------------------------------------------------------------------
  */
 
@@ -43,1088 +17,283 @@
 #include "raylib.h"
 #include "rlgl.h"
 #include "render.h"
-#include "obstaculos.h"
+#include "mundo.h"
+#include "carros3d.h"
+#include "fumaca.h"
+#include "raymath.h"
 
 /* ---------- Câmera ---------- */
-#define DISTANCIA_VISIVEL    100       /* quantos segmentos à frente são desenhados */
-#define ALTURA_CAMERA        1000.0f   /* altura da câmera acima do chão */
-#define PROFUNDIDADE_CAMERA  0.84f     /* "zoom" da lente (campo de visão de ~100 graus) */
-#define DISTANCIA_MINIMA     1.0f      /* nada é projetado mais perto que isso (evita dividir por zero) */
-#define DISTANCIA_CAMERA     (ALTURA_CAMERA * PROFUNDIDADE_CAMERA)   /* câmera atrás do carro: 840 unidades */
-#define DISTANCIA_MINIMA_RIVAL 200.0f  /* rival mais perto da câmera que isso não é desenhado */
-#define DISTANCIA_MINIMA_OBJETO 100.0f /* objeto mais perto que isso já passou pela câmera */
-
-/* ---------- Carro (em pixels, no tamanho do carro do jogador) ---------- */
-#define LARGURA_CARRO        170
-#define ALTURA_CARROCERIA    58
-#define MARGEM_CARRO         18        /* distância da base do carro até o pé da tela */
-#define INCLINACAO_CABINE    8.0f      /* quanto a cabine desliza ao virar */
-#define TREPIDACAO_MAXIMA    4         /* pulo máximo na grama */
-#define LIMIAR_POSE_CURVA    0.35f     /* volante além disso (para um lado) mostra a pose de curva */
-#define NUVENS_DE_FUMACA     4         /* nuvens por roda traseira, subindo uma atrás da outra */
-#define DISTANCIA_DA_NUVEM   900.0f    /* a cada tanto andado, uma nuvem nasce de novo na roda */
-#define COR_FUMACA           (Color){ 225, 225, 230, 255 }
-#define COR_POEIRA           (Color){ 150, 120,  70, 255 }
-
-/* ---------- Pista ---------- */
-#define LARGURA_PISTA        2000.0f   /* metade da largura da estrada, em unidades de mundo */
-#define FATOR_CURVA          4.0f      /* converte a curvatura (graus) em empurrão lateral na tela */
-#define SEGMENTOS_POR_FAIXA  3         /* zebras, asfalto e grama alternam a cada 3 segmentos */
-#define PROPORCAO_ZEBRA      1.15f     /* a zebra é 15% mais larga que a estrada */
-#define LINHAS_DA_CHEGADA    2         /* quadriculado da linha de chegada: fileiras... */
-#define COLUNAS_DA_CHEGADA   16        /* ...e quadrados de um lado ao outro da pista */
-#define MEIA_LARGURA_COLCHETE 0.19f    /* colchete do grid: um pouco mais largo que o carro (~0,11) */
-#define FRENTE_COLCHETE      0.62f     /* barra da frente, em frações do segmento à frente do carro */
-#define GROSSURA_COLCHETE    0.07f     /* grossura da barra da frente (fração do segmento) */
-#define GROSSURA_PERNA       0.025f    /* grossura das pernas (fração da meia pista) */
-#define COR_TINTA            (Color){ 235, 235, 235, 255 }
-
-/* ---------- Texturas ---------- */
-#define PASTA_TEXTURAS       "recursos/texturas/"
-#define LARGURA_FUNDO        640.0f    /* largura de referência do fundo (as imagens podem ser maiores, ex.: 2560) */
-#define REPETICOES_ASFALTO   4.0f      /* quantas vezes a textura do asfalto se repete na largura */
-#define VELOCIDADE_CIDADE    0.5f      /* a cidade, mais longe, desliza na metade da velocidade dos morros */
-#define VELOCIDADE_CEU       0.2f
+#define GRAUS_DE_VISAO        65.0f    /* na vertical */
+#define CAMERA_ATRAS          8.5f     /* metros atrás do centro do carro */
+#define CAMERA_ALTURA         3.4f     /* metros acima do chão */
+#define OLHAR_PARA_BAIXO      5.0f     /* graus abaixo do horizonte */
 #define VELOCIDADE_CAMERA_MENU 3000.0f /* a câmera do fundo do menu anda a 75 km/h */
-#define LIMITE_VERMELHO      60        /* quanto o vermelho tem que passar o verde e o azul para ser "pintura" */
-#define BRILHO_VERMELHO      200.0f    /* vermelho do sprite que vira exatamente a cor do rival */
 
-/* As três poses do sprite do carro */
-#define POSE_RETO            0
-#define POSE_ESQUERDA        1
-#define POSE_DIREITA         2
-#define TOTAL_POSES          3
+/* ---------- Distâncias do que é desenhado (metros) ---------- */
+#define DISTANCIA_DOS_RIVAIS  1500.0f
+#define MENOR_DISTANCIA_SPRITE 1.5f    /* mais perto que isso da câmera, também não */
+#define DISTANCIA_DA_FUMACA   200.0f
 
-/* Folha de sprites (gerada pelo gerar_sprites.py): cada linha é um ângulo
- * de volante (de cima para baixo: todo à esquerda ... todo à direita) e
- * cada coluna é um quadro do giro das rodas. Tem que bater com as opções
- * --angulos e --quadros-roda usadas no script (padrão 9 e 4). */
-#define ANGULOS_DA_FOLHA     9
-#define QUADROS_DA_RODA      4
-#define DISTANCIA_POR_QUADRO_DA_RODA 800.0f   /* a 300 km/h: 15 quadros de roda por segundo */
-#define ALTURA_MAXIMA_FRENTE 0.6f             /* a vista de frente não passa de 60% da largura em altura */
+/* ---------- Carros no mundo ---------- */
+#define ENTRE_EIXOS           0.62f    /* distância entre os eixos, em comprimentos do carro */
+#define BITOLA                0.82f    /* distância entre as rodas de um eixo, em larguras do carro */
+#define GRAUS_DO_VOLANTE      7.0f     /* o carro aponta para onde o volante manda */
+#define GRAUS_DE_ROLAGEM      2.0f     /* e inclina para fora ao virar */
+#define MERGULHO_NA_FREADA    0.025f   /* e abaixa o nariz ao frear */
+#define TREPIDACAO_NA_GRAMA   0.06f    /* metros */
 
-/* ---------- Cores ---------- */
-#define COR_CEU_ALTO         (Color){  40, 110, 210, 255 }
-#define COR_CEU_HORIZONTE    (Color){ 160, 210, 255, 255 }
-#define COR_GRAMA_CLARA      (Color){  16, 170,  16, 255 }
-#define COR_GRAMA_ESCURA     (Color){   0, 154,   0, 255 }
-#define COR_CHAO_DISTANTE    (Color){  54, 125,  48, 255 }   /* média da textura de grama */
-#define COR_ASFALTO_CLARO    (Color){ 107, 107, 107, 255 }
-#define COR_ASFALTO_ESCURO   (Color){  99,  99,  99, 255 }
-#define COR_ZEBRA_CLARA      (Color){ 245, 245, 245, 255 }
-#define COR_ZEBRA_ESCURA     (Color){ 200,  20,  20, 255 }
-#define COR_LARGADA          (Color){ 240, 240, 240, 255 }
-#define COR_LARGADA_ESCURA   (Color){  25,  25,  28, 255 }
-#define COR_VIDRO            (Color){  70, 110, 150, 255 }
-#define COR_PNEU             (Color){  25,  25,  25, 255 }
-#define COR_PARACHOQUE       (Color){  60,  60,  60, 255 }
-#define COR_LANTERNA         (Color){ 150,  20,  20, 255 }
-#define COR_LANTERNA_FREIO   (Color){ 255,  90,  60, 255 }
+/* ---------- Fumaça ---------- */
+#define INICIO_DA_FUMACA      0.55f    /* derrapagem abaixo disso não solta fumaça */
+#define NUVENS_POR_SEGUNDO    55.0f    /* por roda, na derrapagem cheia */
+#define VELOCIDADE_DA_ARRANCADA 1600.0f /* abaixo disso (40 km/h), acelerar patina um pouco */
+#define ALTURA_DA_NUVEM       0.25f    /* metros acima do chão */
 
-/* Cores de cada carro, pelo número: 0 é o jogador, 1 a 7 os rivais */
-static const Color CORES_CARROCERIA[TOTAL_CARROS] = {
-    { 220,  30,  40, 255 },   /* 0 Você: vermelho */
-    { 240, 200,  20, 255 },   /* 1 Barão: amarelo */
-    { 200,  60, 220, 255 },   /* 2 Neon: roxo */
-    {  30,  90, 220, 255 },   /* 3 Trovão: azul */
-    { 240, 130,  20, 255 },   /* 4 Zé Pistão: laranja */
-    {  60, 190, 170, 255 },   /* 5 Fuscão: verde-água */
-    { 250, 120, 180, 255 },   /* 6 Bolinha: rosa */
-    { 150,  80,  40, 255 },   /* 7 Ferrugem: marrom */
-};
-static const Color CORES_CABINE[TOTAL_CARROS] = {
-    { 170,  20,  30, 255 },
-    { 190, 150,  10, 255 },
-    { 150,  40, 170, 255 },
-    {  20,  60, 170, 255 },
-    { 190, 100,  10, 255 },
-    {  40, 150, 130, 255 },
-    { 210,  80, 140, 255 },
-    { 110,  60,  30, 255 },
-};
-
-/* Objetos da beira da pista: a imagem de cada TipoObjeto (obstaculos.h) e
- * a largura dele no mundo (a altura sai da proporção da imagem). Para
- * comparar: a pista tem 2 * LARGURA_PISTA = 4000 e o carro, ~430. */
-static const char *ARQUIVOS_OBJETO[TOTAL_TIPOS_OBJETO] = {
-    [OBJETO_ARVORE]    = "sprites/arvore.png",
-    [OBJETO_PORTICO]   = "sprites/portico.png",
-    [OBJETO_PNEUS]     = "sprites/pneus.png",
-    [OBJETO_PLACA_50]  = "sprites/placa_50.png",
-    [OBJETO_PLACA_100] = "sprites/placa_100.png",
-    [OBJETO_PLACA_150] = "sprites/placa_150.png",
-    [OBJETO_MARCA_GRID] = NULL,   /* pintada no asfalto (desenharMarcasDoGrid), sem imagem */
-};
-static const float LARGURA_OBJETO[TOTAL_TIPOS_OBJETO] = {
-    [OBJETO_ARVORE]    = 1500.0f,
-    [OBJETO_PORTICO]   = 2.6f * LARGURA_PISTA,   /* as colunas ficam logo fora da zebra */
-    [OBJETO_PNEUS]     = 1200.0f,
-    [OBJETO_PLACA_50]  = 360.0f,
-    [OBJETO_PLACA_100] = 360.0f,
-    [OBJETO_PLACA_150] = 360.0f,
-};
-
-/* Texturas carregadas por carregarTexturas(). id == 0 quer dizer "não carregou". */
-static Texture2D texturaCeu;
-static Texture2D texturaCidade;
-static Texture2D texturaMorros;
-static Texture2D texturaAsfalto[2];   /* [0] escuro, [1] claro */
-static Texture2D texturaGrama[2];     /* [0] escura, [1] clara */
-static Texture2D texturaCarro[TOTAL_CARROS][TOTAL_POSES];
-static Texture2D texturaFolha[TOTAL_CARROS];    /* grade: ângulos de volante x quadros de roda */
-static Texture2D texturaFrente[TOTAL_CARROS];   /* vista de frente, para a garagem e o menu */
-static Texture2D texturaObjeto[TOTAL_TIPOS_OBJETO];
-
-/* Quanto o fundo já deslizou para o lado (em pixels da imagem) por causa das curvas */
-static float deslocamentoFundo = 0.0f;
-
-/* Onde um ponto da pista aparece na tela. */
-typedef struct {
-    float x;         /* centro da estrada na tela (pixels) */
-    float y;         /* altura na tela (pixels) */
-    float largura;   /* metade da largura da estrada na tela (pixels) */
-} PontoNaTela;
-
-/* Tudo o que a câmera enxerga neste quadro, calculado uma vez
- * e usado tanto para desenhar a estrada quanto os carros. */
-typedef struct {
-    PosicaoNaPista camera;
-    float xCamera;
-    float alturaCamera;                       /* altura da câmera no mundo (chão + ALTURA_CAMERA) */
-    Segmento *segmentos[DISTANCIA_VISIVEL];   /* os próximos nós da lista */
-    float xCurva[DISTANCIA_VISIVEL];          /* empurrão da curva no começo de cada segmento */
-    float dxCurva[DISTANCIA_VISIVEL];         /* quanto o empurrão cresce dentro do segmento */
-    PontoNaTela perto[DISTANCIA_VISIVEL];     /* começo do segmento na tela */
-    PontoNaTela longe[DISTANCIA_VISIVEL];     /* fim do segmento na tela */
-    float limiteTela[DISTANCIA_VISIVEL];      /* abaixo desta linha da tela, a estrada mais perto cobre o segmento */
-} Visao;
+#define LARGURA_CARRO         170      /* tamanho de referência das fotos nos menus */
 
 /*
- * carregarTexturaRepetida
- * Carrega uma imagem que pode se repetir lado a lado (asfalto, grama, fundo).
- * Recebe: o nome do arquivo dentro de PASTA_TEXTURAS.
- * Devolve: a textura (id 0 se o arquivo não existir).
+ * aFrenteDaCamera
+ * Recebe: a câmera e um ponto.
+ * Devolve: a distância do ponto à frente da câmera (negativa se estiver atrás).
  */
-static Texture2D carregarTexturaRepetida(const char *arquivo) {
-    Texture2D textura = LoadTexture(TextFormat("%s%s", PASTA_TEXTURAS, arquivo));
-    if (textura.id != 0) {
-        SetTextureWrap(textura, TEXTURE_WRAP_REPEAT);
-        /* Mipmaps: sem eles, o asfalto e a grama de 256 px "tremem" quando
-         * a estrada fica pequena lá longe (mesmo truque dos carros) */
-        GenTextureMipmaps(&textura);
-        SetTextureFilter(textura, TEXTURE_FILTER_TRILINEAR);
-    }
-    return textura;
+static float aFrenteDaCamera(Camera3D camera, Vector3 ponto) {
+    Vector3 frente = { camera.target.x - camera.position.x, camera.target.y - camera.position.y,
+                       camera.target.z - camera.position.z };
+    float tamanho = sqrtf(frente.x * frente.x + frente.y * frente.y + frente.z * frente.z);
+    return ((ponto.x - camera.position.x) * frente.x + (ponto.y - camera.position.y) * frente.y
+            + (ponto.z - camera.position.z) * frente.z) / tamanho;
 }
 
 /*
- * carregarCarroPintado
- * Carrega um sprite do carro trocando o vermelho da pintura pela cor
- * pedida. Cada pixel bem vermelho vira a cor nova, mantendo o quanto ele
- * era claro ou escuro (assim as sombras do desenho continuam lá).
- * Pneus, asa e detalhes amarelos não são vermelhos e ficam iguais.
- * Recebe: o nome do arquivo e a cor da carroceria.
- * Devolve: a textura (id 0 se o arquivo não existir).
+ * montarCamera
+ * Põe a câmera atrás de um ponto da pista, olhando para ele. De lado ela
+ * fica presa ao carro, que por isso aparece sempre no centro da tela; nas
+ * curvas inclinadas ela inclina junto com o chão.
+ * Recebe: a posição do carro e o deslocamento lateral dele.
+ * Devolve: a câmera.
  */
-static Texture2D carregarCarroPintado(const char *arquivo, Color cor) {
-    Image imagem = LoadImage(TextFormat("%s%s", PASTA_TEXTURAS, arquivo));
-    if (imagem.data == NULL) {
-        return (Texture2D){ 0 };
-    }
-    ImageFormat(&imagem, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
+static Camera3D montarCamera(PosicaoNaPista carro, float lateral) {
+    PosicaoNaPista atras = carro;
+    moverNaPista(&atras, -CAMERA_ATRAS * UNIDADES_POR_METRO);   /* as voltas devolvidas não importam aqui */
+    PontoNoMundo deCamera = pontoNoMundo(atras, lateral);
+    PontoNoMundo doCarro = pontoNoMundo(carro, lateral);
 
-    Color *pixels = (Color *) imagem.data;
-    for (int i = 0; i < imagem.width * imagem.height; i++) {
-        Color p = pixels[i];
-        if (p.r > p.g + LIMITE_VERMELHO && p.r > p.b + LIMITE_VERMELHO) {
-            float brilho = p.r / BRILHO_VERMELHO;
-            float r = cor.r * brilho, g = cor.g * brilho, b = cor.b * brilho;
-            pixels[i].r = (unsigned char) (r > 255 ? 255 : r);
-            pixels[i].g = (unsigned char) (g > 255 ? 255 : g);
-            pixels[i].b = (unsigned char) (b > 255 ? 255 : b);
-        }
-    }
+    float dx = doCarro.x - deCamera.x, dz = doCarro.z - deCamera.z;
+    float comprimento = hypotf(dx, dz);
+    float ladeira = (doCarro.y - deCamera.y) / comprimento;
 
-    Texture2D textura = LoadTextureFromImage(imagem);
-    UnloadImage(imagem);
-    return textura;
+    Camera3D camera = { 0 };
+    camera.position = (Vector3){ deCamera.x, deCamera.y + CAMERA_ALTURA, deCamera.z };
+    camera.target = (Vector3){ camera.position.x + dx / comprimento,
+                               camera.position.y + ladeira - tanf(OLHAR_PARA_BAIXO * DEG2RAD),
+                               camera.position.z + dz / comprimento };
+
+    /* O "para cima" da câmera é perpendicular ao chão inclinado */
+    float rumo = doCarro.rumo * DEG2RAD;
+    float inclinacao = atanf(doCarro.inclinacao);
+    camera.up = (Vector3){ -cosf(rumo) * sinf(inclinacao), cosf(inclinacao), -sinf(rumo) * sinf(inclinacao) };
+    camera.fovy = GRAUS_DE_VISAO;
+    camera.projection = CAMERA_PERSPECTIVE;
+    return camera;
 }
 
 /*
- * carregarSpriteDoCarro
- * Carrega uma imagem de carro ("folha" ou "frente") para o carro de
- * número dado. Primeiro procura uma imagem só dele (ex.: carro/3_folha.png);
- * se não existir, usa a compartilhada (carro/carro_folha.png), repintada
- * com a cor do carro (o carro 0 usa a original, que já é vermelha).
- * Liga os mipmaps: versões reduzidas da imagem que a placa de vídeo usa
- * quando o carro está longe e pequeno, para ele não ficar serrilhado.
- * Recebe: o número do carro e o tipo ("folha" ou "frente").
- * Devolve: a textura (id 0 se nenhuma das imagens existir).
+ * matrizDoCarro
+ * Assenta o carro no chão: mede a altura do asfalto embaixo das quatro
+ * rodas e, com elas, acha a altura, a ladeira e a inclinação do carro. Em
+ * cima disso, ele aponta para onde o volante manda, inclina um pouco para
+ * fora ao virar e abaixa o nariz ao frear.
+ * Recebe: o carro.
+ * Devolve: a matriz que leva o carro normalizado até lá.
  */
-static Texture2D carregarSpriteDoCarro(int numero, const char *tipo) {
-    Texture2D textura = { 0 };
-    const char *propria = TextFormat("carro/%d_%s.png", numero, tipo);
-    if (FileExists(TextFormat("%s%s", PASTA_TEXTURAS, propria))) {
-        textura = LoadTexture(TextFormat("%s%s", PASTA_TEXTURAS, propria));
-    } else {
-        const char *compartilhada = TextFormat("carro/carro_%s.png", tipo);
-        if (!FileExists(TextFormat("%s%s", PASTA_TEXTURAS, compartilhada))) {
-            return textura;
-        }
-        if (numero == 0) {
-            textura = LoadTexture(TextFormat("%s%s", PASTA_TEXTURAS, compartilhada));
-        } else {
-            textura = carregarCarroPintado(compartilhada, CORES_CARROCERIA[numero]);
-        }
+static Matrix matrizDoCarro(Carro *carro) {
+    PontoNoMundo aqui = pontoNoMundo(carro->posicao, carro->deslocamentoLateral);
+    float meiaDistancia = comprimentoDoCarro3D(carro->numero) * ENTRE_EIXOS / 2.0f;
+    float meiaBitola = larguraDoCarro3D(carro->numero) * BITOLA / 2.0f;
+    float lateral = carro->deslocamentoLateral * larguraDoLado(carro->posicao.segmento, carro->deslocamentoLateral);
+
+    PosicaoNaPista eixoDaFrente = carro->posicao, eixoDeTras = carro->posicao;
+    moverNaPista(&eixoDaFrente, meiaDistancia * UNIDADES_POR_METRO);
+    moverNaPista(&eixoDeTras, -meiaDistancia * UNIDADES_POR_METRO);
+    float frenteEsquerda = alturaDoChao(eixoDaFrente, lateral - meiaBitola);
+    float frenteDireita = alturaDoChao(eixoDaFrente, lateral + meiaBitola);
+    float trasEsquerda = alturaDoChao(eixoDeTras, lateral - meiaBitola);
+    float trasDireita = alturaDoChao(eixoDeTras, lateral + meiaBitola);
+
+    float ladeira = ((frenteEsquerda + frenteDireita) - (trasEsquerda + trasDireita)) / (4.0f * meiaDistancia);
+    float inclinacao = ((frenteDireita + trasDireita) - (frenteEsquerda + trasEsquerda)) / (4.0f * meiaBitola);
+    float y = (frenteEsquerda + frenteDireita + trasEsquerda + trasDireita) / 4.0f;
+
+    if (carro->ultimosComandos.frear && carro->velocidade > 0.0f) {
+        ladeira -= MERGULHO_NA_FREADA;
     }
-
-    if (textura.id != 0) {
-        GenTextureMipmaps(&textura);
-        SetTextureFilter(textura, TEXTURE_FILTER_TRILINEAR);
-    }
-    return textura;
-}
-
-/*
- * carregarTexturas
- * Lê todas as imagens do disco para a placa de vídeo. Tem que ser
- * chamada depois de InitWindow (a raylib precisa da janela aberta).
- * Recebe: nada.
- * Devolve: nada.
- */
-void carregarTexturas(void) {
-    texturaCeu = carregarTexturaRepetida("fundo/ceu.png");
-    texturaCidade = carregarTexturaRepetida("fundo/cidade.png");
-    texturaMorros = carregarTexturaRepetida("fundo/morros.png");
-    texturaAsfalto[0] = carregarTexturaRepetida("estrada/asfalto_escuro.png");
-    texturaAsfalto[1] = carregarTexturaRepetida("estrada/asfalto_claro.png");
-    texturaGrama[0] = carregarTexturaRepetida("estrada/grama_escura.png");
-    texturaGrama[1] = carregarTexturaRepetida("estrada/grama_clara.png");
-
-    const char *poses[TOTAL_POSES] = {
-        "carro/carro_reto.png", "carro/carro_esquerda.png", "carro/carro_direita.png"
-    };
-    for (int pose = 0; pose < TOTAL_POSES; pose++) {
-        /* O sprite já é vermelho: o jogador usa o original */
-        texturaCarro[0][pose] = LoadTexture(TextFormat("%s%s", PASTA_TEXTURAS, poses[pose]));
-        for (int numero = 1; numero < TOTAL_CARROS; numero++) {
-            texturaCarro[numero][pose] = carregarCarroPintado(poses[pose], CORES_CARROCERIA[numero]);
-        }
-    }
-
-    /* Folhas e vistas de frente (opcionais: sem elas, valem as poses acima) */
-    for (int numero = 0; numero < TOTAL_CARROS; numero++) {
-        texturaFolha[numero] = carregarSpriteDoCarro(numero, "folha");
-        texturaFrente[numero] = carregarSpriteDoCarro(numero, "frente");
-    }
-
-    /* Objetos da beira da pista, com mipmaps: quase sempre aparecem
-     * bem menores que a imagem, lá longe */
-    for (int tipo = 0; tipo < TOTAL_TIPOS_OBJETO; tipo++) {
-        if (ARQUIVOS_OBJETO[tipo] == NULL) {
-            continue;
-        }
-        texturaObjeto[tipo] = LoadTexture(TextFormat("%s%s", PASTA_TEXTURAS, ARQUIVOS_OBJETO[tipo]));
-        if (texturaObjeto[tipo].id != 0) {
-            GenTextureMipmaps(&texturaObjeto[tipo]);
-            SetTextureFilter(texturaObjeto[tipo], TEXTURE_FILTER_TRILINEAR);
-        }
-    }
-}
-
-/*
- * descarregarTexturas
- * Devolve a memória de vídeo das texturas. Chamar antes de CloseWindow.
- * (UnloadTexture ignora texturas com id 0, as que não carregaram.)
- * Recebe: nada.
- * Devolve: nada.
- */
-void descarregarTexturas(void) {
-    UnloadTexture(texturaCeu);
-    UnloadTexture(texturaCidade);
-    UnloadTexture(texturaMorros);
-    for (int i = 0; i < 2; i++) {
-        UnloadTexture(texturaAsfalto[i]);
-        UnloadTexture(texturaGrama[i]);
-    }
-    for (int numero = 0; numero < TOTAL_CARROS; numero++) {
-        for (int pose = 0; pose < TOTAL_POSES; pose++) {
-            UnloadTexture(texturaCarro[numero][pose]);
-        }
-        UnloadTexture(texturaFolha[numero]);
-        UnloadTexture(texturaFrente[numero]);
-    }
-    for (int tipo = 0; tipo < TOTAL_TIPOS_OBJETO; tipo++) {
-        UnloadTexture(texturaObjeto[tipo]);
-    }
-}
-
-/*
- * projetar
- * Converte um ponto do chão (coordenadas de mundo) em coordenadas de tela.
- * Recebe: x do centro da estrada, altura do chão nesse ponto, distância z
- *         à frente da câmera, x da câmera e altura da câmera.
- * Devolve: a posição e a largura da estrada naquele ponto da tela.
- */
-static PontoNaTela projetar(float xMundo, float alturaMundo, float z, float xCamera, float alturaCamera) {
-    float centroX = GetScreenWidth() / 2.0f;
-    float metadeAltura = GetScreenHeight() / 2.0f;
-    float escala = PROFUNDIDADE_CAMERA / z;
-
-    /* O horizontal usa a mesma escala do vertical (a altura da tela),
-     * na proporção 4:3 em que o jogo foi desenhado. Assim a pista não
-     * estica em monitores largos: eles só mostram mais dos lados. */
-    float fatorHorizontal = metadeAltura * LARGURA_TELA / ALTURA_TELA;
-
-    PontoNaTela ponto;
-    ponto.x = centroX + escala * (xMundo - xCamera) * fatorHorizontal;
-    ponto.y = metadeAltura + escala * (alturaCamera - alturaMundo) * metadeAltura;
-    ponto.largura = escala * LARGURA_PISTA * fatorHorizontal;
-    return ponto;
-}
-
-/*
- * escalaDaTela
- * Quanto a tela atual é maior que a de 600 de altura para a qual o jogo
- * foi desenhado. Usada para os tamanhos fixos em pixels (o carro).
- * Recebe: nada.
- * Devolve: 1 em 800x600, 1,8 em 1920x1080...
- */
-static float escalaDaTela(void) {
-    return GetScreenHeight() / (float) ALTURA_TELA;
-}
-
-/*
- * calcularVisao
- * Anda pela lista a partir do segmento da câmera, calculando onde cada
- * um dos próximos DISTANCIA_VISIVEL segmentos aparece na tela e somando
- * o empurrão das curvas.
- * Recebe: a visão a preencher, a posição da câmera e o deslocamento
- *         lateral (0 = centro, -1 = borda esquerda, +1 = borda direita).
- * Devolve: nada.
- */
-static void calcularVisao(Visao *visao, PosicaoNaPista camera, float deslocamentoLateral) {
-    visao->camera = camera;
-    visao->xCamera = deslocamentoLateral * LARGURA_PISTA;
-    visao->alturaCamera = alturaNaPosicao(camera) + ALTURA_CAMERA;
-    float limite = GetScreenHeight();
-
-    /* Empurrão lateral da curva. Começa "descontando" o pedaço do
-     * segmento atual que a câmera já andou, para a curva não dar trancos. */
-    float fracaoAndada = camera.distanciaNoSegmento / COMPRIMENTO_SEGMENTO;
-    float xCurva = 0.0f;
-    float dxCurva = -camera.segmento->curvatura * FATOR_CURVA * fracaoAndada;
-
-    Segmento *atual = camera.segmento;
-    for (int i = 0; i < DISTANCIA_VISIVEL; i++) {
-        float zPerto = i * COMPRIMENTO_SEGMENTO - camera.distanciaNoSegmento;
-        float zLonge = (i + 1) * COMPRIMENTO_SEGMENTO - camera.distanciaNoSegmento;
-        if (zPerto < DISTANCIA_MINIMA) {
-            zPerto = DISTANCIA_MINIMA;   /* o começo do segmento atual está atrás da câmera */
-        }
-
-        visao->segmentos[i] = atual;
-        visao->xCurva[i] = xCurva;
-        visao->dxCurva[i] = dxCurva;
-        Segmento *seguinte = proximoSegmento(atual);
-        visao->perto[i] = projetar(xCurva, atual->altura, zPerto, visao->xCamera, visao->alturaCamera);
-        visao->longe[i] = projetar(xCurva + dxCurva, seguinte->altura, zLonge,
-                                   visao->xCamera, visao->alturaCamera);
-
-        /* O ponto mais alto da tela já ocupado pela estrada mais perto:
-         * o que estiver abaixo dele, neste segmento, fica escondido. */
-        visao->limiteTela[i] = limite;
-        if (visao->longe[i].y < limite) {
-            limite = visao->longe[i].y;
-        }
-
-        xCurva += dxCurva;
-        dxCurva += atual->curvatura * FATOR_CURVA;
-
-        atual = seguinte;   /* lista circular: depois do último vem a largada */
-    }
-}
-
-/*
- * desenharTrapezio
- * Desenha um trapézio "deitado": a base de baixo é a parte mais perto,
- * a de cima é a mais longe. Cada pedaço de estrada e zebra é um.
- * A raylib só desenha triângulos, então são dois triângulos.
- * Recebe: centro e meia-largura embaixo e em cima, e a cor.
- * Devolve: nada.
- */
-static void desenharTrapezio(float xPerto, float yPerto, float metadePerto,
-                             float xLonge, float yLonge, float metadeLonge, Color cor) {
-    Vector2 baixoEsquerda = { xPerto - metadePerto, yPerto };
-    Vector2 baixoDireita  = { xPerto + metadePerto, yPerto };
-    Vector2 cimaEsquerda  = { xLonge - metadeLonge, yLonge };
-    Vector2 cimaDireita   = { xLonge + metadeLonge, yLonge };
-
-    /* A raylib exige os vértices em sentido anti-horário na tela */
-    DrawTriangle(cimaEsquerda, baixoEsquerda, baixoDireita, cor);
-    DrawTriangle(cimaEsquerda, baixoDireita, cimaDireita, cor);
-}
-
-/*
- * desenharTrapezioComTextura
- * Igual ao desenharTrapezio, mas preenchido com uma textura. A imagem
- * ocupa o segmento inteiro no comprimento e se repete "repeticoes"
- * vezes na largura. Usa a rlgl (a camada de baixo da raylib), porque
- * as funções comuns de textura só desenham retângulos.
- * Recebe: a textura, centro e meia-largura embaixo e em cima, e as repetições.
- * Devolve: nada.
- */
-static void desenharTrapezioComTextura(Texture2D textura,
-                                       float xPerto, float yPerto, float metadePerto,
-                                       float xLonge, float yLonge, float metadeLonge,
-                                       float repeticoes) {
-    rlSetTexture(textura.id);
-    rlBegin(RL_QUADS);
-    rlColor4ub(255, 255, 255, 255);
-    /* Mesma ordem anti-horária do desenharTrapezio */
-    rlTexCoord2f(0.0f, 0.0f);       rlVertex2f(xLonge - metadeLonge, yLonge);
-    rlTexCoord2f(0.0f, 1.0f);       rlVertex2f(xPerto - metadePerto, yPerto);
-    rlTexCoord2f(repeticoes, 1.0f); rlVertex2f(xPerto + metadePerto, yPerto);
-    rlTexCoord2f(repeticoes, 0.0f); rlVertex2f(xLonge + metadeLonge, yLonge);
-    rlEnd();
-    rlSetTexture(0);
-}
-
-/*
- * ehSegmentoClaro
- * Diz se o segmento usa as cores claras ou escuras. As cores alternam
- * a cada SEGMENTOS_POR_FAIXA segmentos, o que dá a sensação de velocidade.
- * Recebe: o segmento.
- * Devolve: 1 se for claro, 0 se for escuro.
- */
-static int ehSegmentoClaro(Segmento *segmento) {
-    return (segmento->indice / SEGMENTOS_POR_FAIXA) % 2 == 0;
-}
-
-/*
- * desenharGrama
- * Pinta a faixa de grama de um segmento: um retângulo da largura da
- * tela, entre a altura do começo e a do fim do segmento.
- * Recebe: o segmento e os pontos de tela do começo (perto) e do fim (longe).
- * Devolve: nada.
- */
-static void desenharGrama(Segmento *segmento, PontoNaTela perto, PontoNaTela longe) {
-    if (longe.y >= perto.y) {
-        return;   /* descida vista de cima de uma lombada: o segmento está de costas e escondido */
-    }
-    int claro = ehSegmentoClaro(segmento);
-    int largura = GetScreenWidth();
-    float altura = perto.y - longe.y + 1;
-
-    Texture2D textura = texturaGrama[claro];
-    if (textura.id == 0) {
-        Color corGrama = claro ? COR_GRAMA_CLARA : COR_GRAMA_ESCURA;
-        DrawRectangle(0, (int) longe.y, largura, (int) altura, corGrama);
-        return;
-    }
-
-    /* Cada "ladrilho" de grama tem metade da largura da estrada naquele
-     * ponto, então ele encolhe com a distância. A conta do x prende os
-     * ladrilhos no centro da estrada, para a grama andar junto nas curvas. */
-    float ladrilho = perto.largura / 2.0f;
-    if (ladrilho < 1.0f) {
-        ladrilho = 1.0f;
-    }
-    float lado = (float) textura.width;   /* em pixels da imagem (256 nas atuais) */
-    Rectangle origem = { -perto.x / ladrilho * lado, 0.0f,
-                         largura / ladrilho * lado, (float) textura.height };
-    Rectangle destino = { 0.0f, longe.y, (float) largura, altura };
-    DrawTexturePro(textura, origem, destino, (Vector2){ 0, 0 }, 0.0f, WHITE);
-}
-
-/*
- * pontoDaEstrada
- * Um ponto dentro do pedaço de estrada entre "perto" e "longe".
- * Recebe: os dois pontos de tela, quanto andar de perto até longe
- *         (0 a 1) e onde na lateral (-1 borda esquerda, +1 direita).
- * Devolve: o ponto na tela.
- */
-static Vector2 pontoDaEstrada(PontoNaTela perto, PontoNaTela longe, float frente, float lado) {
-    float x = perto.x + (longe.x - perto.x) * frente;
-    float metade = perto.largura + (longe.largura - perto.largura) * frente;
-    return (Vector2){ x + lado * metade, perto.y + (longe.y - perto.y) * frente };
-}
-
-/*
- * desenharRetanguloNaEstrada
- * Pinta um retângulo deitado no asfalto de um segmento (tinta no chão).
- * Recebe: os pontos de tela do começo (perto) e do fim (longe) do
- *         segmento, de onde a onde ele vai na frente (0 a 1), de onde a
- *         onde vai na lateral (-1 a 1) e a cor.
- * Devolve: nada.
- */
-static void desenharRetanguloNaEstrada(PontoNaTela perto, PontoNaTela longe, float frente0, float frente1,
-                                       float lado0, float lado1, Color cor) {
-    Vector2 baixoEsquerda = pontoDaEstrada(perto, longe, frente0, lado0);
-    Vector2 baixoDireita  = pontoDaEstrada(perto, longe, frente0, lado1);
-    Vector2 cimaEsquerda  = pontoDaEstrada(perto, longe, frente1, lado0);
-    Vector2 cimaDireita   = pontoDaEstrada(perto, longe, frente1, lado1);
-    DrawTriangle(cimaEsquerda, baixoEsquerda, baixoDireita, cor);
-    DrawTriangle(cimaEsquerda, baixoDireita, cimaDireita, cor);
-}
-
-/*
- * desenharLinhaDeChegada
- * Pinta o segmento da largada como uma faixa quadriculada, preto e
- * branco, de um lado ao outro da pista.
- * Recebe: os pontos de tela do começo (perto) e do fim (longe) do segmento.
- * Devolve: nada.
- */
-static void desenharLinhaDeChegada(PontoNaTela perto, PontoNaTela longe) {
-    for (int linha = 0; linha < LINHAS_DA_CHEGADA; linha++) {
-        float frente0 = (float) linha / LINHAS_DA_CHEGADA;
-        float frente1 = (float) (linha + 1) / LINHAS_DA_CHEGADA;
-        for (int coluna = 0; coluna < COLUNAS_DA_CHEGADA; coluna++) {
-            float lado0 = -1.0f + 2.0f * coluna / COLUNAS_DA_CHEGADA;
-            float lado1 = -1.0f + 2.0f * (coluna + 1) / COLUNAS_DA_CHEGADA;
-            Color cor = ((linha + coluna) % 2 == 0) ? COR_LARGADA : COR_LARGADA_ESCURA;
-            desenharRetanguloNaEstrada(perto, longe, frente0, frente1, lado0, lado1, cor);
-        }
-    }
-}
-
-/*
- * desenharMarcasDoGrid
- * Pinta o colchete de cada lugar do grid que estiver neste segmento:
- * uma barra atravessada logo à frente do carro e duas pernas pelos
- * lados dele, voltando até onde o carro fica (o começo do segmento).
- *
- *        perna  barra  perna
- *          |‾‾‾‾‾‾‾‾‾‾‾‾|      <- frente
- *          |   (carro)  |
- *
- * Recebe: o segmento e os pontos de tela do começo e do fim dele.
- * Devolve: nada.
- */
-static void desenharMarcasDoGrid(Segmento *segmento, PontoNaTela perto, PontoNaTela longe) {
-    for (Obstaculo *objeto = segmento->obstaculos; objeto != NULL; objeto = objeto->proximo) {
-        if (objeto->tipo != OBJETO_MARCA_GRID) {
-            continue;
-        }
-        float centro = objeto->deslocamentoLateral;
-        float esquerda = centro - MEIA_LARGURA_COLCHETE;
-        float direita = centro + MEIA_LARGURA_COLCHETE;
-        float frente = FRENTE_COLCHETE;
-
-        desenharRetanguloNaEstrada(perto, longe, frente - GROSSURA_COLCHETE, frente,
-                                   esquerda, direita, COR_TINTA);
-        desenharRetanguloNaEstrada(perto, longe, 0.0f, frente, esquerda, esquerda + GROSSURA_PERNA, COR_TINTA);
-        desenharRetanguloNaEstrada(perto, longe, 0.0f, frente, direita - GROSSURA_PERNA, direita, COR_TINTA);
-    }
-}
-
-/*
- * desenharEstrada
- * Desenha a zebra (só nas curvas, como na vida real) e o asfalto de um
- * segmento. A largada vira o quadriculado da linha de chegada.
- * Recebe: o segmento e os pontos de tela do começo (perto) e do fim (longe).
- * Devolve: nada.
- */
-static void desenharEstrada(Segmento *segmento, PontoNaTela perto, PontoNaTela longe) {
-    int claro = ehSegmentoClaro(segmento);
-
-    /* Zebra: um trapézio um pouco mais largo, que sobra dos lados do asfalto */
-    if (temZebra(segmento)) {
-        Color corZebra = claro ? COR_ZEBRA_CLARA : COR_ZEBRA_ESCURA;
-        desenharTrapezio(perto.x, perto.y, perto.largura * PROPORCAO_ZEBRA,
-                         longe.x, longe.y, longe.largura * PROPORCAO_ZEBRA, corZebra);
-    }
-
-    if (segmento->ehLinhaDeChegada) {
-        desenharLinhaDeChegada(perto, longe);
-        return;
-    }
-
-    Texture2D textura = texturaAsfalto[claro];
-    if (textura.id == 0) {
-        Color corAsfalto = claro ? COR_ASFALTO_CLARO : COR_ASFALTO_ESCURO;
-        desenharTrapezio(perto.x, perto.y, perto.largura,
-                         longe.x, longe.y, longe.largura, corAsfalto);
-    } else {
-        desenharTrapezioComTextura(textura, perto.x, perto.y, perto.largura,
-                                   longe.x, longe.y, longe.largura, REPETICOES_ASFALTO);
-    }
-    desenharMarcasDoGrid(segmento, perto, longe);
-}
-
-/*
- * desenharCamadaDoFundo
- * Desenha uma imagem de fundo na largura da tela, com a base encostada
- * em "baseY", ampliada pela mesma escala nos dois eixos (não estica).
- * A imagem se repete para os lados, então pode deslizar sem acabar e
- * cobre telas de qualquer largura.
- * Recebe: a textura, a base na tela, quanto já deslizou e a escala.
- * Devolve: nada.
- */
-static void desenharCamadaDoFundo(Texture2D textura, float baseY, float deslizou, float escala) {
-    float largura = GetScreenWidth();
-    /* "deslizou" e "escala" contam em pixels de uma imagem de LARGURA_FUNDO;
-     * uma imagem mais detalhada (mais larga) é convertida para essa medida */
-    float fator = textura.width / LARGURA_FUNDO;
-    escala /= fator;
-    float altura = textura.height * escala;
-    Rectangle origem = { deslizou * fator, 0.0f, largura / escala, (float) textura.height };
-    Rectangle destino = { 0.0f, baseY - altura, largura, altura };
-    DrawTexturePro(textura, origem, destino, (Vector2){ 0, 0 }, 0.0f, WHITE);
-}
-
-/*
- * desenharFundo
- * Pinta o céu até o horizonte (meio da tela) e o chão inteiro abaixo
- * dele. O chão cobre a faixa entre o último segmento visível e o
- * horizonte, que nenhum segmento alcança.
- * Com as texturas, o céu, a cidade e os morros são três camadas que
- * deslizam nas curvas, cada uma numa velocidade (efeito parallax:
- * o que está mais longe parece se mexer menos).
- * Recebe: nada.
- * Devolve: nada.
- */
-static void desenharFundo(void) {
-    int largura = GetScreenWidth();
-    int horizonte = GetScreenHeight() / 2;
-    /* Em 800x600 a imagem de 640 px ocupava a largura toda (escala 1,25);
-     * em telas maiores, a escala cresce com a altura da tela */
-    float escala = (LARGURA_TELA / LARGURA_FUNDO) * escalaDaTela();
-
-    if (texturaCeu.id != 0) {
-        /* O céu sempre preenche do topo até o horizonte, sem esticar */
-        float escalaCeu = (float) horizonte / texturaCeu.height;
-        float fatorCeu = texturaCeu.width / LARGURA_FUNDO;
-        Rectangle origem = { deslocamentoFundo * VELOCIDADE_CEU * fatorCeu, 0.0f,
-                             largura / escalaCeu, (float) texturaCeu.height };
-        Rectangle destino = { 0.0f, 0.0f, (float) largura, (float) horizonte };
-        DrawTexturePro(texturaCeu, origem, destino, (Vector2){ 0, 0 }, 0.0f, WHITE);
-    } else {
-        DrawRectangleGradientV(0, 0, largura, horizonte, COR_CEU_ALTO, COR_CEU_HORIZONTE);
-    }
-    if (texturaCidade.id != 0) {
-        desenharCamadaDoFundo(texturaCidade, horizonte, deslocamentoFundo * VELOCIDADE_CIDADE, escala);
-    }
-    if (texturaMorros.id != 0) {
-        desenharCamadaDoFundo(texturaMorros, horizonte, deslocamentoFundo, escala);
-    }
-
-    Color corChao = texturaGrama[0].id != 0 ? COR_CHAO_DISTANTE : COR_GRAMA_ESCURA;
-    DrawRectangle(0, horizonte, largura, GetScreenHeight() - horizonte, corChao);
-}
-
-/*
- * desenharPista
- * Desenha a estrada já projetada, do mais longe para o mais perto, para
- * que o que está perto cubra o que está longe, como um pintor que pinta
- * o fundo primeiro.
- * Recebe: a visão calculada neste quadro.
- * Devolve: nada.
- */
-static void desenharPista(Visao *visao) {
-    desenharFundo();
-
-    /* Toda a grama primeiro: se ela fosse junto com a estrada, a grama de
-     * um segmento pintaria uma linha por cima do asfalto do anterior. */
-    for (int i = DISTANCIA_VISIVEL - 1; i >= 0; i--) {
-        desenharGrama(visao->segmentos[i], visao->perto[i], visao->longe[i]);
-    }
-    for (int i = DISTANCIA_VISIVEL - 1; i >= 0; i--) {
-        desenharEstrada(visao->segmentos[i], visao->perto[i], visao->longe[i]);
-    }
-}
-
-/*
- * desenharCarroComFormas
- * Desenha um carro visto de trás com formas simples da raylib.
- * O mesmo desenho serve para o jogador (escala 1) e para os rivais
- * (menores quanto mais longe estão).
- *   - virando, a cabine desliza um pouco para o lado da curva;
- *   - freando, as lanternas acendem mais forte.
- * Recebe: o carro, o centro da base na tela (x, y) e a escala.
- * Devolve: nada.
- */
-static void desenharCarroComFormas(Carro *carro, float centroX, float baseY, float escala) {
-    Comandos comandos = carro->ultimosComandos;
-    Color corCarroceria = CORES_CARROCERIA[carro->numero];
-    Color corCabine = CORES_CABINE[carro->numero];
-
-    /* A cabine desliza aos poucos, acompanhando o volante (-1 a +1) */
-    float inclinacao = INCLINACAO_CABINE * escala * carro->volante;
-
-    float largura = LARGURA_CARRO * escala;
-    float metade = largura / 2.0f;
-    float alturaCarroceria = ALTURA_CARROCERIA * escala;
-    float topoCarroceria = baseY - alturaCarroceria;
-
-    /* Sombra */
-    DrawEllipse((int) centroX, (int) baseY, metade + 10 * escala, 10 * escala, Fade(BLACK, 0.35f));
-
-    /* Pneus traseiros */
-    float larguraPneu = 34 * escala;
-    Rectangle pneuEsquerdo = { centroX - metade, baseY - 30 * escala, larguraPneu, 32 * escala };
-    Rectangle pneuDireito = { centroX + metade - larguraPneu, baseY - 30 * escala, larguraPneu, 32 * escala };
-    DrawRectangleRounded(pneuEsquerdo, 0.3f, 4, COR_PNEU);
-    DrawRectangleRounded(pneuDireito, 0.3f, 4, COR_PNEU);
-
-    /* Cabine e vidro traseiro */
-    Rectangle cabine = { centroX - metade * 0.62f + inclinacao, topoCarroceria - 34 * escala,
-                         largura * 0.62f, 44 * escala };
-    Rectangle vidro = { cabine.x + 10 * escala, cabine.y + 7 * escala,
-                        cabine.width - 20 * escala, 22 * escala };
-    DrawRectangleRounded(cabine, 0.5f, 6, corCabine);
-    DrawRectangleRounded(vidro, 0.4f, 6, COR_VIDRO);
-
-    /* Carroceria */
-    Rectangle carroceria = { centroX - metade + 6 * escala, topoCarroceria,
-                             largura - 12 * escala, alturaCarroceria - 8 * escala };
-    DrawRectangleRounded(carroceria, 0.4f, 6, corCarroceria);
-
-    /* Lanternas */
-    Color corLanterna = comandos.frear ? COR_LANTERNA_FREIO : COR_LANTERNA;
-    float larguraLanterna = 34 * escala;
-    float alturaLanterna = 12 * escala;
-    DrawRectangleRounded((Rectangle){ carroceria.x + 10 * escala, topoCarroceria + 12 * escala,
-                                      larguraLanterna, alturaLanterna }, 0.5f, 4, corLanterna);
-    DrawRectangleRounded((Rectangle){ carroceria.x + carroceria.width - 10 * escala - larguraLanterna,
-                                      topoCarroceria + 12 * escala, larguraLanterna, alturaLanterna },
-                         0.5f, 4, corLanterna);
-
-    /* Para-choque */
-    DrawRectangleRounded((Rectangle){ carroceria.x + 4 * escala, baseY - 18 * escala,
-                                      carroceria.width - 8 * escala, 10 * escala }, 0.5f, 4, COR_PARACHOQUE);
-}
-
-/*
- * desenharCarroDaFolha
- * Desenha um carro recortando o quadro certo da folha de sprites:
- *   - a LINHA sai do volante: -1 é a primeira linha (todo à esquerda),
- *     0 a do meio (reto) e +1 a última (todo à direita);
- *   - a COLUNA sai da distância percorrida: a cada
- *     DISTANCIA_POR_QUADRO_DA_RODA andadas, a roda avança um quadro,
- *     então ela gira mais rápido quanto mais rápido o carro anda.
- * Recebe: o carro, a folha, o centro da base na tela (x, y) e a escala.
- * Devolve: nada.
- */
-static void desenharCarroDaFolha(Carro *carro, Texture2D folha, float centroX, float baseY, float escala) {
-    float larguraQuadro = (float) folha.width / QUADROS_DA_RODA;
-    float alturaQuadro = (float) folha.height / ANGULOS_DA_FOLHA;
-
-    int linha = (int) ((carro->volante + 1.0f) / 2.0f * (ANGULOS_DA_FOLHA - 1) + 0.5f);
-    int coluna = (int) (carro->distanciaPercorrida / DISTANCIA_POR_QUADRO_DA_RODA) % QUADROS_DA_RODA;
-
-    float largura = LARGURA_CARRO * escala;
-    float altura = largura * alturaQuadro / larguraQuadro;
-    Rectangle origem = { coluna * larguraQuadro, linha * alturaQuadro, larguraQuadro, alturaQuadro };
-    Rectangle destino = { centroX - largura / 2.0f, baseY - altura, largura, altura };
-    DrawTexturePro(folha, origem, destino, (Vector2){ 0, 0 }, 0.0f, WHITE);
-}
-
-/*
- * desenharCorpoDoCarro
- * Desenha um carro visto de trás. Se existir a folha de sprites, usa ela
- * (vários ângulos de volante e rodas girando). Senão, usa o sprite da pose
- * certa (reto, virando à esquerda ou à direita): a pose sai do volante e
- * só troca para a curva depois que ele passa de LIMIAR_POSE_CURVA, então
- * um toque rápido na seta não faz o carro "piscar" de pose.
- * Se nenhum sprite carregou, usa o desenho com formas simples.
- * Recebe: o carro, o centro da base na tela (x, y) e a escala.
- * Devolve: nada.
- */
-static void desenharCorpoDoCarro(Carro *carro, float centroX, float baseY, float escala) {
-    if (texturaFolha[carro->numero].id != 0) {
-        desenharCarroDaFolha(carro, texturaFolha[carro->numero], centroX, baseY, escala);
-        return;
-    }
-
-    int pose = POSE_RETO;
-    if (carro->volante < -LIMIAR_POSE_CURVA) {
-        pose = POSE_ESQUERDA;
-    }
-    if (carro->volante > LIMIAR_POSE_CURVA) {
-        pose = POSE_DIREITA;
-    }
-
-    Texture2D sprite = texturaCarro[carro->numero][pose];
-    if (sprite.id == 0) {
-        desenharCarroComFormas(carro, centroX, baseY, escala);
-        return;
-    }
-
-    /* O sprite fica com a mesma largura do carro desenhado com formas,
-     * mantendo a proporção da imagem (a sombra já vem no desenho) */
-    float largura = LARGURA_CARRO * escala;
-    float altura = largura * sprite.height / sprite.width;
-    Rectangle origem = { 0.0f, 0.0f, (float) sprite.width, (float) sprite.height };
-    Rectangle destino = { centroX - largura / 2.0f, baseY - altura, largura, altura };
-    DrawTexturePro(sprite, origem, destino, (Vector2){ 0, 0 }, 0.0f, WHITE);
-}
-
-/*
- * desenharFumaca
- * Nuvens saindo das rodas traseiras: fumaça branca quando o carro está
- * derrapando (a curva quase vencendo o volante) e poeira na grama. É o
- * aviso de que ele vai escapar. Cada nuvem nasce na roda, sobe, cresce
- * e some; a fase dela vem da distância andada, então anda junto com o carro.
- * Recebe: o carro, o centro da base na tela (x, y) e a escala.
- * Devolve: nada.
- */
-static void desenharFumaca(Carro *carro, float centroX, float baseY, float escala) {
-    float forca = carro->derrapagem;
-    Color cor = COR_FUMACA;
     if (estaForaDaPista(carro) && carro->velocidade > 0.0f) {
-        forca = 0.8f;
-        cor = COR_POEIRA;
+        y += TREPIDACAO_NA_GRAMA * sinf(carro->distanciaPercorrida * 0.05f);
+    }
+
+    float rumo = (aqui.rumo + carro->volante * GRAUS_DO_VOLANTE) * DEG2RAD;
+    Vector3 frente = Vector3Normalize((Vector3){ sinf(rumo), ladeira, -cosf(rumo) });
+
+    float rolagem = atanf(inclinacao) + carro->volante * GRAUS_DE_ROLAGEM * DEG2RAD;
+    Vector3 cima = { -cosf(rumo) * sinf(rolagem), cosf(rolagem), -sinf(rumo) * sinf(rolagem) };
+    Vector3 lado = Vector3Normalize(Vector3CrossProduct(cima, frente));   /* a esquerda do carro é +x no modelo */
+    cima = Vector3CrossProduct(frente, lado);
+
+    Matrix m = { 0 };
+    m.m0 = lado.x;   m.m1 = lado.y;   m.m2 = lado.z;
+    m.m4 = cima.x;   m.m5 = cima.y;   m.m6 = cima.z;
+    m.m8 = frente.x; m.m9 = frente.y; m.m10 = frente.z;
+    m.m12 = aqui.x;  m.m13 = y;       m.m14 = aqui.z;
+    m.m15 = 1.0f;
+    return m;
+}
+
+/*
+ * desenharCarroNoMundo
+ * Recebe: a câmera e o carro.
+ * Devolve: nada (carro atrás da câmera ou longe demais não é desenhado).
+ */
+static void desenharCarroNoMundo(Camera3D camera, Carro *carro) {
+    PontoNoMundo ponto = pontoNoMundo(carro->posicao, carro->deslocamentoLateral);
+    float distancia = aFrenteDaCamera(camera, (Vector3){ ponto.x, ponto.y, ponto.z });
+    if (distancia < -6.0f || distancia > DISTANCIA_DOS_RIVAIS) {
+        return;
+    }
+    desenharCarro3D(carro->numero, matrizDoCarro(carro));
+}
+
+/*
+ * soltarFumacaDoCarro
+ * Solta as nuvens nas rodas de trás, de acordo com o que o carro está fazendo:
+ * poeira na grama, fumaça na derrapagem e na arrancada forte. O número de
+ * nuvens depende do tempo que passou, não de quantos quadros o jogo desenha.
+ * Recebe: a câmera, o carro e o tempo que passou na corrida.
+ * Devolve: nada.
+ */
+static void soltarFumacaDoCarro(Camera3D camera, Carro *carro, float tempoQuadro) {
+    PontoNoMundo ponto = pontoNoMundo(carro->posicao, carro->deslocamentoLateral);
+    float distancia = aFrenteDaCamera(camera, (Vector3){ ponto.x, ponto.y, ponto.z });
+    if (distancia < -12.0f || distancia > DISTANCIA_DA_FUMACA || carro->velocidade <= 0.0f) {
+        return;
+    }
+
+    float forca = 0.0f;
+    TipoDeNuvem tipo = NUVEM_DE_PNEU;
+    if (estaForaDaPista(carro)) {
+        forca = 0.9f;
+        tipo = NUVEM_DE_POEIRA;
+    } else if (carro->derrapagem > INICIO_DA_FUMACA) {
+        forca = (carro->derrapagem - INICIO_DA_FUMACA) / (1.0f - INICIO_DA_FUMACA);
+    } else if (carro->ultimosComandos.acelerar && carro->velocidade < VELOCIDADE_DA_ARRANCADA) {
+        forca = 0.55f * (1.0f - carro->velocidade / VELOCIDADE_DA_ARRANCADA);
     }
     if (forca <= 0.0f) {
         return;
     }
 
-    float largura = LARGURA_CARRO * escala;
-    for (int lado = -1; lado <= 1; lado += 2) {
-        float rodaX = centroX + lado * largura * 0.36f;
-        for (int n = 0; n < NUVENS_DE_FUMACA; n++) {
-            /* fase de 0 (nasce) a 1 (some) */
-            float fase = fmodf(carro->distanciaPercorrida / DISTANCIA_DA_NUVEM
-                               + (float) n / NUVENS_DE_FUMACA + (lado > 0 ? 0.5f : 0.0f), 1.0f);
-            float raio = largura * (0.07f + 0.12f * fase);
-            float x = rodaX + lado * largura * 0.10f * fase;
-            float y = baseY - largura * (0.04f + 0.18f * fase);
-            cor.a = (unsigned char) (170.0f * forca * (1.0f - fase));
-            DrawCircleV((Vector2){ x, y }, raio, cor);
+    float metrosPorSegundo = carro->velocidade / UNIDADES_POR_METRO;
+    float rumo = ponto.rumo * DEG2RAD;
+    Vector3 velocidade = { sinf(rumo) * metrosPorSegundo, 0.0f, -cosf(rumo) * metrosPorSegundo };
+
+    /* Quantas nuvens neste quadro: a parte fracionária é sorteada */
+    float quantas = NUVENS_POR_SEGUNDO * tempoQuadro * (0.4f + 0.6f * forca);
+    int inteiras = (int) quantas;
+    if (GetRandomValue(0, 1000) / 1000.0f < quantas - inteiras) {
+        inteiras++;
+    }
+
+    Matrix noMundo = matrizDoCarro(carro);
+    float meiaBitola = larguraDoCarro3D(carro->numero) * BITOLA / 2.0f;
+    float eixoDeTras = -comprimentoDoCarro3D(carro->numero) * ENTRE_EIXOS / 2.0f;
+    for (int i = 0; i < inteiras; i++) {
+        for (int lado = -1; lado <= 1; lado += 2) {
+            /* Sorteia onde, ao longo do caminho do quadro, ela nasce: senão as nuvens saem em fila */
+            float recuo = -metrosPorSegundo * tempoQuadro * GetRandomValue(0, 1000) / 1000.0f;
+            Vector3 roda = Vector3Transform((Vector3){ lado * meiaBitola, ALTURA_DA_NUVEM, eixoDeTras + recuo }, noMundo);
+            soltarNuvem(roda, velocidade, forca, tipo);
         }
     }
 }
 
 /*
- * desenharCarro
- * Desenha o carro e, por cima, a fumaça (ou a poeira) das rodas traseiras.
- * Recebe: o carro, o centro da base na tela (x, y) e a escala.
+ * desenharMundo3D
+ * O cenário e os carros, vistos pela câmera.
+ * Recebe: a câmera, a pista e a corrida (NULL nos menus: sem carros).
  * Devolve: nada.
  */
-static void desenharCarro(Carro *carro, float centroX, float baseY, float escala) {
-    desenharCorpoDoCarro(carro, centroX, baseY, escala);
-    desenharFumaca(carro, centroX, baseY, escala);
-}
+static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
+    prepararPlanosDaCamera();
+    BeginMode3D(camera);
+    rlDisableBackfaceCulling();
+    desenharCenario(pista->id, camera.position);
 
-/*
- * desenharJogador
- * O carro do jogador fica sempre no mesmo lugar da tela (embaixo, no
- * centro): quem se mexe é a estrada. Na grama ele trepida.
- * O tamanho acompanha a tela (escala 1 em 800x600).
- * Recebe: o carro do jogador.
- * Devolve: nada.
- */
-static void desenharJogador(Carro *jogador) {
-    float escala = escalaDaTela();
-    float centroX = GetScreenWidth() / 2.0f;
-    float baseY = GetScreenHeight() - MARGEM_CARRO * escala;
-
-    if (estaForaDaPista(jogador) && jogador->velocidade > 0) {
-        baseY -= GetRandomValue(0, TREPIDACAO_MAXIMA) * escala;
-    }
-    desenharCarro(jogador, centroX, baseY, escala);
-}
-
-/*
- * desenharRival
- * Projeta um rival que está no i-ésimo segmento visível e o desenha
- * no tamanho certo para a distância.
- * Recebe: a visão, o índice do segmento na visão e o rival.
- * Devolve: nada.
- */
-static void desenharRival(Visao *visao, int i, Carro *rival) {
-    float z = i * COMPRIMENTO_SEGMENTO - visao->camera.distanciaNoSegmento
-              + rival->posicao.distanciaNoSegmento;
-    if (z < DISTANCIA_MINIMA_RIVAL) {
-        return;   /* atrás da câmera ou colado nela */
-    }
-
-    /* Centro da estrada naquele ponto exato do segmento (com a curva) */
-    float fracao = rival->posicao.distanciaNoSegmento / COMPRIMENTO_SEGMENTO;
-    float xCurva = visao->xCurva[i] + visao->dxCurva[i] * fracao;
-    PontoNaTela chao = projetar(xCurva, alturaNaPosicao(rival->posicao), z,
-                                visao->xCamera, visao->alturaCamera);
-
-    /* O rival tem o tamanho do jogador quando está na mesma distância que ele
-     * (a largura na tela só depende da distância, não da altura) */
-    PontoNaTela chaoDoJogador = projetar(0.0f, 0.0f, DISTANCIA_CAMERA, 0.0f, 0.0f);
-    float escala = chao.largura / chaoDoJogador.largura * escalaDaTela();
-
-    float centroX = chao.x + rival->deslocamentoLateral * chao.largura;
-    float baseY = chao.y - MARGEM_CARRO * escala;
-
-    /* Atrás de uma lombada, só aparece a parte do carro acima da estrada da frente */
-    BeginScissorMode(0, 0, GetScreenWidth(), (int) visao->limiteTela[i]);
-    desenharCarro(rival, centroX, baseY, escala);
-    EndScissorMode();
-}
-
-/*
- * desenharObjetos
- * Desenha os objetos da beira da pista (árvores, pórtico...) do i-ésimo
- * segmento visível. Eles ficam no começo do segmento, então usam o ponto
- * "perto" dele: o tamanho na tela sai da largura da estrada ali, na
- * proporção entre a largura do objeto e a da pista (LARGURA_OBJETO).
- * Recebe: a visão e o índice do segmento na visão.
- * Devolve: nada.
- */
-static void desenharObjetos(Visao *visao, int i) {
-    Segmento *segmento = visao->segmentos[i];
-    float z = i * COMPRIMENTO_SEGMENTO - visao->camera.distanciaNoSegmento;
-    if (segmento->obstaculos == NULL || z < DISTANCIA_MINIMA_OBJETO) {
-        return;
-    }
-
-    PontoNaTela chao = visao->perto[i];
-    float larguraTela = GetScreenWidth();
-
-    /* Atrás de uma lombada, só aparece a parte acima da estrada da frente */
-    BeginScissorMode(0, 0, (int) larguraTela, (int) visao->limiteTela[i]);
-    for (Obstaculo *objeto = segmento->obstaculos; objeto != NULL; objeto = objeto->proximo) {
-        Texture2D textura = texturaObjeto[objeto->tipo];
-        if (textura.id == 0) {
-            continue;   /* sem imagem (ou é uma marca do grid, pintada junto com a estrada) */
-        }
-
-        float largura = chao.largura * LARGURA_OBJETO[objeto->tipo] / LARGURA_PISTA;
-        float altura = largura * textura.height / textura.width;
-        float centroX = chao.x + objeto->deslocamentoLateral * chao.largura;
-        if (centroX + largura / 2.0f < 0.0f || centroX - largura / 2.0f > larguraTela) {
-            continue;   /* fora da tela */
-        }
-
-        Rectangle origem = { 0.0f, 0.0f, (float) textura.width, (float) textura.height };
-        Rectangle destino = { centroX - largura / 2.0f, chao.y - altura, largura, altura };
-        DrawTexturePro(textura, origem, destino, (Vector2){ 0, 0 }, 0.0f, WHITE);
-    }
-    EndScissorMode();
-}
-
-/*
- * desenharCarros
- * Desenha rivais, objetos da beira e jogador do mais longe para o mais
- * perto. Para isso percorre os segmentos visíveis de trás para a frente:
- * em cada um, primeiro os rivais (que estão dentro dele) e depois os
- * objetos (que ficam no começo dele, mais perto da câmera). O jogador
- * entra na vez dele: depois do que está à frente dele e antes do que
- * está ao lado ou atrás.
- * Recebe: a visão e a corrida.
- * Devolve: nada.
- */
-static void desenharCarros(Visao *visao, Corrida *corrida) {
-    int jogadorDesenhado = 0;
-
-    for (int i = DISTANCIA_VISIVEL - 1; i >= 0; i--) {
+    if (corrida != NULL) {
         for (int r = 0; r < TOTAL_RIVAIS; r++) {
-            Carro *rival = &corrida->rivais[r];
-            if (rival->posicao.segmento != visao->segmentos[i]) {
-                continue;
-            }
-
-            float z = i * COMPRIMENTO_SEGMENTO - visao->camera.distanciaNoSegmento
-                      + rival->posicao.distanciaNoSegmento;
-            if (!jogadorDesenhado && z < DISTANCIA_CAMERA) {
-                desenharJogador(&corrida->jogador);
-                jogadorDesenhado = 1;
-            }
-            desenharRival(visao, i, rival);
+            desenharCarroNoMundo(camera, &corrida->rivais[r]);
         }
-
-        float zObjetos = i * COMPRIMENTO_SEGMENTO - visao->camera.distanciaNoSegmento;
-        if (!jogadorDesenhado && visao->segmentos[i]->obstaculos != NULL
-            && zObjetos < DISTANCIA_CAMERA) {
-            desenharJogador(&corrida->jogador);
-            jogadorDesenhado = 1;
-        }
-        desenharObjetos(visao, i);
+        desenharCarroNoMundo(camera, &corrida->jogador);
+        desenharFumaca3D(camera);
     }
 
-    if (!jogadorDesenhado) {
-        desenharJogador(&corrida->jogador);
-    }
+    rlEnableBackfaceCulling();
+    EndMode3D();
 }
 
 /*
  * desenharVisaoDoJogador
- * Desenha o que o jogador vê: a câmera fica um pouco atrás e acima do
- * carro, olhando para a frente. A posição da câmera é a do carro
- * "andada para trás" DISTANCIA_CAMERA unidades na lista da pista.
+ * Desenha o que o jogador vê: o mundo pela câmera atrás do carro.
  * Recebe: a corrida.
  * Devolve: nada.
  */
 void desenharVisaoDoJogador(Corrida *corrida) {
-    PosicaoNaPista camera = corrida->jogador.posicao;
-    moverNaPista(&camera, -DISTANCIA_CAMERA);   /* as voltas devolvidas não importam aqui */
+    Carro *jogador = &corrida->jogador;
+    Camera3D camera = montarCamera(jogador->posicao, jogador->deslocamentoLateral);
 
-    /* Nas curvas o fundo desliza: uma volta de 360 graus anda uma
-     * largura inteira da imagem dos morros. Curva à direita (curvatura
-     * positiva) faz o fundo andar para a esquerda. */
-    float grausPorSegundo = camera.segmento->curvatura * corrida->jogador.velocidade
-                            / COMPRIMENTO_SEGMENTO;
-    deslocamentoFundo += grausPorSegundo * GetFrameTime() * LARGURA_FUNDO / 360.0f;
+    /* A fumaça anda com o relógio da corrida: na pausa e na contagem, ele para.
+     * Se ele voltou atrás, é uma corrida nova. */
+    static float relogioAnterior = 0.0f;
+    float passou = corrida->tempoDeCorrida - relogioAnterior;
+    relogioAnterior = corrida->tempoDeCorrida;
+    if (passou < 0.0f) {
+        limparFumaca();
+        passou = 0.0f;
+    }
+    if (passou > 0.0f) {
+        for (int r = 0; r < TOTAL_RIVAIS; r++) {
+            soltarFumacaDoCarro(camera, &corrida->rivais[r], passou);
+        }
+        soltarFumacaDoCarro(camera, jogador, passou);
+    }
+    atualizarFumaca(passou);
 
-    /* static: a struct é grande (~6 KB), então fica fora da pilha */
-    static Visao visao;
-    calcularVisao(&visao, camera, corrida->jogador.deslocamentoLateral);
-
-    desenharPista(&visao);
-    desenharCarros(&visao, corrida);
+    desenharMundo3D(camera, corrida->pista, corrida);
 }
 
 /*
  * desenharPistaDeFundo
  * Fundo das telas de menu: a câmera passeia sozinha pela pista, devagar,
- * pelo centro da estrada. Ela anda pela lista com moverNaPista(), então
- * dá voltas infinitas no circuito.
+ * pela linha dela. Ela anda pela lista com moverNaPista(), então dá voltas
+ * infinitas no circuito.
  * Recebe: a pista.
  * Devolve: nada.
  */
 void desenharPistaDeFundo(Pista *pista) {
-    static PosicaoNaPista camera = { NULL, 0.0f };
-    if (camera.segmento == NULL) {
-        camera.segmento = pista->largada;
+    static PosicaoNaPista passeio = { NULL, 0.0f };
+    static Pista *pistaDoPasseio = NULL;
+    if (pista != pistaDoPasseio) {   /* trocou a pista no menu: recomeça na largada dela */
+        passeio.segmento = pista->largada;
+        passeio.distanciaNoSegmento = 0.0f;
+        pistaDoPasseio = pista;
     }
-    moverNaPista(&camera, VELOCIDADE_CAMERA_MENU * GetFrameTime());
-
-    /* O fundo desliza nas curvas como na corrida */
-    float grausPorSegundo = camera.segmento->curvatura * VELOCIDADE_CAMERA_MENU / COMPRIMENTO_SEGMENTO;
-    deslocamentoFundo += grausPorSegundo * GetFrameTime() * LARGURA_FUNDO / 360.0f;
-
-    static Visao visao;
-    calcularVisao(&visao, camera, 0.0f);
-    desenharPista(&visao);
-    for (int i = DISTANCIA_VISIVEL - 1; i >= 0; i--) {
-        desenharObjetos(&visao, i);
-    }
+    moverNaPista(&passeio, VELOCIDADE_CAMERA_MENU * GetFrameTime());
+    desenharMundo3D(montarCamera(passeio, 0.0f), pista, NULL);
 }
 
 /*
  * desenharCarroParado
- * Desenha um modelo de carro fora da corrida (por exemplo, na garagem).
- * Se existir a vista de frente, usa ela, limitada em altura para não
- * invadir o resto da tela; senão, desenha o carro de costas, andando reto.
- * Recebe: o número do carro (define a cor), o centro da base na tela e a escala.
+ * A miniatura de um carro, para a garagem e o menu.
+ * Recebe: o número do carro, o centro da base na tela e a escala.
  * Devolve: nada.
  */
 void desenharCarroParado(int numero, float centroX, float baseY, float escala) {
-    Texture2D frente = texturaFrente[numero];
-    if (frente.id != 0) {
-        float largura = LARGURA_CARRO * escala;
-        float altura = largura * frente.height / frente.width;
-        float alturaMaxima = largura * ALTURA_MAXIMA_FRENTE;
-        if (altura > alturaMaxima) {   /* imagem alta demais: encolhe as duas medidas */
-            largura *= alturaMaxima / altura;
-            altura = alturaMaxima;
-        }
-        Rectangle origem = { 0.0f, 0.0f, (float) frente.width, (float) frente.height };
-        Rectangle destino = { centroX - largura / 2.0f, baseY - altura, largura, altura };
-        DrawTexturePro(frente, origem, destino, (Vector2){ 0, 0 }, 0.0f, WHITE);
-        return;
-    }
-
-    Carro carro = { 0 };   /* sem comandos: pose reta, lanternas apagadas */
-    carro.numero = numero;
-    desenharCarro(&carro, centroX, baseY, escala);
+    desenharMiniatura(numero, centroX, baseY, LARGURA_CARRO * escala);
 }

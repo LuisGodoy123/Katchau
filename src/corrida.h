@@ -15,7 +15,7 @@
 #include "pista.h"
 #include "carro.h"
 
-#define TOTAL_RIVAIS   7
+#define TOTAL_RIVAIS   13
 #define TOTAL_CARROS   (TOTAL_RIVAIS + 1)   /* rivais + jogador */
 
 typedef struct {
@@ -23,7 +23,7 @@ typedef struct {
     Carro jogador;
     Carro rivais[TOTAL_RIVAIS];
 
-    /* Ponteiros para os 8 carros, em ordem de corrida:
+    /* Ponteiros para todos os carros, em ordem de corrida:
      * classificacao[0] é o 1º lugar. Reordenado a cada quadro
      * com Insertion Sort (ordenacao.c). */
     Carro *classificacao[TOTAL_CARROS];

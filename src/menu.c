@@ -52,7 +52,7 @@
 /* ---------- Garagem ---------- */
 #define Y_ABAS                92.0f
 #define Y_PRIMEIRA_LINHA      134.0f
-#define ALTURA_LINHA          50.0f
+#define ALTURA_LINHA          29.5f
 #define X_LISTA               16.0f
 #define LARGURA_LISTA         416.0f
 #define LARGURA_VOLTAR        120.0f
@@ -71,7 +71,7 @@
 /* ---------- Resultado ---------- */
 #define Y_TITULOS_TABELA      104.0f
 #define Y_PRIMEIRO_RESULTADO  126.0f
-#define ALTURA_LINHA_RESULTADO 46.0f
+#define ALTURA_LINHA_RESULTADO 30.0f
 #define X_TABELA              40.0f
 #define LARGURA_TABELA        720.0f
 #define X_COLUNA_PILOTO       112.0f
@@ -79,7 +79,7 @@
 #define X_COLUNA_MELHOR       620.0f
 
 static const char *TEXTOS_OPCOES[TOTAL_OPCOES] = { "CORRER", "GARAGEM", "COMO JOGAR", "SAIR" };
-static const Tela DESTINOS_OPCOES[TOTAL_OPCOES] = { TELA_CORRIDA, TELA_GARAGEM, TELA_COMO_JOGAR, TELA_SAIR };
+static const Tela DESTINOS_OPCOES[TOTAL_OPCOES] = { TELA_PISTAS, TELA_GARAGEM, TELA_COMO_JOGAR, TELA_SAIR };
 static const char *TEXTOS_PAUSA[TOTAL_OPCOES_PAUSA] = { "CONTINUAR", "MENU PRINCIPAL" };
 static const EscolhaDaPausa ESCOLHAS_PAUSA[TOTAL_OPCOES_PAUSA] = { PAUSA_CONTINUAR, PAUSA_SAIR };
 
@@ -394,6 +394,10 @@ void iniciarMenu(EstadoMenu *menu) {
     menu->voltarAnterior = 0;
     menu->destaqueVoltar = 0.0f;
     abrirPausa(menu);
+    menu->pistaEscolhida = PISTA_INTERLAGOS;
+    for (int i = 0; i < TOTAL_PISTAS; i++) {
+        menu->destaquePista[i] = (i == menu->pistaEscolhida) ? 1.0f : 0.0f;
+    }
 }
 
 /*
@@ -838,19 +842,19 @@ static void desenharListaDaGaragem(EstadoMenu *menu) {
         /* Número da posição numa etiqueta */
         Color fundoNumero = ColorLerp(COR_GRAFITE, COR_AMARELO, suave);
         Color corNumero = ColorLerp(COR_CROMO, COR_GRAFITE, suave);
-        desenharParalelogramo(X_LISTA + 14, y + 9, 34, 30, 7, fundoNumero);
-        escreverCentralizado(FONTE_TITULO, TextFormat("%d", i + 1), X_LISTA + 34, y + 8, 26.0f, corNumero);
+        desenharParalelogramo(X_LISTA + 14, y + 4, 30, 21, 5, fundoNumero);
+        escreverCentralizado(FONTE_TITULO, TextFormat("%d", i + 1), X_LISTA + 30, y + 4, 17.0f, corNumero);
 
-        escrever(FONTE_TITULO, ficha->nome, X_LISTA + 60, y + (ehEscolhido ? 2 : 9), 26.0f,
-                 ColorLerp(COR_CROMO, COR_TEXTO_CLARO, suave));
+        escrever(FONTE_TITULO, ficha->nome, X_LISTA + 52, y + 4, 18.0f, ColorLerp(COR_CROMO, COR_TEXTO_CLARO, suave));
         if (ehEscolhido) {
-            escrever(FONTE_FORTE, "SEU CARRO", X_LISTA + 61, y + 29, 13.0f, COR_AMARELO);
+            float x = X_LISTA + 52 + larguraDoTexto(FONTE_TITULO, ficha->nome, 18.0f) + 8;
+            escrever(FONTE_FORTE, "SEU", x, y + 7, 12.0f, COR_AMARELO);
         }
 
-        desenharBarraDeBlocos(X_BARRA_LISTA, y + 18, LARGURA_BARRA_LISTA, 13,
+        desenharBarraDeBlocos(X_BARRA_LISTA, y + 9, LARGURA_BARRA_LISTA, 11,
                               fracaoDoAtributo(ficha, menu->criterio), ColorLerp(COR_CROMO, COR_AMARELO, suave));
         escreverADireita(FONTE_FORTE, textoDoAtributo(ficha, menu->criterio),
-                         X_LISTA + LARGURA_LISTA - 14, y + 12, 21.0f, COR_TEXTO_CLARO);
+                         X_LISTA + LARGURA_LISTA - 14, y + 5, 15.0f, COR_TEXTO_CLARO);
     }
 }
 
@@ -915,6 +919,177 @@ void desenharGaragem(EstadoMenu *menu) {
         { { "ESC", NULL }, "VOLTAR" },
     };
     desenharBarraDeDicas(dicas, 4);
+}
+
+/* ==================================================================
+ * Escolha da pista
+ * ================================================================== */
+
+#define Y_CARTAO_PISTA        120.0f
+#define LARGURA_CARTAO_PISTA  356.0f
+#define ALTURA_CARTAO_PISTA   390.0f
+#define ESPACO_ENTRE_CARTOES  24.0f
+#define LADO_DO_TRACADO       174.0f
+#define PASSO_DO_TRACADO      4        /* desenha o traçado de 4 em 4 segmentos */
+
+/* O jeito de cada pista, na ordem de IdPista */
+static const char *DESCRICOES_PISTA[TOTAL_PISTAS] = {
+    "Circuito misto, sobe e desce. Curvas de todo tipo, e a grama perdoa pouco.",
+    "Oval rápido, com curvas inclinadas, cercado de arquibancadas. Quem erra a curva raspa no muro.",
+};
+
+/*
+ * xDoCartao
+ * Recebe: o número do cartão.
+ * Devolve: o x do canto esquerdo dele (os cartões ficam centralizados).
+ */
+static float xDoCartao(int cartao) {
+    float total = TOTAL_PISTAS * LARGURA_CARTAO_PISTA + (TOTAL_PISTAS - 1) * ESPACO_ENTRE_CARTOES;
+    return (larguraVirtual() - total) / 2.0f + cartao * (LARGURA_CARTAO_PISTA + ESPACO_ENTRE_CARTOES);
+}
+
+/*
+ * cartaoSobOMouse
+ * Recebe: a posição do mouse na tela virtual.
+ * Devolve: o número do cartão sob o mouse, ou -1.
+ */
+static int cartaoSobOMouse(float mouseX, float mouseY) {
+    for (int i = 0; i < TOTAL_PISTAS; i++) {
+        if (dentroDoRetangulo(mouseX, mouseY, xDoCartao(i), Y_CARTAO_PISTA, LARGURA_CARTAO_PISTA,
+                              ALTURA_CARTAO_PISTA)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+/*
+ * atualizarEscolhaDePista
+ * Esquerda/direita marcam uma pista (o fundo da tela mostra a marcada);
+ * ENTER larga nela; ESC volta ao menu. Com o mouse: passar por cima marca,
+ * clicar larga.
+ * Recebe: o estado do menu.
+ * Devolve: a próxima tela.
+ */
+Tela atualizarEscolhaDePista(EstadoMenu *menu) {
+    int anterior = menu->pistaEscolhida;
+    if (apertouParaDireita()) {
+        menu->pistaEscolhida = (menu->pistaEscolhida + 1) % TOTAL_PISTAS;
+    }
+    if (apertouParaEsquerda()) {
+        menu->pistaEscolhida = (menu->pistaEscolhida + TOTAL_PISTAS - 1) % TOTAL_PISTAS;
+    }
+
+    float mouseX, mouseY;
+    posicaoDoMouseNaInterface(&mouseX, &mouseY);
+    int cartao = cartaoSobOMouse(mouseX, mouseY);
+    int voltar = sobreOVoltar(mouseX, mouseY);
+    if (cartao >= 0 && mouseSeMexeu()) {
+        menu->pistaEscolhida = cartao;
+    }
+    if (menu->pistaEscolhida != anterior || (voltar && !menu->voltarAnterior)) {
+        tocarSom(SOM_CURSOR);
+    }
+    menu->voltarAnterior = voltar;
+
+    for (int i = 0; i < TOTAL_PISTAS; i++) {
+        menu->destaquePista[i] = animarDestaque(menu->destaquePista[i], i == menu->pistaEscolhida);
+    }
+    menu->destaqueVoltar = animarDestaque(menu->destaqueVoltar, voltar);
+
+    if (apertouVoltar() || (voltar && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))) {
+        tocarSom(SOM_VOLTAR);
+        return TELA_MENU;
+    }
+    if (apertouConfirmar() || (cartao >= 0 && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))) {
+        tocarSom(SOM_CONFIRMAR);
+        return TELA_CORRIDA;
+    }
+    return TELA_PISTAS;
+}
+
+/*
+ * desenharTracado
+ * A planta da pista, a partir da posição de cada segmento no mundo: mede o
+ * tamanho do desenho e o escala para caber no quadrado.
+ * Recebe: a pista, o centro do quadrado, o lado dele e a cor.
+ * Devolve: nada.
+ */
+static void desenharTracado(Pista *pista, float centroX, float centroY, float lado, Color cor) {
+    float minX = 1e9f, maxX = -1e9f, minZ = 1e9f, maxZ = -1e9f;
+    Segmento *atual = pista->largada;
+    do {
+        minX = fminf(minX, atual->xMundo);
+        maxX = fmaxf(maxX, atual->xMundo);
+        minZ = fminf(minZ, atual->zMundo);
+        maxZ = fmaxf(maxZ, atual->zMundo);
+        atual = atual->proximo;
+    } while (atual != pista->largada);
+
+    float escala = lado / fmaxf(maxX - minX, maxZ - minZ);
+    float meioX = (minX + maxX) / 2.0f, meioZ = (minZ + maxZ) / 2.0f;
+    Vector2 inicio = { centroX + (atual->xMundo - meioX) * escala, centroY + (atual->zMundo - meioZ) * escala };
+    Vector2 ponto = inicio;
+    int passo = 0;
+    do {
+        atual = atual->proximo;
+        if (++passo % PASSO_DO_TRACADO == 0 || atual == pista->largada) {
+            Vector2 seguinte = { centroX + (atual->xMundo - meioX) * escala, centroY + (atual->zMundo - meioZ) * escala };
+            DrawLineEx(ponto, seguinte, 4.0f, cor);
+            ponto = seguinte;
+        }
+    } while (atual != pista->largada);
+
+    /* A linha de chegada: um pontinho vermelho */
+    DrawCircleV(inicio, 5.0f, COR_VERMELHO);
+}
+
+/*
+ * desenharCartaoDePista
+ * Um cartão: o traçado, o nome, a extensão e o jeito da pista. O marcado
+ * acende em amarelo.
+ * Recebe: o número do cartão, a pista e o destaque (0 a 1).
+ * Devolve: nada.
+ */
+static void desenharCartaoDePista(int cartao, Pista *pista, float destaque) {
+    float suave = suavizar(destaque);
+    float x = xDoCartao(cartao);
+    desenharPainel(x, Y_CARTAO_PISTA, LARGURA_CARTAO_PISTA, ALTURA_CARTAO_PISTA);
+    DrawRectangleLinesEx((Rectangle){ x, Y_CARTAO_PISTA, LARGURA_CARTAO_PISTA, ALTURA_CARTAO_PISTA },
+                         1.0f + suave, ColorLerp(Fade(COR_CROMO, 0.25f), COR_AMARELO, suave));
+
+    float centroX = x + LARGURA_CARTAO_PISTA / 2.0f;
+    desenharTracado(pista, centroX, Y_CARTAO_PISTA + 118.0f, LADO_DO_TRACADO,
+                    ColorLerp(COR_TEXTO_FRACO, COR_TEXTO_CLARO, suave));
+
+    float y = Y_CARTAO_PISTA + 222.0f;
+    escreverCentralizado(FONTE_TITULO, pista->nome, centroX, y, 22.0f, ColorLerp(COR_TEXTO_CLARO, COR_AMARELO, suave));
+    float metros = contarSegmentos(pista) * COMPRIMENTO_SEGMENTO / UNIDADES_POR_METRO;
+    escreverCentralizado(FONTE_FORTE, TextFormat("%.2f km por volta  -  %d voltas", metros / 1000.0f, TOTAL_VOLTAS),
+                         centroX, y + 36.0f, 16.0f, COR_TEXTO_FRACO);
+    escreverComQuebra(FONTE_TEXTO, DESCRICOES_PISTA[cartao], x + 24.0f, y + 70.0f, 18.0f,
+                      LARGURA_CARTAO_PISTA - 48.0f, COR_TEXTO_CLARO);
+}
+
+/*
+ * desenharEscolhaDePista
+ * Recebe: o estado do menu e as pistas (o fundo é desenhado antes, pelo main.c).
+ * Devolve: nada.
+ */
+void desenharEscolhaDePista(EstadoMenu *menu, Pista *pistas[]) {
+    escurecerTela(0.7f, 0.55f, 0.75f);
+    desenharCabecalho("PISTA");
+    desenharBotaoVoltar(menu->destaqueVoltar);
+    for (int i = 0; i < TOTAL_PISTAS; i++) {
+        desenharCartaoDePista(i, pistas[i], menu->destaquePista[i]);
+    }
+
+    Dica dicas[] = {
+        { { "ESQ", "DIR", NULL }, "PISTA" },
+        { { "ENTER", NULL }, "CORRER" },
+        { { "ESC", NULL }, "VOLTAR" },
+    };
+    desenharBarraDeDicas(dicas, 3);
 }
 
 /* ==================================================================
@@ -996,7 +1171,7 @@ void desenharComoJogar(void) {
     desenharTituloDePainel("DICAS", x + 20, topo + 14);
 
     const char *dicas[] = {
-        TextFormat("%d voltas em Interlagos contra 7 rivais. Você larga em último.", TOTAL_VOLTAS),
+        TextFormat("%d voltas contra %d rivais. Você larga em último.", TOTAL_VOLTAS, TOTAL_RIVAIS),
         "O carro acelera como um F1: forte na saída e cada vez menos perto dos 300 km/h.",
         "Freie antes das curvas e alivie no meio: acelerando, o carro sai de frente. Fumaça = pneu no limite; passar dele custa velocidade.",
         "Na grama (sai poeira) o carro não passa de 75 km/h.",
@@ -1171,38 +1346,38 @@ static void desenharLinhaDoResultado(Corrida *corrida, int posicao, float y) {
     }
 
     Color podio = corDoPodio(posicao);
-    desenharParalelogramo(X_TABELA + 12, y + 7, 46, 30, 7, podio);
-    escreverCentralizado(FONTE_TITULO, TextFormat("%dº", posicao + 1), X_TABELA + 38, y + 6, 24.0f,
+    desenharParalelogramo(X_TABELA + 12, y + 5, 38, 20, 5, podio);
+    escreverCentralizado(FONTE_TITULO, TextFormat("%dº", posicao + 1), X_TABELA + 33, y + 4, 16.0f,
                          posicao < 3 ? COR_GRAFITE : COR_CROMO);
 
-    escrever(FONTE_TITULO, carro->nome, X_COLUNA_PILOTO, y + 6, 26.0f, COR_TEXTO_CLARO);
+    escrever(FONTE_TITULO, carro->nome, X_COLUNA_PILOTO, y + 5, 18.0f, COR_TEXTO_CLARO);
     if (ehJogador) {
-        float x = X_COLUNA_PILOTO + larguraDoTexto(FONTE_TITULO, carro->nome, 26.0f) + 12;
-        desenharParalelogramo(x, y + 12, 52, 20, 5, COR_AMARELO);
-        escreverCentralizado(FONTE_FORTE, "VOCÊ", x + 28, y + 12, 15.0f, COR_GRAFITE);
+        float x = X_COLUNA_PILOTO + larguraDoTexto(FONTE_TITULO, carro->nome, 18.0f) + 10;
+        desenharParalelogramo(x, y + 7, 42, 16, 4, COR_AMARELO);
+        escreverCentralizado(FONTE_FORTE, "VOCÊ", x + 23, y + 7, 12.0f, COR_GRAFITE);
     }
 
     Color corTempo = ehJogador ? COR_TEXTO_CLARO : COR_CROMO;
     if (carro->voltas >= TOTAL_VOLTAS) {
         formatarTempo(carro->tempoDeChegada, tempo, sizeof(tempo));
-        escrever(FONTE_FORTE, tempo, X_COLUNA_TEMPO, y + 8, 22.0f, corTempo);
+        escrever(FONTE_FORTE, tempo, X_COLUNA_TEMPO, y + 6, 16.0f, corTempo);
     } else {
         escrever(FONTE_FORTE, TextFormat("VOLTA %d/%d", voltaAtual(carro), TOTAL_VOLTAS),
-                 X_COLUNA_TEMPO, y + 8, 22.0f, COR_TEXTO_FRACO);
+                 X_COLUNA_TEMPO, y + 6, 16.0f, COR_TEXTO_FRACO);
     }
 
     float melhor = melhorVolta(carro);
     if (melhor > 0.0f) {
         formatarTempo(melhor, tempo, sizeof(tempo));
-        escrever(FONTE_FORTE, tempo, X_COLUNA_MELHOR, y + 8, 22.0f, corTempo);
+        escrever(FONTE_FORTE, tempo, X_COLUNA_MELHOR, y + 6, 16.0f, corTempo);
     } else {
-        escrever(FONTE_FORTE, "-", X_COLUNA_MELHOR, y + 8, 22.0f, COR_TEXTO_FRACO);
+        escrever(FONTE_FORTE, "-", X_COLUNA_MELHOR, y + 6, 16.0f, COR_TEXTO_FRACO);
     }
 }
 
 /*
  * desenharResultado
- * Tabela de chegada com os 8 carros, por cima da corrida (que continua
+ * Tabela de chegada com todos os carros, por cima da corrida (que continua
  * andando ao fundo: os rivais que ainda não chegaram terminam a prova
  * e a tabela vai se completando).
  * A ordem vem direto de corrida->classificacao, já ordenada pelo
@@ -1233,8 +1408,8 @@ void desenharResultado(Corrida *corrida) {
         float alfa = 0.55f + 0.45f * sinf((float) GetTime() * 3.0f);
         const char *aviso = "OS OUTROS CARROS AINDA ESTÃO TERMINANDO A PROVA...";
         float largura = larguraDoTexto(FONTE_FORTE, aviso, 16.0f) + 40;
-        desenharParalelogramo(LARGURA_TELA / 2.0f - largura / 2, 502, largura, 26, 8, Fade(COR_GRAFITE, 0.9f));
-        escreverCentralizado(FONTE_FORTE, aviso, LARGURA_TELA / 2.0f + 4, 505, 16.0f, Fade(COR_CROMO, alfa));
+        desenharParalelogramo(LARGURA_TELA / 2.0f - largura / 2, 76, largura, 20, 6, Fade(COR_GRAFITE, 0.9f));
+        escreverCentralizado(FONTE_FORTE, aviso, LARGURA_TELA / 2.0f + 4, 77, 14.0f, Fade(COR_CROMO, alfa));
     }
 
     Dica dicas[] = {

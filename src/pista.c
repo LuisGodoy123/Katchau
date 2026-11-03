@@ -8,7 +8,14 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 #include "pista.h"
+#include "copa_pistao.h"
+
+#define GRAUS_PARA_RADIANOS   0.017453292f
+#define META_LARGURA_DA_INCLINACAO 3.0f   /* mede a inclinação 3 m para cada lado */
+#define RAIO_DA_MEDIA_DO_NOME 40      /* segmentos para cada lado */
+#define SUBPASSOS_DO_TRACADO  64      /* entre dois pontos da tabela: bem menor que um segmento */
 #include "obstaculos.h"
 
 /* ==================================================================
@@ -33,6 +40,15 @@ static Segmento *criarSegmento(float curvatura) {
     novo->ehLinhaDeChegada = 0;
     novo->altura = 0.0f;
     novo->nomeTrecho = "";
+    novo->temMuro = 0;
+    novo->xMundo = 0.0f;
+    novo->zMundo = 0.0f;
+    novo->rumo = 0.0f;
+    novo->larguraDireita = MEIA_LARGURA_PADRAO;
+    novo->larguraEsquerda = MEIA_LARGURA_PADRAO;
+    for (int i = 0; i < PONTOS_DO_PERFIL; i++) {
+        novo->perfil[i] = 0.0f;   /* plano, até alguém dizer o contrário */
+    }
     novo->obstaculos = NULL;
     novo->proximo = novo;    /* sozinho, ele é o próprio vizinho */
     novo->anterior = novo;
@@ -82,6 +98,8 @@ Pista *criarPistaVazia(void) {
     }
 
     pista->largada = NULL;
+    pista->id = PISTA_INTERLAGOS;
+    pista->nome = "";
     return pista;
 }
 
@@ -208,9 +226,46 @@ static const TrechoReal TRECHOS_INTERLAGOS[] = {
 #define TOTAL_TRECHOS_INTERLAGOS  (int) (sizeof(TRECHOS_INTERLAGOS) / sizeof(TRECHOS_INTERLAGOS[0]))
 
 /*
+ * calcularPosicoesNoMundo
+ * Acha onde cada segmento fica no mundo 3D andando pela lista, como uma
+ * tartaruga: anda um segmento para a frente e vira a curvatura dele. As
+ * medidas são aproximadas e o fim pode não cair exatamente no começo, então
+ * o erro é espalhado aos poucos para a pista fechar.
+ * Recebe: a pista.
+ * Devolve: nada (preenche xMundo, zMundo e rumo).
+ */
+static void calcularPosicoesNoMundo(Pista *pista) {
+    float passo = COMPRIMENTO_SEGMENTO / UNIDADES_POR_METRO;
+    int total = contarSegmentos(pista);
+    float x = 0.0f, z = 0.0f, rumo = 0.0f;
+
+    Segmento *atual = pista->largada;
+    do {
+        atual->xMundo = x;
+        atual->zMundo = z;
+        atual->rumo = rumo;
+        x += sinf(rumo * GRAUS_PARA_RADIANOS) * passo;
+        z -= cosf(rumo * GRAUS_PARA_RADIANOS) * passo;
+        rumo += atual->curvatura;
+        atual = atual->proximo;
+    } while (atual != pista->largada);
+
+    /* Agora x e z são o erro de fechamento */
+    int i = 0;
+    do {
+        float fracao = (float) i / total;
+        atual->xMundo -= x * fracao;
+        atual->zMundo -= z * fracao;
+        i++;
+        atual = atual->proximo;
+    } while (atual != pista->largada);
+}
+
+/*
  * criarPista
  * Monta o Autódromo de Interlagos a partir da tabela TRECHOS_INTERLAGOS,
- * suaviza a entrada e a saída das curvas e põe os objetos da beira da pista.
+ * suaviza a entrada e a saída das curvas, acha o lugar de cada segmento no
+ * mundo 3D e põe os objetos da beira da pista.
  * Cada trecho em metros vira um bloco de segmentos:
  *   quantidade = metros * SEGMENTOS_POR_METRO
  *   curvatura  = ângulo do trecho / quantidade (graus por segmento)
@@ -220,6 +275,8 @@ static const TrechoReal TRECHOS_INTERLAGOS[] = {
  */
 Pista *criarPista(void) {
     Pista *pista = criarPistaVazia();
+    pista->id = PISTA_INTERLAGOS;
+    pista->nome = "Interlagos";
     float alturaAtual = 0.0f;   /* a linha de chegada fica na altura 0 */
 
     for (int i = 0; i < TOTAL_TRECHOS_INTERLAGOS; i++) {
@@ -234,8 +291,130 @@ Pista *criarPista(void) {
     }
 
     suavizarCurvas(pista);
+    calcularPosicoesNoMundo(pista);
     decorarPista(pista);   /* árvores, pórtico, placas... (depois: as zebras dependem das curvas) */
     return pista;
+}
+
+/*
+ * catmullRom
+ * Curva suave que passa pelos pontos b e c da tabela (a e d só dão a direção).
+ * Recebe: os quatro valores e a fração entre b e c (0 a 1).
+ * Devolve: o valor interpolado.
+ */
+static float catmullRom(float a, float b, float c, float d, float t) {
+    return 0.5f * (2.0f * b + (c - a) * t + (2.0f * a - 5.0f * b + 4.0f * c - d) * t * t
+                   + (3.0f * b - a - 3.0f * c + d) * t * t * t);
+}
+
+/*
+ * pontoDaTabela
+ * Recebe: um índice qualquer (a tabela é circular).
+ * Devolve: o ponto do traçado da Copa Pistão.
+ */
+static PontoDoTracado pontoDaTabela(int indice) {
+    return TRACADO_COPA_PISTAO[(indice + TOTAL_PONTOS_COPA_PISTAO) % TOTAL_PONTOS_COPA_PISTAO];
+}
+
+/*
+ * criarCopaPistao
+ * Monta o oval a partir do traçado medido no modelo 3D (copa_pistao.h): anda
+ * pela tabela criando um segmento a cada COMPRIMENTO_SEGMENTO, já na posição
+ * exata do modelo, e deduz a curvatura de cada um da mudança de rumo. Assim a
+ * física anda sobre a mesma linha que a imagem mostra.
+ * Recebe: nada.
+ * Devolve: a pista completa.
+ */
+Pista *criarCopaPistao(void) {
+    Pista *pista = criarPistaVazia();
+    pista->id = PISTA_COPA_PISTAO;
+    pista->nome = "Copa Pistão";
+    float passo = COMPRIMENTO_SEGMENTO / UNIDADES_POR_METRO;
+
+    /* 1) Anda pela tabela em passos curtos, medindo o caminho em metros */
+    float ultimoX = pontoDaTabela(0).x * ESCALA_COPA_PISTAO, ultimoZ = pontoDaTabela(0).z * ESCALA_COPA_PISTAO;
+    float andou = passo;   /* força um segmento logo no primeiro ponto */
+    for (int i = 0; i < TOTAL_PONTOS_COPA_PISTAO; i++) {
+        PontoDoTracado a = pontoDaTabela(i - 1), b = pontoDaTabela(i), c = pontoDaTabela(i + 1), d = pontoDaTabela(i + 2);
+        for (int sub = 0; sub < SUBPASSOS_DO_TRACADO; sub++) {
+            float t = (float) sub / SUBPASSOS_DO_TRACADO;
+            float x = catmullRom(a.x, b.x, c.x, d.x, t) * ESCALA_COPA_PISTAO;
+            float z = catmullRom(a.z, b.z, c.z, d.z, t) * ESCALA_COPA_PISTAO;
+            andou += hypotf(x - ultimoX, z - ultimoZ);
+            ultimoX = x;
+            ultimoZ = z;
+            if (andou < passo) {
+                continue;
+            }
+            andou -= passo;
+            Segmento *novo = inserirSegmento(pista, pista->largada == NULL ? NULL : pista->largada->anterior, 0.0f);
+            novo->temMuro = 1;
+            novo->xMundo = x;
+            novo->zMundo = z;
+            novo->altura = (b.altura + (c.altura - b.altura) * t) * ESCALA_COPA_PISTAO * UNIDADES_POR_METRO;
+            for (int k = 0; k < PONTOS_DO_PERFIL; k++) {
+                novo->perfil[k] = (b.perfil[k] + (c.perfil[k] - b.perfil[k]) * t) * ESCALA_COPA_PISTAO;
+            }
+            novo->larguraDireita = (b.ateMuroDireita + (c.ateMuroDireita - b.ateMuroDireita) * t) * ESCALA_COPA_PISTAO;
+            novo->larguraEsquerda = (b.ateMuroEsquerda + (c.ateMuroEsquerda - b.ateMuroEsquerda) * t) * ESCALA_COPA_PISTAO;
+        }
+    }
+
+    /* 2) Rumo de cada segmento (até o próximo) e curvatura (quanto o rumo muda) */
+    Segmento *atual = pista->largada;
+    do {
+        atual->rumo = atan2f(atual->proximo->xMundo - atual->xMundo,
+                             atual->zMundo - atual->proximo->zMundo) / GRAUS_PARA_RADIANOS;
+        atual = atual->proximo;
+    } while (atual != pista->largada);
+    do {
+        float mudou = atual->proximo->rumo - atual->rumo;
+        while (mudou > 180.0f) {
+            mudou -= 360.0f;
+        }
+        while (mudou < -180.0f) {
+            mudou += 360.0f;
+        }
+        atual->curvatura = mudou;
+        atual = atual->proximo;
+    } while (atual != pista->largada);
+    suavizarCurvas(pista);
+
+    /* 3) Nome de cada trecho: conta as curvas, na ordem. A curva é decidida pela
+     * média em volta, para uma variação pequena não partir uma curva em duas */
+    static const char *CURVAS[] = { "Curva 1", "Curva 2", "Curva 3", "Curva 4" };
+    static const char *RETAS[] = { "Reta dos Boxes", "Reta Curta", "Reta Oposta", "Reta Curta", "Reta dos Boxes" };
+    int curvasFeitas = 0, naCurva = 0;
+    do {
+        float soma = 0.0f;
+        Segmento *vizinho = atual;
+        for (int i = 0; i < RAIO_DA_MEDIA_DO_NOME; i++) {
+            vizinho = vizinho->anterior;
+        }
+        for (int i = 0; i < 2 * RAIO_DA_MEDIA_DO_NOME + 1; i++) {
+            soma += vizinho->curvatura;
+            vizinho = vizinho->proximo;
+        }
+        int ehCurva = soma / (2 * RAIO_DA_MEDIA_DO_NOME + 1) <= -CURVATURA_MINIMA_ZEBRA;
+        if (naCurva && !ehCurva) {
+            curvasFeitas++;
+        }
+        naCurva = ehCurva;
+        atual->nomeTrecho = ehCurva ? CURVAS[curvasFeitas] : RETAS[curvasFeitas];
+        atual = atual->proximo;
+    } while (atual != pista->largada);
+
+    decorarOval(pista);
+    return pista;
+}
+
+/*
+ * criarPistaPorId
+ * Recebe: qual pista criar.
+ * Devolve: a pista completa.
+ */
+Pista *criarPistaPorId(IdPista id) {
+    return (id == PISTA_COPA_PISTAO) ? criarCopaPistao() : criarPista();
 }
 
 /* ==================================================================
@@ -394,6 +573,9 @@ int contarSegmentos(Pista *pista) {
  * Devolve: 1 se tem zebra, 0 se é reta (ou quase).
  */
 int temZebra(Segmento *segmento) {
+    if (segmento->temMuro) {
+        return 0;   /* no oval, a borda é o muro */
+    }
     return segmento->curvatura >= CURVATURA_MINIMA_ZEBRA ||
            segmento->curvatura <= -CURVATURA_MINIMA_ZEBRA;
 }
@@ -499,4 +681,95 @@ void liberarPista(Pista *pista) {
     }
 
     free(pista);
+}
+
+/*
+ * larguraDoLado
+ * A pista pode ser mais larga de um lado que do outro (o oval).
+ * Recebe: o segmento e a lateral (só importa o sinal).
+ * Devolve: a largura, em metros, do lado onde a lateral está.
+ */
+float larguraDoLado(Segmento *segmento, float lateral) {
+    return (lateral >= 0.0f) ? segmento->larguraDireita : segmento->larguraEsquerda;
+}
+
+/*
+ * perfilNaLateral
+ * A altura do chão num lugar da largura, interpolando o perfil do segmento.
+ * Além da borda, vale a altura da borda.
+ * Recebe: o segmento e a lateral (-1 borda esquerda, +1 borda direita).
+ * Devolve: a altura em relação à linha da pista, em metros.
+ */
+static float perfilNaLateral(Segmento *segmento, float lateral) {
+    float lugar = (lateral + 1.0f) / 2.0f * (PONTOS_DO_PERFIL - 1);
+    if (lugar <= 0.0f) {
+        return segmento->perfil[0];
+    }
+    if (lugar >= PONTOS_DO_PERFIL - 1) {
+        return segmento->perfil[PONTOS_DO_PERFIL - 1];
+    }
+    int k = (int) lugar;
+    return segmento->perfil[k] + (segmento->perfil[k + 1] - segmento->perfil[k]) * (lugar - k);
+}
+
+/*
+ * alturaNaLateral
+ * A altura do chão numa posição da pista e num lugar da largura.
+ * Recebe: a posição na pista e a lateral (-1 a +1).
+ * Devolve: a altura no mundo, em metros.
+ */
+static float alturaNaLateral(PosicaoNaPista posicao, float lateral) {
+    Segmento *a = posicao.segmento;
+    float t = posicao.distanciaNoSegmento / COMPRIMENTO_SEGMENTO;
+    float perfil = perfilNaLateral(a, lateral) + (perfilNaLateral(a->proximo, lateral) - perfilNaLateral(a, lateral)) * t;
+    return alturaNaPosicao(posicao) / UNIDADES_POR_METRO + perfil;
+}
+
+/*
+ * alturaDoChao
+ * A altura do chão a tantos metros da linha da pista. É o que assenta as
+ * rodas dos carros no asfalto.
+ * Recebe: a posição na pista e a lateral em metros (+ direita, - esquerda).
+ * Devolve: a altura no mundo, em metros.
+ */
+float alturaDoChao(PosicaoNaPista posicao, float lateralEmMetros) {
+    return alturaNaLateral(posicao, lateralEmMetros / larguraDoLado(posicao.segmento, lateralEmMetros));
+}
+
+/*
+ * pontoNoMundo
+ * Onde um ponto da pista fica no mundo 3D: interpola entre o começo do
+ * segmento e o começo do seguinte, anda para o lado e sobe até o chão.
+ * Recebe: a posição na pista e o deslocamento lateral (0 = linha da pista, +1 = borda direita, -1 = esquerda).
+ * Devolve: o ponto, em metros.
+ */
+PontoNoMundo pontoNoMundo(PosicaoNaPista posicao, float deslocamentoLateral) {
+    Segmento *a = posicao.segmento;
+    Segmento *b = a->proximo;
+    float t = posicao.distanciaNoSegmento / COMPRIMENTO_SEGMENTO;
+
+    float mudou = b->rumo - a->rumo;
+    while (mudou > 180.0f) {
+        mudou -= 360.0f;
+    }
+    while (mudou < -180.0f) {
+        mudou += 360.0f;
+    }
+
+    PontoNoMundo ponto;
+    ponto.rumo = a->rumo + mudou * t;
+    float largura = larguraDoLado(a, deslocamentoLateral) + (larguraDoLado(b, deslocamentoLateral) - larguraDoLado(a, deslocamentoLateral)) * t;
+    float lateral = deslocamentoLateral * largura;
+    float angulo = ponto.rumo * GRAUS_PARA_RADIANOS;
+
+    /* A direita de quem olha para o rumo */
+    ponto.x = a->xMundo + (b->xMundo - a->xMundo) * t + cosf(angulo) * lateral;
+    ponto.z = a->zMundo + (b->zMundo - a->zMundo) * t + sinf(angulo) * lateral;
+    ponto.y = alturaNaLateral(posicao, deslocamentoLateral);
+
+    /* A inclinação em volta do ponto, para a câmera acompanhar sem tremer */
+    float direita = alturaDoChao(posicao, lateral + META_LARGURA_DA_INCLINACAO);
+    float esquerda = alturaDoChao(posicao, lateral - META_LARGURA_DA_INCLINACAO);
+    ponto.inclinacao = (direita - esquerda) / (2.0f * META_LARGURA_DA_INCLINACAO);
+    return ponto;
 }

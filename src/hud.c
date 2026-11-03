@@ -103,7 +103,7 @@ void terminarInterface(void) {
 #define LARGURA_POSICOES      236.0f
 #define ALTURA_CABECALHO_HUD  20.0f
 #define ALTURA_SUBCABECALHO   16.0f
-#define ALTURA_LINHA_HUD      16.0f
+#define ALTURA_LINHA_HUD      14.0f
 #define LARGURA_BANDEIRA      78.0f
 #define X_COLUNA_INTERVALO    146.0f   /* a partir da esquerda do painel */
 #define X_COLUNA_ULTIMA       190.0f
@@ -390,13 +390,13 @@ static void desenharPainelDePosicoes(Corrida *corrida) {
         DrawRectangleRec((Rectangle){ x, y, LARGURA_POSICOES, ALTURA_LINHA_HUD }, COR_FUNDO_HUD);
         DrawRectangleRec((Rectangle){ x + 3, y + 2, 13, ALTURA_LINHA_HUD - 4 },
                          ehJogador ? COR_AMARELO : COR_TEXTO_CLARO);
-        escreverCentralizado(FONTE_FORTE, TextFormat("%d", i + 1), x + 9.5f, y + 1, LETRA_PEQUENA, COR_GRAFITE);
-        escrever(FONTE_TEXTO, carro->nome, x + 22, y + 1, LETRA_HUD, corTexto);
+        escreverCentralizado(FONTE_FORTE, TextFormat("%d", i + 1), x + 9.5f, y, LETRA_PEQUENA, COR_GRAFITE);
+        escrever(FONTE_TEXTO, carro->nome, x + 22, y, LETRA_HUD, corTexto);
 
         const char *intervalo = ehJogador ? "--" : TextFormat("%+.2f", intervaloEmSegundos(carro, jogador));
-        escrever(FONTE_TEXTO, intervalo, x + X_COLUNA_INTERVALO, y + 1, LETRA_HUD, corTexto);
+        escrever(FONTE_TEXTO, intervalo, x + X_COLUNA_INTERVALO, y, LETRA_HUD, corTexto);
         escrever(FONTE_TEXTO, textoDoTempo(ultimaVolta(carro), texto, sizeof(texto)),
-                 x + X_COLUNA_ULTIMA, y + 1, LETRA_HUD, corTexto);
+                 x + X_COLUNA_ULTIMA, y, LETRA_HUD, corTexto);
         y += ALTURA_LINHA_HUD;
     }
 }

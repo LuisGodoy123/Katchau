@@ -18,6 +18,15 @@
 #define LADO_ARVORE_MINIMO  3.0f
 #define LADO_ARVORE_MAXIMO  6.0f
 
+/* Num circuito sinuoso, o lugar de um objeto pode cair em cima de OUTRO trecho
+ * da pista. Por isso ele é conferido contra a volta inteira: precisa ficar além
+ * de onde o carro consegue chegar em qualquer trecho, mais o tamanho do objeto. */
+#define ALCANCE_DO_CARRO    2.5f   /* LIMITE_LATERAL em carro.c, em larguras da pista */
+#define FOLGA_DA_ARVORE     7.0f   /* metros: o raio da copa */
+#define FOLGA_DOS_PNEUS     1.0f
+#define FOLGA_DAS_PLACAS    1.0f
+#define PASSO_DA_CONFERENCIA 3     /* confere um a cada 3 segmentos (5 m) */
+
 /* De quantos em quantos segmentos se repete cada coisa */
 #define ESPACO_PNEUS        6
 
@@ -98,15 +107,41 @@ static float sortear(void) {
 }
 
 /*
+ * lugarLivre
+ * Diz se um objeto pode ficar num lugar: longe, no mundo, de toda a pista.
+ * Recebe: a pista, o segmento e a lateral do objeto, e o raio dele em metros.
+ * Devolve: 1 se está livre, 0 se cairia onde o carro pode passar.
+ */
+int lugarLivre(Pista *pista, Segmento *segmento, float lateral, float folga) {
+    PosicaoNaPista lugar = { segmento, 0.0f };
+    PontoNoMundo ponto = pontoNoMundo(lugar, lateral);
+
+    Segmento *atual = pista->largada;
+    int indice = 0;
+    do {
+        if (indice++ % PASSO_DA_CONFERENCIA == 0) {
+            float largura = (atual->larguraDireita > atual->larguraEsquerda) ? atual->larguraDireita : atual->larguraEsquerda;
+            float alcance = largura * ALCANCE_DO_CARRO + folga;
+            float dx = atual->xMundo - ponto.x, dz = atual->zMundo - ponto.z;
+            if (dx * dx + dz * dz < alcance * alcance) {
+                return 0;
+            }
+        }
+        atual = atual->proximo;
+    } while (atual != pista->largada);
+    return 1;
+}
+
+/*
  * colocarPlacas
  * Coloca as placas de 150, 100 e 50 metros antes da entrada de uma
  * curva, por fora dela (curva à esquerda: placas à direita). A placa
  * só entra se o lugar dela for reta: se antes da curva vem outra
  * curva logo em seguida, as placas mais distantes ficam de fora.
- * Recebe: o primeiro segmento da curva.
+ * Recebe: a pista e o primeiro segmento da curva.
  * Devolve: nada.
  */
-static void colocarPlacas(Segmento *entrada) {
+static void colocarPlacas(Pista *pista, Segmento *entrada) {
     static const int METROS[] = { 50, 100, 150 };
     static const TipoObjeto PLACAS[] = { OBJETO_PLACA_50, OBJETO_PLACA_100, OBJETO_PLACA_150 };
     float lado = (entrada->curvatura < 0) ? LADO_PLACAS : -LADO_PLACAS;
@@ -121,7 +156,7 @@ static void colocarPlacas(Segmento *entrada) {
                 ehReta = 0;   /* bateu em outra curva: não cabe esta placa */
             }
         }
-        if (!ehReta) {
+        if (!ehReta || !lugarLivre(pista, lugar, lado, FOLGA_DAS_PLACAS)) {
             return;   /* as placas maiores ficariam mais longe ainda */
         }
         adicionarObstaculo(lugar, PLACAS[p], lado);
@@ -173,10 +208,12 @@ void decorarPista(Pista *pista) {
         if (temZebra(atual)) {
             if (atual->indice % ESPACO_PNEUS == 0) {
                 float fora = (atual->curvatura < 0) ? LADO_PNEUS : -LADO_PNEUS;
-                adicionarObstaculo(atual, OBJETO_PNEUS, fora);
+                if (lugarLivre(pista, atual, fora, FOLGA_DOS_PNEUS)) {
+                    adicionarObstaculo(atual, OBJETO_PNEUS, fora);
+                }
             }
             if (!temZebra(segmentoAnterior(atual))) {
-                colocarPlacas(atual);
+                colocarPlacas(pista, atual);
             }
         }
 
@@ -185,10 +222,25 @@ void decorarPista(Pista *pista) {
             if (sortear() < CHANCE_ARVORE) {
                 float distancia = LADO_ARVORE_MINIMO
                                   + sortear() * (LADO_ARVORE_MAXIMO - LADO_ARVORE_MINIMO);
-                adicionarObstaculo(atual, OBJETO_ARVORE, lado * distancia);
+                if (lugarLivre(pista, atual, lado * distancia, FOLGA_DA_ARVORE)) {
+                    adicionarObstaculo(atual, OBJETO_ARVORE, lado * distancia);
+                }
             }
         }
 
         atual = proximoSegmento(atual);
     } while (atual != pista->largada);
+}
+
+/*
+ * decorarOval
+ * No oval, só as marcas do grid: todo o resto do cenário (muros, placas,
+ * arquibancadas) já está no modelo 3D.
+ * Recebe: a pista (já montada).
+ * Devolve: nada.
+ */
+void decorarOval(Pista *pista) {
+    if (pista != NULL && pista->largada != NULL) {
+        marcarGrid(pista);
+    }
 }

@@ -13,13 +13,13 @@
  * os objetos só são percorridos do começo ao fim, para desenhar.
  *
  * Módulo de lógica: não usa a raylib. Só decide QUE objeto fica ONDE;
- * a imagem e o tamanho de cada tipo ficam no render.c.
+ * a forma 3D de cada tipo fica no mundo.c.
  * ------------------------------------------------------------------
  */
 
 #include "pista.h"
 
-/* O que é o objeto (o render.c tem uma imagem para cada tipo) */
+/* O que é o objeto (o mundo.c tem uma forma 3D para cada tipo) */
 typedef enum {
     OBJETO_ARVORE,
     OBJETO_PORTICO,      /* pórtico da largada, por cima da pista */
@@ -45,5 +45,7 @@ void liberarObstaculos(Segmento *segmento);
 
 /* ---------- A pista inteira ---------- */
 void decorarPista(Pista *pista);
+void decorarOval(Pista *pista);
+int lugarLivre(Pista *pista, Segmento *segmento, float lateral, float folga);
 
 #endif

@@ -4,10 +4,8 @@ Imagens PNG usadas pelo `render.c`. Elas são carregadas uma vez em
 `carregarTexturas()` (chamada no `main.c`). Se uma imagem faltar, aquela
 parte volta a ser desenhada com as cores sólidas (`COR_*` no `render.c`).
 
-Já usadas: fundo (céu, cidade, morros), asfalto, grama e as três poses
-do carro (os rivais são o mesmo sprite com o vermelho trocado pela cor
-de cada um) e os `sprites/` (objetos na beira da pista, ver
-`obstaculos.c`). A zebra continua com cores sólidas (só nas curvas), e a
+Já usadas: fundo (céu, cidade, morros), asfalto, grama e as placas e o pórtico de `sprites/` (`mundo.c`;
+`arvore.png` e `pneus.png` não são mais usados: os dois agora são geométricos). A zebra continua com cores sólidas (só nas curvas), e a
 faixa não é mais usada.
 
 Os caminhos são relativos à raiz do projeto, que é de onde o jogo roda
@@ -68,6 +66,16 @@ mantendo o nome.
 O `render.c` não depende do tamanho das imagens: a grama usa a largura da
 textura e o fundo converte para a largura de referência `LARGURA_FUNDO`
 (640). As texturas repetidas usam mipmaps, para não tremerem ao longe.
+
+## Os modelos 3D
+
+Os carros não usam mais a pasta `carro/` (veio dos sprites antigos): agora são os modelos de
+`recursos/modelos/carros/`, com as texturas dentro.
+
+
+O cenário da Copa Pistão não usa estas imagens: ele vem pronto, com as texturas dentro, em
+`recursos/modelos/copa_pistao.glb` ([Motor Speedway of the South](https://sketchfab.com/3d-models/motor-speedway-of-the-south-b6406f62b7b94580844fb8508cc72148),
+de DinseyPixarCarsModels, publicado como CC-BY-4.0).
 
 ## Regras para adicionar texturas
 
