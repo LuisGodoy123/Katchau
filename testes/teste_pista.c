@@ -726,6 +726,39 @@ static void testarObjetosDaPista(void) {
               "placas de frenagem antes das curvas (a de 50 m sempre que tem a de 150 m)");
     verificar(noCaminho == 0, "nenhum objeto de pe fica onde o carro pode passar (fora o portico)");
 
+    /* Arquibancadas: cada setor do mapa está no trecho certo da pista */
+    static const struct { char setor; const char *trecho; } SETORES[] = {
+        { 'A', "Subida dos Boxes" }, { 'B', "Reta dos Boxes" }, { 'M', "Reta dos Boxes" }, { 'D', "S do Senna" },
+        { 'H', "Curva do Sol" }, { 'N', "Curva do Sol" }, { 'R', "Reta Oposta" }, { 'G', "Reta Oposta" },
+        { 'S', "Reta Oposta" }, { 'V', "Descida do Lago" },
+    };
+    int setoresCertos = 0;
+    for (int i = 0; i < 10; i++) {
+        atual = pista->largada;
+        do {
+            for (Obstaculo *objeto = atual->obstaculos; objeto != NULL; objeto = objeto->proximo) {
+                if (objeto->setor == SETORES[i].setor && objeto->deslocamentoLateral > 0.0f) {
+                    /* o módulo do meio pode cair no trecho seguinte: confere uns segmentos em volta */
+                    Segmento *perto = atual;
+                    int achou = 0;
+                    for (int k = 0; k < 120; k++) {
+                        perto = segmentoAnterior(perto);
+                    }
+                    for (int k = 0; k < 240; k++) {
+                        achou = achou || strcmp(perto->nomeTrecho, SETORES[i].trecho) == 0;
+                        perto = proximoSegmento(perto);
+                    }
+                    setoresCertos += achou;
+                }
+            }
+            atual = proximoSegmento(atual);
+        } while (atual != pista->largada);
+    }
+    printf("     arquibancadas: %d modulos, camarotes: %d; %d setores no trecho certo\n",
+           contagem[OBJETO_ARQUIBANCADA], contagem[OBJETO_CAMAROTE], setoresCertos);
+    verificar(setoresCertos == 10, "os 10 setores do mapa estao no trecho certo da pista");
+    verificar(contagem[OBJETO_CAMAROTE] >= 2, "os dois camarotes do mapa existem");
+
     /* No mundo: nenhum objeto cai em cima de OUTRO trecho da pista, nem dentro do alcance do carro nele */
     int emCimaDaPista = 0, dentroDoAlcance = 0, total = 0;
     float maisPerto = 1e9f;

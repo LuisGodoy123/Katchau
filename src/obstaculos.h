@@ -19,6 +19,10 @@
 
 #include "pista.h"
 
+/* Um módulo de arquibancada: largura e fundo, em metros (os mesmos do modelo 3D) */
+#define LARGURA_DO_MODULO     24.0f
+#define FUNDO_DO_MODULO       13.0f
+
 /* O que é o objeto (o mundo.c tem uma forma 3D para cada tipo) */
 typedef enum {
     OBJETO_ARVORE,
@@ -28,6 +32,8 @@ typedef enum {
     OBJETO_PLACA_100,
     OBJETO_PLACA_150,
     OBJETO_MARCA_GRID,   /* colchete de um lugar do grid: pintado no chão, não fica de pé */
+    OBJETO_ARQUIBANCADA, /* um módulo de arquibancada, de frente para a pista */
+    OBJETO_CAMAROTE,     /* um módulo de camarote */
     TOTAL_TIPOS_OBJETO
 } TipoObjeto;
 
@@ -35,6 +41,7 @@ typedef enum {
 typedef struct Obstaculo {
     TipoObjeto tipo;
     float deslocamentoLateral;    /* como o do carro: 0 no meio, ±1 nas bordas do asfalto */
+    char setor;                   /* no módulo do meio de uma arquibancada: a letra da placa (senão 0) */
     struct Obstaculo *proximo;    /* próximo objeto do mesmo segmento (NULL no último) */
 } Obstaculo;
 

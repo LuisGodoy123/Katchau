@@ -5,8 +5,8 @@
  *
  *   - Copa Pistão: o modelo do estádio (recursos/modelos/copa_pistao.glb);
  *   - Interlagos: malhas geradas a partir da lista de segmentos (asfalto,
- *     zebras, terreno, árvores, pneus, placas e pórtico), com o céu, a
- *     cidade e os morros em volta.
+ *     zebras e terreno), com o céu, a cidade e os morros em volta, e os
+ *     objetos da beira, modelos de recursos/modelos/objetos.
  *
  * A lógica do jogo continua na lista circular da pista. Este módulo só
  * transforma os segmentos em malhas, uma vez, no começo.

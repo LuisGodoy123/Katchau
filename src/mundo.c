@@ -49,39 +49,16 @@
 #define TAMANHO_DA_BASE       9000.0f   /* chão plano que cobre até o horizonte */
 
 /* ---------- Objetos da beira de Interlagos (metros) ---------- */
+#define PASTA_DOS_OBJETOS     "recursos/modelos/objetos/"
 #define SEMENTE_DOS_OBJETOS   2026u     /* sorteio fixo: as árvores são sempre iguais */
-#define ABAIXO_DO_CHAO        1.0f      /* troncos e postes começam um pouco abaixo do terreno */
-#define COR_DO_TRONCO         (Color){  92,  66,  42, 255 }
-#define COR_DA_COPA           (Color){  52, 118,  44, 255 }
-#define ALTURA_MINIMA_ARVORE  9.0f
-#define ALTURA_MAXIMA_ARVORE  15.0f
-
 #define PILHAS_POR_BARREIRA   7         /* a barreira vem a cada 6 segmentos (10 m): fica contínua */
-#define PNEUS_POR_PILHA       3
-#define RAIO_DO_PNEU          0.72f
-#define ALTURA_DO_PNEU        0.48f
-#define LADOS_DO_PNEU         8
-#define COR_DA_BORRACHA       (Color){  42,  42,  48, 255 }
-#define COR_DO_FURO           (Color){  12,  12,  14, 255 }
-#define COR_PNEU_VERMELHO     (Color){ 205,  30,  36, 255 }
-#define COR_PNEU_BRANCO       (Color){ 236, 236, 236, 255 }
-
-#define COR_DO_METAL          (Color){ 130, 136, 148, 255 }
-#define COR_DO_POSTE          (Color){  96, 100, 110, 255 }
-#define COR_DAS_COSTAS        (Color){ 150,  36,  38, 255 }
-#define ALTURA_DA_PLACA       5.6f      /* do chão até o alto da placa */
-#define LADO_DA_PLACA         3.0f
-#define ESPESSURA_DA_PLACA    0.12f
-#define RECUO_DA_PLACA        0.22f     /* do centro do poste até as costas da placa */
-#define FRACAO_DO_DESENHO     0.536f    /* a parte da imagem que é a placa (o resto é o poste do desenho) */
-
-#define VAO_DO_PORTICO        13.0f     /* altura livre embaixo da viga */
-#define LARGURA_DO_PORTICO    43.3f
-#define ALTURA_DA_VIGA        5.4f
-#define FUNDO_DA_VIGA         1.6f
-#define LADO_DA_COLUNA        1.9f
-#define TOPO_DA_VIGA_NA_IMAGEM 0.07f    /* onde a viga está na imagem do pórtico, de cima para baixo */
-#define BASE_DA_VIGA_NA_IMAGEM 0.34f
+#define SEGMENTOS_DA_BARREIRA 6
+#define MENOR_ARVORE          0.82f     /* cada árvore tem um tamanho, em relação ao modelo */
+#define MAIOR_ARVORE          1.22f
+#define AFUNDAR_NO_CHAO       0.05f
+#define MAXIMO_DE_LOTES       96
+#define TOPO_DA_ARQUIBANCADA  10.3f     /* a placa do setor fica no alto do fundo */
+#define MAXIMO_DE_VERTICES    60000     /* uma malha da raylib aponta os vértices com 16 bits */
 
 /* ---------- Céu e fundo (cilindros em volta da câmera) ---------- */
 #define LADOS_DO_CILINDRO     72
@@ -128,10 +105,56 @@ typedef struct {
     Mesh acostamento;
     Mesh terreno;
     Mesh base;
-    Mesh objetos;           /* árvores, pneus, postes: formas com cores nos vértices */
-    Mesh placas[3];         /* a frente de cada placa, com a imagem dela */
-    Mesh viga;              /* a viga do pórtico, com a imagem dele */
 } MalhasDaPista;
+
+/* Os modelos .glb dos objetos de Interlagos */
+typedef enum {
+    MODELO_ARVORE_1,
+    MODELO_ARVORE_2,
+    MODELO_ARVORE_3,
+    MODELO_PNEUS_VERMELHO,
+    MODELO_PNEUS_BRANCO,
+    MODELO_PLACA_50,
+    MODELO_PLACA_100,
+    MODELO_PLACA_150,
+    MODELO_PORTICO,
+    MODELO_ARQUIBANCADA,
+    MODELO_CAMAROTE,
+    MODELO_SETOR_A,
+    MODELO_SETOR_B,
+    MODELO_SETOR_D,
+    MODELO_SETOR_G,
+    MODELO_SETOR_H,
+    MODELO_SETOR_M,
+    MODELO_SETOR_N,
+    MODELO_SETOR_R,
+    MODELO_SETOR_S,
+    MODELO_SETOR_V,
+    TOTAL_MODELOS_DE_OBJETO
+} ModeloDeObjeto;
+
+static const char *ARQUIVOS_DOS_OBJETOS[TOTAL_MODELOS_DE_OBJETO] = {
+    "arvore_1.glb", "arvore_2.glb", "arvore_3.glb", "pneus_vermelho.glb", "pneus_branco.glb",
+    "placa_50.glb", "placa_100.glb", "placa_150.glb", "portico.glb", "arquibancada.glb", "camarote.glb",
+    "setor_A.glb", "setor_B.glb", "setor_D.glb", "setor_G.glb", "setor_H.glb",
+    "setor_M.glb", "setor_N.glb", "setor_R.glb", "setor_S.glb", "setor_V.glb",
+};
+
+/* Centenas de cópias do mesmo modelo desenhadas uma a uma pesariam: elas são
+ * juntadas em malhas únicas, os lotes, uma para cada textura */
+typedef struct {
+    Mesh malha;
+    Texture2D textura;
+} LoteDeObjetos;
+
+/* Um lote ainda sendo montado */
+typedef struct {
+    float *vertices, *texturas;
+    unsigned char *cores;
+    unsigned short *indices;
+    int totalVertices, capacidadeVertices;
+    int totalIndices, capacidadeIndices;
+} LoteAberto;
 
 static Shader shader;
 static Material material;   /* o mesmo material, trocando a textura a cada desenho */
@@ -141,7 +164,9 @@ static MalhasDaPista interlagos;
 static Mesh cilindroDoCeu, cilindroDaCidade, cilindroDosMorros;
 static Texture2D texturaCeu, texturaCidade, texturaMorros;
 static Texture2D texturaAsfalto[2], texturaGrama;
-static Texture2D texturaPlacas[3], texturaPortico;
+static Model modelosDosObjetos[TOTAL_MODELOS_DE_OBJETO];
+static LoteDeObjetos lotes[MAXIMO_DE_LOTES];
+static int totalDeLotes = 0;
 
 /* ==================================================================
  * Construção de malhas
@@ -454,10 +479,10 @@ static void construirInterlagos(Pista *pista) {
 }
 
 /* ==================================================================
- * Objetos 3D de Interlagos
+ * Objetos 3D de Interlagos: modelos .glb juntados em lotes
  * ================================================================== */
 
-/* Sorteio próprio, como em obstaculos.c: a mesma semente dá sempre as mesmas formas */
+/* Sorteio próprio, como em obstaculos.c: a mesma semente dá sempre as mesmas árvores */
 static unsigned int sementeDosObjetos;
 
 /*
@@ -471,203 +496,140 @@ static float sortearObjeto(float minimo, float maximo) {
 }
 
 /*
- * corComLuz
- * Clareia ou escurece a cor conforme a face olha para o sol. Os objetos não
- * mudam de lugar, então a luz é calculada uma vez, na construção.
- * Recebe: a cor e a direção para onde a face aponta.
- * Devolve: a cor iluminada.
+ * luzDoSol
+ * Quanto uma face clareia conforme olha para o sol. Os objetos não mudam
+ * de lugar, então a luz é calculada uma vez, na construção.
+ * Recebe: a direção para onde a face aponta.
+ * Devolve: o fator de luz.
  */
-static Color corComLuz(Color cor, Vector3 normal) {
+static float luzDoSol(Vector3 normal) {
     Vector3 sol = Vector3Normalize((Vector3){ 0.35f, 0.8f, 0.45f });
     Vector3 n = Vector3Normalize(normal);
-    float luz = 0.58f + 0.30f * (n.y * 0.5f + 0.5f) + 0.38f * fmaxf(Vector3DotProduct(n, sol), 0.0f);
-    return (Color){ (unsigned char) fminf(cor.r * luz, 255.0f), (unsigned char) fminf(cor.g * luz, 255.0f),
-                    (unsigned char) fminf(cor.b * luz, 255.0f), 255 };
+    return 0.58f + 0.30f * (n.y * 0.5f + 0.5f) + 0.38f * fmaxf(Vector3DotProduct(n, sol), 0.0f);
 }
 
 /*
- * adicionarTriangulo
- * Um triângulo de uma cor só, iluminado pela própria face.
- * Recebe: a construção, os 3 pontos e a cor.
+ * fecharLote
+ * Envia um lote pronto para a placa de vídeo e deixa o aberto vazio, para
+ * continuar montando. A Mesh passa a ser dona dos vetores.
+ * Recebe: o lote aberto e a textura dele.
  * Devolve: nada.
  */
-static void adicionarTriangulo(Construcao *c, Vector3 a, Vector3 b, Vector3 d, Color cor) {
-    Vector3 normal = Vector3CrossProduct(Vector3Subtract(b, a), Vector3Subtract(d, a));
-    Color comLuz = corComLuz(cor, normal);
-    Vector2 zero = { 0.0f, 0.0f };
-    adicionarVertice(c, a, zero, comLuz);
-    adicionarVertice(c, b, zero, comLuz);
-    adicionarVertice(c, d, zero, comLuz);
-}
-
-/*
- * adicionarFace
- * Um quadrilátero de uma cor só, iluminado pela própria face.
- * Recebe: a construção, os 4 pontos em volta dele e a cor.
- * Devolve: nada.
- */
-static void adicionarFace(Construcao *c, Vector3 a, Vector3 b, Vector3 d, Vector3 e, Color cor) {
-    adicionarTriangulo(c, a, b, d, cor);
-    adicionarTriangulo(c, a, d, e, cor);
-}
-
-/*
- * adicionarCaixa
- * Uma caixa em pé, alinhada com as direções dadas.
- * Recebe: a construção, o centro da base, as direções do lado e da frente
- *         (já unitárias), a largura, o fundo, a altura e a cor.
- * Devolve: nada.
- */
-static void adicionarCaixa(Construcao *c, Vector3 base, Vector3 lado, Vector3 frente,
-                           float largura, float fundo, float altura, Color cor) {
-    Vector3 l = Vector3Scale(lado, largura / 2.0f), f = Vector3Scale(frente, fundo / 2.0f);
-    Vector3 cima = { 0.0f, altura, 0.0f };
-    Vector3 p[4] = { Vector3Subtract(Vector3Subtract(base, l), f), Vector3Subtract(Vector3Add(base, l), f),
-                     Vector3Add(Vector3Add(base, l), f), Vector3Add(Vector3Subtract(base, l), f) };
-    Vector3 q[4];
-    for (int i = 0; i < 4; i++) {
-        q[i] = Vector3Add(p[i], cima);
+static void fecharLote(LoteAberto *aberto, Texture2D textura) {
+    if (aberto->totalVertices == 0) {
+        return;
     }
-    for (int i = 0; i < 4; i++) {
-        int j = (i + 1) % 4;
-        /* A luz depende da direção da face: aqui ela é medida a partir do centro */
-        Vector3 meio = Vector3Scale(Vector3Add(p[i], p[j]), 0.5f);
-        Color comLuz = corComLuz(cor, Vector3Subtract(meio, base));
-        Vector2 zero = { 0.0f, 0.0f };
-        adicionarQuadrilatero(c, p[i], p[j], q[j], q[i], zero, zero, zero, zero, comLuz);
+    if (totalDeLotes == MAXIMO_DE_LOTES) {
+        TraceLog(LOG_ERROR, "MUNDO: lotes demais; aumente MAXIMO_DE_LOTES");
+        return;
     }
-    adicionarFace(c, q[0], q[3], q[2], q[1], cor);
-}
-
-/* Os 12 vértices e as 20 faces de um icosaedro: a base das copas */
-#define P_ICO 1.618034f
-static const Vector3 VERTICES_ICO[12] = {
-    { -1,  P_ICO, 0 }, { 1,  P_ICO, 0 }, { -1, -P_ICO, 0 }, { 1, -P_ICO, 0 },
-    { 0, -1,  P_ICO }, { 0, 1,  P_ICO }, { 0, -1, -P_ICO }, { 0, 1, -P_ICO },
-    {  P_ICO, 0, -1 }, {  P_ICO, 0, 1 }, { -P_ICO, 0, -1 }, { -P_ICO, 0, 1 },
-};
-static const unsigned char FACES_ICO[20][3] = {
-    {0,11,5},{0,5,1},{0,1,7},{0,7,10},{0,10,11},{1,5,9},{5,11,4},{11,10,2},{10,7,6},{7,1,8},
-    {3,9,4},{3,4,2},{3,2,6},{3,6,8},{3,8,9},{4,9,5},{2,4,11},{6,2,10},{8,6,7},{9,8,1},
-};
-
-/*
- * deformarNaBola
- * Põe um ponto na superfície de uma bola amassada. O amassado depende só da
- * direção, para as faces vizinhas continuarem encostadas.
- * Recebe: a direção, o centro, os raios e o desenho do amassado.
- * Devolve: o ponto.
- */
-static Vector3 deformarNaBola(Vector3 direcao, Vector3 centro, Vector3 raios, float desenho) {
-    Vector3 n = Vector3Normalize(direcao);
-    float amassado = 1.0f + 0.13f * sinf(n.x * 5.3f + desenho) * cosf(n.y * 4.1f + desenho * 2.0f) * sinf(n.z * 4.7f + desenho * 0.5f);
-    return (Vector3){ centro.x + n.x * raios.x * amassado, centro.y + n.y * raios.y * amassado,
-                      centro.z + n.z * raios.z * amassado };
+    Mesh malha = { 0 };
+    malha.vertexCount = aberto->totalVertices;
+    malha.triangleCount = aberto->totalIndices / 3;
+    malha.vertices = aberto->vertices;
+    malha.texcoords = aberto->texturas;
+    malha.colors = aberto->cores;
+    malha.indices = aberto->indices;
+    UploadMesh(&malha, false);
+    lotes[totalDeLotes].malha = malha;
+    lotes[totalDeLotes].textura = textura;
+    totalDeLotes++;
+    *aberto = (LoteAberto){ 0 };
 }
 
 /*
- * adicionarBolaDeFolhas
- * Uma bola de folhas facetada: um icosaedro com cada face dividida em 4.
- * Recebe: a construção, o centro, os raios e a cor.
+ * juntarCopia
+ * Copia uma peça do modelo para o lote, já no lugar dela no mundo. A cor de
+ * cada vértice leva a cor do material e a luz do sol.
+ * Recebe: o lote, a peça, a cor do material, a textura e a matriz.
  * Devolve: nada.
  */
-static void adicionarBolaDeFolhas(Construcao *c, Vector3 centro, Vector3 raios, Color cor) {
-    float desenho = sortearObjeto(0.0f, 6.28f);
-    for (int f = 0; f < 20; f++) {
-        Vector3 a = VERTICES_ICO[FACES_ICO[f][0]], b = VERTICES_ICO[FACES_ICO[f][1]], d = VERTICES_ICO[FACES_ICO[f][2]];
-        Vector3 ab = Vector3Add(a, b), bd = Vector3Add(b, d), da = Vector3Add(d, a);   /* os meios das arestas, antes de ir para a bola */
-        Vector3 pa = deformarNaBola(a, centro, raios, desenho), pb = deformarNaBola(b, centro, raios, desenho);
-        Vector3 pd = deformarNaBola(d, centro, raios, desenho), pab = deformarNaBola(ab, centro, raios, desenho);
-        Vector3 pbd = deformarNaBola(bd, centro, raios, desenho), pda = deformarNaBola(da, centro, raios, desenho);
-
-        /* Cada face tem um tom um pouco diferente, como tufos de folhas */
-        float tom = sortearObjeto(0.86f, 1.14f);
-        Color folhas = { (unsigned char) fminf(cor.r * tom, 255.0f), (unsigned char) fminf(cor.g * tom, 255.0f),
-                         (unsigned char) fminf(cor.b * tom, 255.0f), 255 };
-        adicionarTriangulo(c, pa, pab, pda, folhas);
-        adicionarTriangulo(c, pab, pb, pbd, folhas);
-        adicionarTriangulo(c, pda, pbd, pd, folhas);
-        adicionarTriangulo(c, pab, pbd, pda, folhas);
+static void juntarCopia(LoteAberto *lote, Mesh peca, Color corDoMaterial, Texture2D textura, Matrix noMundo) {
+    if (lote->totalVertices + peca.vertexCount > MAXIMO_DE_VERTICES) {
+        fecharLote(lote, textura);
     }
-}
-
-/*
- * adicionarArvore
- * Tronco afilado e uma copa feita de algumas bolas de folhas. Cada árvore sai
- * diferente da outra.
- * Recebe: a construção e o pé da árvore.
- * Devolve: nada.
- */
-static void adicionarArvore(Construcao *c, Vector3 pe) {
-    float altura = sortearObjeto(ALTURA_MINIMA_ARVORE, ALTURA_MAXIMA_ARVORE);
-    float raioDaCopa = altura * sortearObjeto(0.28f, 0.38f);
-    float raioDoTronco = altura * 0.035f;
-    float topoDoTronco = altura * 0.55f;
-
-    /* Tronco: 6 lados, mais fino em cima */
-    for (int i = 0; i < 6; i++) {
-        float a0 = 2.0f * PI * i / 6.0f, a1 = 2.0f * PI * (i + 1) / 6.0f;
-        Vector3 b0 = { pe.x + cosf(a0) * raioDoTronco, pe.y - ABAIXO_DO_CHAO, pe.z + sinf(a0) * raioDoTronco };
-        Vector3 b1 = { pe.x + cosf(a1) * raioDoTronco, pe.y - ABAIXO_DO_CHAO, pe.z + sinf(a1) * raioDoTronco };
-        Vector3 t0 = { pe.x + cosf(a0) * raioDoTronco * 0.6f, pe.y + topoDoTronco, pe.z + sinf(a0) * raioDoTronco * 0.6f };
-        Vector3 t1 = { pe.x + cosf(a1) * raioDoTronco * 0.6f, pe.y + topoDoTronco, pe.z + sinf(a1) * raioDoTronco * 0.6f };
-        adicionarFace(c, b0, t0, t1, b1, COR_DO_TRONCO);
+    int totalNovo = lote->totalVertices + peca.vertexCount;
+    if (totalNovo > lote->capacidadeVertices) {
+        lote->capacidadeVertices = MAXIMO_DE_VERTICES;
+        lote->vertices = MemRealloc(lote->vertices, lote->capacidadeVertices * 3 * sizeof(float));
+        lote->texturas = MemRealloc(lote->texturas, lote->capacidadeVertices * 2 * sizeof(float));
+        lote->cores = MemRealloc(lote->cores, lote->capacidadeVertices * 4);
+    }
+    int indicesDaPeca = (peca.indices != NULL) ? peca.triangleCount * 3 : peca.vertexCount;
+    if (lote->totalIndices + indicesDaPeca > lote->capacidadeIndices) {
+        lote->capacidadeIndices = (lote->capacidadeIndices == 0) ? 65536 : lote->capacidadeIndices * 2;
+        lote->indices = MemRealloc(lote->indices, lote->capacidadeIndices * sizeof(unsigned short));
     }
 
-    /* Copa: uma bola grande no alto e outras em volta, mais baixas */
-    float variacao = sortearObjeto(0.85f, 1.1f);
-    Color copa = { (unsigned char) (COR_DA_COPA.r * variacao), (unsigned char) (COR_DA_COPA.g * variacao),
-                   (unsigned char) (COR_DA_COPA.b * variacao), 255 };
-    float yCopa = pe.y + altura - raioDaCopa * 0.75f;
-    adicionarBolaDeFolhas(c, (Vector3){ pe.x, yCopa, pe.z },
-                          (Vector3){ raioDaCopa * 0.8f, raioDaCopa * 0.78f, raioDaCopa * 0.8f }, copa);
-    for (int i = 0; i < 3; i++) {
-        float angulo = 2.0f * PI * i / 3.0f + sortearObjeto(-0.5f, 0.5f);
-        float raio = raioDaCopa * sortearObjeto(0.55f, 0.72f);
-        Vector3 centro = { pe.x + cosf(angulo) * raioDaCopa * 0.55f, yCopa - raioDaCopa * sortearObjeto(0.15f, 0.45f),
-                           pe.z + sinf(angulo) * raioDaCopa * 0.55f };
-        adicionarBolaDeFolhas(c, centro, (Vector3){ raio, raio * 0.85f, raio }, copa);
-    }
-}
+    /* A rotação sem o deslocamento, para girar as normais */
+    Matrix giro = noMundo;
+    giro.m12 = giro.m13 = giro.m14 = 0.0f;
 
-/*
- * adicionarPilhaDePneus
- * Uma pilha de pneus deitados. Cada pneu é um anel com a banda arredondada,
- * e o de cima é pintado, com o furo escuro no meio.
- * Recebe: a construção, a base da pilha e a cor do pneu de cima.
- * Devolve: nada.
- */
-static void adicionarPilhaDePneus(Construcao *c, Vector3 base, Color corDoTopo) {
-    for (int p = 0; p < PNEUS_POR_PILHA; p++) {
-        Color cor = (p == PNEUS_POR_PILHA - 1) ? corDoTopo : COR_DA_BORRACHA;
-        float y0 = base.y + p * ALTURA_DO_PNEU, yMeio = y0 + ALTURA_DO_PNEU / 2.0f, y1 = y0 + ALTURA_DO_PNEU;
-        float raioNaEmenda = RAIO_DO_PNEU * 0.86f;
-        for (int i = 0; i < LADOS_DO_PNEU; i++) {
-            float a0 = 2.0f * PI * i / LADOS_DO_PNEU, a1 = 2.0f * PI * (i + 1) / LADOS_DO_PNEU;
-            float c0 = cosf(a0), s0 = sinf(a0), c1 = cosf(a1), s1 = sinf(a1);
-            Vector3 em0 = { base.x + c0 * raioNaEmenda, y0, base.z + s0 * raioNaEmenda };
-            Vector3 em1 = { base.x + c1 * raioNaEmenda, y0, base.z + s1 * raioNaEmenda };
-            Vector3 me0 = { base.x + c0 * RAIO_DO_PNEU, yMeio, base.z + s0 * RAIO_DO_PNEU };
-            Vector3 me1 = { base.x + c1 * RAIO_DO_PNEU, yMeio, base.z + s1 * RAIO_DO_PNEU };
-            Vector3 al0 = { base.x + c0 * raioNaEmenda, y1, base.z + s0 * raioNaEmenda };
-            Vector3 al1 = { base.x + c1 * raioNaEmenda, y1, base.z + s1 * raioNaEmenda };
-            adicionarFace(c, em0, me0, me1, em1, cor);
-            adicionarFace(c, me0, al0, al1, me1, cor);
+    for (int i = 0; i < peca.vertexCount; i++) {
+        int v = lote->totalVertices + i;
+        Vector3 ponto = Vector3Transform((Vector3){ peca.vertices[i * 3], peca.vertices[i * 3 + 1], peca.vertices[i * 3 + 2] }, noMundo);
+        lote->vertices[v * 3] = ponto.x;
+        lote->vertices[v * 3 + 1] = ponto.y;
+        lote->vertices[v * 3 + 2] = ponto.z;
+        lote->texturas[v * 2] = (peca.texcoords != NULL) ? peca.texcoords[i * 2] : 0.0f;
+        lote->texturas[v * 2 + 1] = (peca.texcoords != NULL) ? peca.texcoords[i * 2 + 1] : 0.0f;
+
+        Vector3 normal = { 0.0f, 1.0f, 0.0f };
+        if (peca.normals != NULL) {
+            normal = Vector3Transform((Vector3){ peca.normals[i * 3], peca.normals[i * 3 + 1], peca.normals[i * 3 + 2] }, giro);
         }
+        float luz = luzDoSol(normal);
+        lote->cores[v * 4] = (unsigned char) fminf(corDoMaterial.r * luz, 255.0f);
+        lote->cores[v * 4 + 1] = (unsigned char) fminf(corDoMaterial.g * luz, 255.0f);
+        lote->cores[v * 4 + 2] = (unsigned char) fminf(corDoMaterial.b * luz, 255.0f);
+        lote->cores[v * 4 + 3] = 255;
     }
+    for (int i = 0; i < indicesDaPeca; i++) {
+        int original = (peca.indices != NULL) ? peca.indices[i] : i;
+        lote->indices[lote->totalIndices + i] = (unsigned short) (lote->totalVertices + original);
+    }
+    lote->totalVertices = totalNovo;
+    lote->totalIndices += indicesDaPeca;
+}
 
-    /* O alto: o anel do pneu e o furo */
-    float yAlto = base.y + PNEUS_POR_PILHA * ALTURA_DO_PNEU;
-    float raioNaEmenda = RAIO_DO_PNEU * 0.86f, raioDoFuro = RAIO_DO_PNEU * 0.48f;
-    Vector3 centro = { base.x, yAlto - ALTURA_DO_PNEU * 0.7f, base.z };
-    for (int i = 0; i < LADOS_DO_PNEU; i++) {
-        float a0 = 2.0f * PI * i / LADOS_DO_PNEU, a1 = 2.0f * PI * (i + 1) / LADOS_DO_PNEU;
-        Vector3 fora0 = { base.x + cosf(a0) * raioNaEmenda, yAlto, base.z + sinf(a0) * raioNaEmenda };
-        Vector3 fora1 = { base.x + cosf(a1) * raioNaEmenda, yAlto, base.z + sinf(a1) * raioNaEmenda };
-        Vector3 furo0 = { base.x + cosf(a0) * raioDoFuro, yAlto, base.z + sinf(a0) * raioDoFuro };
-        Vector3 furo1 = { base.x + cosf(a1) * raioDoFuro, yAlto, base.z + sinf(a1) * raioDoFuro };
-        adicionarFace(c, fora0, furo0, furo1, fora1, corDoTopo);
-        adicionarTriangulo(c, furo0, centro, furo1, COR_DO_FURO);
+/* Um lote aberto para cada peça de cada modelo */
+#define MAXIMO_DE_PECAS 8
+static LoteAberto lotesAbertos[TOTAL_MODELOS_DE_OBJETO][MAXIMO_DE_PECAS];
+
+/*
+ * colocarModelo
+ * Põe uma cópia de um modelo no mundo.
+ * Recebe: qual modelo, o pé dele, o giro em volta de y (radianos) e o tamanho.
+ * Devolve: nada.
+ */
+static void colocarModelo(ModeloDeObjeto qual, Vector3 pe, float giro, float tamanho) {
+    Model modelo = modelosDosObjetos[qual];
+    Matrix noMundo = MatrixMultiply(MatrixMultiply(MatrixScale(tamanho, tamanho, tamanho), MatrixRotateY(giro)),
+                                    MatrixTranslate(pe.x, pe.y, pe.z));
+    for (int i = 0; i < modelo.meshCount && i < MAXIMO_DE_PECAS; i++) {
+        Material peca = modelo.materials[modelo.meshMaterial[i]];
+        juntarCopia(&lotesAbertos[qual][i], modelo.meshes[i], peca.maps[MATERIAL_MAP_ALBEDO].color,
+                    peca.maps[MATERIAL_MAP_ALBEDO].texture, noMundo);
+    }
+}
+
+/*
+ * carregarModelosDosObjetos
+ * Lê os .glb. As texturas ganham mipmaps, para não tremerem ao longe.
+ * Recebe: nada.
+ * Devolve: nada.
+ */
+static void carregarModelosDosObjetos(void) {
+    for (int i = 0; i < TOTAL_MODELOS_DE_OBJETO; i++) {
+        modelosDosObjetos[i] = LoadModel(TextFormat("%s%s", PASTA_DOS_OBJETOS, ARQUIVOS_DOS_OBJETOS[i]));
+        for (int m = 0; m < modelosDosObjetos[i].materialCount; m++) {
+            Texture2D *textura = &modelosDosObjetos[i].materials[m].maps[MATERIAL_MAP_ALBEDO].texture;
+            if (textura->id != 0 && textura->id != rlGetTextureIdDefault()) {
+                GenTextureMipmaps(textura);
+                SetTextureFilter(*textura, TEXTURE_FILTER_TRILINEAR);
+                SetTextureWrap(*textura, TEXTURE_WRAP_REPEAT);
+            }
+        }
     }
 }
 
@@ -675,118 +637,95 @@ static void adicionarPilhaDePneus(Construcao *c, Vector3 base, Color corDoTopo) 
  * adicionarBarreira
  * Uma barreira de pneus acompanhando a pista: as pilhas seguem a curva, cada
  * uma no seu lugar, com o topo vermelho e branco alternando.
- * Recebe: a construção, o segmento e a lateral da barreira.
+ * Recebe: o segmento e a lateral da barreira.
  * Devolve: nada.
  */
-static void adicionarBarreira(Construcao *c, Segmento *segmento, float lateral) {
+static void adicionarBarreira(Segmento *segmento, float lateral) {
     for (int i = 0; i < PILHAS_POR_BARREIRA; i++) {
         PosicaoNaPista lugar = { segmento, 0.0f };
-        moverNaPista(&lugar, (float) i / PILHAS_POR_BARREIRA * 6.0f * COMPRIMENTO_SEGMENTO);
+        moverNaPista(&lugar, (float) i / PILHAS_POR_BARREIRA * SEGMENTOS_DA_BARREIRA * COMPRIMENTO_SEGMENTO);
         PontoNoMundo ponto = pontoNoMundo(lugar, lateral);
-        Vector3 base = { ponto.x, alturaNaGrade(ponto.x, ponto.z) - 0.05f, ponto.z };
-        int vermelho = (segmento->indice / 6 + i) % 2;
-        adicionarPilhaDePneus(c, base, vermelho ? COR_PNEU_VERMELHO : COR_PNEU_BRANCO);
+        Vector3 pe = { ponto.x, alturaNaGrade(ponto.x, ponto.z) - AFUNDAR_NO_CHAO, ponto.z };
+        int vermelho = (segmento->indice / SEGMENTOS_DA_BARREIRA + i) % 2;
+        colocarModelo(vermelho ? MODELO_PNEUS_VERMELHO : MODELO_PNEUS_BRANCO, pe, sortearObjeto(0.0f, 2.0f * PI), 1.0f);
     }
 }
 
 /*
- * adicionarPlaca
- * Uma placa de frenagem: poste, costas pintadas e, numa malha à parte, a
- * frente com a imagem do número, olhando para os carros que vêm.
- * Recebe: a malha da frente, a de cores, o ponto e a direção da pista.
- * Devolve: nada.
+ * modeloDoSetor
+ * Recebe: a letra do setor.
+ * Devolve: o modelo da placa dele.
  */
-static void adicionarPlaca(Construcao *frente, Construcao *cores, Vector3 pe, float rumo) {
-    Vector3 sentido = { sinf(rumo), 0.0f, -cosf(rumo) };   /* para onde os carros vão */
-    Vector3 lado = { cosf(rumo), 0.0f, sinf(rumo) };
-    float topo = pe.y + ALTURA_DA_PLACA, base = topo - LADO_DA_PLACA;
-    Vector3 poste = { pe.x, pe.y - ABAIXO_DO_CHAO, pe.z };
-    adicionarCaixa(cores, poste, lado, sentido, 0.32f, 0.32f, ALTURA_DA_PLACA - 0.8f + ABAIXO_DO_CHAO, COR_DO_POSTE);
-
-    /* Costas da placa, para ela ter corpo: a placa fica na frente do poste, do lado dos carros */
-    Vector3 atras = Vector3Subtract(pe, Vector3Scale(sentido, RECUO_DA_PLACA));
-    adicionarCaixa(cores, (Vector3){ atras.x, base, atras.z }, lado, sentido, LADO_DA_PLACA * 0.94f, ESPESSURA_DA_PLACA,
-                   LADO_DA_PLACA * 0.94f, COR_DAS_COSTAS);
-
-    Vector3 l = Vector3Scale(lado, LADO_DA_PLACA / 2.0f);
-    Vector3 face = Vector3Subtract(pe, Vector3Scale(sentido, RECUO_DA_PLACA + ESPESSURA_DA_PLACA * 0.6f));
-    Vector3 a = { face.x - l.x, topo, face.z - l.z }, b = { face.x - l.x, base, face.z - l.z };
-    Vector3 d = { face.x + l.x, base, face.z + l.z }, e = { face.x + l.x, topo, face.z + l.z };
-    adicionarQuadrilatero(frente, a, b, d, e, (Vector2){ 0.0f, 0.0f }, (Vector2){ 0.0f, FRACAO_DO_DESENHO },
-                          (Vector2){ 1.0f, FRACAO_DO_DESENHO }, (Vector2){ 1.0f, 0.0f }, WHITE);
+static ModeloDeObjeto modeloDoSetor(char letra) {
+    static const char LETRAS[] = "ABDGHMNRSV";
+    for (int i = 0; LETRAS[i] != '\0'; i++) {
+        if (LETRAS[i] == letra) {
+            return (ModeloDeObjeto) (MODELO_SETOR_A + i);
+        }
+    }
+    return MODELO_SETOR_A;
 }
 
 /*
- * adicionarPortico
- * O pórtico da largada: duas colunas e uma viga sólidas sobre a pista, com a
- * imagem do pórtico na frente e atrás da viga.
- * Recebe: a malha da viga, a de cores e a posição dele na pista.
+ * adicionarArquibancada
+ * Um módulo de arquibancada ou camarote, de frente para a pista. No módulo do
+ * meio de cada setor vai também a placa com a letra.
+ * Recebe: o objeto, a posição do pé dele e o ponto na pista.
  * Devolve: nada.
  */
-static void adicionarPortico(Construcao *viga, Construcao *cores, PosicaoNaPista lugar) {
-    PontoNoMundo ponto = pontoNoMundo(lugar, 0.0f);
+static void adicionarArquibancada(Obstaculo *objeto, Vector3 pe, PontoNoMundo ponto) {
     float rumo = ponto.rumo * DEG2RAD;
-    Vector3 sentido = { sinf(rumo), 0.0f, -cosf(rumo) };
-    Vector3 lado = { cosf(rumo), 0.0f, sinf(rumo) };
-    Vector3 meio = { ponto.x, ponto.y, ponto.z };
-    float meiaLargura = LARGURA_DO_PORTICO / 2.0f;
-    float altoDaViga = ponto.y + VAO_DO_PORTICO + ALTURA_DA_VIGA;
+    float lado = (objeto->deslocamentoLateral > 0.0f) ? -1.0f : 1.0f;   /* a frente olha de volta para a pista */
+    Vector3 frente = { lado * cosf(rumo), 0.0f, lado * sinf(rumo) };
+    float giro = atan2f(frente.x, frente.z);
 
-    for (int s = -1; s <= 1; s += 2) {
-        Vector3 pe = Vector3Add(meio, Vector3Scale(lado, s * (meiaLargura - LADO_DA_COLUNA)));
-        pe.y -= ABAIXO_DO_CHAO;
-        adicionarCaixa(cores, pe, lado, sentido, LADO_DA_COLUNA, LADO_DA_COLUNA,
-                       VAO_DO_PORTICO + ABAIXO_DO_CHAO, COR_DO_METAL);
-    }
-
-    /* O corpo da viga, um pouco menor que as faces com a imagem */
-    adicionarCaixa(cores, (Vector3){ meio.x, ponto.y + VAO_DO_PORTICO + 0.02f, meio.z }, lado, sentido,
-                   LARGURA_DO_PORTICO - 0.04f, FUNDO_DA_VIGA - 0.04f, ALTURA_DA_VIGA - 0.04f, COR_DA_BORRACHA);
-
-    /* A imagem nas duas faces. Quem olha a face de trás tem a direita trocada;
-     * por isso o lado inverte, e o texto é lido certo de qualquer direção */
-    for (int s = -1; s <= 1; s += 2) {
-        Vector3 centro = Vector3Add(meio, Vector3Scale(sentido, s * FUNDO_DA_VIGA / 2.0f));
-        Vector3 l = Vector3Scale(lado, s * meiaLargura);
-        Vector3 a = { centro.x + l.x, altoDaViga, centro.z + l.z };
-        Vector3 b = { centro.x + l.x, altoDaViga - ALTURA_DA_VIGA, centro.z + l.z };
-        Vector3 d = { centro.x - l.x, altoDaViga - ALTURA_DA_VIGA, centro.z - l.z };
-        Vector3 e = { centro.x - l.x, altoDaViga, centro.z - l.z };
-        adicionarQuadrilatero(viga, a, b, d, e, (Vector2){ 0.0f, TOPO_DA_VIGA_NA_IMAGEM }, (Vector2){ 0.0f, BASE_DA_VIGA_NA_IMAGEM },
-                              (Vector2){ 1.0f, BASE_DA_VIGA_NA_IMAGEM }, (Vector2){ 1.0f, TOPO_DA_VIGA_NA_IMAGEM }, WHITE);
+    colocarModelo((objeto->tipo == OBJETO_CAMAROTE) ? MODELO_CAMAROTE : MODELO_ARQUIBANCADA, pe, giro, 1.0f);
+    if (objeto->setor != 0) {
+        Vector3 placa = { pe.x - frente.x * (FUNDO_DO_MODULO - 1.0f), pe.y + TOPO_DA_ARQUIBANCADA, pe.z - frente.z * (FUNDO_DO_MODULO - 1.0f) };
+        colocarModelo(modeloDoSetor(objeto->setor), placa, giro, 1.0f);
     }
 }
 
 /*
  * construirObjetos
- * Anda pela lista de objetos de cada segmento e monta as formas 3D deles.
+ * Anda pela lista de objetos de cada segmento, põe uma cópia do modelo de
+ * cada um no lugar dele e fecha os lotes. As placas e o pórtico olham para
+ * os carros que vêm: a frente do modelo (+z) fica contra o rumo da pista.
  * Recebe: a pista.
- * Devolve: nada (preenche as malhas de "interlagos").
+ * Devolve: nada (preenche "lotes").
  */
 static void construirObjetos(Pista *pista) {
-    Construcao cores = { 0 }, viga = { 0 }, placas[3] = { { 0 }, { 0 }, { 0 } };
     sementeDosObjetos = SEMENTE_DOS_OBJETOS;
+    carregarModelosDosObjetos();
 
     Segmento *atual = pista->largada;
     do {
         PosicaoNaPista lugar = { atual, 0.0f };
         for (Obstaculo *objeto = atual->obstaculos; objeto != NULL; objeto = objeto->proximo) {
             PontoNoMundo ponto = pontoNoMundo(lugar, objeto->deslocamentoLateral);
-            Vector3 pe = { ponto.x, alturaNaGrade(ponto.x, ponto.z), ponto.z };
+            Vector3 pe = { ponto.x, alturaNaGrade(ponto.x, ponto.z) - AFUNDAR_NO_CHAO, ponto.z };
+            float contraORumo = -ponto.rumo * DEG2RAD;
             switch (objeto->tipo) {
-                case OBJETO_ARVORE:
-                    adicionarArvore(&cores, pe);
+                case OBJETO_ARVORE: {
+                    int variacao = (int) sortearObjeto(0.0f, 2.999f);
+                    colocarModelo((ModeloDeObjeto) (MODELO_ARVORE_1 + variacao), pe, sortearObjeto(0.0f, 2.0f * PI),
+                                  sortearObjeto(MENOR_ARVORE, MAIOR_ARVORE));
                     break;
+                }
                 case OBJETO_PNEUS:
-                    adicionarBarreira(&cores, atual, objeto->deslocamentoLateral);
+                    adicionarBarreira(atual, objeto->deslocamentoLateral);
                     break;
                 case OBJETO_PLACA_50:
                 case OBJETO_PLACA_100:
                 case OBJETO_PLACA_150:
-                    adicionarPlaca(&placas[objeto->tipo - OBJETO_PLACA_50], &cores, pe, ponto.rumo * DEG2RAD);
+                    colocarModelo((ModeloDeObjeto) (MODELO_PLACA_50 + (objeto->tipo - OBJETO_PLACA_50)), pe, contraORumo, 1.0f);
+                    break;
+                case OBJETO_ARQUIBANCADA:
+                case OBJETO_CAMAROTE:
+                    adicionarArquibancada(objeto, pe, ponto);
                     break;
                 case OBJETO_PORTICO:
-                    adicionarPortico(&viga, &cores, lugar);
+                    colocarModelo(MODELO_PORTICO, (Vector3){ ponto.x, ponto.y, ponto.z }, contraORumo, 1.0f);
                     break;
                 default:
                     break;   /* as marcas do grid são pintadas no asfalto */
@@ -795,14 +734,15 @@ static void construirObjetos(Pista *pista) {
         atual = atual->proximo;
     } while (atual != pista->largada);
 
+    for (int m = 0; m < TOTAL_MODELOS_DE_OBJETO; m++) {
+        for (int i = 0; i < modelosDosObjetos[m].meshCount && i < MAXIMO_DE_PECAS; i++) {
+            Material peca = modelosDosObjetos[m].materials[modelosDosObjetos[m].meshMaterial[i]];
+            fecharLote(&lotesAbertos[m][i], peca.maps[MATERIAL_MAP_ALBEDO].texture);
+        }
+    }
+
     MemFree(alturasDaGrade);
     alturasDaGrade = NULL;
-
-    interlagos.objetos = terminarMalha(&cores);
-    interlagos.viga = terminarMalha(&viga);
-    for (int i = 0; i < 3; i++) {
-        interlagos.placas[i] = terminarMalha(&placas[i]);
-    }
 }
 
 /*
@@ -884,10 +824,6 @@ void carregarMundo(Pista *pistas[]) {
     texturaAsfalto[0] = carregarTexturaRepetida("estrada/asfalto_escuro.png");
     texturaAsfalto[1] = carregarTexturaRepetida("estrada/asfalto_claro.png");
     texturaGrama = carregarTexturaRepetida("estrada/grama_clara.png");
-    texturaPlacas[0] = carregarTexturaRepetida("sprites/placa_50.png");
-    texturaPlacas[1] = carregarTexturaRepetida("sprites/placa_100.png");
-    texturaPlacas[2] = carregarTexturaRepetida("sprites/placa_150.png");
-    texturaPortico = carregarTexturaRepetida("sprites/portico.png");
 
     /* A imagem ocupa a altura proporcional à largura de cada repetição, sem esticar */
     float voltaCeu = 2.0f * PI * RAIO_DO_CEU / REPETICOES_CEU;
@@ -920,13 +856,12 @@ void descarregarMundo(void) {
     UnloadMesh(interlagos.acostamento);
     UnloadMesh(interlagos.terreno);
     UnloadMesh(interlagos.base);
-    UnloadMesh(interlagos.objetos);
-    UnloadMesh(interlagos.viga);
-    for (int i = 0; i < 3; i++) {
-        UnloadMesh(interlagos.placas[i]);
-        UnloadTexture(texturaPlacas[i]);
+    for (int i = 0; i < totalDeLotes; i++) {
+        UnloadMesh(lotes[i].malha);
     }
-    UnloadTexture(texturaPortico);
+    for (int i = 0; i < TOTAL_MODELOS_DE_OBJETO; i++) {
+        UnloadModel(modelosDosObjetos[i]);
+    }
     UnloadMesh(cilindroDoCeu);
     UnloadMesh(cilindroDaCidade);
     UnloadMesh(cilindroDosMorros);
@@ -983,10 +918,8 @@ void desenharCenario(IdPista id, Vector3 camera) {
     desenharMalha(interlagos.asfalto[0], texturaAsfalto[0], origem);
     desenharMalha(interlagos.asfalto[1], texturaAsfalto[1], origem);
     desenharMalha(interlagos.pintura, semTextura, origem);
-    desenharMalha(interlagos.objetos, semTextura, origem);
-    desenharMalha(interlagos.viga, texturaPortico, origem);
-    for (int i = 0; i < 3; i++) {
-        desenharMalha(interlagos.placas[i], texturaPlacas[i], origem);
+    for (int i = 0; i < totalDeLotes; i++) {
+        desenharMalha(lotes[i].malha, lotes[i].textura, origem);
     }
 }
 

@@ -4,8 +4,8 @@ Imagens PNG usadas pelo `render.c`. Elas são carregadas uma vez em
 `carregarTexturas()` (chamada no `main.c`). Se uma imagem faltar, aquela
 parte volta a ser desenhada com as cores sólidas (`COR_*` no `render.c`).
 
-Já usadas: fundo (céu, cidade, morros), asfalto, grama e as placas e o pórtico de `sprites/` (`mundo.c`;
-`arvore.png` e `pneus.png` não são mais usados: os dois agora são geométricos). A zebra continua com cores sólidas (só nas curvas), e a
+Já usadas: fundo (céu, cidade, morros), asfalto, grama (`mundo.c`). A pasta `sprites/` não é mais usada: os objetos
+da pista agora são modelos 3D, em `recursos/modelos/objetos/`. A zebra continua com cores sólidas (só nas curvas), e a
 faixa não é mais usada.
 
 Os caminhos são relativos à raiz do projeto, que é de onde o jogo roda

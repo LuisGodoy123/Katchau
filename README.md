@@ -288,14 +288,17 @@ que fica onde em Interlagos:
 
 - o **pórtico** em cima da linha de chegada e os **colchetes do grid**, pintados no asfalto;
 - **barreiras de pneus** por fora das curvas e **placas de 150, 100 e 50 m** antes delas;
+- **arquibancadas e camarotes** nos lugares do mapa oficial do GP (setores A, B, M, D, H, N, R, G, S e V, Pit Stop Club e
+  Orange Tree Club; tabela `ARQUIBANCADAS`). As posições foram lidas no mapa e alinhadas pelos trechos da pista;
 - **árvores** sorteadas dos dois lados (sorteio com semente fixa: ficam sempre no mesmo lugar).
 
 Num circuito sinuoso, o lugar de um objeto pode cair em cima de outro trecho da pista. Por isso `lugarLivre` confere
 cada um contra a volta inteira: ele só entra se ficar além de onde o carro alcança em qualquer trecho.
 
-As formas são geradas por código (`construirObjetos` em `mundo.c`) e pousam na altura exata do terreno
-desenhado: árvores facetadas, cada uma diferente; pilhas de pneus que acompanham a curva; placas e pórtico sólidos, com
-a arte de `recursos/texturas/sprites/`. O oval não tem objetos: o cenário dele já está no modelo 3D.
+As formas são modelos 3D em `recursos/modelos/objetos/` (3 árvores, pilhas de pneus, 3 placas, o pórtico, a arquibancada, o camarote e as placas dos setores), feitos
+no Blender e editáveis lá. `construirObjetos` (`mundo.c`) põe cada cópia na altura exata do terreno desenhado e junta
+todas em poucas malhas, os lotes, para desenhar centenas de objetos de uma vez. O oval não tem objetos: o cenário dele
+já está no modelo 3D.
 
 As **zebras** só aparecem nas curvas, como na vida real: um segmento tem zebra quando vira
 pelo menos `CURVATURA_MINIMA_ZEBRA` graus (`temZebra()` em `pista.c`).
