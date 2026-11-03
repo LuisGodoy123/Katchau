@@ -533,14 +533,6 @@ void desenharMenuPrincipal(EstadoMenu *menu) {
     float flutuar = sinf((float) GetTime() * 1.6f) * 3.0f;
     desenharLogo(LARGURA_TELA / 2.0f, 6.0f + flutuar, LARGURA_LOGO);
 
-    /* "CORRIDA EM INTERLAGOS" entre dois quadriculados */
-    const char *subtitulo = "CORRIDA EM INTERLAGOS";
-    float tamanho = 20.0f;
-    float meio = larguraDoTexto(FONTE_FORTE, subtitulo, tamanho) / 2.0f;
-    escreverCentralizado(FONTE_FORTE, subtitulo, LARGURA_TELA / 2.0f, 228.0f, tamanho, COR_CROMO);
-    desenharQuadriculado(LARGURA_TELA / 2.0f - meio - 86, 238.0f, 70.0f, 10.0f, 5.0f);
-    desenharQuadriculado(LARGURA_TELA / 2.0f + meio + 16, 238.0f, 70.0f, 10.0f, 5.0f);
-
     for (int i = 0; i < TOTAL_OPCOES; i++) {
         desenharOpcao(TEXTOS_OPCOES[i], Y_PRIMEIRA_OPCAO + i * ESPACO_OPCOES, menu->destaque[i]);
     }

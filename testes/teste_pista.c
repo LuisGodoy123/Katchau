@@ -1397,24 +1397,6 @@ static void testarPistasNoMundo(void) {
     verificar(maiorDegrau < 0.5f, "o chao nao da degraus ao longo da pista");
     verificar(maiorDiferenca < 0.001f, "alturaDoChao e pontoNoMundo concordam");
 
-    /* Postes: a volta inteira, por fora do muro, a cada 60 m */
-    int postes = 0, postesAtrasDoMuro = 1, intervaloCerto = 1, ultimo = -1;
-    atual = oval->largada;
-    do {
-        for (Obstaculo *objeto = atual->obstaculos; objeto != NULL; objeto = objeto->proximo) {
-            if (objeto->tipo == OBJETO_POSTE) {
-                postes++;
-                postesAtrasDoMuro = postesAtrasDoMuro && objeto->deslocamentoLateral > 1.0f;
-                intervaloCerto = intervaloCerto && (ultimo < 0 || atual->indice - ultimo == 36);
-                ultimo = atual->indice;
-            }
-        }
-        atual = proximoSegmento(atual);
-    } while (atual != oval->largada);
-    printf("     %d postes de iluminacao\n", postes);
-    verificar(postes > 50 && postes <= 128, "o oval tem postes na volta inteira (e cabem na lista do desenho)");
-    verificar(postesAtrasDoMuro && intervaloCerto, "os postes ficam atras do muro de fora, a cada 60 m");
-
     /* Muro dos dois lados: o carro jogado contra ele para ali e perde velocidade */
     for (int lado = 0; lado < 2; lado++) {
         Comandos virando = { 1, 0, lado == 0, lado == 1, 0.0f };

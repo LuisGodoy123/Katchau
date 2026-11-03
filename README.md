@@ -128,7 +128,7 @@ src/
   mundo.c/.h       cenário 3D: o modelo do estádio e as malhas de Interlagos
   carros3d.c/.h    modelos 3D dos carros, sombras e fotos para os menus
   fumaca.c/.h      fumaça dos pneus e poeira da grama
-  noite.c/.h       noite da Copa Pistão: luzes, torcida, flashes e refletores
+  noite.c/.h       noite da Copa Pistão: refletores, torcida e flashes
   copa_pistao.h    traçado da Copa Pistão, medido no modelo 3D
   carro.c/.h       struct Carro, Comandos e movimento                  (fase 3)
   corrida.c/.h     grid, voltas, colisão, classificação e fim          (fases 3 e 4)
@@ -296,7 +296,7 @@ que fica onde em Interlagos:
 Num circuito sinuoso, o lugar de um objeto pode cair em cima de outro trecho da pista. Por isso `lugarLivre` confere
 cada um contra a volta inteira: ele só entra se ficar além de onde o carro alcança em qualquer trecho.
 
-As formas são modelos 3D em `recursos/modelos/objetos/` (3 árvores, pilhas de pneus, 3 placas, o pórtico, a arquibancada, o camarote e as placas dos setores), feitos
+As formas são modelos 3D em `recursos/modelos/objetos/` (3 árvores, pilhas de pneus, 3 placas, o pórtico, a arquibancada, o camarote e as placas dos setores, mais o refletor do estádio), feitos
 no Blender e editáveis lá. `construirObjetos` (`mundo.c`) põe cada cópia na altura exata do terreno desenhado e junta
 todas em poucas malhas, os lotes, para desenhar centenas de objetos de uma vez. O oval não tem objetos: o cenário dele
 já está no modelo 3D.
@@ -333,10 +333,11 @@ real de Daytona, 2,5 milhas ou 4.023 m (`COMPRIMENTO_COPA_PISTAO`), e o modelo �
 (~43 m por unidade). O modelo não tem proporções reais: com esse tamanho, as arquibancadas ficam bem
 mais altas e a pista mais larga que as de verdade.
 
-A corrida é **à noite** (`noite.c`): luz fria da arena, céu estrelado, refletores no alto das arquibancadas e postes
-de iluminação em `poste.glb`, com a luz calculada no shader, usando os 32 postes mais perto da câmera. A **torcida** é
-desenhada no shader dos assentos do próprio modelo: cada lugar sorteia uma cor pela posição, então são dezenas de milhares
-de torcedores sem geometria nova, e os **flashes** das câmeras acendem em pontos sorteados dos assentos.
+A corrida é **à noite** (`noite.c`), com céu estrelado. Quem ilumina tudo são os 32 **refletores** (`refletor.glb`) no alto das
+arquibancadas, virados para o centro: a pista, os carros e a torcida recebem a luz deles no shader, conforme a distância e o
+quanto cada superfície está virada para cada refletor. A **torcida** é desenhada no shader dos assentos do próprio modelo: cada
+lugar sorteia uma cor pela posição, então são dezenas de milhares de torcedores sem geometria nova, e os **flashes**
+das câmeras acendem em pontos sorteados dos assentos.
 
 Modelo: [Motor Speedway of the South](https://sketchfab.com/3d-models/motor-speedway-of-the-south-b6406f62b7b94580844fb8508cc72148),
 de DinseyPixarCarsModels, publicado como CC-BY-4.0. O estádio é do universo de *Carros* (Disney/Pixar) e

@@ -29,6 +29,8 @@
 #define CAMERA_ALTURA         3.4f     /* metros acima do chão */
 #define OLHAR_PARA_BAIXO      5.0f     /* graus abaixo do horizonte */
 #define VELOCIDADE_CAMERA_MENU 3000.0f /* a câmera do fundo do menu anda a 75 km/h */
+#define SEGUNDOS_POR_PISTA    14.0f    /* o fundo dos menus troca de pista depois disso */
+#define DURACAO_DA_TROCA_DE_PISTA 0.7f /* segundos escurecendo e clareando */
 
 /* ---------- Distâncias do que é desenhado (metros) ---------- */
 #define DISTANCIA_DOS_RIVAIS  1500.0f
@@ -238,7 +240,7 @@ static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
     if (ehNoite) {
         atualizarNoite(cenaPausada ? 0.0f : GetFrameTime());
     }
-    prepararLuzes(camera, ehNoite);
+    prepararLuzes(ehNoite);
 
     prepararPlanosDaCamera();
     BeginMode3D(camera);
@@ -294,20 +296,39 @@ void desenharVisaoDoJogador(Corrida *corrida) {
  * desenharPistaDeFundo
  * Fundo das telas de menu: a câmera passeia sozinha pela pista, devagar,
  * pela linha dela. Ela anda pela lista com moverNaPista(), então dá voltas
- * infinitas no circuito.
+ * infinitas no circuito. Cada pista lembra onde o passeio parou.
  * Recebe: a pista.
  * Devolve: nada.
  */
 void desenharPistaDeFundo(Pista *pista) {
-    static PosicaoNaPista passeio = { NULL, 0.0f };
-    static Pista *pistaDoPasseio = NULL;
-    if (pista != pistaDoPasseio) {   /* trocou a pista no menu: recomeça na largada dela */
-        passeio.segmento = pista->largada;
-        passeio.distanciaNoSegmento = 0.0f;
-        pistaDoPasseio = pista;
+    static PosicaoNaPista passeios[TOTAL_PISTAS];
+    PosicaoNaPista *passeio = &passeios[pista->id];
+    if (passeio->segmento == NULL) {
+        passeio->segmento = pista->largada;
     }
-    moverNaPista(&passeio, VELOCIDADE_CAMERA_MENU * GetFrameTime());
-    desenharMundo3D(montarCamera(passeio, 0.0f), pista, NULL);
+    moverNaPista(passeio, VELOCIDADE_CAMERA_MENU * GetFrameTime());
+    desenharMundo3D(montarCamera(*passeio, 0.0f), pista, NULL);
+}
+
+/*
+ * desenharFundoAlternado
+ * O fundo dos menus: mostra cada pista por um tempo, trocando com um
+ * escurecimento rápido para a troca não ser um salto.
+ * Recebe: as pistas, na ordem de IdPista.
+ * Devolve: nada.
+ */
+void desenharFundoAlternado(Pista *pistas[]) {
+    static float relogio = 0.0f;
+    relogio += GetFrameTime();
+    int qual = (int) (relogio / SEGUNDOS_POR_PISTA) % TOTAL_PISTAS;
+    float noTurno = fmodf(relogio, SEGUNDOS_POR_PISTA);
+
+    desenharPistaDeFundo(pistas[qual]);
+
+    float escuro = 1.0f - fminf(fminf(noTurno, SEGUNDOS_POR_PISTA - noTurno) / DURACAO_DA_TROCA_DE_PISTA, 1.0f);
+    if (escuro > 0.0f) {
+        DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Fade(BLACK, escuro));
+    }
 }
 
 /*

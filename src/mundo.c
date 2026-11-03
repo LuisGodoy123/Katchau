@@ -59,8 +59,6 @@
 #define AFUNDAR_NO_CHAO       0.05f
 #define MAXIMO_DE_LOTES       96
 #define MATERIAL_DOS_ASSENTOS 7         /* Material.079 do estádio: a raylib põe o padrão na frente */
-#define ALCANCE_DO_POSTE      6.65f     /* metros, do pé até a lâmpada, na direção da pista */
-#define ALTURA_DA_LAMPADA     14.0f
 #define TOPO_DA_ARQUIBANCADA  10.3f     /* a placa do setor fica no alto do fundo */
 #define MAXIMO_DE_VERTICES    60000     /* uma malha da raylib aponta os vértices com 16 bits */
 
@@ -134,7 +132,7 @@ typedef enum {
     MODELO_SETOR_R,
     MODELO_SETOR_S,
     MODELO_SETOR_V,
-    MODELO_POSTE,
+    MODELO_REFLETOR,
     TOTAL_MODELOS_DE_OBJETO
 } ModeloDeObjeto;
 
@@ -142,7 +140,7 @@ static const char *ARQUIVOS_DOS_OBJETOS[TOTAL_MODELOS_DE_OBJETO] = {
     "arvore_1.glb", "arvore_2.glb", "arvore_3.glb", "pneus_vermelho.glb", "pneus_branco.glb",
     "placa_50.glb", "placa_100.glb", "placa_150.glb", "portico.glb", "arquibancada.glb", "camarote.glb",
     "setor_A.glb", "setor_B.glb", "setor_D.glb", "setor_G.glb", "setor_H.glb",
-    "setor_M.glb", "setor_N.glb", "setor_R.glb", "setor_S.glb", "setor_V.glb", "poste.glb",
+    "setor_M.glb", "setor_N.glb", "setor_R.glb", "setor_S.glb", "setor_V.glb", "refletor.glb",
 };
 
 /* Centenas de cópias do mesmo modelo desenhadas uma a uma pesariam: elas são
@@ -793,32 +791,22 @@ static Texture2D carregarTexturaRepetida(const char *arquivo) {
 }
 
 /*
- * construirPostes
- * Põe os postes do oval, de frente para a pista, e registra a lâmpada de cada um.
- * Recebe: a pista.
+ * construirRefletores
+ * Põe o modelo 3D em cada refletor do alto do estádio, virado para o centro.
+ * Recebe: nada.
  * Devolve: nada.
  */
-static void construirPostes(Pista *pista) {
-    Segmento *atual = pista->largada;
-    do {
-        PosicaoNaPista lugar = { atual, 0.0f };
-        for (Obstaculo *objeto = atual->obstaculos; objeto != NULL; objeto = objeto->proximo) {
-            if (objeto->tipo != OBJETO_POSTE) {
-                continue;
-            }
-            PontoNoMundo ponto = pontoNoMundo(lugar, objeto->deslocamentoLateral);
-            float rumo = ponto.rumo * DEG2RAD;
-            Vector3 paraAPista = { -cosf(rumo), 0.0f, -sinf(rumo) };
-            colocarModelo(MODELO_POSTE, (Vector3){ ponto.x, ponto.y, ponto.z }, atan2f(paraAPista.x, paraAPista.z), 1.0f);
-            adicionarLuzDePoste((Vector3){ ponto.x + paraAPista.x * ALCANCE_DO_POSTE, ponto.y + ALTURA_DA_LAMPADA,
-                                           ponto.z + paraAPista.z * ALCANCE_DO_POSTE });
-        }
-        atual = atual->proximo;
-    } while (atual != pista->largada);
+static void construirRefletores(void) {
+    const Vector3 *lugares;
+    int total = refletoresDaNoite(&lugares);
+    for (int i = 0; i < total; i++) {
+        Vector3 pe = { lugares[i].x, lugares[i].y - ALTURA_DO_REFLETOR, lugares[i].z };
+        colocarModelo(MODELO_REFLETOR, pe, atan2f(-pe.x, -pe.z), 1.0f);
+    }
 
-    Model modelo = modelosDosObjetos[MODELO_POSTE];
+    Model modelo = modelosDosObjetos[MODELO_REFLETOR];
     for (int i = 0; i < modelo.meshCount && i < MAXIMO_DE_PECAS; i++) {
-        fecharLote(&lotesAbertos[MODELO_POSTE][i], modelo.materials[modelo.meshMaterial[i]].maps[MATERIAL_MAP_ALBEDO].texture);
+        fecharLote(&lotesAbertos[MODELO_REFLETOR][i], modelo.materials[modelo.meshMaterial[i]].maps[MATERIAL_MAP_ALBEDO].texture);
     }
 }
 
@@ -844,7 +832,7 @@ static void carregarEstadio(Pista *pista) {
     Construcao pintura = { 0 };
     pintarLargadaEGrid(&pintura, pista);
     pinturaDoEstadio = terminarMalha(&pintura);
-    construirPostes(pista);
+    construirRefletores();
 }
 
 /*

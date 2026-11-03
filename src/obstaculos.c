@@ -28,8 +28,6 @@
 #define FOLGA_DAS_PLACAS    1.0f
 #define LADO_DA_ARQUIBANCADA 3.0f  /* lateral da frente dela: ~50 m da linha da pista, além dos pneus */
 #define RAIO_DO_MODULO       18.0f  /* metros, do centro de um módulo até o canto */
-#define ESPACO_POSTES_DO_OVAL 36    /* um poste a cada 36 segmentos (60 m) */
-#define FOLGA_POSTE_DO_MURO  1.2f   /* metros atrás do muro de fora */
 #define PASSO_DA_CONFERENCIA 3     /* confere um a cada 3 segmentos (5 m) */
 
 /* De quantos em quantos segmentos se repete cada coisa */
@@ -340,22 +338,13 @@ void decorarPista(Pista *pista) {
 
 /*
  * decorarOval
- * As marcas do grid e os postes de iluminação, por fora do muro. Todo o resto do
- * cenário (muros, placas, arquibancadas) já está no modelo 3D.
+ * No oval, só as marcas do grid: todo o resto do cenário (muros, placas,
+ * arquibancadas) já está no modelo 3D.
  * Recebe: a pista (já montada).
  * Devolve: nada.
  */
 void decorarOval(Pista *pista) {
-    if (pista == NULL || pista->largada == NULL) {
-        return;
+    if (pista != NULL && pista->largada != NULL) {
+        marcarGrid(pista);
     }
-    marcarGrid(pista);
-
-    Segmento *atual = pista->largada;
-    do {
-        if (atual->indice % ESPACO_POSTES_DO_OVAL == 0) {
-            adicionarObstaculo(atual, OBJETO_POSTE, 1.0f + FOLGA_POSTE_DO_MURO / atual->larguraDireita);
-        }
-        atual = atual->proximo;
-    } while (atual != pista->largada);
 }

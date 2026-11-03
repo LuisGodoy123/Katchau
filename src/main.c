@@ -234,13 +234,13 @@ int main(int argc, char *argv[]) {
         congelarCena(tela == TELA_CORRIDA && pausada);
         switch (tela) {
             case TELA_MENU:
-                desenharPistaDeFundo(pistas[menu.pistaEscolhida]);
+                desenharFundoAlternado(pistas);
                 comecarInterface(1);
                 desenharMenuPrincipal(&menu);
                 terminarInterface();
                 break;
             case TELA_GARAGEM:
-                desenharPistaDeFundo(pistas[menu.pistaEscolhida]);
+                desenharFundoAlternado(pistas);
                 comecarInterface(1);
                 desenharGaragem(&menu);
                 terminarInterface();
@@ -252,7 +252,7 @@ int main(int argc, char *argv[]) {
                 terminarInterface();
                 break;
             case TELA_COMO_JOGAR:
-                desenharPistaDeFundo(pistas[menu.pistaEscolhida]);
+                desenharFundoAlternado(pistas);
                 comecarInterface(1);
                 desenharComoJogar();
                 terminarInterface();

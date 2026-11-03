@@ -82,7 +82,7 @@ static const char *VERTICES_DO_SHADER =
     "              if (!gl_FrontFacing) n = -n;\n" \
     "              float sol = max(dot(n, normalize(vec3(0.35, 0.8, 0.45))), 0.0);\n" \
     "              float luz = 0.62 + 0.28 * (n.y * 0.5 + 0.5) + 0.42 * sol;\n" \
-    "              vec3 comLuz = (noite > 0.5) ? luzDaNoite(fragPos, n) * 1.45 : vec3(luz);\n" \
+    "              vec3 comLuz = (noite > 0.5) ? luzDaNoite(fragPos, n) * 1.1 : vec3(luz);\n" \
     "              finalColor = vec4(cor.rgb * comLuz, " SAIDA "); }\n"
 
 static Model modelos[TOTAL_CARROS];

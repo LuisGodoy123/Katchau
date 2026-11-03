@@ -11,36 +11,29 @@
 #include "raymath.h"
 #include "rlgl.h"
 
-#define MAXIMO_DE_POSTES      128
 #define MAXIMO_DE_SHADERS     8
-#define PESO_ATRAS_DA_CAMERA  3.0f     /* um poste atrás da câmera conta como 3 vezes mais longe */
 
 /* ---------- Flashes das câmeras ---------- */
 #define MAXIMO_DE_FLASHES     700
 #define FLASHES_POR_SEGUNDO   1800.0f
 #define VIDA_MINIMA_FLASH     0.08f    /* segundos */
 #define VIDA_MAXIMA_FLASH     0.30f
-#define TAMANHO_DO_FLASH      0.042f   /* em relação à distância: todos parecem do mesmo tamanho */
+#define TAMANHO_DO_FLASH      0.024f   /* em relação à distância: todos parecem do mesmo tamanho */
+#define HALO_DO_FLASH         1.1f     /* o halo do flash, em relação à estrela */
 #define COR_FLASH_BRANCO      (Color){ 255, 255, 255, 255 }
 #define COR_FLASH_AZUL        (Color){ 120, 185, 255, 255 }
 
 /* ---------- Refletores, no alto das arquibancadas ---------- */
-#define FATIAS_DO_ANEL        48
+#define FATIAS_DO_ANEL        32       /* um refletor por fatia: é o tamanho de "luzes" no shader */
 #define RAIO_MINIMO_DO_ANEL   14.0f    /* em unidades do modelo: só o que está em volta da pista */
 #define ACIMA_DOS_ASSENTOS    0.15f    /* em unidades do modelo */
-#define HALO_DO_REFLETOR      125.0f   /* metros */
-#define MIOLO_DO_REFLETOR     38.0f
-#define ALTURA_DO_ANEL_DE_BAIXO 4.6f   /* em unidades do modelo: a beirada da arquibancada de baixo */
-#define HALO_DE_BAIXO         95.0f
-#define MIOLO_DE_BAIXO        24.0f
-#define COR_DO_HALO           (Color){  90, 150, 255, 150 }
+#define HALO_DO_REFLETOR      0.17f    /* em relação à distância: de longe ele continua forte */
+#define MIOLO_DO_REFLETOR     0.055f
+#define NA_FRENTE_DO_REFLETOR 16.0f    /* metros: o brilho fica à frente da estrutura, senão ela o cobre */
+#define MENOR_HALO            70.0f    /* metros */
+#define MENOR_MIOLO           24.0f
+#define COR_DO_HALO           (Color){  85, 145, 255, 170 }
 #define COR_DO_MIOLO          (Color){ 235, 245, 255, 255 }
-
-/* ---------- Lâmpadas dos postes ---------- */
-#define HALO_DO_POSTE         9.0f
-#define MIOLO_DO_POSTE        2.2f
-#define MENOR_TAMANHO_POSTE   0.012f   /* de longe, o halo não some: nunca menos que isso vezes a distância */
-#define COR_DO_HALO_DO_POSTE  (Color){ 255, 225, 170, 120 }
 
 /* ---------- Céu ---------- */
 #define LARGURA_DO_CEU        2048
@@ -61,7 +54,8 @@ static const char *VERTICES_DO_SHADER =
     "              gl_Position = mvp * vec4(vertexPosition, 1.0); }\n";
 
 /* O cenário: a imagem do modelo, com a luz da noite. A direção da superfície
- * sai das derivadas da posição, porque nem toda malha traz as normais. */
+ * sai das derivadas da posição, porque nem toda malha traz as normais: ela
+ * sempre aponta para o lado de quem olha. */
 static const char *PIXELS_DO_CENARIO =
     "#version 330\n"
     "in vec2 fragTexCoord; in vec4 fragColor; in vec3 fragPos;\n"
@@ -71,7 +65,6 @@ static const char *PIXELS_DO_CENARIO =
     "void main() { vec4 cor = texture(texture0, fragTexCoord) * colDiffuse * fragColor;\n"
     "              if (cor.a < 0.5) discard;\n"
     "              vec3 n = normalize(cross(dFdx(fragPos), dFdy(fragPos)));\n"
-    "              if (n.y < 0.0) n = -n;\n"
     "              finalColor = vec4(cor.rgb * luzDaNoite(fragPos, n), 1.0); }\n";
 
 /* A torcida: os blocos de assentos do modelo têm 13 filas por 14 lugares, com um
@@ -117,8 +110,7 @@ static const char *PIXELS_DA_TORCIDA =
     "    float corredor = abs(fract(fragTexCoord.x) - 0.5);\n"
     "    cor = mix(vec3(0.16, 0.17, 0.20), cor, smoothstep(0.015, 0.04, corredor));\n"
     "    vec3 n = normalize(cross(dFdx(fragPos), dFdy(fragPos)));\n"
-    "    if (n.y < 0.0) n = -n;\n"
-    "    finalColor = vec4(cor * (luzDaNoite(fragPos, n) * 0.8 + vec3(0.30, 0.34, 0.42)), 1.0);\n"
+    "    finalColor = vec4(cor * (luzDaNoite(fragPos, n) * 0.72 + vec3(0.08, 0.09, 0.12)), 1.0);\n"
     "}\n";
 
 /* Um flash aceso */
@@ -140,14 +132,9 @@ static int locTempo;
 static ShaderIluminado iluminados[MAXIMO_DE_SHADERS];
 static int totalDeIluminados = 0;
 
-static Vector3 postes[MAXIMO_DE_POSTES];
-static int totalDePostes = 0;
-
 static Texture2D imagemDoBrilho, imagemDaEstrela, ceuNoturno;
 static Vector3 refletores[FATIAS_DO_ANEL];
 static int totalDeRefletores = 0;
-static Vector3 refletoresDeBaixo[FATIAS_DO_ANEL];
-static int totalDeBaixo = 0;
 
 /* Os triângulos dos assentos, para sortear onde cada flash acontece */
 static float *verticesDosAssentos = NULL;
@@ -258,12 +245,12 @@ static Vector3 normalDoTriangulo(int t) {
 
 /*
  * montarAnel
- * Acha um anel de refletores: em cada fatia em volta do oval, o assento mais
- * alto abaixo de um limite.
- * Recebe: a malha dos assentos, a altura limite (unidades do modelo) e onde guardar.
- * Devolve: quantos refletores saíram.
+ * Acha o lugar dos refletores: em cada fatia em volta do oval, em cima do
+ * assento mais alto. O que fica guardado é o centro das lâmpadas.
+ * Recebe: a malha dos assentos.
+ * Devolve: nada (preenche refletores).
  */
-static int montarAnel(Mesh malha, float limite, Vector3 anel[]) {
+static void montarAnel(Mesh malha) {
     Vector3 maisAlto[FATIAS_DO_ANEL];
     for (int f = 0; f < FATIAS_DO_ANEL; f++) {
         maisAlto[f] = (Vector3){ 0.0f, -1.0f, 0.0f };
@@ -271,7 +258,7 @@ static int montarAnel(Mesh malha, float limite, Vector3 anel[]) {
     for (int i = 0; i < malha.vertexCount; i++) {
         Vector3 v = verticeDoAssento(i);
         float dx = v.x - CENTRO_DO_OVAL_X;
-        if (hypotf(dx, v.z) < RAIO_MINIMO_DO_ANEL || v.y > limite) {
+        if (hypotf(dx, v.z) < RAIO_MINIMO_DO_ANEL) {
             continue;
         }
         int fatia = (int) ((atan2f(v.z, dx) + PI) / (2.0f * PI) * FATIAS_DO_ANEL) % FATIAS_DO_ANEL;
@@ -279,14 +266,14 @@ static int montarAnel(Mesh malha, float limite, Vector3 anel[]) {
             maisAlto[fatia] = v;
         }
     }
-    int total = 0;
+    totalDeRefletores = 0;
     for (int f = 0; f < FATIAS_DO_ANEL; f++) {
         if (maisAlto[f].y > 0.0f) {
-            anel[total++] = (Vector3){ maisAlto[f].x * escalaDoEstadio, (maisAlto[f].y + ACIMA_DOS_ASSENTOS) * escalaDoEstadio,
-                                       maisAlto[f].z * escalaDoEstadio };
+            refletores[totalDeRefletores++] = (Vector3){ maisAlto[f].x * escalaDoEstadio,
+                                                         (maisAlto[f].y + ACIMA_DOS_ASSENTOS) * escalaDoEstadio + ALTURA_DO_REFLETOR,
+                                                         maisAlto[f].z * escalaDoEstadio };
         }
     }
-    return total;
 }
 
 /*
@@ -313,8 +300,7 @@ static void prepararAssentos(Mesh malha) {
         }
     }
 
-    totalDeRefletores = montarAnel(malha, 1000.0f, refletores);
-    totalDeBaixo = montarAnel(malha, ALTURA_DO_ANEL_DE_BAIXO, refletoresDeBaixo);
+    montarAnel(malha);
 }
 
 /*
@@ -411,14 +397,13 @@ void registrarShaderIluminado(Shader shader) {
 }
 
 /*
- * adicionarLuzDePoste
- * Recebe: onde fica a lâmpada de um poste, em metros.
- * Devolve: nada.
+ * refletoresDaNoite
+ * Recebe: onde guardar o endereço da lista.
+ * Devolve: quantos refletores há (mundo.c põe o modelo 3D em cada um).
  */
-void adicionarLuzDePoste(Vector3 lampada) {
-    if (totalDePostes < MAXIMO_DE_POSTES) {
-        postes[totalDePostes++] = lampada;
-    }
+int refletoresDaNoite(const Vector3 **lista) {
+    *lista = refletores;
+    return totalDeRefletores;
 }
 
 /*
@@ -438,47 +423,18 @@ Texture2D texturaDoCeuNoturno(void) {
 
 /*
  * prepararLuzes
- * Escolhe os postes mais perto da câmera e envia para os shaders. Um poste
- * atrás dela pesa menos, porque o que está à frente é o que aparece.
- * Recebe: a câmera e se é noite nesta pista.
+ * Envia os refletores para os shaders. De dia não há nenhum.
+ * Recebe: se é noite nesta pista.
  * Devolve: nada.
  */
-void prepararLuzes(Camera3D camera, int ehNoite) {
-    Vector3 escolhidos[MAXIMO_DE_LUZES_NO_SHADER];
-    float distancias[MAXIMO_DE_LUZES_NO_SHADER];
-    int total = 0;
-
-    if (ehNoite) {
-        Vector3 frente = Vector3Subtract(camera.target, camera.position);
-        for (int i = 0; i < totalDePostes; i++) {
-            Vector3 ate = Vector3Subtract(postes[i], camera.position);
-            float distancia = Vector3Length(ate) * ((Vector3DotProduct(ate, frente) < 0.0f) ? PESO_ATRAS_DA_CAMERA : 1.0f);
-            /* Inserção ordenada, ficando só com os mais perto */
-            int lugar = total;
-            while (lugar > 0 && distancias[lugar - 1] > distancia) {
-                lugar--;
-            }
-            if (lugar == MAXIMO_DE_LUZES_NO_SHADER) {
-                continue;
-            }
-            for (int j = (total < MAXIMO_DE_LUZES_NO_SHADER ? total : MAXIMO_DE_LUZES_NO_SHADER - 1); j > lugar; j--) {
-                distancias[j] = distancias[j - 1];
-                escolhidos[j] = escolhidos[j - 1];
-            }
-            distancias[lugar] = distancia;
-            escolhidos[lugar] = postes[i];
-            if (total < MAXIMO_DE_LUZES_NO_SHADER) {
-                total++;
-            }
-        }
-    }
-
+void prepararLuzes(int ehNoite) {
+    int total = ehNoite ? totalDeRefletores : 0;
     float valorDaNoite = ehNoite ? 1.0f : 0.0f;
     for (int i = 0; i < totalDeIluminados; i++) {
         SetShaderValue(iluminados[i].shader, iluminados[i].locNoite, &valorDaNoite, SHADER_UNIFORM_FLOAT);
         SetShaderValue(iluminados[i].shader, iluminados[i].locTotal, &total, SHADER_UNIFORM_INT);
         if (total > 0) {
-            SetShaderValueV(iluminados[i].shader, iluminados[i].locLuzes, escolhidos, SHADER_UNIFORM_VEC3, total);
+            SetShaderValueV(iluminados[i].shader, iluminados[i].locLuzes, refletores, SHADER_UNIFORM_VEC3, total);
         }
     }
     SetShaderValue(shaderDeTorcida, locTempo, &tempoDaTorcida, SHADER_UNIFORM_FLOAT);
@@ -515,7 +471,7 @@ static void desenharImagemNoAr(Camera3D camera, Texture2D imagem, Vector3 centro
 
 /*
  * desenharBrilhos
- * Os refletores, as lâmpadas dos postes e os flashes, somando luz ao que está
+ * O brilho dos refletores e os flashes, somando luz ao que está
  * atrás. Eles respeitam o que está na frente, mas não escrevem na profundidade.
  * Chamar dentro de BeginMode3D, depois de tudo o que é sólido.
  * Recebe: a câmera.
@@ -527,18 +483,11 @@ void desenharBrilhos(Camera3D camera) {
     rlDisableDepthMask();
 
     for (int i = 0; i < totalDeRefletores; i++) {
-        desenharImagemNoAr(camera, imagemDoBrilho, refletores[i], HALO_DO_REFLETOR, COR_DO_HALO);
-        desenharImagemNoAr(camera, imagemDoBrilho, refletores[i], MIOLO_DO_REFLETOR, COR_DO_MIOLO);
-    }
-    for (int i = 0; i < totalDeBaixo; i++) {
-        desenharImagemNoAr(camera, imagemDoBrilho, refletoresDeBaixo[i], HALO_DE_BAIXO, COR_DO_HALO);
-        desenharImagemNoAr(camera, imagemDoBrilho, refletoresDeBaixo[i], MIOLO_DE_BAIXO, COR_DO_MIOLO);
-    }
-    for (int i = 0; i < totalDePostes; i++) {
-        float distancia = Vector3Distance(postes[i], camera.position);
-        float halo = fmaxf(HALO_DO_POSTE, distancia * MENOR_TAMANHO_POSTE * 2.5f);
-        desenharImagemNoAr(camera, imagemDoBrilho, postes[i], halo, COR_DO_HALO_DO_POSTE);
-        desenharImagemNoAr(camera, imagemDoBrilho, postes[i], fmaxf(MIOLO_DO_POSTE, distancia * MENOR_TAMANHO_POSTE), WHITE);
+        float distancia = Vector3Distance(refletores[i], camera.position);
+        Vector3 paraACamera = Vector3Normalize(Vector3Subtract(camera.position, refletores[i]));
+        Vector3 centro = Vector3Add(refletores[i], Vector3Scale(paraACamera, NA_FRENTE_DO_REFLETOR));
+        desenharImagemNoAr(camera, imagemDoBrilho, centro, fmaxf(MENOR_HALO, distancia * HALO_DO_REFLETOR), COR_DO_HALO);
+        desenharImagemNoAr(camera, imagemDoBrilho, centro, fmaxf(MENOR_MIOLO, distancia * MIOLO_DO_REFLETOR), COR_DO_MIOLO);
     }
     for (int i = 0; i < MAXIMO_DE_FLASHES; i++) {
         Flash *flash = &flashes[i];
@@ -547,7 +496,9 @@ void desenharBrilhos(Camera3D camera) {
         }
         float forca = 1.0f - flash->idade / flash->vida;
         float distancia = Vector3Distance(flash->lugar, camera.position);
-        desenharImagemNoAr(camera, imagemDaEstrela, flash->lugar, flash->tamanho * distancia, Fade(flash->cor, forca));
+        float tamanho = flash->tamanho * distancia;
+        desenharImagemNoAr(camera, imagemDoBrilho, flash->lugar, tamanho * HALO_DO_FLASH, Fade(COR_FLASH_AZUL, forca * 0.40f));
+        desenharImagemNoAr(camera, imagemDaEstrela, flash->lugar, tamanho, Fade(flash->cor, forca));
     }
 
     rlDrawRenderBatchActive();
