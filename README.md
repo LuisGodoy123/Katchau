@@ -187,7 +187,8 @@ uma volta lançada, sozinho na pista e dirigido pela IA, usando o nitro.
 
 `carros3d.c` carrega os modelos e deixa todos iguais: mede cada um, escala para o comprimento do personagem
 (`MODELOS`), centraliza, põe as rodas no chão e a frente para +z. O carro no mundo segue a pista, o
-volante e o chão embaixo das rodas (`matrizDoCarro` em `render.c`). A sombra é a foto do próprio modelo visto de cima, desfocada,
+volante e o chão embaixo das rodas (`matrizDoCarro` em `render.c`). A sombra é a foto do próprio modelo visto de cima, desfocada, numa malha
+que acompanha o chão ponto a ponto (`desenharSombraDoCarro` em `render.c`), sem inclinar com o carro: uma sombra plana afundava na pista inclinada da Copa Pistão;
 e a fumaça e a poeira são nuvens soltas no mundo (`fumaca.c`). As rodas giram de verdade: `carros3d.c` acha, ao carregar, as peças redondas encostadas no chão, separa cada roda
 do resto do modelo e a desenha girando em volta do próprio eixo; as da frente também viram com o volante. Na arrancada elas patinam, e o giro na tela
 tem um limite, porque acima dele a roda pareceria girar ao contrário. A garagem e o menu usam uma foto de cada modelo, tirada ao carregar.
@@ -307,9 +308,14 @@ que fica onde em Interlagos:
 
 - o **pórtico** em cima da linha de chegada e os **colchetes do grid**, pintados no asfalto;
 - **barreiras de pneus** por fora das curvas e **placas de 150, 100 e 50 m** antes delas;
-- **arquibancadas e camarotes** nos lugares do mapa oficial do GP (setores A, B, M, D, H, N, R, G, S e V, Pit Stop Club e
-  Orange Tree Club; tabela `ARQUIBANCADAS`). As posições foram lidas no mapa e alinhadas pelos trechos da pista;
-- **árvores** sorteadas dos dois lados (sorteio com semente fixa: ficam sempre no mesmo lugar).
+- **arquibancadas contínuas** nos lugares do mapa oficial do GP (setores A, B, M, D, H, N, R, G, S e V; tabela `ARQUIBANCADAS`).
+  Elas acompanham a curva da pista, com muro da frente, fileiras com a torcida, corredores e, em algumas, cobertura sobre colunas;
+- a **reta dos boxes**: muro e alambrado dos dois lados, com um funil no fim da Subida dos Boxes, para quem vem pela grama, e o camarote
+  Pit Stop Club depois da linha;
+- os **boxes**: o prédio é feito de módulos de 6 garagens (`boxes.glb`), cada um na altura da reta, com pontas envidraçadas e a torre de controle,
+  com um pátio de asfalto e ruas de serviço. Onde o terreno desce, tudo fica sobre uma laje com pilares e vigas (`construirEstruturaDosBoxes`). O **pit lane** sai da pista na Subida dos Boxes, passa por trás do funil,
+  corre atrás do muro e volta à pista antes do S do Senna. **É só cenário:** a entrada fica fechada por uma barreira, e o carro continua na pista;
+- **árvores** só nos bosques da tabela `BOSQUES` (sorteio com semente fixa: ficam sempre no mesmo lugar). Longe deles, o campo é aberto.
 
 Num circuito sinuoso, o lugar de um objeto pode cair em cima de outro trecho da pista. Por isso `lugarLivre` confere
 cada um contra a volta inteira: ele só entra se ficar além de onde o carro alcança em qualquer trecho.

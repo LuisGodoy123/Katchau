@@ -18,6 +18,8 @@
 #define SUBPASSOS_DO_TRACADO  64      /* entre dois pontos da tabela: bem menor que um segmento */
 #include "obstaculos.h"
 
+#define FIM_DO_MURO           320.0f    /* metros depois da linha */
+
 /* ==================================================================
  * Funções auxiliares (static = só podem ser usadas dentro deste arquivo)
  * ================================================================== */
@@ -41,6 +43,7 @@ static Segmento *criarSegmento(float curvatura) {
     novo->altura = 0.0f;
     novo->nomeTrecho = "";
     novo->temMuro = 0;
+    novo->lugarDoMuro = 1.0f;
     novo->xMundo = 0.0f;
     novo->zMundo = 0.0f;
     novo->rumo = 0.0f;
@@ -262,6 +265,28 @@ static void calcularPosicoesNoMundo(Pista *pista) {
 }
 
 /*
+ * murarRetaDosBoxes
+ * A reta dos boxes tem muro dos dois lados, como na vida real. Ele começa no fim da
+ * Subida dos Boxes num funil, para quem vem pela grama voltar aos poucos, e termina
+ * antes do S do Senna, onde a área de escape abre.
+ * Recebe: a pista.
+ * Devolve: nada.
+ */
+static void murarRetaDosBoxes(Pista *pista) {
+    Segmento *atual = pista->largada;
+    do {
+        float metros = atual->indice * COMPRIMENTO_SEGMENTO / UNIDADES_POR_METRO;
+        if (metros >= INICIO_DO_FUNIL || metros <= FIM_DO_MURO) {
+            atual->temMuro = 1;
+            float noFunil = (metros < INICIO_DO_FUNIL + COMPRIMENTO_DO_FUNIL && metros >= INICIO_DO_FUNIL)
+                            ? 1.0f - (metros - INICIO_DO_FUNIL) / COMPRIMENTO_DO_FUNIL : 0.0f;
+            atual->lugarDoMuro = 1.0f + (ABERTURA_DO_FUNIL - 1.0f) * noFunil;
+        }
+        atual = atual->proximo;
+    } while (atual != pista->largada);
+}
+
+/*
  * criarPista
  * Monta o Autódromo de Interlagos a partir da tabela TRECHOS_INTERLAGOS,
  * suaviza a entrada e a saída das curvas, acha o lugar de cada segmento no
@@ -292,6 +317,7 @@ Pista *criarPista(void) {
 
     suavizarCurvas(pista);
     calcularPosicoesNoMundo(pista);
+    murarRetaDosBoxes(pista);
     decorarPista(pista);   /* árvores, pórtico, placas... (depois: as zebras dependem das curvas) */
     return pista;
 }

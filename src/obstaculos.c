@@ -17,7 +17,7 @@
 #define LADO_PNEUS          2.7f   /* barreira de pneus por fora das curvas */
 #define LADO_PLACAS         2.7f
 #define LADO_ARVORE_MINIMO  3.0f
-#define LADO_ARVORE_MAXIMO  6.0f
+#define LADO_ARVORE_MAXIMO  8.0f
 
 /* Num circuito sinuoso, o lugar de um objeto pode cair em cima de OUTRO trecho
  * da pista. Por isso ele é conferido contra a volta inteira: precisa ficar além
@@ -33,7 +33,7 @@
 /* De quantos em quantos segmentos se repete cada coisa */
 #define ESPACO_PNEUS        6
 
-#define CHANCE_ARVORE       0.12f  /* em cada lado de cada segmento */
+#define CHANCE_ARVORE       0.30f  /* em cada lado de cada segmento */
 #define SEMENTE_DECORACAO   2026u  /* sorteio fixo: a pista é sempre igual */
 
 /* ==================================================================
@@ -125,7 +125,7 @@ int lugarLivre(Pista *pista, Segmento *segmento, float lateral, float folga) {
     do {
         if (indice++ % PASSO_DA_CONFERENCIA == 0) {
             float largura = (atual->larguraDireita > atual->larguraEsquerda) ? atual->larguraDireita : atual->larguraEsquerda;
-            float alcance = largura * ALCANCE_DO_CARRO + folga;
+            float alcance = largura * (atual->temMuro ? atual->lugarDoMuro : ALCANCE_DO_CARRO) + folga;
             float dx = atual->xMundo - ponto.x, dz = atual->zMundo - ponto.z;
             if (dx * dx + dz * dz < alcance * alcance) {
                 return 0;
@@ -185,31 +185,21 @@ static void marcarGrid(Pista *pista) {
     }
 }
 
-/* As arquibancadas e os camarotes do mapa oficial do GP de Interlagos, em metros
- * a partir da linha de chegada, no sentido da corrida. As posições foram lidas no
- * mapa e convertidas para esta pista alinhando os pontos que existem nos dois (o fim
- * de cada trecho), porque o traçado daqui é aproximado. Lado: +1 por fora (direita). */
-typedef struct {
-    char setor;     /* a letra no mapa */
-    int inicio;     /* metros */
-    int fim;
-    int lado;
-    TipoObjeto tipo;
-} Arquibancada;
-
+/* As arquibancadas e o camarote do mapa oficial do GP: as posições foram lidas no mapa
+ * e alinhadas pelo início e fim de cada trecho. Na reta dos boxes elas ficam logo atrás
+ * do muro; fora dela, além de onde o carro chega pela grama. */
 static const Arquibancada ARQUIBANCADAS[] = {
-    { 'A', 3667, 4185,  1, OBJETO_ARQUIBANCADA },   /* Subida dos Boxes até a Reta dos Boxes */
-    { 'B', 4197, 4280,  1, OBJETO_ARQUIBANCADA },   /* Reta dos Boxes, antes da linha */
-    {  0,    24,   77,  1, OBJETO_CAMAROTE },       /* Pit Stop Club, logo depois da linha */
-    { 'M',  143,  292,  1, OBJETO_ARQUIBANCADA },   /* Reta dos Boxes, chegando no S do Senna */
-    { 'D',  341,  510,  1, OBJETO_ARQUIBANCADA },   /* por fora do S do Senna */
-    { 'H',  532,  607,  1, OBJETO_ARQUIBANCADA },   /* Curva do Sol */
-    { 'N',  636,  667,  1, OBJETO_ARQUIBANCADA },   /* Curva do Sol */
-    { 'R',  678,  833,  1, OBJETO_ARQUIBANCADA },   /* saída da Curva do Sol */
-    { 'G',  857, 1299,  1, OBJETO_ARQUIBANCADA },   /* Reta Oposta */
-    { 'S', 1330, 1358,  1, OBJETO_ARQUIBANCADA },   /* fim da Reta Oposta */
-    { 'V', 1431, 1463,  1, OBJETO_ARQUIBANCADA },   /* Descida do Lago */
-    {  0,  4134, 4165, -1, OBJETO_CAMAROTE },       /* Orange Tree Club, do outro lado da Reta dos Boxes */
+    { 'A', 3740, 4185, 19.5f, 26, 1, OBJETO_ARQUIBANCADA },   /* fim da Subida dos Boxes e começo da reta */
+    { 'B', 4197, 4280, 19.5f, 24, 1, OBJETO_ARQUIBANCADA },   /* reta dos boxes, antes da linha */
+    {  0,    24,   77, 19.5f,  0, 0, OBJETO_CAMAROTE },       /* Pit Stop Club, logo depois da linha */
+    { 'M',  100,  270, 19.5f, 20, 1, OBJETO_ARQUIBANCADA },   /* reta dos boxes, chegando no S do Senna */
+    { 'D',  341,  510, 46.0f, 20, 0, OBJETO_ARQUIBANCADA },   /* por fora do S do Senna */
+    { 'H',  532,  607, 46.0f, 16, 0, OBJETO_ARQUIBANCADA },   /* Curva do Sol */
+    { 'N',  636,  667, 46.0f, 12, 0, OBJETO_ARQUIBANCADA },   /* Curva do Sol */
+    { 'R',  678,  833, 46.0f, 18, 1, OBJETO_ARQUIBANCADA },   /* saída da Curva do Sol */
+    { 'G',  857, 1299, 46.0f, 20, 1, OBJETO_ARQUIBANCADA },   /* Reta Oposta */
+    { 'S', 1330, 1358, 46.0f, 12, 0, OBJETO_ARQUIBANCADA },   /* fim da Reta Oposta */
+    { 'V', 1431, 1463, 46.0f, 14, 0, OBJETO_ARQUIBANCADA },   /* Descida do Lago */
 };
 #define TOTAL_ARQUIBANCADAS  (int) (sizeof(ARQUIBANCADAS) / sizeof(ARQUIBANCADAS[0]))
 
@@ -219,41 +209,44 @@ static float xDosModulos[MAXIMO_DE_MODULOS], zDosModulos[MAXIMO_DE_MODULOS];
 static int totalDeModulos;
 
 /*
+ * arquibancadasDaPista
+ * Recebe: onde guardar quantas são.
+ * Devolve: a tabela, para o desenho (mundo.c).
+ */
+const Arquibancada *arquibancadasDaPista(int *total) {
+    *total = TOTAL_ARQUIBANCADAS;
+    return ARQUIBANCADAS;
+}
+
+/*
  * colocarArquibancada
- * Anda pelo trecho da pista e põe um módulo cada vez que a distância até o
- * anterior, no mundo, dá a largura de um módulo. Assim eles ficam encostados
- * e acompanham a curva. A letra do setor vai no módulo do meio.
+ * Marca o trecho da arquibancada na lista de objetos: um marcador a cada
+ * LARGURA_DO_MODULO metros, para as árvores não nascerem dentro dela. O do meio
+ * leva a letra do setor. Quem constrói a arquibancada de verdade é o mundo.c.
  * Recebe: a pista e a arquibancada.
  * Devolve: nada.
  */
 static void colocarArquibancada(Pista *pista, const Arquibancada *arquibancada) {
-    float lateral = arquibancada->lado * LADO_DA_ARQUIBANCADA;
+    float lateral = arquibancada->distancia / pista->largada->larguraDireita;
+    float fundo = FUNDO_DO_MODULO / pista->largada->larguraDireita;
     Obstaculo *colocados[MAXIMO_DE_MODULOS];
     int total = 0;
-    float xAnterior = 0.0f, zAnterior = 0.0f;
-
     int primeiro = (int) (arquibancada->inicio * SEGMENTOS_POR_METRO);
     int ultimo = (int) (arquibancada->fim * SEGMENTOS_POR_METRO);
-    Segmento *atual = buscarSegmento(pista, primeiro);
-    for (int i = primeiro; i <= ultimo && atual != NULL; i++, atual = atual->proximo) {
-        PosicaoNaPista lugar = { atual, 0.0f };
-        PontoNoMundo ponto = pontoNoMundo(lugar, lateral);
-        float andou = hypotf(ponto.x - xAnterior, ponto.z - zAnterior);
-        if (total > 0 && andou < LARGURA_DO_MODULO) {
-            continue;
-        }
-        float lateralDoFundo = lateral + arquibancada->lado * FUNDO_DO_MODULO / atual->larguraDireita;
-        if (!lugarLivre(pista, atual, lateral, FOLGA_DAS_PLACAS) || !lugarLivre(pista, atual, lateralDoFundo, FOLGA_DAS_PLACAS)) {
-            continue;   /* cairia onde outro trecho da pista passa */
+    int passo = (int) (LARGURA_DO_MODULO * SEGMENTOS_POR_METRO);
+
+    for (int i = primeiro; i <= ultimo; i += passo) {
+        Segmento *atual = buscarSegmento(pista, i);
+        if (atual == NULL) {
+            break;
         }
         adicionarObstaculo(atual, arquibancada->tipo, lateral);
         if (total < MAXIMO_DE_MODULOS) {
             colocados[total++] = atual->obstaculos;
         }
-        xAnterior = ponto.x;
-        zAnterior = ponto.z;
+        PosicaoNaPista lugar = { atual, 0.0f };
         if (totalDeModulos < MAXIMO_DE_MODULOS) {
-            PontoNoMundo meio = pontoNoMundo(lugar, (lateral + lateralDoFundo) / 2.0f);
+            PontoNoMundo meio = pontoNoMundo(lugar, lateral + fundo / 2.0f);
             xDosModulos[totalDeModulos] = meio.x;
             zDosModulos[totalDeModulos] = meio.z;
             totalDeModulos++;
@@ -279,6 +272,21 @@ static int longeDasArquibancadas(Segmento *segmento, float lateral) {
     }
     return 1;
 }
+
+/* Onde há mata de verdade em volta do autódromo: de onde até onde, em metros a
+ * partir da linha, e de que lado (-1 dentro do circuito, +1 fora). Longe disso,
+ * o campo é aberto, como na vida real. */
+typedef struct {
+    int inicio, fim, lado;
+} Bosque;
+
+static const Bosque BOSQUES[] = {
+    {  720, 1320, -1 },   /* a mata de dentro, ao longo da Reta Oposta */
+    { 1480, 1720, -1 },   /* em volta do Lago */
+    { 1500, 1800,  1 },   /* por fora, atrás do Lago */
+    { 3250, 3640,  1 },   /* o morro atrás da Subida dos Boxes */
+};
+#define TOTAL_BOSQUES  (int) (sizeof(BOSQUES) / sizeof(BOSQUES[0]))
 
 /*
  * decorarPista
@@ -321,9 +329,11 @@ void decorarPista(Pista *pista) {
             }
         }
 
-        /* Árvores: um sorteio para cada lado (-1 esquerda, +1 direita) */
-        for (int lado = -1; lado <= 1; lado += 2) {
-            if (sortear() < CHANCE_ARVORE) {
+        /* Árvores: só nos bosques, com um sorteio para cada segmento */
+        for (int b = 0; b < TOTAL_BOSQUES; b++) {
+            float metros = atual->indice / SEGMENTOS_POR_METRO;
+            int lado = BOSQUES[b].lado;
+            if (metros >= BOSQUES[b].inicio && metros <= BOSQUES[b].fim && sortear() < CHANCE_ARVORE) {
                 float distancia = LADO_ARVORE_MINIMO
                                   + sortear() * (LADO_ARVORE_MAXIMO - LADO_ARVORE_MINIMO);
                 if (lugarLivre(pista, atual, lado * distancia, FOLGA_DA_ARVORE) && longeDasArquibancadas(atual, lado * distancia)) {

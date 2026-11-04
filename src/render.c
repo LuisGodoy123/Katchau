@@ -24,6 +24,8 @@
 #include "raymath.h"
 
 /* ---------- Câmera ---------- */
+#define ALTURA_DA_SOMBRA_NO_CHAO 0.04f  /* metros acima do chão */
+#define SOMBRA_PERTO_DA_CAMERA   0.40f  /* metros: quanto ela é puxada na direção da câmera */
 #define GRAUS_DE_VISAO        65.0f    /* na vertical */
 #define CAMERA_ATRAS          8.5f     /* metros atrás do centro do carro */
 #define CAMERA_ALTURA         3.4f     /* metros acima do chão */
@@ -196,12 +198,44 @@ static Matrix matrizDoCarro(Carro *carro) {
  * Recebe: a câmera e o carro.
  * Devolve: nada (carro atrás da câmera ou longe demais não é desenhado).
  */
+/*
+ * desenharSombraDoCarro
+ * Põe cada ponto da sombra em cima do chão daquele lugar, sem contar a inclinação do
+ * carro (freada, volante, trepidação). Depois puxa o ponto para perto da câmera: na
+ * tela ele fica no mesmo lugar, mas não some por pouco atrás do asfalto ou da pintura.
+ * Recebe: a câmera e o carro.
+ * Devolve: nada.
+ */
+static void desenharSombraDoCarro(Camera3D camera, Carro *carro) {
+    Vector3 grade[PONTOS_DA_SOMBRA * PONTOS_DA_SOMBRA];
+    float meio = ladoDaSombra(carro->numero) / 2.0f;
+    float lateral = carro->deslocamentoLateral * larguraDoLado(carro->posicao.segmento, carro->deslocamentoLateral);
+    float giro = (carro->giro + carro->volante * GRAUS_DO_VOLANTE) * DEG2RAD;
+    for (int i = 0; i < PONTOS_DA_SOMBRA; i++) {
+        for (int j = 0; j < PONTOS_DA_SOMBRA; j++) {
+            float paraDireita = -meio + 2.0f * meio * i / (PONTOS_DA_SOMBRA - 1);
+            float paraFrente = meio - 2.0f * meio * j / (PONTOS_DA_SOMBRA - 1);
+            float naPista = paraFrente * cosf(giro) - paraDireita * sinf(giro);
+            float aoLado = lateral + paraDireita * cosf(giro) + paraFrente * sinf(giro);
+
+            PosicaoNaPista lugar = carro->posicao;
+            moverNaPista(&lugar, naPista * UNIDADES_POR_METRO);
+            PontoNoMundo chao = pontoNoMundo(lugar, aoLado / larguraDoLado(lugar.segmento, aoLado));
+            Vector3 ponto = { chao.x, chao.y + ALTURA_DA_SOMBRA_NO_CHAO, chao.z };
+            Vector3 paraCamera = Vector3Normalize(Vector3Subtract(camera.position, ponto));
+            grade[i * PONTOS_DA_SOMBRA + j] = Vector3Add(ponto, Vector3Scale(paraCamera, SOMBRA_PERTO_DA_CAMERA));
+        }
+    }
+    desenharSombraNoChao(carro->numero, grade);
+}
+
 static void desenharCarroNoMundo(Camera3D camera, Carro *carro) {
     PontoNoMundo ponto = pontoNoMundo(carro->posicao, carro->deslocamentoLateral);
     float distancia = aFrenteDaCamera(camera, (Vector3){ ponto.x, ponto.y, ponto.z });
     if (distancia < -6.0f || distancia > DISTANCIA_DOS_RIVAIS) {
         return;
     }
+    desenharSombraDoCarro(camera, carro);
     desenharCarro3D(carro->numero, matrizDoCarro(carro), carro->anguloDasRodas, carro->volante);
 }
 
@@ -312,6 +346,7 @@ void definirOlhar(Olhar olhar) {
  */
 static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
     int ehNoite = (pista->id == PISTA_COPA_PISTAO);
+    animarTorcida(cenaPausada ? 0.0f : GetFrameTime());
     if (ehNoite) {
         atualizarNoite(cenaPausada ? 0.0f : GetFrameTime());
     }

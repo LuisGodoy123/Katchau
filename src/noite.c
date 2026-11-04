@@ -73,7 +73,7 @@ static const char *PIXELS_DO_CENARIO =
 static const char *PIXELS_DA_TORCIDA =
     "#version 330\n"
     "in vec2 fragTexCoord; in vec4 fragColor; in vec3 fragPos;\n"
-    "uniform sampler2D texture0; uniform float tempo;\n"
+    "uniform float tempo;\n"
     "out vec4 finalColor;\n"
     GLSL_DA_LUZ_DA_NOITE
     "float sorteio(vec2 c) { return fract(sin(dot(c, vec2(127.1, 311.7))) * 43758.5453); }\n"
@@ -103,12 +103,14 @@ static const char *PIXELS_DA_TORCIDA =
     "        float corpo = smoothstep(0.08, 0.16, l.x) * smoothstep(0.92, 0.84, l.x) * smoothstep(0.10, 0.18, l.y) * smoothstep(0.86, 0.72, l.y);\n"
     "        float vidro = step(0.26, l.x) * step(l.x, 0.74) * step(0.30, l.y) * step(l.y, 0.50);\n"
     "        vec3 carro = mix(cor, vec3(0.05, 0.07, 0.10), vidro * 0.85) * (1.15 - 0.45 * l.y);\n"
-    "        cor = mix(cor, mix(vec3(0.03), carro, corpo), perto);\n"
+    "        cor = mix(cor, mix(vec3(noite > 0.5 ? 0.03 : 0.30), carro, corpo), perto);\n"
     "    }\n"
     "    float corredor = abs(fract(fragTexCoord.x) - 0.5);\n"
     "    cor = mix(vec3(0.16, 0.17, 0.20), cor, smoothstep(0.015, 0.04, corredor));\n"
     "    vec3 n = normalize(cross(dFdx(fragPos), dFdy(fragPos)));\n"
-    "    finalColor = vec4(cor * (luzDaNoite(fragPos, n) * 0.72 + vec3(0.08, 0.09, 0.12)), 1.0);\n"
+    "    if (noite < 0.5) cor = mix(cor, vec3(dot(cor, vec3(0.3, 0.6, 0.1))), 0.30) + vec3(0.03);\n"   /* de dia, o sol lava as cores */
+    "    vec3 luz = (noite > 0.5) ? luzDaNoite(fragPos, n) * 0.72 + vec3(0.08, 0.09, 0.12) : vec3(0.85);\n"
+    "    finalColor = vec4(cor * luz * fragColor.rgb, 1.0);\n"
     "}\n";
 
 /* Um flash aceso */
@@ -439,13 +441,22 @@ void prepararLuzes(int ehNoite) {
 }
 
 /*
+ * animarTorcida
+ * A torcida se mexe de dia e de noite. Com tempo 0 (pausa), ela para.
+ * Recebe: o tempo que passou.
+ * Devolve: nada.
+ */
+void animarTorcida(float tempoQuadro) {
+    tempoDaTorcida += tempoQuadro;
+}
+
+/*
  * atualizarNoite
  * Solta os flashes novos e envelhece os acesos. Com tempo 0 (pausa), para tudo.
  * Recebe: o tempo que passou.
  * Devolve: nada.
  */
 void atualizarNoite(float tempoQuadro) {
-    tempoDaTorcida += tempoQuadro;
     for (int i = 0; i < MAXIMO_DE_FLASHES; i++) {
         flashes[i].idade += tempoQuadro;
     }

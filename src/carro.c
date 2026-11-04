@@ -382,8 +382,8 @@ static void atualizarLateral(Carro *carro, Comandos comandos, float tempoQuadro)
     /* Muro (só no oval): o carro não passa dele, e raspar custa velocidade.
      * A largura de cada lado muda ao longo da pista, então a conta é em metros */
     if (aqui->temMuro) {
-        float limiteDireita = LIMITE_PISTA - FOLGA_DO_MURO / aqui->larguraDireita;
-        float limiteEsquerda = LIMITE_PISTA - FOLGA_DO_MURO / aqui->larguraEsquerda;
+        float limiteDireita = aqui->lugarDoMuro - FOLGA_DO_MURO / aqui->larguraDireita;
+        float limiteEsquerda = aqui->lugarDoMuro - FOLGA_DO_MURO / aqui->larguraEsquerda;
         if (carro->deslocamentoLateral > limiteDireita || carro->deslocamentoLateral < -limiteEsquerda) {
             carro->deslocamentoLateral = limitar(carro->deslocamentoLateral, -limiteEsquerda, limiteDireita);
             carro->velocidade = fmaxf(carro->velocidade - PERDA_NO_MURO * tempoQuadro, 0.0f);

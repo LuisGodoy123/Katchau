@@ -49,6 +49,9 @@ typedef enum {
 #define UNIDADES_POR_METRO    (COMPRIMENTO_SEGMENTO * SEGMENTOS_POR_METRO)
 
 /* Largura de cada lado da pista, em metros, onde não há outra medida (Interlagos) */
+#define INICIO_DO_FUNIL       3650.0f   /* metros: o muro da reta dos boxes começa aqui, no fim da Subida */
+#define COMPRIMENTO_DO_FUNIL  70.0f
+#define ABERTURA_DO_FUNIL     2.5f      /* larguras da pista: até onde o carro pode ir pela grama */
 #define MEIA_LARGURA_PADRAO   (2000.0f / UNIDADES_POR_METRO)
 
 /* A Copa Pistão tem o comprimento real de Daytona (2,5 milhas): a pista do filme
@@ -81,7 +84,8 @@ typedef struct Segmento {
     int ehLinhaDeChegada;           /* 1 no segmento da largada/chegada, 0 nos outros */
     float altura;                   /* altura do chão no começo do segmento (unidades de mundo) */
     const char *nomeTrecho;         /* nome da parte do autódromo ("S do Senna", "Junção"...) */
-    int temMuro;                    /* 1: muro nas duas bordas do asfalto; 0: grama além dele */
+    int temMuro;                    /* 1: muro nos dois lados; 0: grama além do asfalto */
+    float lugarDoMuro;              /* onde fica o muro, em larguras da pista (1 = na borda do asfalto) */
 
     /* Onde o começo do segmento fica no mundo 3D, em metros */
     float xMundo, zMundo;           /* centro da pista, visto de cima (a altura é o campo "altura") */

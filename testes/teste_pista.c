@@ -701,8 +701,9 @@ static void testarObjetosDaPista(void) {
         for (Obstaculo *objeto = atual->obstaculos; objeto != NULL; objeto = objeto->proximo) {
             contagem[objeto->tipo]++;
             float lado = fabsf(objeto->deslocamentoLateral);
-            int ficaDePe = objeto->tipo != OBJETO_PORTICO && objeto->tipo != OBJETO_MARCA_GRID;
-            if (ficaDePe && lado <= 2.5f) {
+            int ficaDePe = objeto->tipo != OBJETO_PORTICO && objeto->tipo != OBJETO_MARCA_GRID
+                           && objeto->tipo != OBJETO_ARQUIBANCADA && objeto->tipo != OBJETO_CAMAROTE;
+            if (ficaDePe && !atual->temMuro && lado <= 2.5f) {
                 noCaminho++;   /* o carro anda ate 2,5 (LIMITE_LATERAL em carro.c) */
             }
         }
@@ -771,14 +772,18 @@ static void testarObjetosDaPista(void) {
             total++;
             PontoNoMundo ponto = pontoNoMundo(lugar, objeto->deslocamentoLateral);
             Segmento *outro = pista->largada;
-            float menor = 1e9f;
+            float menor = 1e9f, alcanceAli = 0.0f;
             do {
-                menor = fminf(menor, hypotf(outro->xMundo - ponto.x, outro->zMundo - ponto.z));
+                float distanciaAqui = hypotf(outro->xMundo - ponto.x, outro->zMundo - ponto.z);
+                if (distanciaAqui < menor) {
+                    menor = distanciaAqui;
+                    alcanceAli = outro->larguraDireita * (outro->temMuro ? outro->lugarDoMuro : 2.5f);
+                }
                 outro = proximoSegmento(outro);
             } while (outro != pista->largada);
             maisPerto = fminf(maisPerto, menor);
             emCimaDaPista += (menor < atual->larguraDireita * 1.15f);
-            dentroDoAlcance += (menor < atual->larguraDireita * 2.5f);
+            dentroDoAlcance += (menor < alcanceAli);
         }
         atual = proximoSegmento(atual);
     } while (atual != pista->largada);
@@ -1638,6 +1643,85 @@ static void testarColisaoEEquilibrio(void) {
 }
 
 /*
+ * testarRetaDosBoxes
+ * Interlagos: a reta tem muro, o funil não dá tranco, e as árvores só ficam nos bosques.
+ */
+static void testarRetaDosBoxes(void) {
+    printf("\n25) Reta dos boxes de Interlagos\n");
+    float quadro = 1.0f / 60.0f;
+    Pista *pista = criarPista();
+    int comMuro = 0, zebraNoMuro = 0, arvoresNaReta = 0;
+    float maiorDegrau = 0.0f;
+    Segmento *atual = pista->largada;
+    do {
+        comMuro += atual->temMuro;
+        zebraNoMuro += (atual->temMuro && temZebra(atual));
+        if (atual->temMuro) {
+            maiorDegrau = fmaxf(maiorDegrau, fabsf(atual->lugarDoMuro - proximoSegmento(atual)->lugarDoMuro));
+        }
+        for (Obstaculo *o = atual->obstaculos; o != NULL; o = o->proximo) {
+            arvoresNaReta += (o->tipo == OBJETO_ARVORE && strcmp(atual->nomeTrecho, "Reta dos Boxes") == 0);
+        }
+        atual = proximoSegmento(atual);
+    } while (atual != pista->largada);
+    printf("     %.0f m de muro\n", comMuro / SEGMENTOS_POR_METRO);
+    verificar(pista->largada->temMuro && comMuro > 0, "a linha de chegada fica entre muros");
+    verificar(zebraNoMuro == 0, "no trecho de muro nao ha zebra");
+    verificar(maiorDegrau < 0.1f, "o muro abre em funil, sem degrau");
+    verificar(arvoresNaReta == 0, "nenhuma arvore na reta dos boxes");
+
+    /* Nenhuma arquibancada, da frente ao fundo, fica onde o carro consegue chegar */
+    int totalTabela, invadindo = 0;
+    const Arquibancada *tabela = arquibancadasDaPista(&totalTabela);
+    for (int a = 0; a < totalTabela; a++) {
+        float fundo = 2.8f + tabela[a].fileiras * 0.85f;
+        for (int i = (int) (tabela[a].inicio * SEGMENTOS_POR_METRO); i <= (int) (tabela[a].fim * SEGMENTOS_POR_METRO); i += 4) {
+            PosicaoNaPista lugar = { buscarSegmento(pista, i), 0.0f };
+            int invadiu = 0;
+            for (int parte = 0; parte <= 2; parte++) {
+                PontoNoMundo ponto = pontoNoMundo(lugar, (tabela[a].distancia + fundo * parte / 2.0f) / lugar.segmento->larguraDireita);
+                Segmento *outro = pista->largada;
+                do {
+                    float alcance = outro->larguraDireita * (outro->temMuro ? outro->lugarDoMuro : 2.5f);
+                    invadiu |= hypotf(outro->xMundo - ponto.x, outro->zMundo - ponto.z) < alcance;
+                    outro = proximoSegmento(outro);
+                } while (outro != pista->largada);
+            }
+            if (invadiu) {
+                printf("     setor %c invade em %.0f m\n", tabela[a].setor ? tabela[a].setor : '-', i / SEGMENTOS_POR_METRO);
+                invadindo++;
+            }
+        }
+    }
+    verificar(invadindo == 0, "nenhuma arquibancada fica onde o carro chega");
+
+    /* O carro não sai da reta, para os dois lados */
+    for (int lado = 0; lado < 2; lado++) {
+        Comandos virando = { 1, 0, lado == 0, lado == 1, 0.0f, 0 };
+        Carro carro = criarCarro("Teste", 0, buscarSegmento(pista, 2500), 0.0f, 12000.0f, 2400.0f, 0.5f);
+        carro.velocidade = 8000.0f;
+        for (int i = 0; i < 60; i++) {
+            atualizarCarro(&carro, virando, quadro);
+        }
+        verificar(fabsf(carro.deslocamentoLateral) < 1.0f && !estaForaDaPista(&carro), "o muro segura o carro na reta");
+    }
+
+    /* Vindo pela grama, ele entra no funil e volta para o asfalto, sem salto */
+    Carro pelaGrama = criarCarro("Teste", 0, buscarSegmento(pista, (int) (3560 * SEGMENTOS_POR_METRO)), 2.2f, 12000.0f, 2400.0f, 0.5f);
+    pelaGrama.velocidade = 3000.0f;
+    Comandos reto = { 1, 0, 0, 0, 0.0f, 0 };
+    float maiorSalto = 0.0f, antes = pelaGrama.deslocamentoLateral;
+    for (int i = 0; i < 60 * 15; i++) {
+        atualizarCarro(&pelaGrama, reto, quadro);
+        maiorSalto = fmaxf(maiorSalto, fabsf(pelaGrama.deslocamentoLateral - antes));
+        antes = pelaGrama.deslocamentoLateral;
+    }
+    printf("     pela grama, no funil: maior salto %.3f larguras em um quadro\n", maiorSalto);
+    verificar(maiorSalto < 0.1f, "o funil leva o carro de volta sem salto");
+    liberarPista(pista);
+}
+
+/*
  * testarCameraLivre
  * O analógico direito: um giro rápido para trás, sempre contínuo.
  */
@@ -1843,6 +1927,7 @@ int main(int argc, char *argv[]) {
     testarFreioAlivioECambio();
     testarPistasNoMundo();
     testarDepoisDaChegada();
+    testarRetaDosBoxes();
     testarGiroDasRodas();
     testarColisaoEEquilibrio();
     testarCameraLivre();

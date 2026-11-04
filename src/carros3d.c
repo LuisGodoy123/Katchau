@@ -170,27 +170,58 @@ static void desenharRodas(int numero, Model modelo, Matrix noMundo, float angulo
  * Devolve: nada.
  */
 static void desenharSombra(int numero, Matrix noMundo) {
+    Vector3 grade[PONTOS_DA_SOMBRA * PONTOS_DA_SOMBRA];
     float meio = ladosDaSombra[numero] / 2.0f;
-    /* Na foto, a imagem cresce para a direita em -x e para baixo em -z */
-    Vector3 a = Vector3Transform((Vector3){  meio, ALTURA_DA_SOMBRA,  meio }, noMundo);
-    Vector3 b = Vector3Transform((Vector3){  meio, ALTURA_DA_SOMBRA, -meio }, noMundo);
-    Vector3 c = Vector3Transform((Vector3){ -meio, ALTURA_DA_SOMBRA, -meio }, noMundo);
-    Vector3 d = Vector3Transform((Vector3){ -meio, ALTURA_DA_SOMBRA,  meio }, noMundo);
+    for (int i = 0; i < PONTOS_DA_SOMBRA; i++) {
+        for (int j = 0; j < PONTOS_DA_SOMBRA; j++) {
+            float noCarroX = meio - 2.0f * meio * i / (PONTOS_DA_SOMBRA - 1);
+            float noCarroZ = meio - 2.0f * meio * j / (PONTOS_DA_SOMBRA - 1);
+            grade[i * PONTOS_DA_SOMBRA + j] = Vector3Transform((Vector3){ noCarroX, ALTURA_DA_SOMBRA, noCarroZ }, noMundo);
+        }
+    }
+    desenharSombraNoChao(numero, grade);
+}
 
+/*
+ * desenharSombraNoChao
+ * Desenha a sombra como uma malha, com cada ponto já no lugar dele: assim ela dobra
+ * junto com o chão, em vez de afundar num trecho inclinado.
+ * Recebe: o número do carro e os pontos da malha. A primeira coluna é a esquerda do
+ *         carro, e cada coluna vai da frente para trás.
+ * Devolve: nada.
+ */
+void desenharSombraNoChao(int numero, const Vector3 *grade) {
+    float passo = 1.0f / (PONTOS_DA_SOMBRA - 1);
     BeginBlendMode(BLEND_ALPHA);
     rlDisableDepthMask();
     rlSetTexture(sombras[numero].id);
     rlBegin(RL_QUADS);
     rlColor4ub(255, 255, 255, 255);
-    rlTexCoord2f(0.0f, 0.0f); rlVertex3f(a.x, a.y, a.z);
-    rlTexCoord2f(0.0f, 1.0f); rlVertex3f(b.x, b.y, b.z);
-    rlTexCoord2f(1.0f, 1.0f); rlVertex3f(c.x, c.y, c.z);
-    rlTexCoord2f(1.0f, 0.0f); rlVertex3f(d.x, d.y, d.z);
+    for (int i = 0; i + 1 < PONTOS_DA_SOMBRA; i++) {
+        for (int j = 0; j + 1 < PONTOS_DA_SOMBRA; j++) {
+            Vector3 a = grade[i * PONTOS_DA_SOMBRA + j], b = grade[i * PONTOS_DA_SOMBRA + j + 1];
+            Vector3 c = grade[(i + 1) * PONTOS_DA_SOMBRA + j + 1], d = grade[(i + 1) * PONTOS_DA_SOMBRA + j];
+            float u0 = i * passo, u1 = (i + 1) * passo, v0 = j * passo, v1 = (j + 1) * passo;
+            rlTexCoord2f(u0, v0); rlVertex3f(a.x, a.y, a.z);
+            rlTexCoord2f(u0, v1); rlVertex3f(b.x, b.y, b.z);
+            rlTexCoord2f(u1, v1); rlVertex3f(c.x, c.y, c.z);
+            rlTexCoord2f(u1, v0); rlVertex3f(d.x, d.y, d.z);
+        }
+    }
     rlEnd();
     rlSetTexture(0);
     rlDrawRenderBatchActive();
     rlEnableDepthMask();
     EndBlendMode();
+}
+
+/*
+ * ladoDaSombra
+ * Recebe: o número do carro.
+ * Devolve: o lado do quadrado da sombra, em metros.
+ */
+float ladoDaSombra(int numero) {
+    return ladosDaSombra[numero];
 }
 
 /*
@@ -241,7 +272,6 @@ static void prepararSombra(int numero) {
  */
 void desenharCarro3D(int numero, Matrix noMundo, float anguloDasRodas, float volante) {
     rlDrawRenderBatchActive();   /* o que já estava na fila sai antes de mudar a profundidade */
-    desenharSombra(numero, noMundo);
 
     Model modelo = modelos[numero];
     modelo.transform = MatrixMultiply(ajuste[numero], noMundo);
@@ -642,6 +672,7 @@ static void prepararMiniatura(int numero) {
     ClearBackground(BLANK);
     BeginMode3D(camera);
     rlDisableBackfaceCulling();
+    desenharSombra(numero, MatrixIdentity());
     desenharCarro3D(numero, MatrixIdentity(), 0.0f, 0.0f);
     rlEnableBackfaceCulling();
     EndMode3D();

@@ -45,6 +45,18 @@ typedef struct Obstaculo {
     struct Obstaculo *proximo;    /* próximo objeto do mesmo segmento (NULL no último) */
 } Obstaculo;
 
+/* Uma arquibancada de Interlagos, no lugar do mapa oficial do GP. Ela é contínua e
+ * acompanha a pista (mundo.c constrói a partir daqui). */
+typedef struct {
+    char setor;       /* a letra no mapa (0 = camarote) */
+    int inicio;       /* metros a partir da linha de chegada */
+    int fim;
+    float distancia;  /* metros da linha da pista até o muro da frente (+ direita) */
+    int fileiras;     /* quantas fileiras de lugares */
+    int coberta;      /* 1 = tem cobertura */
+    TipoObjeto tipo;
+} Arquibancada;
+
 /* ---------- Lista de um segmento ---------- */
 void adicionarObstaculo(Segmento *segmento, TipoObjeto tipo, float deslocamentoLateral);
 int contarObstaculos(Segmento *segmento);
@@ -53,6 +65,7 @@ void liberarObstaculos(Segmento *segmento);
 /* ---------- A pista inteira ---------- */
 void decorarPista(Pista *pista);
 void decorarOval(Pista *pista);
+const Arquibancada *arquibancadasDaPista(int *total);
 int lugarLivre(Pista *pista, Segmento *segmento, float lateral, float folga);
 
 #endif
