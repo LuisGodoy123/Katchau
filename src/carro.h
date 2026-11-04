@@ -36,6 +36,14 @@ typedef struct {
     float largura;
 } FichaTecnica;
 
+/* Por onde o carro anda no pit lane (pitstop.c) */
+typedef enum {
+    PIT_FORA,       /* na pista */
+    PIT_CHEGANDO,   /* do começo do pit lane até a vaga */
+    PIT_TROCANDO,   /* parado na vaga */
+    PIT_SAINDO      /* da vaga até voltar à pista */
+} EstadoDoPit;
+
 /* O que o piloto quer fazer neste quadro: 1 = sim, 0 = não.
  * As setas (esquerda/direita) giram o volante todo; o analógico do
  * controle diz quanto girar, em "direcao". */
@@ -79,6 +87,15 @@ typedef struct {
     float velocidadeDoGiro;        /* graus por segundo */
     float tempoSemRodar;           /* segundos até poder rodar de novo */
     float velocidadeNaRodada;      /* a velocidade quando começou a rodar */
+
+    /* ---- Pitstop ---- */
+    EstadoDoPit estadoDoPit;
+    int voltaDoPit;                /* só para a IA: em que volta ela vai parar (0 = nunca) */
+    int querParar;                 /* 1: a IA vai entrar no próximo pit lane */
+    int pitFeito;                  /* 1 depois de completar uma troca */
+    float tempoDaTroca;            /* segundos parado na vaga */
+    float duracaoDaTroca;          /* quanto a troca dele leva */
+    float ultimaTroca;             /* quanto levou a última (0 = nenhuma) */
 
     /* ---- O que o piloto da IA enxerga (corrida.c preenche a cada quadro) ---- */
     float habilidade;              /* de 0 a 1: quanto do limite do carro a IA usa */

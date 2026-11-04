@@ -10,6 +10,7 @@
 #include "raylib.h"
 #include "config.h"
 #include "hud.h"
+#include "pitstop.h"
 #include "visual.h"
 #include "controle.h"
 
@@ -90,6 +91,7 @@ void terminarInterface(void) {
     EndMode2D();
 }
 
+#define METROS_DO_AVISO_DO_BOX 3150.0f  /* a partir daqui, o aviso de entrar nos boxes */
 #define TAMANHO_TITULO_FIM    48
 #define TAMANHO_TEXTO_FIM     22
 #define MARGEM_HUD            12
@@ -400,6 +402,9 @@ static void desenharPainelDePosicoes(Corrida *corrida) {
         escrever(FONTE_TEXTO, carro->nome, x + 22, y, LETRA_HUD, corTexto);
 
         const char *intervalo = ehJogador ? "--" : TextFormat("%+.2f", intervaloEmSegundos(carro, jogador));
+        if (carroNoPit(carro)) {
+            intervalo = "BOX";
+        }
         escrever(FONTE_TEXTO, intervalo, x + X_COLUNA_INTERVALO, y, LETRA_HUD, corTexto);
         escrever(FONTE_TEXTO, textoDoTempo(ultimaVolta(carro), texto, sizeof(texto)),
                  x + X_COLUNA_ULTIMA, y, LETRA_HUD, corTexto);
@@ -736,6 +741,45 @@ static void desenharContagemRegressiva(Corrida *corrida) {
 }
 
 /*
+ * desenharAvisosDoPit
+ * O que falta da parada obrigatória, o caminho até os boxes, o limite do pit lane e
+ * o cronômetro da troca de pneus.
+ * Recebe: a corrida.
+ * Devolve: nada.
+ */
+static void desenharAvisosDoPit(Corrida *corrida) {
+    Carro *jogador = &corrida->jogador;
+    if (!corrida->pista->temPit || corrida->contagemRegressiva > 0.0f || corrida->terminou) {
+        return;
+    }
+    float centro = larguraVirtual() / 2.0f;
+    float direita = larguraVirtual() - 24.0f;
+    float metros = metrosNaVolta(jogador);
+
+    /* O estado da parada, embaixo do painel da volta */
+    if (jogador->pitFeito) {
+        escreverADireita(FONTE_FORTE, TextFormat("PIT FEITO  %.2f s", jogador->ultimaTroca), direita, 134.0f, 16.0f, COR_VERDE_HUD);
+    } else if (voltaAtual(jogador) >= TOTAL_VOLTAS) {
+        escreverADireita(FONTE_FORTE, "ÚLTIMA VOLTA: PARE OU SERÁ DESCLASSIFICADO", direita, 134.0f, 16.0f, COR_VERMELHO);
+    } else {
+        escreverADireita(FONTE_FORTE, "PIT OBRIGATÓRIO", direita, 134.0f, 16.0f, COR_AMARELO);
+    }
+
+    if (jogador->estadoDoPit == PIT_TROCANDO) {
+        escreverCentralizado(FONTE_TITULO, TextFormat("%.2f", jogador->tempoDaTroca), centro, 70.0f, 52.0f, COR_AMARELO);
+        escreverCentralizado(FONTE_FORTE, "GUIDO TROCANDO OS PNEUS!", centro, 130.0f, 20.0f, COR_TEXTO_CLARO);
+    } else if (carroNoPit(jogador)) {
+        if (metros >= INICIO_DO_LIMITE_DO_PIT || metros <= FIM_DO_LIMITE_DO_PIT) {
+            escreverCentralizado(FONTE_FORTE, "LIMITE DOS BOXES: 100 KM/H", centro, 70.0f, 24.0f, COR_AMARELO);
+        } else {
+            escreverCentralizado(FONTE_FORTE, "PIT LANE", centro, 70.0f, 24.0f, COR_TEXTO_CLARO);
+        }
+    } else if (!jogador->pitFeito && metros > METROS_DO_AVISO_DO_BOX && metros < FIM_DA_ZONA_DE_ENTRADA) {
+        escreverCentralizado(FONTE_TITULO, "BOX PELA ESQUERDA", centro, 70.0f, 30.0f, COR_AMARELO);
+    }
+}
+
+/*
  * desenharHud
  * O HUD da corrida, nos quatro cantos da tela: posições (em cima à
  * esquerda), a volta (em cima à direita), o mapa (embaixo à esquerda)
@@ -755,6 +799,7 @@ void desenharHud(Corrida *corrida) {
         escreverCentralizado(FONTE_FORTE, "FORA DA PISTA", larguraVirtual() / 2.0f, alturaVirtual() * 0.30f,
                              20.0f, COR_AMARELO);
     }
+    desenharAvisosDoPit(corrida);
     desenharContagemRegressiva(corrida);
 }
 
@@ -771,7 +816,8 @@ void desenharFimDeCorrida(Corrida *corrida) {
     char tempo[32];
 
     float largura = 440.0f;
-    float altura = 316.0f;
+    float linhaDaVolta = 28.0f;
+    float altura = 164.0f + TOTAL_VOLTAS * linhaDaVolta + 46.0f;
     float x = (larguraVirtual() - largura) / 2.0f;
     float y = (alturaVirtual() - altura) / 2.0f - 30.0f;
     float centro = x + largura / 2.0f;
@@ -783,11 +829,20 @@ void desenharFimDeCorrida(Corrida *corrida) {
     desenharParalelogramo(x - 14, y + 24, largura + 14, 62, 14, COR_VERMELHO);
     desenharParalelogramo(x - 7, y + 24, largura + 14, 31, 7, Fade(WHITE, 0.12f));
     const char *titulo = (corrida->posicaoFinal == 1) ? "KATCHAU!" : TextFormat("%dº LUGAR", corrida->posicaoFinal);
+    if (corrida->desclassificado) {
+        titulo = "DESCLASSIFICADO";
+    }
     escreverCentralizado(FONTE_TITULO, titulo, centro, y + 26, TAMANHO_TITULO_FIM, COR_TEXTO_CLARO);
 
     formatarTempo(jogador->tempoDeChegada, tempo, sizeof(tempo));
     escrever(FONTE_FORTE, "TEMPO TOTAL", x + 40, y + 106, 16.0f, COR_TEXTO_FRACO);
     escreverADireita(FONTE_TITULO, tempo, x + largura - 40, y + 98, 30.0f, COR_AMARELO);
+
+    if (corrida->desclassificado) {
+        escreverCentralizado(FONTE_FORTE, "VOCÊ NÃO FEZ A PARADA OBRIGATÓRIA", centro, y + 130, 14.0f, COR_AMARELO);
+    } else if (jogador->ultimaTroca > 0.0f) {
+        escreverCentralizado(FONTE_FORTE, TextFormat("TROCA DE PNEUS DO GUIDO: %.2f s", jogador->ultimaTroca), centro, y + 130, 14.0f, COR_TEXTO_FRACO);
+    }
 
     /* Procura a melhor volta antes de escrever cada uma */
     int melhorVolta = 0;
@@ -797,13 +852,13 @@ void desenharFimDeCorrida(Corrida *corrida) {
         }
     }
     for (int i = 0; i < TOTAL_VOLTAS; i++) {
-        float linha = y + 150 + i * 38;
+        float linha = y + 156 + i * linhaDaVolta;
         int ehMelhor = (i == melhorVolta);
-        DrawRectangleRec((Rectangle){ x + 30, linha - 4, largura - 60, 32 }, Fade(COR_GRAFITE, ehMelhor ? 0.95f : 0.6f));
+        DrawRectangleRec((Rectangle){ x + 30, linha - 2, largura - 60, linhaDaVolta - 3 }, Fade(COR_GRAFITE, ehMelhor ? 0.95f : 0.6f));
         escrever(FONTE_FORTE, TextFormat("VOLTA %d", i + 1), x + 42, linha, TAMANHO_TEXTO_FIM, COR_CROMO);
         if (ehMelhor) {
-            desenharParalelogramo(x + 150, linha + 2, 70, 20, 5, COR_AMARELO);
-            escreverCentralizado(FONTE_FORTE, "MELHOR", x + 188, linha + 2, 15.0f, COR_GRAFITE);
+            desenharParalelogramo(x + 150, linha + 1, 70, 20, 5, COR_AMARELO);
+            escreverCentralizado(FONTE_FORTE, "MELHOR", x + 188, linha + 1, 15.0f, COR_GRAFITE);
         }
         formatarTempo(jogador->temposDeVolta[i], tempo, sizeof(tempo));
         escreverADireita(FONTE_FORTE, tempo, x + largura - 42, linha, TAMANHO_TEXTO_FIM,

@@ -237,6 +237,16 @@ Interlagos dar o mesmo tempo, e a velocidade máxima varia só 2%, porque ela de
 uma `habilidade`, de 93% do limite do carro (a pole) a 86% (o último do grid, antes do jogador); para deixar o jogo mais fácil ou difícil, mude
 `HABILIDADE_DA_POLE` e `HABILIDADE_DO_ULTIMO` em `corrida.c`.
 
+## Pitstop
+
+Em Interlagos a corrida tem 8 voltas e a parada nos boxes é obrigatória: quem cruza a última bandeirada sem parar é desclassificado.
+
+- **Entrar:** na Subida dos Boxes, saia pela esquerda para cima do asfalto do pit lane (`querEntrarNoPit`). Ali o piloto automático assume, no limite de 100 km/h perto das garagens.
+- **A troca:** cada carro tem uma vaga. Na do jogador, o Guido passa por todas as rodas em 3,2 s (`faseDaTroca` e `lugarDoGuido` em `pitstop.c`, desenho em `render.c`), e a imagem corta para uma câmera ao lado do carro.
+- **Rivais:** cada um para numa volta (`voltaDoPit`) e leva mais tempo na troca que o Guido. No pit lane, ninguém bate em ninguém.
+
+A Copa Pistão ainda não tem pit lane: lá também são 8 voltas, mas sem parada.
+
 ## Onde a ordenação entra na lógica
 
 ### Insertion Sort: a classificação da corrida
@@ -314,7 +324,7 @@ que fica onde em Interlagos:
   Pit Stop Club depois da linha;
 - os **boxes**: o prédio é feito de módulos de 6 garagens (`boxes.glb`), cada um na altura da reta, com pontas envidraçadas e a torre de controle,
   com um pátio de asfalto e ruas de serviço. Onde o terreno desce, tudo fica sobre uma laje com pilares e vigas (`construirEstruturaDosBoxes`). O **pit lane** sai da pista na Subida dos Boxes, passa por trás do funil,
-  corre atrás do muro e volta à pista antes do S do Senna. **É só cenário:** a entrada fica fechada por uma barreira, e o carro continua na pista;
+  corre atrás do muro e, por dentro do S do Senna e da Curva do Sol, volta à pista na Reta Oposta. É por ele que passa o pitstop (`pitstop.c`);
 - **árvores** só nos bosques da tabela `BOSQUES` (sorteio com semente fixa: ficam sempre no mesmo lugar). Longe deles, o campo é aberto.
 
 Num circuito sinuoso, o lugar de um objeto pode cair em cima de outro trecho da pista. Por isso `lugarLivre` confere

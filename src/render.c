@@ -17,6 +17,7 @@
 #include "raylib.h"
 #include "rlgl.h"
 #include "render.h"
+#include "pitstop.h"
 #include "mundo.h"
 #include "carros3d.h"
 #include "fumaca.h"
@@ -24,6 +25,12 @@
 #include "raymath.h"
 
 /* ---------- Câmera ---------- */
+#define GIRO_DAS_RODAS_DO_GUIDO 18.0f   /* radianos por segundo */
+#define NUMERO_DO_GUIDO        7        /* na tabela FICHAS */
+#define ALTURA_NA_TROCA        0.10f    /* metros: o macaco levanta o carro */
+#define CAMERA_DA_TROCA_LADO   4.6f     /* a câmera da troca: à direita do carro, na frente e no alto */
+#define CAMERA_DA_TROCA_FRENTE 5.2f
+#define CAMERA_DA_TROCA_ALTURA 2.8f
 #define ALTURA_DA_SOMBRA_NO_CHAO 0.04f  /* metros acima do chão */
 #define SOMBRA_PERTO_DA_CAMERA   0.40f  /* metros: quanto ela é puxada na direção da câmera */
 #define GRAUS_DE_VISAO        65.0f    /* na vertical */
@@ -118,7 +125,7 @@ static Camera3D montarCamera(PosicaoNaPista carro, float lateral, Olhar olhar) {
     float aoLado = -comprimento * seno;
     Segmento *aqui = carro.segmento;
     float emMetros = lateral * larguraDoLado(aqui, lateral);
-    if (aqui->temMuro) {
+    if (aqui->temMuro && fabsf(lateral) <= 1.0f) {   /* no pit lane, o muro fica do outro lado */
         float limiteDireita = aqui->larguraDireita - FOLGA_DA_CAMERA_NO_MURO - emMetros;
         float limiteEsquerda = -aqui->larguraEsquerda + FOLGA_DA_CAMERA_NO_MURO - emMetros;
         aoLado = fminf(fmaxf(aoLado, limiteEsquerda), limiteDireita);
@@ -174,6 +181,10 @@ static Matrix matrizDoCarro(Carro *carro) {
     }
     if (estaForaDaPista(carro) && carro->velocidade > 0.0f) {
         y += TREPIDACAO_NA_GRAMA * sinf(carro->distanciaPercorrida * 0.05f);
+    }
+    if (carro->estadoDoPit == PIT_TROCANDO) {
+        float tempo = fminf(carro->tempoDaTroca, carro->duracaoDaTroca - carro->tempoDaTroca);
+        y += ALTURA_NA_TROCA * fminf(tempo / SEGUNDOS_PARA_A_RODA, 1.0f);
     }
 
     float rumo = (aqui.rumo + carro->giro + carro->volante * GRAUS_DO_VOLANTE) * DEG2RAD;
@@ -236,6 +247,14 @@ static void desenharCarroNoMundo(Camera3D camera, Carro *carro) {
         return;
     }
     desenharSombraDoCarro(camera, carro);
+    if (carro->estadoDoPit == PIT_TROCANDO && carro->duracaoDaTroca == DURACAO_DA_TROCA) {
+        int canto;
+        float andamento;
+        if (faseDaTroca(carro, &canto, &andamento)) {
+            Vector3 centro;
+            trocarRodaNoProximoDesenho(rodaDoCanto(carro->numero, canto, &centro), andamento);
+        }
+    }
     desenharCarro3D(carro->numero, matrizDoCarro(carro), carro->anguloDasRodas, carro->volante);
 }
 
@@ -245,6 +264,40 @@ static void desenharCarroNoMundo(Camera3D camera, Carro *carro) {
  * Recebe: a câmera e o carro.
  * Devolve: nada.
  */
+/*
+ * desenharGuido
+ * O Guido fica na vaga do jogador esperando. Na troca ele dispara de roda em roda,
+ * contornando o carro pela traseira e pela frente (o caminho está em pitstop.c).
+ * Recebe: a câmera e o jogador.
+ * Devolve: nada.
+ */
+static void desenharGuido(Camera3D camera, Pista *pista, Carro *jogador) {
+    /* A vaga, como se o carro já estivesse parado nela */
+    Carro naVaga = *jogador;
+    lugarDaVaga(pista, jogador, &naVaga.posicao, &naVaga.deslocamentoLateral);
+    naVaga.volante = 0.0f;
+    naVaga.giro = 0.0f;
+    naVaga.velocidade = 0.0f;
+    naVaga.estadoDoPit = PIT_FORA;
+    naVaga.ultimosComandos.frear = 0;
+    PontoNoMundo ponto = pontoNoMundo(naVaga.posicao, naVaga.deslocamentoLateral);
+    float distancia = aFrenteDaCamera(camera, (Vector3){ ponto.x, ponto.y, ponto.z });
+    if (distancia < -6.0f || distancia > DISTANCIA_DOS_RIVAIS) {
+        return;
+    }
+    Matrix vaga = matrizDoCarro(&naVaga);
+
+    Vector3 frente = { 0 }, tras = { 0 };
+    rodaDoCanto(jogador->numero, 0, &frente);
+    rodaDoCanto(jogador->numero, 1, &tras);
+    LugarDoGuido lugar = lugarDoGuido(jogador, larguraDoCarro3D(jogador->numero) / 2.0f, comprimentoDoCarro3D(jogador->numero) / 2.0f, frente.z, tras.z);
+    float rodas = (jogador->estadoDoPit == PIT_TROCANDO) ? jogador->tempoDaTroca * GIRO_DAS_RODAS_DO_GUIDO : 0.0f;
+    Matrix noCarro = MatrixMultiply(MatrixRotateY(lugar.olha), MatrixTranslate(lugar.x, 0.0f, lugar.z));
+    Matrix noMundo = MatrixMultiply(noCarro, vaga);
+    desenharSombra(NUMERO_DO_GUIDO, noMundo);
+    desenharCarro3D(NUMERO_DO_GUIDO, noMundo, rodas, 0.0f);
+}
+
 static void desenharChamasDoCarro(Camera3D camera, Carro *carro) {
     if (!carro->nitroLigado) {
         return;
@@ -362,6 +415,9 @@ static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
             desenharCarroNoMundo(camera, &corrida->rivais[r]);
         }
         desenharCarroNoMundo(camera, &corrida->jogador);
+        if (pista->temPit) {
+            desenharGuido(camera, pista, &corrida->jogador);
+        }
         desenharFumaca3D(camera);
         for (int r = 0; r < TOTAL_RIVAIS; r++) {
             desenharChamasDoCarro(camera, &corrida->rivais[r]);
@@ -377,6 +433,25 @@ static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
 }
 
 /*
+ * cameraDaTroca
+ * Na troca de pneus, a imagem corta para a frente do carro, do lado da pista, para ver
+ * o Guido passando por todas as rodas. No fim, corta de volta para trás do carro.
+ * Recebe: a câmera normal e o jogador.
+ * Devolve: a câmera.
+ */
+static Camera3D cameraDaTroca(Camera3D normal, Carro *carro) {
+    Matrix m = matrizDoCarro(carro);
+    Vector3 centro = { m.m12, m.m13, m.m14 };
+    Vector3 lado = { m.m0, 0.0f, m.m2 }, frente = { m.m8, 0.0f, m.m10 };
+    Camera3D camera = normal;
+    camera.position = Vector3Add(Vector3Add(centro, Vector3Scale(lado, -CAMERA_DA_TROCA_LADO)), Vector3Scale(frente, CAMERA_DA_TROCA_FRENTE));
+    camera.position.y += CAMERA_DA_TROCA_ALTURA;
+    camera.target = (Vector3){ centro.x, centro.y + 0.4f, centro.z };
+    camera.up = (Vector3){ 0.0f, 1.0f, 0.0f };
+    return camera;
+}
+
+/*
  * desenharVisaoDoJogador
  * Desenha o que o jogador vê: o mundo pela câmera atrás do carro.
  * Recebe: a corrida.
@@ -385,6 +460,9 @@ static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
 void desenharVisaoDoJogador(Corrida *corrida) {
     Carro *jogador = &corrida->jogador;
     Camera3D camera = montarCamera(jogador->posicao, jogador->deslocamentoLateral, olharDoJogador);
+    if (jogador->estadoDoPit == PIT_TROCANDO) {
+        camera = cameraDaTroca(camera, jogador);
+    }
 
     /* A fumaça anda com o relógio da corrida: na pausa e na contagem, ele para.
      * Se ele voltou atrás, é uma corrida nova. */

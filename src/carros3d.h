@@ -25,6 +25,9 @@ float comprimentoDoCarro3D(int numero);
 #define PONTOS_DA_SOMBRA  7   /* a malha da sombra tem tantos pontos em cada lado */
 void desenharSombraNoChao(int numero, const Vector3 *grade);
 float ladoDaSombra(int numero);
+void desenharSombra(int numero, Matrix noMundo);
+int rodaDoCanto(int numero, int canto, Vector3 *centro);
+void trocarRodaNoProximoDesenho(int roda, float andamento);
 void desenharCarro3D(int numero, Matrix noMundo, float anguloDasRodas, float volante);
 void desenharMiniatura(int numero, float centroX, float baseY, float larguraNaTela);
 

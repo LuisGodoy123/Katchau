@@ -8,10 +8,13 @@
 #include <stddef.h>
 #include <math.h>
 #include "corrida.h"
+#include "pitstop.h"
 #include "ia.h"
 #include "ordenacao.h"
 
 /* ---------- Grid de largada (as medidas ficam em pista.h) ---------- */
+#define TROCA_MAIS_RAPIDA_DOS_RIVAIS 4.5f  /* segundos parados na vaga */
+#define PASSO_DA_TROCA_DOS_RIVAIS    0.3f
 #define LUGAR_DO_JOGADOR       (TOTAL_CARROS - 1)   /* o jogador larga em último */
 
 /* ---------- Colisão ---------- */
@@ -139,10 +142,14 @@ void iniciarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador) {
     corrida->tempoDeCorrida = 0.0f;
     corrida->contagemRegressiva = SEGUNDOS_DE_CONTAGEM;
     corrida->terminou = 0;
+    corrida->desclassificado = 0;
     corrida->posicaoFinal = 0;
 
     corrida->jogador = criarCarroDaFicha(FICHAS[carroDoJogador], carroDoJogador, pista);
     colocarNoGrid(&corrida->jogador, LUGAR_DO_JOGADOR);
+    corrida->jogador.duracaoDaTroca = DURACAO_DA_TROCA;
+    corrida->jogador.voltaDoPit = pista->temPit ? (TOTAL_VOLTAS + 1) / 2 : 0;   /* se a IA dirigir */
+    corrida->jogador.pitFeito = !pista->temPit;
     corrida->classificacao[0] = &corrida->jogador;
 
     /* Rivais: todos os carros, menos o que o jogador pegou */
@@ -155,6 +162,10 @@ void iniciarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador) {
         colocarNoGrid(&corrida->rivais[rival], rival);   /* rivais nos lugares 0 a 6 */
         corrida->rivais[rival].habilidade = HABILIDADE_DA_POLE
             - (HABILIDADE_DA_POLE - HABILIDADE_DO_ULTIMO) * rival / (TOTAL_RIVAIS - 1);
+        /* Cada um para numa volta, para os boxes não lotarem; na troca, eles são mais lentos que o Guido */
+        corrida->rivais[rival].voltaDoPit = pista->temPit ? 2 + rival * 5 % (TOTAL_VOLTAS - 2) : 0;
+        corrida->rivais[rival].pitFeito = !pista->temPit;
+        corrida->rivais[rival].duracaoDaTroca = TROCA_MAIS_RAPIDA_DOS_RIVAIS + (rival % 6) * PASSO_DA_TROCA_DOS_RIVAIS;
         corrida->classificacao[rival + 1] = &corrida->rivais[rival];
         rival++;
     }
@@ -303,6 +314,10 @@ int penetracaoEntreCarros(const Corrida *corrida, const Carro *a, const Carro *b
     float meioA, larguraA, meioB, larguraB;
     meiasMedidasDoCarro(a, &meioA, &larguraA);
     meiasMedidasDoCarro(b, &meioB, &larguraB);
+    if (carroNoPit(a) || carroNoPit(b)) {
+        *naFrente = *deLado = 0.0f;   /* o pit lane é separado da pista, e cada um vai para a sua vaga */
+        return 0;
+    }
     *naFrente = meioA + meioB - fabsf(distanciaNaPista(corrida, a, b));
     *deLado = larguraA + larguraB - fabsf(lateralEmMetros((Carro *) a) - lateralEmMetros((Carro *) b));
     return *naFrente > 0.0f && *deLado > 0.0f;
@@ -429,7 +444,7 @@ static void olharEmVolta(Corrida *corrida) {
 
         for (int j = 0; j < TOTAL_CARROS; j++) {
             Carro *outro = corrida->classificacao[j];
-            if (outro == carro) {
+            if (outro == carro || carroNoPit(carro) || carroNoPit(outro)) {
                 continue;
             }
             float meioOutro, larguraOutro;
@@ -469,7 +484,7 @@ static float forcaDoVacuo(Corrida *corrida, Carro *carro) {
         Carro *outro = corrida->classificacao[i];
         float distancia = outro->distanciaPercorrida - carro->distanciaPercorrida;
         float diferencaLateral = fabsf(lateralEmMetros(outro) - lateralEmMetros(carro));
-        if (outro == carro || distancia <= 0.0f || distancia >= DISTANCIA_DO_VACUO
+        if (outro == carro || carroNoPit(outro) || carroNoPit(carro) || distancia <= 0.0f || distancia >= DISTANCIA_DO_VACUO
             || diferencaLateral >= LARGURA_DO_VACUO) {
             continue;
         }
@@ -499,6 +514,26 @@ static void atualizarVacuo(Corrida *corrida, float tempoQuadro) {
             carro->vacuo = fmaxf(carro->vacuo - passo, alvo);
         }
     }
+}
+
+/*
+ * moverCarro
+ * No pit lane, o piloto automático anda com o carro; na pista, o piloto. Depois vê
+ * se ele acabou de entrar no pit lane.
+ * Recebe: a corrida, o carro, os comandos e o tempo do quadro.
+ * Devolve: 1 se cruzou a linha de chegada.
+ */
+static int moverCarro(Corrida *corrida, Carro *carro, Comandos comandos, float tempoQuadro) {
+    int cruzou;
+    if (carroNoPit(carro)) {
+        cruzou = atualizarCarroNoPit(carro, corrida->pista, tempoQuadro) > 0;
+    } else {
+        cruzou = atualizarCarro(carro, comandos, tempoQuadro) > 0;
+        if (querEntrarNoPit(corrida->pista, carro)) {
+            entrarNoPit(carro);
+        }
+    }
+    return cruzou;
 }
 
 /*
@@ -538,7 +573,7 @@ void atualizarCorrida(Corrida *corrida, Comandos comandosJogador, float tempoQua
     atualizarVacuo(corrida, tempoQuadro);
 
     /* 1) Jogador */
-    int cruzou = atualizarCarro(&corrida->jogador, comandosJogador, tempoQuadro) > 0;
+    int cruzou = moverCarro(corrida, &corrida->jogador, comandosJogador, tempoQuadro);
     atualizarSetores(corrida, &corrida->jogador, cruzou);
     if (cruzou) {
         registrarVolta(corrida, &corrida->jogador);
@@ -548,7 +583,7 @@ void atualizarCorrida(Corrida *corrida, Comandos comandosJogador, float tempoQua
     for (int i = 0; i < TOTAL_RIVAIS; i++) {
         Carro *rival = &corrida->rivais[i];
         Comandos comandosIA = atualizarIA(rival);
-        cruzou = atualizarCarro(rival, comandosIA, tempoQuadro) > 0;
+        cruzou = moverCarro(corrida, rival, comandosIA, tempoQuadro);
         atualizarSetores(corrida, rival, cruzou);
         if (cruzou) {
             registrarVolta(corrida, rival);
@@ -565,6 +600,10 @@ void atualizarCorrida(Corrida *corrida, Comandos comandosJogador, float tempoQua
     if (!corrida->terminou && corrida->jogador.voltas >= TOTAL_VOLTAS) {
         corrida->terminou = 1;
         corrida->posicaoFinal = posicaoDoCarro(corrida, &corrida->jogador);
+        if (!corrida->jogador.pitFeito) {
+            corrida->desclassificado = 1;   /* não fez a parada obrigatória */
+            corrida->posicaoFinal = TOTAL_CARROS;
+        }
     }
 }
 

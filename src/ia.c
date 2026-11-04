@@ -17,6 +17,8 @@
 #include <stddef.h>
 #include "ia.h"
 
+#define METROS_PARA_IR_AO_PIT 300.0f  /* quanto antes do pit lane ela já vai para o lado */
+#define LADO_PARA_IR_AO_PIT   0.75f   /* em larguras da pista */
 #define SEGMENTOS_OLHADOS         80       /* quantos segmentos à frente a IA enxerga (16000 unidades: */
                                            /* mais que a frenagem de 313 km/h até parar) */
 #define FOLGA_NA_FRENAGEM         0.8f     /* a IA conta só 80% da distância: começa a frear um pouco antes */
@@ -141,8 +143,14 @@ Comandos atualizarIA(Carro *carro) {
         comandos.nitro = 1;
     }
 
-    /* 2) Linha: tenta ultrapassar quem está na frente */
+    /* 2) Linha: tenta ultrapassar quem está na frente; chegando na volta de
+     *    parar, vai para a esquerda, para entrar no pit lane */
     escolherLinha(carro, desejada);
+    carro->querParar = (carro->voltaDoPit > 0 && carro->voltas + 1 == carro->voltaDoPit && !carro->pitFeito);
+    float metros = (carro->posicao.segmento->indice * COMPRIMENTO_SEGMENTO + carro->posicao.distanciaNoSegmento) / UNIDADES_POR_METRO;
+    if (carro->querParar && metros > ENTRADA_DO_PIT - METROS_PARA_IR_AO_PIT) {
+        carro->linhaAlvo = -carro->posicao.segmento->larguraEsquerda * LADO_PARA_IR_AO_PIT;
+    }
 
     /* Sem espaço para desviar e chegando rápido: freia atrás dele */
     if (vaiBater(carro)) {

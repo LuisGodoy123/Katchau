@@ -102,6 +102,13 @@ Carro criarCarro(const char *nome, int numero, Segmento *largada, float deslocam
     carro.vacuo = 0.0f;
     iniciarMotor(&carro.motor);
     carro.anguloDasRodas = 0.0f;
+    carro.estadoDoPit = PIT_FORA;
+    carro.voltaDoPit = 0;
+    carro.querParar = 0;
+    carro.pitFeito = 0;
+    carro.tempoDaTroca = 0.0f;
+    carro.duracaoDaTroca = 0.0f;
+    carro.ultimaTroca = 0.0f;
     carro.nitro = NITRO_INICIAL;
     carro.nitroLigado = 0;
     carro.comprimento = COMPRIMENTO_PADRAO;
@@ -168,6 +175,9 @@ static float limitar(float valor, float minimo, float maximo) {
  * Devolve: 1 se o carro está na grama, 0 se está no asfalto.
  */
 int estaForaDaPista(Carro *carro) {
+    if (carro->estadoDoPit != PIT_FORA) {
+        return 0;   /* o pit lane é asfalto, mesmo longe da pista */
+    }
     return carro->deslocamentoLateral < -LIMITE_PISTA ||
            carro->deslocamentoLateral > LIMITE_PISTA;
 }

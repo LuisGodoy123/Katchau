@@ -31,6 +31,7 @@ typedef struct {
     float contagemRegressiva;   /* segundos até a largada; a corrida só anda quando chega a 0 */
     float tempoDeCorrida;       /* segundos desde a largada (não para no fim) */
     int terminou;               /* 1 depois que o jogador completa TOTAL_VOLTAS */
+    int desclassificado;        /* 1 se o jogador terminou sem fazer a parada obrigatória */
     int posicaoFinal;           /* posição do jogador na chegada (1 a 8) */
 
     int totalSegmentos;                          /* tamanho da volta, para saber o setor de cada carro */

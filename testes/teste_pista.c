@@ -24,8 +24,9 @@
 #include "obstaculos.h"
 #include "motor.h"
 #include "olhar.h"
+#include "pitstop.h"
+#include "config.h"
 
-#define TOTAL_VOLTAS          3
 #define GRAUS_VOLTA_COMPLETA  -360.0f  /* Interlagos é anti-horário: vira 360 graus para a esquerda */
 #define TOLERANCIA            0.01f
 #define TOLERANCIA_GRAUS      0.05f    /* erro de arredondamento ao somar ~2600 floats */
@@ -1902,6 +1903,235 @@ static void testarGiroDasRodas(void) {
     liberarPista(pista);
 }
 
+/*
+ * testarPitstop
+ * A parada obrigatória: entrar, parar na vaga, trocar, voltar e a punição de quem não para.
+ */
+static void testarPitstop(void) {
+    printf("\n26) Pitstop\n");
+    float quadro = 1.0f / 60.0f;
+    Pista *pista = criarPista();
+    static Corrida corrida;
+    Comandos acelerar = { 1, 0, 0, 0, 0.0f, 0 };
+
+    /* O jogador entra de propósito, e o carro segue sozinho */
+    iniciarCorrida(&corrida, pista, 0);
+    corrida.contagemRegressiva = 0.0f;
+    Carro *jogador = &corrida.jogador;
+    verificar(!jogador->pitFeito && pista->temPit, "a corrida comeca com a parada pendente");
+    jogador->voltas = 2;
+    jogador->posicao.segmento = buscarSegmento(pista, (int) ((ENTRADA_DO_PIT - 100.0f) * SEGMENTOS_POR_METRO));
+    jogador->posicao.distanciaNoSegmento = 0.0f;
+    jogador->deslocamentoLateral = -0.5f;
+    jogador->velocidade = 7000.0f;
+    int quadros = 0;
+    while (!carroNoPit(jogador) && quadros < 60 * 5) {
+        Comandos paraEsquerda = { 1, 0, 1, 0, 0.0f, 0 };
+        atualizarCorrida(&corrida, paraEsquerda, quadro);
+        quadros++;
+    }
+    verificar(carroNoPit(jogador), "virando para o pit lane, ele entra");
+
+    float ondeFoiOSalto = 0.0f;
+    float maiorVelocidadeNoLimite = 0.0f, maiorSalto = 0.0f, antes = jogador->deslocamentoLateral * jogador->posicao.segmento->larguraEsquerda;
+    float metrosAntes = metrosNaVolta(jogador), maiorDistanciaAoChao = 0.0f;
+    int chegouNaVaga = 0, voltasAntes = jogador->voltas, trocou = 0;
+    float tempoEntrada = corrida.tempoDeCorrida;
+    quadros = 0;
+    while (carroNoPit(jogador) && quadros < 60 * 90) {
+        atualizarCorrida(&corrida, acelerar, quadro);
+        quadros++;
+        float agora = jogador->deslocamentoLateral * jogador->posicao.segmento->larguraEsquerda;
+        if (fabsf(agora - antes) > maiorSalto) {
+            maiorSalto = fabsf(agora - antes);
+            ondeFoiOSalto = metrosNaVolta(jogador);
+        }
+        antes = agora;
+        float metros = metrosNaVolta(jogador);
+        if (metros > INICIO_DO_LIMITE_DO_PIT + 1.0f || metros < FIM_DO_LIMITE_DO_PIT - 1.0f) {
+            maiorVelocidadeNoLimite = fmaxf(maiorVelocidadeNoLimite, jogador->velocidade);
+        }
+        if (jogador->estadoDoPit == PIT_TROCANDO) {
+            chegouNaVaga = 1;
+            maiorDistanciaAoChao = fmaxf(maiorDistanciaAoChao, jogador->velocidade);
+            int canto;
+            float andamento;
+            trocou |= faseDaTroca(jogador, &canto, &andamento);
+        }
+        (void) metrosAntes;
+    }
+    printf("     no pit lane: %.1f s (parado %.2f s); maior salto de lado %.2f m, aos %.0f m\n", corrida.tempoDeCorrida - tempoEntrada, jogador->ultimaTroca, maiorSalto, ondeFoiOSalto);
+    verificar(chegouNaVaga && trocou, "ele para na vaga e o Guido troca as rodas");
+    verificar(maiorDistanciaAoChao == 0.0f, "parado na vaga, a velocidade e zero");
+    verificar(fabsf(jogador->ultimaTroca - DURACAO_DA_TROCA) < 0.05f, "a troca leva o tempo do Guido");
+    verificar(DURACAO_DA_TROCA < 4.0f, "a troca e rapida, como no filme");
+    verificar(maiorVelocidadeNoLimite <= LIMITE_DO_PIT + 1.0f, "no pit lane ele respeita o limite");
+    verificar(maiorSalto < 0.3f, "ele anda de lado sem saltos");
+    verificar(jogador->pitFeito && !carroNoPit(jogador), "ele volta para a pista com a parada feita");
+    verificar(jogador->deslocamentoLateral >= -1.0f, "e volta na borda do asfalto");
+    verificar(jogador->voltas == voltasAntes + 1, "passar pelo pit lane conta a volta na linha de chegada");
+
+    /* De qualquer ponto da entrada, o carro nunca atravessa o muro, e sai na Reta Oposta */
+    float metrosDaVolta = pista->metrosDaVolta;
+    int atravessou = 0, entradas = 0, saiuNaReta = 1, longeDoMuro = 1;
+    for (float inicio = INICIO_DA_ENTRADA_LIVRE; inicio <= FIM_DA_ZONA_DE_ENTRADA - 40.0f; inicio += 20.0f) {
+        float larguraAqui = 0.0f;
+        iniciarCorrida(&corrida, pista, 0);
+        corrida.contagemRegressiva = 0.0f;
+        jogador->voltas = 2;
+        jogador->posicao.segmento = buscarSegmento(pista, (int) (inicio * SEGMENTOS_POR_METRO));
+        jogador->posicao.distanciaNoSegmento = 0.0f;
+        jogador->deslocamentoLateral = -(ladoDentroDoPit(inicio, metrosDaVolta, &larguraAqui) + 0.25f);
+        jogador->velocidade = 8000.0f;
+        atualizarCorrida(&corrida, acelerar, quadro);
+        if (!carroNoPit(jogador)) {
+            continue;
+        }
+        entradas++;
+        for (int i = 0; i < 60 * 90 && carroNoPit(jogador); i++) {
+            atualizarCorrida(&corrida, acelerar, quadro);
+            float metros = metrosNaVolta(jogador);
+            float muro = jogador->posicao.segmento->lugarDoMuro * jogador->posicao.segmento->larguraEsquerda;
+            float lado = -jogador->deslocamentoLateral * jogador->posicao.segmento->larguraEsquerda;
+            if (jogador->posicao.segmento->temMuro && metros >= INICIO_DO_FUNIL && lado < muro + 1.0f) {
+                atravessou++;
+            }
+            if (metros > FIM_DO_DESVIO_DA_SAIDA && metros < FIM_DO_PIT_LANE - METROS_VOLTANDO_A_PISTA
+                && lado < LADO_DA_SAIDA * jogador->posicao.segmento->larguraEsquerda - 2.0f) {
+                longeDoMuro = 0;
+            }
+        }
+        float ondeSaiu = metrosNaVolta(jogador);
+        saiuNaReta &= (ondeSaiu >= FIM_DO_PIT_LANE - 5.0f && ondeSaiu < FIM_DO_PIT_LANE + 20.0f
+                       && strcmp(jogador->posicao.segmento->nomeTrecho, "Reta Oposta") == 0);
+    }
+    printf("     %d entradas diferentes, %d quadros encostando no muro\n", entradas, atravessou);
+    verificar(entradas >= 4, "da para entrar de varios pontos da entrada");
+    verificar(atravessou == 0, "em nenhuma entrada o carro atravessa o muro");
+    verificar(longeDoMuro, "depois da reta ele fica no pit lane, longe da ponta do muro");
+    verificar(saiuNaReta, "ele volta a pista na Reta Oposta");
+
+    /* O pit lane e bem largo logo depois de abrir, e nao tem nada no caminho */
+    float larguraNaEntrada = 0.0f;
+    ladoDentroDoPit(ENTRADA_DO_PIT + 50.0f, metrosDaVolta, &larguraNaEntrada);
+    verificar(larguraNaEntrada >= LARGURA_DO_PIT_LANE - 0.01f, "a 50 m da entrada, o pit lane ja tem a largura toda");
+    int objetosNoCaminho = 0, sobreAsfalto = 0;
+    float larguraDaPista = pista->largada->larguraEsquerda;
+    for (float m = ENTRADA_DO_PIT; m < metrosDaVolta + FIM_DO_PIT_LANE; m += 4.0f) {
+        float metros = fmodf(m, metrosDaVolta), larguraDoPit = 0.0f;
+        float borda = ladoDentroDoPit(metros, metrosDaVolta, &larguraDoPit);
+        PosicaoNaPista lugar = { buscarSegmento(pista, (int) (metros * SEGMENTOS_POR_METRO)), 0.0f };
+        for (int parte = 0; parte <= 4; parte++) {
+            PontoNoMundo ponto = pontoNoMundo(lugar, -(borda + larguraDoPit / larguraDaPista * parte / 4.0f));
+            Segmento *outro = pista->largada;
+            do {
+                float deste = hypotf(outro->xMundo - ponto.x, outro->zMundo - ponto.z);
+                sobreAsfalto += (parte > 0 && metros > 330.0f && metros < 700.0f && deste < larguraDaPista - 0.5f);
+                for (Obstaculo *o = outro->obstaculos; o != NULL; o = o->proximo) {
+                    if (o->tipo == OBJETO_ARVORE || o->tipo == OBJETO_PNEUS || o->tipo == OBJETO_PLACA_50
+                        || o->tipo == OBJETO_PLACA_100 || o->tipo == OBJETO_PLACA_150) {
+                        PosicaoNaPista ali = { outro, 0.0f };
+                        PontoNoMundo noObjeto = pontoNoMundo(ali, o->deslocamentoLateral);
+                        objetosNoCaminho += hypotf(noObjeto.x - ponto.x, noObjeto.z - ponto.z) < 2.0f;
+                    }
+                }
+                outro = proximoSegmento(outro);
+            } while (outro != pista->largada);
+        }
+    }
+    printf("     no caminho do pit lane: %d objetos, %d pontos sobre o asfalto da pista\n", objetosNoCaminho, sobreAsfalto);
+    verificar(objetosNoCaminho == 0, "nenhum objeto no caminho do pit lane");
+    verificar(sobreAsfalto == 0, "a saida nao passa por cima da pista");
+
+    /* O Guido nunca entra no carro, em nenhum momento da troca, em nenhum carro */
+    int dentroDoCarro = 0, deixouDeSair = 0;
+    for (int n = 0; n < TOTAL_CARROS; n++) {
+        const FichaTecnica *ficha = fichaDoCarro(n);
+        float meiaLargura = ficha->largura / 2.0f, meioComprimento = ficha->comprimento / 2.0f;
+        Carro parado = *jogador;
+        parado.estadoDoPit = PIT_TROCANDO;
+        float maiorX = 0.0f;
+        for (float t = 0.0f; t < DURACAO_DA_TROCA; t += 0.005f) {
+            parado.tempoDaTroca = t;
+            LugarDoGuido g = lugarDoGuido(&parado, meiaLargura, meioComprimento, meioComprimento * 0.62f, -meioComprimento * 0.62f);
+            maiorX = fmaxf(maiorX, fabsf(g.x));
+            /* Os cantos e o meio do Guido, olhando para onde ele aponta */
+            for (int fr = -2; fr <= 2; fr++) {
+                for (int la = -1; la <= 1; la++) {
+                    float noComprimento = fr / 2.0f * MEIO_COMPRIMENTO_DO_GUIDO, naLargura = la * MEIA_LARGURA_DO_GUIDO;
+                    float x = g.x + sinf(g.olha) * noComprimento + cosf(g.olha) * naLargura;
+                    float z = g.z + cosf(g.olha) * noComprimento - sinf(g.olha) * naLargura;
+                    dentroDoCarro += (fabsf(x) < meiaLargura && fabsf(z) < meioComprimento);
+                }
+            }
+        }
+        deixouDeSair += (maiorX < meiaLargura);
+    }
+    printf("     pontos do Guido dentro do carro: %d\n", dentroDoCarro);
+    verificar(dentroDoCarro == 0, "o Guido nunca entra dentro do carro");
+    verificar(deixouDeSair == 0, "ele trabalha ao lado do carro");
+
+    /* Cada carro tem a sua vaga, todas antes da linha */
+    int vagasBoas = 1;
+    for (int n = 0; n < TOTAL_CARROS; n++) {
+        vagasBoas &= metroDaVagaDoCarro(n) < -5.0f + 0.01f && metroDaVagaDoCarro(n) >= PRIMEIRO_METRO_DOS_BOXES;
+    }
+    verificar(vagasBoas, "as vagas ficam nos boxes, antes da linha de chegada");
+
+    /* Quem anda encostado na borda, sem querer entrar, continua na pista */
+    iniciarCorrida(&corrida, pista, 0);
+    corrida.contagemRegressiva = 0.0f;
+    jogador->posicao.segmento = buscarSegmento(pista, (int) ((ENTRADA_DO_PIT - 20.0f) * SEGMENTOS_POR_METRO));
+    jogador->deslocamentoLateral = -0.95f;
+    jogador->velocidade = 7000.0f;
+    int entrou = 0;
+    for (int i = 0; i < 60 * 3; i++) {
+        atualizarCorrida(&corrida, acelerar, quadro);
+        entrou |= carroNoPit(jogador);
+    }
+    verificar(!entrou, "pela borda da pista ninguem entra sem querer");
+
+    /* Quem nao para e desclassificado; e os rivais param todos */
+    iniciarCorrida(&corrida, pista, 0);
+    corrida.contagemRegressiva = 0.0f;
+    quadros = 0;
+    while (!corrida.terminou && quadros < 60 * 60 * 20) {
+        Comandos semPit = atualizarIA(jogador);
+        jogador->querParar = 0;
+        atualizarCorrida(&corrida, semPit, quadro);
+        quadros++;
+    }
+    verificar(corrida.terminou && corrida.desclassificado, "sem parar nos boxes, ele e desclassificado");
+    verificar(corrida.posicaoFinal == TOTAL_CARROS && !jogadorVenceu(&corrida), "e nao ganha a corrida");
+    for (int i = 0; i < 60 * 60 * 10 && !todosChegaram(&corrida); i++) {
+        atualizarCorrida(&corrida, acelerar, quadro);
+    }
+    int pararam = 0;
+    for (int i = 0; i < TOTAL_RIVAIS; i++) {
+        pararam += corrida.rivais[i].pitFeito;
+    }
+    printf("     %d de %d rivais pararam\n", pararam, TOTAL_RIVAIS);
+    verificar(pararam == TOTAL_RIVAIS, "todos os rivais fazem a parada");
+
+    /* Parando, ele nao fica desclassificado */
+    iniciarCorrida(&corrida, pista, 0);
+    corrida.contagemRegressiva = 0.0f;
+    quadros = 0;
+    while (!corrida.terminou && quadros < 60 * 60 * 20) {
+        atualizarCorrida(&corrida, atualizarIA(jogador), quadro);
+        quadros++;
+    }
+    printf("     corrida de %d voltas com parada: %.0f s, chegou em %d\n", TOTAL_VOLTAS, corrida.tempoDeCorrida, corrida.posicaoFinal);
+    verificar(corrida.terminou && !corrida.desclassificado && jogador->pitFeito, "parando, ele termina a corrida valendo");
+    liberarPista(pista);
+
+    /* Na Copa Pistao ainda nao ha pit lane */
+    Pista *copa = criarPistaPorId(PISTA_COPA_PISTAO);
+    iniciarCorrida(&corrida, copa, 0);
+    verificar(!copa->temPit && corrida.jogador.pitFeito, "na Copa Pistao nao ha parada obrigatoria");
+    liberarPista(copa);
+}
+
 int main(int argc, char *argv[]) {
     int modoDetalhado = (argc > 1 && strcmp(argv[1], "-v") == 0);
 
@@ -1928,6 +2158,7 @@ int main(int argc, char *argv[]) {
     testarPistasNoMundo();
     testarDepoisDaChegada();
     testarRetaDosBoxes();
+    testarPitstop();
     testarGiroDasRodas();
     testarColisaoEEquilibrio();
     testarCameraLivre();

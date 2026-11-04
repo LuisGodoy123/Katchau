@@ -26,6 +26,12 @@
 #define RAIO_DO_DESFOQUE      4
 
 /* ---------- Rodas ---------- */
+#define FIM_DA_RODA_VELHA     0.60f     /* na troca: a velha some aqui, a nova aparece ali */
+#define INICIO_DA_RODA_NOVA   0.40f
+#define VOO_DA_RODA_VELHA     2.6f      /* metros para o lado */
+#define ALTURA_DA_RODA_VELHA  0.9f
+#define ENTRADA_DA_RODA_NOVA  1.1f
+#define GIRO_NA_TROCA         26.0f     /* radianos a mais durante a troca */
 #define MAXIMO_DE_RODAS       12
 #define MENOR_QUE_A_MAIOR     0.45f     /* peça redonda menor que isso, em relação à maior roda, não é roda */
 #define MAXIMO_DE_PECAS_RODA  16        /* uma por material, somando todas as rodas */
@@ -127,6 +133,8 @@ static RodaDoCarro rodas[TOTAL_CARROS][MAXIMO_DE_RODAS];
 static int totalDeRodas[TOTAL_CARROS];
 static PecaDeRoda pecas[TOTAL_CARROS][MAXIMO_DE_PECAS_RODA * MAXIMO_DE_RODAS];
 static int totalDePecas[TOTAL_CARROS];
+static int rodaEmTroca = -1;          /* a roda que está sendo trocada no próximo carro desenhado (-1 = nenhuma) */
+static float andamentoDaTroca = 0.0f;
 static float ladosDaSombra[TOTAL_CARROS];
 
 /*
@@ -142,6 +150,31 @@ static void desenharComShader(Model modelo, Shader shader) {
 }
 
 /*
+ * desenharPecaTrocando
+ * A roda que o Guido está trocando: a velha sai voando para o lado, quicando, e a
+ * nova entra, girando rápido.
+ * Recebe: a peça, a roda, o modelo, a matriz do carro no mundo e o ângulo das rodas.
+ * Devolve: nada.
+ */
+static void desenharPecaTrocando(PecaDeRoda *peca, RodaDoCarro *roda, Model modelo, Matrix noMundo, float anguloDasRodas) {
+    float lado = (roda->centro.x > 0.0f) ? 1.0f : -1.0f;
+    float giro = anguloDasRodas + andamentoDaTroca * GIRO_NA_TROCA;
+    if (andamentoDaTroca < FIM_DA_RODA_VELHA) {
+        float t = andamentoDaTroca / FIM_DA_RODA_VELHA;
+        float ponta = (roda->centro.z > 0.0f) ? 1.0f : -1.0f;   /* para longe do Guido, que está de frente para a roda */
+        Vector3 lugar = { roda->centro.x + lado * t * VOO_DA_RODA_VELHA, roda->centro.y + sinf(t * PI) * ALTURA_DA_RODA_VELHA, roda->centro.z + ponta * t * VOO_DA_RODA_VELHA };
+        Matrix ali = MatrixMultiply(MatrixRotateX(giro), MatrixTranslate(lugar.x, lugar.y, lugar.z));
+        DrawMesh(peca->malha, modelo.materials[peca->material], MatrixMultiply(ali, noMundo));
+    }
+    if (andamentoDaTroca > INICIO_DA_RODA_NOVA) {
+        float t = (andamentoDaTroca - INICIO_DA_RODA_NOVA) / (1.0f - INICIO_DA_RODA_NOVA);
+        Vector3 lugar = { roda->centro.x + lado * (1.0f - t) * ENTRADA_DA_RODA_NOVA, roda->centro.y, roda->centro.z };
+        Matrix ali = MatrixMultiply(MatrixRotateX(giro), MatrixTranslate(lugar.x, lugar.y, lugar.z));
+        DrawMesh(peca->malha, modelo.materials[peca->material], MatrixMultiply(ali, noMundo));
+    }
+}
+
+/*
  * desenharRodas
  * Cada peça de roda gira em volta do eixo (x) e, nas rodas da frente, vira com
  * o volante (em volta de y), a partir do centro da roda.
@@ -153,6 +186,10 @@ static void desenharRodas(int numero, Model modelo, Matrix noMundo, float angulo
     for (int i = 0; i < totalDePecas[numero]; i++) {
         PecaDeRoda *peca = &pecas[numero][i];
         RodaDoCarro *roda = &rodas[numero][peca->roda];
+        if (peca->roda == rodaEmTroca) {
+            desenharPecaTrocando(peca, roda, modelo, noMundo, anguloDasRodas);
+            continue;
+        }
         Matrix giro = MatrixRotateX(anguloDasRodas);
         if (roda->centro.z > 0.0f) {
             giro = MatrixMultiply(giro, MatrixRotateY(-volante * GRAUS_DAS_RODAS_DA_FRENTE * DEG2RAD));
@@ -169,7 +206,7 @@ static void desenharRodas(int numero, Model modelo, Matrix noMundo, float angulo
  * Recebe: o número do carro e a matriz dele no mundo.
  * Devolve: nada.
  */
-static void desenharSombra(int numero, Matrix noMundo) {
+void desenharSombra(int numero, Matrix noMundo) {
     Vector3 grade[PONTOS_DA_SOMBRA * PONTOS_DA_SOMBRA];
     float meio = ladosDaSombra[numero] / 2.0f;
     for (int i = 0; i < PONTOS_DA_SOMBRA; i++) {
@@ -213,6 +250,44 @@ void desenharSombraNoChao(int numero, const Vector3 *grade) {
     rlDrawRenderBatchActive();
     rlEnableDepthMask();
     EndBlendMode();
+}
+
+/*
+ * rodaDoCanto
+ * Recebe: o carro e um canto (0 frente esquerda, 1 trás esquerda, 2 trás direita,
+ *         3 frente direita) e onde guardar o centro da roda, no carro normalizado.
+ * Devolve: o índice da roda mais perto desse canto (o Guido tem só 3 rodas: a da frente
+ *          vale pelos dois cantos), ou -1 se o carro não tem rodas.
+ */
+int rodaDoCanto(int numero, int canto, Vector3 *centro) {
+    float esquerda = (canto == 0 || canto == 1) ? 1.0f : -1.0f;
+    float frente = (canto == 0 || canto == 3) ? 1.0f : -1.0f;
+    float meioLado = larguraDoCarro3D(numero) / 2.0f, meioFrente = comprimentoDoCarro3D(numero) / 2.0f;
+    float menor = 1e9f;
+    int achou = -1;
+    for (int r = 0; r < totalDeRodas[numero]; r++) {
+        Vector3 c = rodas[numero][r].centro;
+        float d = hypotf(c.x - esquerda * meioLado, c.z - frente * meioFrente);
+        if (d < menor) {
+            menor = d;
+            achou = r;
+        }
+    }
+    if (achou >= 0) {
+        *centro = rodas[numero][achou].centro;
+    }
+    return achou;
+}
+
+/*
+ * trocarRodaNoProximoDesenho
+ * O próximo carro desenhado mostra esta roda sendo trocada.
+ * Recebe: o índice da roda e o andamento da troca (0 a 1).
+ * Devolve: nada.
+ */
+void trocarRodaNoProximoDesenho(int roda, float andamento) {
+    rodaEmTroca = roda;
+    andamentoDaTroca = andamento;
 }
 
 /*
@@ -286,6 +361,7 @@ void desenharCarro3D(int numero, Matrix noMundo, float anguloDasRodas, float vol
     rlDrawRenderBatchActive();
     rlEnableDepthMask();
     EndBlendMode();
+    rodaEmTroca = -1;
 }
 
 /*

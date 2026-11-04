@@ -1168,11 +1168,11 @@ void desenharComoJogar(void) {
 
     const char *dicas[] = {
         TextFormat("%d voltas contra %d rivais. Você larga em último.", TOTAL_VOLTAS, TOTAL_RIVAIS),
+        "Em Interlagos a parada nos boxes é obrigatória: saia pela esquerda na Subida dos Boxes. Quem não para é desclassificado.",
         "O carro acelera como um F1: forte na saída e cada vez menos perto dos 300 km/h.",
         "Freie antes das curvas e alivie no meio: acelerando, o carro sai de frente. Fumaça = pneu no limite; passar dele custa velocidade.",
         "Na grama (sai poeira) o carro não passa de 75 km/h.",
         "Colado atrás de alguém você pega vácuo. Os carros são sólidos: batendo na quina ou de lado, quem toma a batida roda.",
-        "Na garagem, compare velocidade, aceleração e aderência antes de escolher.",
     };
     float y = topo + 72;
     for (int i = 0; i < 6; i++) {
@@ -1384,7 +1384,9 @@ static void desenharLinhaDoResultado(Corrida *corrida, int posicao, float y) {
 void desenharResultado(Corrida *corrida) {
     escurecerTela(0.75f, 0.6f, 0.8f);
 
-    if (corrida->posicaoFinal == 1) {
+    if (corrida->desclassificado) {
+        desenharCabecalho("DESCLASSIFICADO: SEM PARADA");
+    } else if (corrida->posicaoFinal == 1) {
         desenharCabecalho("VOCÊ VENCEU!");
     } else {
         desenharCabecalho(TextFormat("VOCÊ CHEGOU EM %dº", corrida->posicaoFinal));

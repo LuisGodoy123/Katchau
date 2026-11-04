@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include "mundo.h"
+#include "pitstop.h"
 #include "raymath.h"
 #include "rlgl.h"
 #include "obstaculos.h"
@@ -62,22 +63,12 @@
 #define MATERIAL_DO_ALAMBRADO 25        /* ...e o mesmo alambrado (Material.110) */
 
 /* ---------- Reta dos boxes de Interlagos (metros) ---------- */
+#define TAMANHO_DO_PORTICO    0.85f     /* os pés ficam em cima dos muros, sem invadir a pista nem o pit lane */
 #define ALTURA_DO_MURO        1.5f
 #define ALTURA_DO_ALAMBRADO   4.5f
 #define METROS_POR_TEXTURA    20.0f     /* ao longo do muro, a imagem se repete a cada tanto */
-#define LARGURA_DO_PIT_LANE   14.0f
-#define ENTRADA_DO_PIT        3470.0f   /* metros: o pit lane sai da pista aqui, na Subida dos Boxes */
-#define FIM_DA_SAIDA_DA_PISTA 3590.0f   /* e já se afastou dela aqui */
-#define PIT_ATRAS_DO_FUNIL    2.62f     /* larguras da pista: passa por trás do muro do funil */
-#define INICIO_DA_BARREIRA    3575.0f   /* onde a entrada está fechada: o pit lane não funciona */
-#define ALTURA_DA_BARREIRA    1.3f
-#define BLOCO_DA_BARREIRA     3.0f
-#define FIM_DO_PIT_LANE       320.0f    /* volta à pista onde o muro acaba */
-#define RAMPA_DO_PIT_LANE     90.0f     /* o pit lane fecha aos poucos na saída */
-#define METROS_DO_RETAO_DO_PIT 40.0f    /* depois do funil, ele encosta no muro */
 #define MODULOS_DOS_BOXES     7
 #define METROS_DO_MODULO      60.0f
-#define PRIMEIRO_METRO_DOS_BOXES (-270.0f)  /* a partir da linha de chegada */
 #define GARAGENS_POR_MODULO   6
 #define MODULO_DA_TORRE       3         /* o do meio */
 #define METROS_DA_PONTA       6.0f
@@ -99,6 +90,7 @@
 #define FUNDO_DA_VAGA         8.0f      /* a marca no chão na frente de cada garagem */
 #define LARGURA_DA_VAGA       8.0f
 #define LINHA_DO_PIT          0.25f
+#define LINHA_DO_LIMITE       0.8f
 #define TRACO_DO_PIT          6.0f      /* traço e vão da linha que separa a pista de trabalho */
 #define COR_DA_VAGA           (Color){ 232, 196,  40, 255 }
 #define COR_DA_ZONA_DE_TRABALHO (Color){ 92, 92, 96, 255 }
@@ -903,40 +895,6 @@ static void construirArquibancadas(Pista *pista) {
 }
 
 /*
- * ladoDentroDoPit
- * O traçado do pit lane: sai da pista, se afasta, passa por trás do funil e encosta
- * no muro da reta até voltar à pista. Só desenho: o carro não consegue entrar.
- * Recebe: os metros desde a linha de chegada, o comprimento da volta e onde guardar a
- *         largura do pit lane ali (em metros).
- * Devolve: onde fica a borda dele perto da pista, em larguras (ou 0 se ali não há pit lane).
- */
-static float ladoDentroDoPit(float metros, float metrosDaVolta, float *largura) {
-    int depoisDaLinha = (metros <= FIM_DO_PIT_LANE);
-    float noPit = depoisDaLinha ? metros + metrosDaVolta : metros;
-    if (!depoisDaLinha && metros < ENTRADA_DO_PIT) {
-        return 0.0f;
-    }
-    float saindo = fminf((noPit - ENTRADA_DO_PIT) / (FIM_DA_SAIDA_DA_PISTA - ENTRADA_DO_PIT), 1.0f);
-    float voltando = fminf((metrosDaVolta + FIM_DO_PIT_LANE - noPit) / RAMPA_DO_PIT_LANE, 1.0f);
-    *largura = LARGURA_DO_PIT_LANE * fminf(saindo, voltando);
-
-    float inicioDoFunil = INICIO_DO_FUNIL, fimDoFunil = INICIO_DO_FUNIL + COMPRIMENTO_DO_FUNIL;
-    if (noPit < FIM_DA_SAIDA_DA_PISTA) {
-        float suave = saindo * saindo * (3.0f - 2.0f * saindo);
-        return 1.0f + (PIT_ATRAS_DO_FUNIL - 1.0f) * suave;
-    }
-    if (noPit < inicioDoFunil) {
-        return PIT_ATRAS_DO_FUNIL;
-    }
-    if (noPit < fimDoFunil) {
-        float noFunil = 1.0f - (noPit - inicioDoFunil) / COMPRIMENTO_DO_FUNIL;
-        return 1.0f + (PIT_ATRAS_DO_FUNIL - 1.0f) * noFunil + (PIT_ATRAS_DO_FUNIL - ABERTURA_DO_FUNIL) * (1.0f - noFunil);
-    }
-    float encostando = fminf((noPit - fimDoFunil) / METROS_DO_RETAO_DO_PIT, 1.0f);
-    return 1.0f + (PIT_ATRAS_DO_FUNIL - ABERTURA_DO_FUNIL) * (1.0f - encostando);
-}
-
-/*
  * noChaoDoPit
  * O chão do pit lane: acompanha a pista, mas não fica abaixo do terreno.
  * Recebe: o segmento e o lado (negativo: esquerda), em larguras.
@@ -962,23 +920,6 @@ static void pintarFaixaDoPit(Construcao *marcas, Vector3 a, Vector3 b, float lar
     a = Vector3Add(a, subir);
     b = Vector3Add(b, subir);
     adicionarQuadrilatero(marcas, Vector3Subtract(a, lado), Vector3Add(a, lado), Vector3Add(b, lado), Vector3Subtract(b, lado), zero, zero, zero, zero, cor);
-}
-
-/*
- * caixaDaBarreira
- * Um bloco da barreira que fecha a entrada do pit lane.
- * Recebe: a construção, os dois pontos no chão e a cor.
- * Devolve: nada.
- */
-static void caixaDaBarreira(Construcao *c, Vector3 a, Vector3 b, Color cor) {
-    Vector3 lado = Vector3Scale(Vector3Normalize(Vector3CrossProduct(Vector3Subtract(b, a), (Vector3){ 0.0f, 1.0f, 0.0f })), 0.35f);
-    Vector3 cima = { 0.0f, ALTURA_DA_BARREIRA, 0.0f };
-    Vector3 c0 = Vector3Add(a, lado), c1 = Vector3Add(b, lado), c2 = Vector3Subtract(b, lado), c3 = Vector3Subtract(a, lado);
-    quadIluminado(c, c0, c1, Vector3Add(c1, cima), Vector3Add(c0, cima), cor);
-    quadIluminado(c, c3, c2, Vector3Add(c2, cima), Vector3Add(c3, cima), cor);
-    quadIluminado(c, Vector3Add(c0, cima), Vector3Add(c1, cima), Vector3Add(c2, cima), Vector3Add(c3, cima), cor);
-    quadIluminado(c, c0, c3, Vector3Add(c3, cima), Vector3Add(c0, cima), cor);
-    quadIluminado(c, c1, c2, Vector3Add(c2, cima), Vector3Add(c1, cima), cor);
 }
 
 /*
@@ -1150,8 +1091,7 @@ static void construirPredioDosBoxes(Pista *pista, Construcao *pit, Construcao *m
 /*
  * construirRetaDosBoxes
  * O muro e o alambrado dos dois lados da reta; o pit lane, que sai da pista na Subida
- * dos Boxes e volta depois da reta, com a entrada fechada por uma barreira (ele não
- * funciona: o carro segue pela pista); e o prédio dos boxes.
+ * dos Boxes e volta depois da reta; e o prédio dos boxes.
  * Recebe: a pista e a construção das estruturas (onde entra a barreira).
  * Devolve: nada.
  */
@@ -1168,12 +1108,10 @@ static void construirRetaDosBoxes(Pista *pista, Construcao *estruturas) {
         float metros = atual->indice * metrosPorSegmento;
         float v0 = metros / METROS_POR_TEXTURA, v1 = (metros + metrosPorSegmento) / METROS_POR_TEXTURA;
         for (int lado = -1; lado <= 1; lado += 2) {
-            /* Na esquerda, o muro do funil começa antes: é ele que fecha a entrada do pit lane */
-            int muroDaEntrada = (lado < 0 && metros >= INICIO_DA_BARREIRA && metros < INICIO_DO_FUNIL);
-            if (!(atual->temMuro && seguinte->temMuro) && !muroDaEntrada) {
+            if (!(atual->temMuro && seguinte->temMuro)) {
                 continue;
             }
-            float l0 = muroDaEntrada ? ABERTURA_DO_FUNIL : atual->lugarDoMuro, l1 = muroDaEntrada ? ABERTURA_DO_FUNIL : seguinte->lugarDoMuro;
+            float l0 = atual->lugarDoMuro, l1 = seguinte->lugarDoMuro;
             Vector3 p0 = pontoNaEstrada(atual, 0.0f, lado * l0, 0.0f), p1 = pontoNaEstrada(seguinte, 0.0f, lado * l1, 0.0f);
             Vector3 m0 = { p0.x, p0.y + ALTURA_DO_MURO, p0.z }, m1 = { p1.x, p1.y + ALTURA_DO_MURO, p1.z };
             Vector3 t0 = { p0.x, m0.y + ALTURA_DO_ALAMBRADO, p0.z }, t1 = { p1.x, m1.y + ALTURA_DO_ALAMBRADO, p1.z };
@@ -1214,15 +1152,12 @@ static void construirRetaDosBoxes(Pista *pista, Construcao *estruturas) {
         atual = seguinte;
     } while (atual != pista->largada);
 
-    /* A barreira vermelha e branca, de um lado ao outro do pit lane, fecha a entrada */
-    Segmento *naBarreira = buscarSegmento(pista, (int) (INICIO_DA_BARREIRA * SEGMENTOS_POR_METRO));
-    float larguraNaBarreira = 0.0f;
-    float ladoDaBarreira = ladoDentroDoPit(INICIO_DA_BARREIRA, metrosDaVolta, &larguraNaBarreira);
-    float deOnde = ABERTURA_DO_FUNIL, ateOnde = ladoDaBarreira + larguraNaBarreira / largura + 0.05f;
-    int blocos = (int) ((ateOnde - deOnde) * largura / BLOCO_DA_BARREIRA) + 1;
-    for (int i = 0; i < blocos; i++) {
-        float a = deOnde + (ateOnde - deOnde) * i / blocos, b = deOnde + (ateOnde - deOnde) * (i + 1) / blocos;
-        caixaDaBarreira(estruturas, noChaoDoPit(naBarreira, -a), noChaoDoPit(naBarreira, -b), (i % 2 == 0) ? COR_DA_FAIXA : WHITE);
+    /* As duas linhas do limite de velocidade, de um lado ao outro do pit lane */
+    float metrosDasLinhas[2] = { INICIO_DO_LIMITE_DO_PIT, FIM_DO_LIMITE_DO_PIT };
+    for (int i = 0; i < 2; i++) {
+        Segmento *naLinha = buscarSegmento(pista, (int) (metrosDasLinhas[i] * SEGMENTOS_POR_METRO));
+        float bordaDaPista = -1.0f - LARGURA_DO_PIT_LANE / largura;
+        pintarFaixaDoPit(&marcas, noChaoDoPit(naLinha, -1.0f), noChaoDoPit(naLinha, bordaDaPista), LINHA_DO_LIMITE, COR_DA_FAIXA_DO_PIT);
     }
 
     construirPredioDosBoxes(pista, &pit, &marcas);
@@ -1272,7 +1207,7 @@ static void construirObjetos(Pista *pista) {
                     break;
                 }
                 case OBJETO_PORTICO:
-                    colocarModelo(MODELO_PORTICO, (Vector3){ ponto.x, ponto.y, ponto.z }, contraORumo, 1.0f);
+                    colocarModelo(MODELO_PORTICO, (Vector3){ ponto.x, ponto.y, ponto.z }, contraORumo, TAMANHO_DO_PORTICO);
                     break;
                 default:
                     break;   /* as marcas do grid são pintadas no asfalto */
