@@ -40,6 +40,7 @@ void carregarVisual(void);
 void descarregarVisual(void);
 
 /* ---------- Texto (com sombra) ---------- */
+Font fonteDoJogo(TipoFonte fonte);
 float larguraDoTexto(TipoFonte fonte, const char *texto, float tamanho);
 void escrever(TipoFonte fonte, const char *texto, float x, float y, float tamanho, Color cor);
 void escreverCentralizado(TipoFonte fonte, const char *texto, float centroX, float y, float tamanho, Color cor);

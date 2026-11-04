@@ -3103,6 +3103,100 @@ static void testarCambio(void) {
     verificar(motor.reduzindo && motor.carga > cargaNaReduzida, "ao reduzir, o motor da a acelerada de punta-taco");
 }
 
+/*
+ * testarTransitoNoPit
+ * Muitos carros nos boxes ao mesmo tempo: ninguem atravessa ninguem, e todos saem.
+ */
+static void testarTransitoNoPit(void) {
+    printf("\n33) Transito no pit lane\n");
+    float quadro = 1.0f / 60.0f;
+    Pista *pista = criarPista();
+    static Corrida corrida;
+    Comandos nada = { 0, 0, 0, 0, 0.0f, 0, 0 };
+
+    /* Todos entram quase juntos, um atras do outro, na mesma faixa */
+    for (int espaco = 0; espaco < 2; espaco++) {
+        float vao = espaco ? 12.0f : 7.0f;
+        iniciarCorrida(&corrida, pista, 0, NIVEL_MEDIO);
+        corrida.contagemRegressiva = 0.0f;
+        corrida.terminou = 0;
+        for (int i = 0; i < TOTAL_CARROS; i++) {
+            Carro *carro = corrida.classificacao[i];
+            carro->voltas = 1;
+            carro->pitFeito = 0;
+            carro->duracaoDaTroca = (i % 3 == 0) ? 3.2f : 5.0f;
+            carro->posicao.segmento = buscarSegmento(pista, (int) ((ENTRADA_DO_PIT + 60.0f + (TOTAL_CARROS - i) * vao) * SEGMENTOS_POR_METRO));
+            carro->posicao.distanciaNoSegmento = 0.0f;
+            carro->distanciaPercorrida = (ENTRADA_DO_PIT + 60.0f + (TOTAL_CARROS - i) * vao) * UNIDADES_POR_METRO;
+            carro->deslocamentoLateral = -3.1f;
+            carro->velocidade = 3000.0f;
+            entrarNoPit(carro);
+        }
+        float maiorEntrada = 0.0f;
+        int quadrosEncostados = 0, moveuNaTroca = 0, naPista = 0;
+        float lugarNaTroca[TOTAL_CARROS] = { 0.0f };
+        for (int q = 0; q < 60 * 150 && naPista < TOTAL_CARROS; q++) {
+            atualizarCorrida(&corrida, nada, quadro);
+            naPista = 0;
+            for (int i = 0; i < TOTAL_CARROS; i++) {
+                Carro *a = corrida.classificacao[i];
+                int indice = a->numero;
+                naPista += !carroNoPit(a);
+                if (!carroNoPit(a)) {
+                    a->velocidade = 0.0f;         /* quem saiu sai do caminho, para o teste olhar só os boxes */
+                    a->posicao.segmento = buscarSegmento(pista, 1400 + indice * 40);
+                    a->distanciaPercorrida = 1e7f + indice * 1e5f;
+                    continue;
+                }
+                if (a->estadoDoPit == PIT_TROCANDO) {
+                    if (lugarNaTroca[indice] == 0.0f) {
+                        lugarNaTroca[indice] = a->distanciaPercorrida;
+                    }
+                    moveuNaTroca += fabsf(a->distanciaPercorrida - lugarNaTroca[indice]) > 0.01f;
+                }
+                for (int j = i + 1; j < TOTAL_CARROS; j++) {
+                    Carro *b = corrida.classificacao[j];
+                    float f, l;
+                    if (carroNoPit(b) && penetracaoEntreCarros(&corrida, a, b, &f, &l)) {
+                        maiorEntrada = fmaxf(maiorEntrada, fminf(f, l));
+                        quadrosEncostados++;
+                    }
+                }
+            }
+        }
+        printf("     %d carros com %.0f m entre eles: %d na pista no fim; maior entrada %.2f m; %d quadros encostados\n", TOTAL_CARROS, vao, naPista, maiorEntrada, quadrosEncostados);
+        verificar(naPista == TOTAL_CARROS, "ninguem fica preso nos boxes");
+        verificar(maiorEntrada < 0.30f, "nenhum carro atravessa outro no pit lane");
+        verificar(moveuNaTroca == 0, "o carro parado na troca nao sai do lugar");
+    }
+
+    /* Corridas de verdade: em toda a prova, ninguem se atravessa nos boxes */
+    for (int n = NIVEL_MEDIO; n <= NIVEL_DIFICIL; n++) {
+        iniciarCorrida(&corrida, pista, 0, (NivelDaCorrida) n);
+        corrida.contagemRegressiva = 0.0f;
+        float maior = 0.0f;
+        for (int q = 0; q < 60 * 60 * 15 && !corrida.terminou; q++) {
+            atualizarCorrida(&corrida, atualizarIA(&corrida.jogador), quadro);
+            for (int i = 0; i < TOTAL_CARROS; i++) {
+                for (int j = i + 1; j < TOTAL_CARROS; j++) {
+                    Carro *a = corrida.classificacao[i], *b = corrida.classificacao[j];
+                    float f, l;
+                    if (carroNoPit(a) && carroNoPit(b) && penetracaoEntreCarros(&corrida, a, b, &f, &l)) {
+                        maior = fmaxf(maior, fminf(f, l));
+                    }
+                }
+            }
+        }
+        int pararam = corrida.jogador.pitFeito;
+        for (int i = 0; i < TOTAL_RIVAIS; i++) {
+            pararam += corrida.rivais[i].pitFeito;
+        }
+        printf("     corrida %s: maior entrada nos boxes %.2f m; %d carros ja pararam; chegou em %d\n", fichaDoNivel((NivelDaCorrida) n)->nome, maior, pararam, corrida.posicaoFinal);
+        verificar(maior < 0.30f, "numa corrida inteira, ninguem se atravessa nos boxes");
+    }
+    liberarPista(pista);
+}
+
 int main(int argc, char *argv[]) {
     int modoDetalhado = (argc > 1 && strcmp(argv[1], "-v") == 0);
 
@@ -3136,6 +3230,7 @@ int main(int argc, char *argv[]) {
     testarConfiguracoes();
     testarCurvaNaMaoDoPiloto();
     testarCambio();
+    testarTransitoNoPit();
     testarGiroDasRodas();
     testarColisaoEEquilibrio();
     testarCameraLivre();

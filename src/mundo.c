@@ -12,6 +12,9 @@
 #include <stdlib.h>
 #include <math.h>
 #include "mundo.h"
+#include "construcao.h"
+#include "paisagem.h"
+#include "infraestrutura.h"
 #include "pitstop.h"
 #include "raymath.h"
 #include "rlgl.h"
@@ -40,6 +43,11 @@
 #define COR_LARGADA_ESCURA    (Color){  25,  25,  28, 255 }
 
 /* ---------- Terreno de Interlagos ---------- */
+#define FAIXAS_DO_ASFALTO     8         /* na largura da pista */
+#define JANELA_DA_BORRACHA    12        /* segmentos, para cada lado */
+#define GANHO_DA_BORRACHA     1.1f
+#define LARGURA_DA_BORRACHA   0.30f     /* em larguras */
+#define FORCA_DA_BORRACHA     0.24f
 #define LADO_DA_CELULA        30.0f     /* metros */
 #define MARGEM_DO_TERRENO     1800.0f   /* quanto o terreno passa da pista */
 #define PASSO_NA_PISTA        4         /* olha um a cada 4 segmentos para achar a altura */
@@ -58,7 +66,7 @@
 #define MENOR_ARVORE          0.82f     /* cada árvore tem um tamanho, em relação ao modelo */
 #define MAIOR_ARVORE          1.22f
 #define AFUNDAR_NO_CHAO       0.05f
-#define MAXIMO_DE_LOTES       160
+#define MAXIMO_DE_LOTES       320
 #define MATERIAL_DO_MURO      23        /* Material.108 do estádio: o mesmo concreto... */
 #define MATERIAL_DO_ALAMBRADO 25        /* ...e o mesmo alambrado (Material.110) */
 
@@ -98,6 +106,7 @@
 #define METROS_DA_GRAMA       12.0f     /* a imagem da grama se repete a cada tanto */
 #define PILHAS_NA_PONTA       3
 #define METROS_ENTRE_PILHAS   1.5f
+#define FOLGA_DAS_PILHAS      0.8f      /* metros da ponta do muro para o lado da pista */
 #define TRACO_DO_PIT          6.0f      /* traço e vão da linha que separa a pista de trabalho */
 #define COR_DA_VAGA           (Color){ 232, 196,  40, 255 }
 #define COR_DA_ZONA_DE_TRABALHO (Color){ 92, 92, 96, 255 }
@@ -128,15 +137,11 @@
 /* ---------- Céu (um domo) e fundo (cilindros), em volta da câmera ---------- */
 #define LADOS_DO_CILINDRO     72
 #define RAIO_DO_CEU           9000.0f
-#define RAIO_DA_CIDADE        4200.0f
-#define RAIO_DOS_MORROS       3200.0f
 #define ANEIS_DO_CEU          32
 #define ELEVACAO_DA_BASE_DO_CEU (-12.0f)  /* graus: o céu começa abaixo do horizonte */
 #define COMECO_DA_IMAGEM_DO_CEU 0.02f     /* a imagem do céu vai até aqui, e daí para cima é a tampa */
 #define COR_DO_TOPO_DO_CEU    (Color){ 52, 112, 196, 255 }   /* a cor da linha de cima de fundo/ceu.png */
 #define REPETICOES_CEU        2.0f
-#define REPETICOES_CIDADE     5.0f
-#define REPETICOES_MORROS     4.0f
 #define ABAIXO_DA_CAMERA      300.0f    /* a base dos cilindros fica abaixo do horizonte */
 #define PLANO_DE_LONGE        14000.0f
 #define PLANO_DE_PERTO        0.5f
@@ -157,15 +162,6 @@ static const char *PIXELS_DO_SHADER =
     "void main() { vec4 cor = texture(texture0, fragTexCoord) * colDiffuse * fragColor;\n"
     "              if (cor.a < 0.5) discard;\n"
     "              finalColor = vec4(cor.rgb, 1.0); }\n";
-
-/* Uma malha em construção: vai crescendo triângulo a triângulo */
-typedef struct {
-    float *vertices;
-    float *texturas;
-    unsigned char *cores;
-    int total;       /* vértices usados */
-    int capacidade;
-} Construcao;
 
 /* As malhas geradas para Interlagos */
 typedef struct {
@@ -210,6 +206,8 @@ typedef enum {
     MODELO_BOXES,
     MODELO_BOXES_PONTA,
     MODELO_BOXES_TORRE,
+    MODELO_PRIMEIRO_DO_CENARIO,   /* na ordem de ModeloDoCenario (infraestrutura.h) */
+    MODELO_FIM_DO_CENARIO = MODELO_PRIMEIRO_DO_CENARIO + TOTAL_DE_MODELOS_DO_CENARIO - 1,
     TOTAL_MODELOS_DE_OBJETO
 } ModeloDeObjeto;
 
@@ -218,6 +216,11 @@ static const char *ARQUIVOS_DOS_OBJETOS[TOTAL_MODELOS_DE_OBJETO] = {
     "placa_50.glb", "placa_100.glb", "placa_150.glb", "portico.glb", "arquibancada.glb", "camarote.glb",
     "setor_A.glb", "setor_B.glb", "setor_D.glb", "setor_G.glb", "setor_H.glb",
     "setor_M.glb", "setor_N.glb", "setor_R.glb", "setor_S.glb", "setor_V.glb", "refletor.glb", "boxes.glb", "boxes_ponta.glb", "boxes_torre.glb",
+    "posto_fiscal.glb", "torre_tv.glb", "passarela.glb", "telao.glb",
+    "caminhao_1.glb", "caminhao_2.glb", "caminhao_3.glb", "caminhao_4.glb", "tenda_1.glb", "tenda_2.glb", "tenda_3.glb",
+    "carro_rua_1.glb", "carro_rua_2.glb", "carro_rua_3.glb", "carro_rua_4.glb", "carro_rua_5.glb", "carro_rua_6.glb",
+    "bancada_1.glb", "bancada_2.glb", "bancada_3.glb", "bancada_4.glb",
+    "mastro_1.glb", "mastro_2.glb", "mastro_3.glb", "mastro_4.glb", "mastro_5.glb", "pilha_1.glb", "pilha_2.glb",
 };
 
 /* Centenas de cópias do mesmo modelo desenhadas uma a uma pesariam: elas são
@@ -241,8 +244,8 @@ static Material material;   /* o mesmo material, trocando a textura a cada desen
 static Model estadio;
 static Mesh pinturaDoEstadio;
 static MalhasDaPista interlagos;
-static Mesh ceuDeDia, tampaDoCeu, ceuDeNoite, cilindroDaCidade, cilindroDosMorros;
-static Texture2D texturaCeu, texturaCidade, texturaMorros;
+static Mesh ceuDeDia, tampaDoCeu, ceuDeNoite;
+static Texture2D texturaCeu;
 static Texture2D texturaAsfalto[2], texturaGrama;
 static Model modelosDosObjetos[TOTAL_MODELOS_DE_OBJETO];
 static LoteDeObjetos lotes[MAXIMO_DE_LOTES];
@@ -252,64 +255,6 @@ static int lotesDeInterlagos = 0;   /* os primeiros lotes são de Interlagos; os
 /* ==================================================================
  * Construção de malhas
  * ================================================================== */
-
-/*
- * adicionarVertice
- * Põe um vértice na malha em construção, dobrando o espaço quando acaba.
- * Recebe: a construção, a posição, a coordenada de textura e a cor.
- * Devolve: nada.
- */
-static void adicionarVertice(Construcao *c, Vector3 p, Vector2 uv, Color cor) {
-    if (c->total == c->capacidade) {
-        c->capacidade = (c->capacidade == 0) ? 1024 : c->capacidade * 2;
-        c->vertices = MemRealloc(c->vertices, c->capacidade * 3 * sizeof(float));
-        c->texturas = MemRealloc(c->texturas, c->capacidade * 2 * sizeof(float));
-        c->cores = MemRealloc(c->cores, c->capacidade * 4);
-    }
-    int i = c->total++;
-    c->vertices[i * 3] = p.x;
-    c->vertices[i * 3 + 1] = p.y;
-    c->vertices[i * 3 + 2] = p.z;
-    c->texturas[i * 2] = uv.x;
-    c->texturas[i * 2 + 1] = uv.y;
-    c->cores[i * 4] = cor.r;
-    c->cores[i * 4 + 1] = cor.g;
-    c->cores[i * 4 + 2] = cor.b;
-    c->cores[i * 4 + 3] = cor.a;
-}
-
-/*
- * adicionarQuadrilatero
- * Um quadrilátero, em dois triângulos. Os vértices vêm em volta dele.
- * Recebe: a construção, os 4 pontos, os 4 pares de textura e a cor.
- * Devolve: nada.
- */
-static void adicionarQuadrilatero(Construcao *c, Vector3 a, Vector3 b, Vector3 d, Vector3 e,
-                                  Vector2 ua, Vector2 ub, Vector2 ud, Vector2 ue, Color cor) {
-    adicionarVertice(c, a, ua, cor);
-    adicionarVertice(c, b, ub, cor);
-    adicionarVertice(c, d, ud, cor);
-    adicionarVertice(c, a, ua, cor);
-    adicionarVertice(c, d, ud, cor);
-    adicionarVertice(c, e, ue, cor);
-}
-
-/*
- * terminarMalha
- * Envia a malha para a placa de vídeo. A Mesh passa a ser dona dos vetores.
- * Recebe: a construção.
- * Devolve: a malha pronta.
- */
-static Mesh terminarMalha(Construcao *c) {
-    Mesh malha = { 0 };
-    malha.vertexCount = c->total;
-    malha.triangleCount = c->total / 3;
-    malha.vertices = c->vertices;
-    malha.texcoords = c->texturas;
-    malha.colors = c->cores;
-    UploadMesh(&malha, false);
-    return malha;
-}
 
 /*
  * pontoNaEstrada
@@ -385,6 +330,8 @@ static void construirObjetos(Pista *pista);
 static float *alturasDaGrade = NULL;
 static float origemDaGradeX, origemDaGradeZ;
 static int colunasDaGrade, linhasDaGrade;
+static float fimDaGradeX, fimDaGradeZ;
+static const MalhasDaInfraestrutura *infra = NULL;
 
 /*
  * alturaDoTerreno
@@ -413,7 +360,7 @@ static float alturaDoTerreno(Pista *pista, float x, float z) {
         }
         atual = atual->proximo;
     } while (atual != pista->largada);
-    return fminf(soma / somaPesos, limite);
+    return fminf(alturaComLago(soma / somaPesos, x, z), limite) + relevoDaPaisagem(x, z);
 }
 
 /*
@@ -441,9 +388,8 @@ static float alturaNaGrade(float x, float z) {
 
 /*
  * construirTerreno
- * Uma grade de quadradinhos de grama em volta da pista, com a altura vinda
- * de alturaDoTerreno. As células alternam um pouco o tom, o que ajuda a
- * perceber a velocidade.
+ * Uma grade em volta da pista, com a altura vinda de alturaDoTerreno: grama dentro do
+ * autódromo e, fora dele, o chão da cidade (paisagem.c).
  * Recebe: a pista.
  * Devolve: a malha.
  */
@@ -474,6 +420,8 @@ static Mesh construirTerreno(Pista *pista) {
         }
     }
 
+    fimDaGradeX = minX + colunas * LADO_DA_CELULA;
+    fimDaGradeZ = minZ + linhas * LADO_DA_CELULA;
     Construcao c = { 0 };
     for (int l = 0; l < linhas; l++) {
         for (int k = 0; k < colunas; k++) {
@@ -487,11 +435,51 @@ static Mesh construirTerreno(Pista *pista) {
             Vector2 ub = { x0 / METROS_POR_LADRILHO, z1 / METROS_POR_LADRILHO };
             Vector2 ud = { x1 / METROS_POR_LADRILHO, z1 / METROS_POR_LADRILHO };
             Vector2 ue = { x1 / METROS_POR_LADRILHO, z0 / METROS_POR_LADRILHO };
-            Color tom = ((k + l) % 2 == 0) ? WHITE : (Color){ 228, 236, 228, 255 };
-            adicionarQuadrilatero(&c, a, b, d, e, ua, ub, ud, ue, tom);
+            /* Fora do autódromo é a cidade; dentro, a grama, com manchas em vez de um xadrez */
+            if (foraDoAutodromo(x0 + LADO_DA_CELULA / 2.0f, z0 + LADO_DA_CELULA / 2.0f)) {
+                adicionarChaoDaCidade(a, b, d, e);
+                continue;
+            }
+            adicionarVertice(&c, a, ua, corDaGramaNoAutodromo(a.x, a.z));
+            adicionarVertice(&c, b, ub, corDaGramaNoAutodromo(b.x, b.z));
+            adicionarVertice(&c, d, ud, corDaGramaNoAutodromo(d.x, d.z));
+            adicionarVertice(&c, a, ua, corDaGramaNoAutodromo(a.x, a.z));
+            adicionarVertice(&c, d, ud, corDaGramaNoAutodromo(d.x, d.z));
+            adicionarVertice(&c, e, ue, corDaGramaNoAutodromo(e.x, e.z));
         }
     }
     return terminarMalha(&c);   /* a grade fica para os objetos; construirObjetos a devolve */
+}
+
+/*
+ * linhaDeBorracha
+ * Por onde os carros passam: para dentro nas curvas, e no meio nas retas.
+ * Recebe: o segmento.
+ * Devolve: a lateral, em larguras.
+ */
+static float linhaDeBorracha(Segmento *segmento) {
+    float soma = 0.0f;
+    Segmento *s = segmento;
+    for (int i = 0; i < JANELA_DA_BORRACHA; i++) {
+        s = s->proximo;
+    }
+    for (int i = 0; i < JANELA_DA_BORRACHA * 2; i++) {
+        soma += s->curvatura;
+        s = segmentoAnterior(s);
+    }
+    return fminf(fmaxf(soma / (JANELA_DA_BORRACHA * 2) * GANHO_DA_BORRACHA, -0.6f), 0.6f);
+}
+
+/*
+ * tomDoAsfalto
+ * Recebe: a lateral e onde está a linha de borracha.
+ * Devolve: a cor que vai multiplicar a imagem do asfalto.
+ */
+static Color tomDoAsfalto(float lateral, float linha) {
+    float d = (lateral - linha) / LARGURA_DA_BORRACHA;
+    float t = 1.0f - FORCA_DA_BORRACHA * expf(-d * d);
+    unsigned char v = (unsigned char) (255.0f * t);
+    return (Color){ v, v, v, 255 };
 }
 
 /*
@@ -508,11 +496,20 @@ static void construirInterlagos(Pista *pista) {
     Segmento *atual = pista->largada;
     do {
         int claro = (atual->indice / SEGMENTOS_POR_FAIXA) % 2;
-        adicionarQuadrilatero(&asfalto[claro],
-                              pontoNaEstrada(atual, 0.0f, -1.0f, 0.0f), pontoNaEstrada(atual, 0.0f, 1.0f, 0.0f),
-                              pontoNaEstrada(atual, 1.0f, 1.0f, 0.0f), pontoNaEstrada(atual, 1.0f, -1.0f, 0.0f),
-                              (Vector2){ 0.0f, 1.0f }, (Vector2){ REPETICOES_ASFALTO, 1.0f },
-                              (Vector2){ REPETICOES_ASFALTO, 0.0f }, (Vector2){ 0.0f, 0.0f }, WHITE);
+        /* Em faixas na largura: onde os carros passam, a borracha escurece o asfalto */
+        float linha0 = linhaDeBorracha(atual), linha1 = linhaDeBorracha(atual->proximo);
+        for (int f = 0; f < FAIXAS_DO_ASFALTO; f++) {
+            float l0 = -1.0f + 2.0f * f / FAIXAS_DO_ASFALTO, l1 = -1.0f + 2.0f * (f + 1) / FAIXAS_DO_ASFALTO;
+            float u0 = (l0 + 1.0f) / 2.0f * REPETICOES_ASFALTO, u1 = (l1 + 1.0f) / 2.0f * REPETICOES_ASFALTO;
+            Vector3 p[4] = { pontoNaEstrada(atual, 0.0f, l0, 0.0f), pontoNaEstrada(atual, 0.0f, l1, 0.0f),
+                             pontoNaEstrada(atual, 1.0f, l1, 0.0f), pontoNaEstrada(atual, 1.0f, l0, 0.0f) };
+            Vector2 uv[4] = { { u0, 1.0f }, { u1, 1.0f }, { u1, 0.0f }, { u0, 0.0f } };
+            Color cor[4] = { tomDoAsfalto(l0, linha0), tomDoAsfalto(l1, linha0), tomDoAsfalto(l1, linha1), tomDoAsfalto(l0, linha1) };
+            int ordem[6] = { 0, 1, 2, 0, 2, 3 };
+            for (int v = 0; v < 6; v++) {
+                adicionarVertice(&asfalto[claro], p[ordem[v]], uv[ordem[v]], cor[ordem[v]]);
+            }
+        }
 
         float borda = 1.0f;
         if (temZebra(atual)) {
@@ -542,7 +539,12 @@ static void construirInterlagos(Pista *pista) {
     interlagos.asfalto[1] = terminarMalha(&asfalto[1]);
     interlagos.pintura = terminarMalha(&pintura);
     interlagos.acostamento = terminarMalha(&acostamento);
+    prepararPaisagem(pista);
+    float lagoX, lagoZ;
+    lugarDoLago(&lagoX, &lagoZ);
+    definirNivelDoLago(alturaDoTerreno(pista, lagoX, lagoZ));
     interlagos.terreno = construirTerreno(pista);
+    construirPaisagem(pista, alturaDoTerreno, origemDaGradeX, fimDaGradeX, origemDaGradeZ, fimDaGradeZ);
 
     /* Um chão plano, bem abaixo, cobre o que o terreno não alcança */
     float menor = 1e9f;
@@ -574,19 +576,6 @@ static unsigned int sementeDosObjetos;
 static float sortearObjeto(float minimo, float maximo) {
     sementeDosObjetos = sementeDosObjetos * 1103515245u + 12345u;
     return minimo + (maximo - minimo) * ((sementeDosObjetos >> 16) & 0x7FFF) / 32767.0f;
-}
-
-/*
- * luzDoSol
- * Quanto uma face clareia conforme olha para o sol. Os objetos não mudam
- * de lugar, então a luz é calculada uma vez, na construção.
- * Recebe: a direção para onde a face aponta.
- * Devolve: o fator de luz.
- */
-static float luzDoSol(Vector3 normal) {
-    Vector3 sol = Vector3Normalize((Vector3){ 0.35f, 0.8f, 0.45f });
-    Vector3 n = Vector3Normalize(normal);
-    return 0.58f + 0.30f * (n.y * 0.5f + 0.5f) + 0.38f * fmaxf(Vector3DotProduct(n, sol), 0.0f);
 }
 
 /*
@@ -747,23 +736,6 @@ static ModeloDeObjeto modeloDoSetor(char letra) {
     return MODELO_SETOR_A;
 }
 
-/*
- * quadIluminado
- * Um quadrilátero de uma cor, com a luz do sol calculada pela face dele.
- * Recebe: a construção, os 4 cantos em volta e a cor.
- * Devolve: nada.
- */
-static void quadIluminado(Construcao *c, Vector3 a, Vector3 b, Vector3 d, Vector3 e, Color cor) {
-    Vector3 normal = Vector3Normalize(Vector3CrossProduct(Vector3Subtract(b, a), Vector3Subtract(d, a)));
-    if (normal.y < -0.2f) {      /* só vira quem olha para baixo: uma parede em curva não fica em faixas */
-        normal = Vector3Negate(normal);
-    }
-    float luz = luzDoSol(normal);
-    Color comLuz = { (unsigned char) fminf(cor.r * luz, 255.0f), (unsigned char) fminf(cor.g * luz, 255.0f),
-                     (unsigned char) fminf(cor.b * luz, 255.0f), 255 };
-    Vector2 zero = { 0.0f, 0.0f };
-    adicionarQuadrilatero(c, a, b, d, e, zero, zero, zero, zero, comLuz);
-}
 
 /* Um corte da arquibancada: onde a frente dela está, e para onde é "para fora" */
 typedef struct {
@@ -1218,14 +1190,13 @@ static void construirRetaDosBoxes(Pista *pista) {
         pintarFaixaDoPit(&marcas, noChaoDoPit(naLinha, -1.0f), noChaoDoPit(naLinha, bordaDaPista), LINHA_DO_LIMITE, COR_DA_FAIXA_DO_PIT);
     }
 
-    /* Os pneus de proteção na ponta dos muros, de frente para quem vem */
-    Segmento *pontas[2] = { buscarSegmento(pista, (int) (INICIO_DO_FUNIL * SEGMENTOS_POR_METRO)), buscarSegmento(pista, (int) (FIM_DO_MURO * SEGMENTOS_POR_METRO)) };
-    float ladosDasPontas[2] = { -ABERTURA_DO_FUNIL, -1.0f };
-    for (int i = 0; i < 2; i++) {
-        for (int k = 0; k < PILHAS_NA_PONTA; k++) {
-            Vector3 pe = pontoNaEstrada(pontas[i], 0.0f, ladosDasPontas[i] - k * METROS_ENTRE_PILHAS / largura, 0.0f);
-            colocarModelo((k % 2 == 0) ? MODELO_PNEUS_VERMELHO : MODELO_PNEUS_BRANCO, pe, 0.0f, 1.0f);
-        }
+    /* Os pneus de proteção na ponta dos muros, do lado da pista: nunca no caminho do pit lane */
+    for (int k = 0; k < PILHAS_NA_PONTA; k++) {
+        Vector3 noFunil = pontoNaEstrada(buscarSegmento(pista, (int) ((INICIO_DO_FUNIL - k * METROS_ENTRE_PILHAS) * SEGMENTOS_POR_METRO)), 0.0f, -ABERTURA_DO_FUNIL + FOLGA_DAS_PILHAS / largura, 0.0f);
+        Vector3 noFim = pontoNaEstrada(buscarSegmento(pista, (int) ((FIM_DO_MURO + k * METROS_ENTRE_PILHAS) * SEGMENTOS_POR_METRO)), 0.0f, -1.0f, 0.0f);
+        ModeloDeObjeto modelo = (k % 2 == 0) ? MODELO_PNEUS_VERMELHO : MODELO_PNEUS_BRANCO;
+        colocarModelo(modelo, noFunil, 0.0f, 1.0f);
+        colocarModelo(modelo, noFim, 0.0f, 1.0f);
     }
 
     construirPredioDosBoxes(pista, &pit[0], &marcas);
@@ -1235,6 +1206,26 @@ static void construirRetaDosBoxes(Pista *pista) {
     interlagos.pitLane[1] = terminarMalha(&pit[1]);
     interlagos.taludes = terminarMalha(&taludes);
     interlagos.marcasDoPit = terminarMalha(&marcas);
+}
+
+/*
+ * colocarNoCenario
+ * Recebe: um modelo do cenário, o pé, o giro e o tamanho (quem escolhe é a infraestrutura).
+ * Devolve: nada.
+ */
+static void colocarNoCenario(ModeloDoCenario qual, Vector3 pe, float giro, float tamanho) {
+    colocarModelo((ModeloDeObjeto) (MODELO_PRIMEIRO_DO_CENARIO + qual), pe, giro, tamanho);
+}
+
+/*
+ * plantarArvoreDoJardim
+ * Recebe: o pé da árvore (quem escolhe o lugar é a infraestrutura).
+ * Devolve: nada.
+ */
+static void plantarArvoreDoJardim(Vector3 pe) {
+    int variacao = (int) sortearObjeto(0.0f, 2.999f);
+    pe.y -= AFUNDAR_NO_CHAO;
+    colocarModelo((ModeloDeObjeto) (MODELO_ARVORE_1 + variacao), pe, sortearObjeto(0.0f, 2.0f * PI), sortearObjeto(MENOR_ARVORE, MAIOR_ARVORE));
 }
 
 /*
@@ -1258,6 +1249,9 @@ static void construirObjetos(Pista *pista) {
             float contraORumo = -ponto.rumo * DEG2RAD;
             switch (objeto->tipo) {
                 case OBJETO_ARVORE: {
+                    if (dentroDoLago(pe.x, pe.z)) {
+                        break;
+                    }
                     int variacao = (int) sortearObjeto(0.0f, 2.999f);
                     colocarModelo((ModeloDeObjeto) (MODELO_ARVORE_1 + variacao), pe, sortearObjeto(0.0f, 2.0f * PI),
                                   sortearObjeto(MENOR_ARVORE, MAIOR_ARVORE));
@@ -1287,6 +1281,7 @@ static void construirObjetos(Pista *pista) {
     } while (atual != pista->largada);
 
     construirArquibancadas(pista);
+    infra = construirInfraestrutura(pista, alturaNaGrade, plantarArvoreDoJardim, colocarNoCenario);
 
     for (int m = 0; m < TOTAL_MODELOS_DE_OBJETO; m++) {
         for (int i = 0; i < modelosDosObjetos[m].meshCount && i < MAXIMO_DE_PECAS; i++) {
@@ -1300,26 +1295,6 @@ static void construirObjetos(Pista *pista) {
     lotesDeInterlagos = totalDeLotes;
 }
 
-/*
- * construirCilindro
- * Um cilindro aberto em volta da câmera, para o céu e as camadas do fundo.
- * Recebe: o raio, a altura e quantas vezes a imagem se repete na volta.
- * Devolve: a malha.
- */
-static Mesh construirCilindro(float raio, float altura, float repeticoes) {
-    Construcao c = { 0 };
-    for (int i = 0; i < LADOS_DO_CILINDRO; i++) {
-        float a0 = 2.0f * PI * i / LADOS_DO_CILINDRO, a1 = 2.0f * PI * (i + 1) / LADOS_DO_CILINDRO;
-        float u0 = repeticoes * i / LADOS_DO_CILINDRO, u1 = repeticoes * (i + 1) / LADOS_DO_CILINDRO;
-        Vector3 embaixo0 = { sinf(a0) * raio, 0.0f, -cosf(a0) * raio };
-        Vector3 embaixo1 = { sinf(a1) * raio, 0.0f, -cosf(a1) * raio };
-        Vector3 emcima0 = { embaixo0.x, altura, embaixo0.z };
-        Vector3 emcima1 = { embaixo1.x, altura, embaixo1.z };
-        adicionarQuadrilatero(&c, emcima0, embaixo0, embaixo1, emcima1, (Vector2){ u0, 0.0f }, (Vector2){ u0, 1.0f },
-                              (Vector2){ u1, 1.0f }, (Vector2){ u1, 0.0f }, WHITE);
-    }
-    return terminarMalha(&c);
-}
 
 /*
  * adicionarAneisDoCeu
@@ -1456,22 +1431,16 @@ void carregarMundo(Pista *pistas[]) {
     material.shader = shader;
 
     texturaCeu = carregarTexturaRepetida("fundo/ceu.png");
-    texturaCidade = carregarTexturaRepetida("fundo/cidade.png");
-    texturaMorros = carregarTexturaRepetida("fundo/morros.png");
     texturaAsfalto[0] = carregarTexturaRepetida("estrada/asfalto_escuro.png");
     texturaAsfalto[1] = carregarTexturaRepetida("estrada/asfalto_claro.png");
     texturaGrama = carregarTexturaRepetida("estrada/grama_clara.png");
 
     /* A imagem ocupa a altura proporcional à largura de cada repetição, sem esticar */
     float voltaCeu = 2.0f * PI * RAIO_DO_CEU / REPETICOES_CEU;
-    float voltaCidade = 2.0f * PI * RAIO_DA_CIDADE / REPETICOES_CIDADE;
-    float voltaMorros = 2.0f * PI * RAIO_DOS_MORROS / REPETICOES_MORROS;
     construirCeuDeDia(voltaCeu * texturaCeu.height / texturaCeu.width);
     ceuDeNoite = construirCeuDeNoite();
     /* Na vertical a imagem não se repete: a borda de cima não pode misturar com a de baixo */
     rlTextureParameters(texturaCeu.id, RL_TEXTURE_WRAP_T, RL_TEXTURE_WRAP_CLAMP);
-    cilindroDaCidade = construirCilindro(RAIO_DA_CIDADE, voltaCidade * texturaCidade.height / texturaCidade.width, REPETICOES_CIDADE);
-    cilindroDosMorros = construirCilindro(RAIO_DOS_MORROS, voltaMorros * texturaMorros.height / texturaMorros.width, REPETICOES_MORROS);
 
     construirInterlagos(pistas[PISTA_INTERLAGOS]);
     carregarEstadio(pistas[PISTA_COPA_PISTAO]);
@@ -1513,11 +1482,9 @@ void descarregarMundo(void) {
     UnloadMesh(ceuDeDia);
     UnloadMesh(tampaDoCeu);
     UnloadMesh(ceuDeNoite);
-    UnloadMesh(cilindroDaCidade);
-    UnloadMesh(cilindroDosMorros);
+    descarregarPaisagem();
+    descarregarInfraestrutura();
     UnloadTexture(texturaCeu);
-    UnloadTexture(texturaCidade);
-    UnloadTexture(texturaMorros);
     UnloadTexture(texturaAsfalto[0]);
     UnloadTexture(texturaAsfalto[1]);
     UnloadTexture(texturaGrama);
@@ -1552,7 +1519,6 @@ static void desenharMalha(Mesh malha, Texture2D textura, Matrix posicao) {
 void desenharCenario(IdPista id, Vector3 camera) {
     Texture2D semTextura = { 0 };
     Matrix origem = MatrixIdentity();
-    Matrix nosCilindros = MatrixTranslate(camera.x, camera.y - ABAIXO_DA_CAMERA, camera.z);
     Matrix naCamera = MatrixTranslate(camera.x, camera.y, camera.z);
 
     if (id == PISTA_COPA_PISTAO) {
@@ -1569,11 +1535,11 @@ void desenharCenario(IdPista id, Vector3 camera) {
 
     desenharMalha(ceuDeDia, texturaCeu, naCamera);
     desenharMalha(tampaDoCeu, semTextura, naCamera);
-    desenharMalha(cilindroDaCidade, texturaCidade, nosCilindros);
-    desenharMalha(cilindroDosMorros, texturaMorros, nosCilindros);
+    desenharPaisagem();
     desenharMalha(interlagos.base, texturaGrama, origem);
     desenharMalha(interlagos.terreno, texturaGrama, origem);
     desenharMalha(interlagos.acostamento, texturaGrama, origem);
+    desenharMalha(infra->pintura, semTextura, origem);
     desenharMalha(interlagos.asfalto[0], texturaAsfalto[0], origem);
     desenharMalha(interlagos.asfalto[1], texturaAsfalto[1], origem);
     desenharMalha(interlagos.pitLane[0], texturaAsfalto[0], origem);
@@ -1584,6 +1550,9 @@ void desenharCenario(IdPista id, Vector3 camera) {
     desenharMalha(interlagos.muro, estadio.materials[MATERIAL_DO_MURO].maps[MATERIAL_MAP_ALBEDO].texture, origem);
     desenharMalha(interlagos.alambrado, estadio.materials[MATERIAL_DO_ALAMBRADO].maps[MATERIAL_MAP_ALBEDO].texture, origem);
     desenharMalha(interlagos.estruturas, semTextura, origem);
+    desenharMalha(infra->objetos, semTextura, origem);
+    desenharMalha(infra->anuncios, infra->imagemDosAnuncios, origem);
+    desenharMalha(infra->cercas, estadio.materials[MATERIAL_DO_ALAMBRADO].maps[MATERIAL_MAP_ALBEDO].texture, origem);
     material.shader = shaderDaTorcida();
     desenharMalha(interlagos.torcida, semTextura, origem);
     material.shader = shader;

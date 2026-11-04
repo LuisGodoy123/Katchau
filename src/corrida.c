@@ -30,6 +30,7 @@
 #define GIRO_POR_LADO             75.0f     /* graus por segundo por metro/s de batida de lado, vezes a excentricidade */
 
 /* ---------- O que a IA enxerga ---------- */
+#define VISAO_PARA_TRAS_NO_PIT    22.0f     /* metros: quem sai da vaga não entra na frente de quem vem */
 #define ALCANCE_DA_VISAO          60.0f     /* metros à frente */
 #define DISTANCIA_AO_LADO         1.5f      /* metros de folga: mais perto que isso, o lado está ocupado */
 
@@ -341,10 +342,6 @@ int penetracaoEntreCarros(const Corrida *corrida, const Carro *a, const Carro *b
     float meioA, larguraA, meioB, larguraB;
     meiasMedidasDoCarro(a, &meioA, &larguraA);
     meiasMedidasDoCarro(b, &meioB, &larguraB);
-    if (carroNoPit(a) || carroNoPit(b)) {
-        *naFrente = *deLado = 0.0f;   /* o pit lane é separado da pista, e cada um vai para a sua vaga */
-        return 0;
-    }
     *naFrente = meioA + meioB - fabsf(distanciaNaPista(corrida, a, b));
     *deLado = larguraA + larguraB - fabsf(lateralEmMetros((Carro *) a) - lateralEmMetros((Carro *) b));
     return *naFrente > 0.0f && *deLado > 0.0f;
@@ -412,6 +409,37 @@ static void baterDeLado(const Corrida *corrida, Carro *a, Carro *b, float entrad
 }
 
 /*
+ * separarNoPit
+ * Dois carros encostando no pit lane. A fila já evita isso (pitstop.c); se acontecer, só
+ * os separa: sem tranco nem rodada, e o carro parado na troca nunca sai do lugar.
+ * Recebe: a corrida, os dois carros e quanto as caixas entraram.
+ * Devolve: nada.
+ */
+static void separarNoPit(const Corrida *corrida, Carro *a, Carro *b, float naFrente, float deLado) {
+    if (naFrente < deLado) {
+        Carro *atras = (distanciaNaPista(corrida, a, b) > 0.0f) ? a : b;
+        Carro *frente = (atras == a) ? b : a;
+        if (atras->estadoDoPit != PIT_TROCANDO) {
+            atras->empurraoPendente -= naFrente * UNIDADES_POR_METRO;
+            atras->velocidade = fminf(atras->velocidade, frente->velocidade);
+        } else {
+            frente->empurraoPendente += naFrente * UNIDADES_POR_METRO;
+        }
+        return;
+    }
+    Carro *esquerda = (lateralEmMetros(a) < lateralEmMetros(b)) ? a : b;
+    Carro *direita = (esquerda == a) ? b : a;
+    if (esquerda->estadoDoPit == PIT_TROCANDO) {
+        direita->deslocamentoLateral += deLado / larguraDoLado(direita->posicao.segmento, direita->deslocamentoLateral);
+    } else if (direita->estadoDoPit == PIT_TROCANDO) {
+        esquerda->deslocamentoLateral -= deLado / larguraDoLado(esquerda->posicao.segmento, esquerda->deslocamentoLateral);
+    } else {
+        esquerda->deslocamentoLateral -= deLado / 2.0f / larguraDoLado(esquerda->posicao.segmento, esquerda->deslocamentoLateral);
+        direita->deslocamentoLateral += deLado / 2.0f / larguraDoLado(direita->posicao.segmento, direita->deslocamentoLateral);
+    }
+}
+
+/*
  * tratarBatida
  * Se as caixas de dois carros se tocam, separa os dois pelo lado em que entraram
  * menos: é por ali que eles acabaram de se encontrar.
@@ -423,6 +451,11 @@ static void tratarBatida(Corrida *corrida, Carro *a, Carro *b, float tempoQuadro
     if (!penetracaoEntreCarros(corrida, a, b, &naFrente, &deLado)) {
         return;
     }
+    if (carroNoPit(a) && carroNoPit(b)) {
+        separarNoPit(corrida, a, b, naFrente, deLado);
+        return;
+    }
+
     /* A força da batida, para a vibração do controle: a diferença de velocidade entre os dois */
     float choque = fabsf(a->velocidade - b->velocidade) / VELOCIDADE_DA_PANCADA_FORTE
                    + fabsf(a->velocidadeDeLado - b->velocidadeDeLado) / LADO_DA_PANCADA_FORTE;
@@ -432,7 +465,7 @@ static void tratarBatida(Corrida *corrida, Carro *a, Carro *b, float tempoQuadro
 
     /* Só roda quem bate com o jogador: rodadas entre rivais só atrapalhariam a corrida
      * longe dos olhos dele, e fechariam a pista para todo mundo */
-    int podeRodar = (a == &corrida->jogador || b == &corrida->jogador);
+    int podeRodar = (a == &corrida->jogador || b == &corrida->jogador) && !carroNoPit(a) && !carroNoPit(b);
     if (naFrente < deLado) {
         if (distanciaNaPista(corrida, a, b) > 0.0f) {
             baterNaTraseira(a, b, naFrente, podeRodar);
@@ -473,12 +506,13 @@ static void olharEmVolta(Corrida *corrida) {
         carro->distanciaAFrente = -1.0f;
         carro->ocupadoEsquerda = 0;
         carro->ocupadoDireita = 0;
+        carro->vemAlguemAtras = 0;
         float meio, meiaLargura;
         meiasMedidasDoCarro(carro, &meio, &meiaLargura);
 
         for (int j = 0; j < TOTAL_CARROS; j++) {
             Carro *outro = corrida->classificacao[j];
-            if (outro == carro || carroNoPit(carro) || carroNoPit(outro)) {
+            if (outro == carro) {
                 continue;
             }
             float meioOutro, larguraOutro;
@@ -494,6 +528,9 @@ static void olharEmVolta(Corrida *corrida) {
                 } else {
                     carro->ocupadoEsquerda = 1;
                 }
+            }
+            if (d < 0.0f && vaoNaFrente < VISAO_PARA_TRAS_NO_PIT && carroNoPit(carro) && carroNoPit(outro) && outro->velocidade > 0.0f && outro->estadoDoPit != PIT_SAINDO) {
+                carro->vemAlguemAtras = 1;
             }
             if (d > 0.0f && vaoDeLado < DISTANCIA_AO_LADO && vaoNaFrente < ALCANCE_DA_VISAO
                 && (carro->distanciaAFrente < 0.0f || vaoNaFrente < carro->distanciaAFrente)) {

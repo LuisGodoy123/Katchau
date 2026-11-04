@@ -12,12 +12,15 @@
 #define FREIO_NO_PIT          6000.0f   /* o que a velocidade cai por segundo, entrando */
 #define ACELERACAO_NO_PIT     2600.0f
 #define VELOCIDADE_SEM_LIMITE 9000.0f   /* longe das garagens, no pit lane */
+#define FOLGA_NA_FILA         2.5f      /* metros até o carro da frente */
+#define METROS_SAINDO_DA_VAGA 6.0f
 #define VELOCIDADE_NA_ENTRADA 5000.0f   /* até passar do funil */
 #define FIM_DA_ENTRADA        3730.0f   /* metros: daqui em diante ele já está na reta do pit lane */
 #define GUIDO_ENCOSTADO       0.15f     /* metros entre o nariz dele e o carro, trabalhando */
 #define GUIDO_ESPERANDO       0.9f      /* metros a mais de folga, esperando */
 #define GUIDO_FOLGA_NAS_PONTAS 0.5f     /* metros além do carro, dando a volta nele */
-#define METROS_DA_ENTRADA_NA_VAGA 26.0f /* a essa distância da vaga ele começa a encostar */
+#define METROS_DA_ENTRADA_NA_VAGA 14.0f /* a essa distância da vaga ele encosta: menos que o vão entre as vagas, para não invadir a do lado */
+#define VELOCIDADE_ENCOSTANDO 1400.0f   /* devagar nesse trecho, para chegar até o fim da manobra */
 #define SEGUNDOS_OLHANDO_ADIANTE 1.2f
 #define BORDA_DEPOIS_DA_SAIDA 0.9f      /* larguras da pista: um pouco para dentro do asfalto */
 #define SEGUNDOS_VOLTANDO_A_PISTA 0.5f
@@ -141,6 +144,7 @@ int atualizarCarroNoPit(Carro *carro, Pista *pista, float tempoQuadro) {
     float vaga = metroDaVagaDoCarro(carro->numero) + metrosDaVolta - ENTRADA_DO_PIT;
     float fim = FIM_DO_PIT_LANE + metrosDaVolta - ENTRADA_DO_PIT;
     Comandos comandos = { 0, 0, 0, 0, 0.0f, 0, 0 };
+    float distanciaDaVaga = fabsf(vaga - noPit);
 
     /* Velocidade */
     int dentroDoLimite = (metros >= INICIO_DO_LIMITE_DO_PIT || metros <= FIM_DO_LIMITE_DO_PIT);
@@ -156,6 +160,9 @@ int atualizarCarroNoPit(Carro *carro, Pista *pista, float tempoQuadro) {
     if (carro->estadoDoPit == PIT_CHEGANDO) {
         float falta = fmaxf(vaga - noPit, 0.0f) * UNIDADES_POR_METRO;
         alvo = fminf(alvo, sqrtf(2.0f * FREIO_NO_PIT * falta));
+        if (distanciaDaVaga < METROS_DA_ENTRADA_NA_VAGA) {
+            alvo = fminf(alvo, VELOCIDADE_ENCOSTANDO);
+        }
         if (vaga - noPit < PARADO_NA_VAGA) {
             carro->estadoDoPit = PIT_TROCANDO;
             carro->tempoDaTroca = 0.0f;
@@ -174,6 +181,16 @@ int atualizarCarroNoPit(Carro *carro, Pista *pista, float tempoQuadro) {
             carro->desgaste = 0.0f;   /* pneus novos */
         }
     }
+
+    /* O trânsito: reduz atrás de quem está na mesma faixa, e fica na vaga até poder sair */
+    if (carro->estadoDoPit != PIT_TROCANDO && carro->distanciaAFrente >= 0.0f) {
+        float folga = fmaxf(carro->distanciaAFrente - FOLGA_NA_FILA, 0.0f) * UNIDADES_POR_METRO;
+        alvo = fminf(alvo, sqrtf(carro->velocidadeAFrente * carro->velocidadeAFrente + 2.0f * FREIO_NO_PIT * folga));
+    }
+    if (carro->estadoDoPit == PIT_SAINDO && distanciaDaVaga < METROS_SAINDO_DA_VAGA && carro->vemAlguemAtras) {
+        alvo = 0.0f;
+    }
+
     int freando = carro->velocidade > alvo;
     comandos.acelerar = carro->velocidade < alvo;
     comandos.frear = freando;
@@ -217,6 +234,10 @@ int atualizarCarroNoPit(Carro *carro, Pista *pista, float tempoQuadro) {
     if (carro->velocidade > 0.0f) {
         rapidez = fminf(fmaxf((linha - agora) * RESPOSTA_DE_LADO, -RAPIDEZ_DE_LADO), RAPIDEZ_DE_LADO);
     }
+    /* Saindo, só muda de faixa com o lado livre */
+    if (carro->estadoDoPit == PIT_SAINDO && ((rapidez > 0.0f && carro->ocupadoDireita) || (rapidez < 0.0f && carro->ocupadoEsquerda))) {
+        rapidez = 0.0f;
+    }
     agora += rapidez * tempoQuadro;
     carro->deslocamentoLateral = agora / larguraDaPista;
     carro->velocidadeDeLado = rapidez;
@@ -233,6 +254,14 @@ int atualizarCarroNoPit(Carro *carro, Pista *pista, float tempoQuadro) {
 
     /* Anda */
     float distancia = carro->velocidade * tempoQuadro;
+    if (carro->estadoDoPit != PIT_TROCANDO) {
+        distancia += carro->empurraoPendente;
+    }
+    carro->empurraoPendente = 0.0f;
+    carro->velocidadeLateral = 0.0f;
+    if (carro->posicao.segmento->ehLinhaDeChegada && carro->posicao.distanciaNoSegmento + distancia < 0.0f) {
+        distancia = -carro->posicao.distanciaNoSegmento;
+    }
     carro->distanciaPercorrida += distancia;
     int voltasGanhas = moverNaPista(&carro->posicao, distancia);
     carro->voltas += voltasGanhas;

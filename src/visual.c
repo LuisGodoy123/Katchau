@@ -98,6 +98,15 @@ void descarregarVisual(void) {
  * ================================================================== */
 
 /*
+ * fonteDoJogo
+ * Recebe: qual fonte.
+ * Devolve: a fonte, para quem escreve em imagens (os anúncios do cenário).
+ */
+Font fonteDoJogo(TipoFonte fonte) {
+    return fontes[fonte];
+}
+
+/*
  * larguraDoTexto
  * Recebe: a fonte, o texto e o tamanho da letra.
  * Devolve: a largura que o texto ocupa.

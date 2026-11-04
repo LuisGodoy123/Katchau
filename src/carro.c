@@ -137,6 +137,7 @@ Carro criarCarro(const char *nome, int numero, Segmento *largada, float deslocam
     carro.voltaDoPit = 0;
     carro.querParar = 0;
     carro.pitFeito = 0;
+    carro.vemAlguemAtras = 0;
     carro.tempoDaTroca = 0.0f;
     carro.duracaoDaTroca = 0.0f;
     carro.ultimaTroca = 0.0f;

@@ -244,7 +244,7 @@ Em Interlagos, nos níveis médio e difícil, a parada nos boxes é obrigatória
 
 - **Entrar:** na Subida dos Boxes, a faixa de desaceleração abre colada na pista: é só ir para a esquerda, em cima dela (`querEntrarNoPit`). Ali o piloto automático assume, no limite de 100 km/h perto das garagens.
 - **A troca:** cada carro tem uma vaga. Na do jogador, o Guido passa por todas as rodas em 3,2 s (`faseDaTroca` e `lugarDoGuido` em `pitstop.c`, desenho em `render.c`), e a imagem corta para uma câmera ao lado do carro.
-- **Rivais:** cada um para numa volta (`voltaDoPit`) e leva mais tempo na troca que o Guido. No pit lane, ninguém bate em ninguém.
+- **Rivais:** cada um para numa volta (`voltaDoPit`) e leva mais tempo na troca que o Guido. No pit lane há fila: quem vem atrás reduz, quem sai da vaga espera passar quem já vem na faixa, e a colisão só separa os carros, sem tranco nem rodada; o carro parado na troca nunca é empurrado.
 
 A Copa Pistão ainda não tem pit lane: lá não há parada.
 
@@ -369,6 +369,9 @@ que fica onde em Interlagos:
 - os **boxes**: o prédio é feito de módulos de 6 garagens (`boxes.glb`), cada um na altura da reta, com pontas envidraçadas e a torre de controle,
   com um pátio de asfalto e ruas de serviço. Onde o terreno desce, tudo fica sobre uma laje com pilares e vigas (`construirEstruturaDosBoxes`). O **pit lane** abre colado na pista na Subida dos Boxes, como uma faixa de desaceleração, passa por trás do funil, corre atrás do muro e, por dentro do S do Senna e da Curva do Sol, volta a colar na pista na Reta Oposta, como uma faixa de aceleração. Nas duas ligações há uma ilha de asfalto pintado. É por ele que passa o pitstop (`pitstop.c`);
 - **árvores** só nos bosques da tabela `BOSQUES` (sorteio com semente fixa: ficam sempre no mesmo lugar). Longe deles, o campo é aberto.
+- em volta da pista (`infraestrutura.c`): linhas brancas nas bordas, a marca de borracha no traçado, brita por fora das curvas, guard-rail com alambrado e placas de patrocínio, postos de fiscal, torres de TV, duas passarelas, o telão, bandeiras no alto das arquibancadas, a rua de serviço, tendas, estacionamento, caminhões das equipes no pátio e bancadas na mureta dos boxes. Fica tudo além de onde o carro chega: a física da pista não muda;
+- os prédios, casas, árvores, caminhões, tendas, torres e o telão são modelos `.glb` em `recursos/modelos/objetos/`; só o que acompanha a forma da pista e do terreno é montado em código (linhas, brita, guard-rail, placas, morros);
+- além do muro do autódromo (`paisagem.c`), tudo em 3D de verdade: a avenida com o trânsito, os bairros, os prédios, as matas, o centro da cidade e os morros até o horizonte, com o ar clareando o que está longe. Só o céu é uma imagem. Dentro do circuito fica o lago da Descida do Lago.
 
 Num circuito sinuoso, o lugar de um objeto pode cair em cima de outro trecho da pista. Por isso `lugarLivre` confere
 cada um contra a volta inteira: ele só entra se ficar além de onde o carro alcança em qualquer trecho.
