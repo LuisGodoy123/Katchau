@@ -62,13 +62,14 @@ tamanho real (`comecarInterface()` em `hud.c`).
 
 | Tecla | Controle | Ação |
 |-------|----------|------|
-| ↑ ou W | RT ou A | Acelerar |
-| ↓ ou S | LT ou X | Frear |
-| ESPAÇO | RB ou B | Nitro (segure): recarrega aos poucos, e bem mais rápido freando |
+| ↑ ou W | R2 | Acelerar |
+| ↓ ou S | L2 | Frear |
+| SHIFT | Cruz | Freio de mão (com o volante virado, drift) |
+| ESPAÇO | Bola | Nitro (segure): recarrega aos poucos, e bem mais rápido freando |
 | ← → ou A D | analógico esquerdo ou direcional | Virar (o volante gira aos poucos e volta sozinho ao centro) |
 | | analógico direito | Câmera livre: gira em volta do carro; todo para cima olha para o alto e todo para baixo olha para trás num giro rápido (soltando, volta) |
-| ENTER | A | Ver o resultado (depois da chegada) |
-| ESC   | START | Pausar: a corrida e os sons congelam; escolha CONTINUAR ou MENU PRINCIPAL (ESC de novo continua) |
+| ENTER | Cruz | Ver o resultado (depois da chegada) |
+| ESC   | Options | Pausar: a corrida e os sons congelam; escolha CONTINUAR ou MENU PRINCIPAL (ESC de novo continua) |
 
 O controle (Xbox, PlayStation ou parecido, por USB ou Bluetooth) funciona junto com o
 teclado, sem configurar nada. Os nomes da tabela são os do controle de Xbox; no de
@@ -239,13 +240,56 @@ uma `habilidade`, de 93% do limite do carro (a pole) a 86% (o último do grid, a
 
 ## Pitstop
 
-Em Interlagos a corrida tem 8 voltas e a parada nos boxes é obrigatória: quem cruza a última bandeirada sem parar é desclassificado.
+Em Interlagos, nos níveis médio e difícil, a parada nos boxes é obrigatória: quem cruza a última bandeirada sem parar é desclassificado.
 
-- **Entrar:** na Subida dos Boxes, saia pela esquerda para cima do asfalto do pit lane (`querEntrarNoPit`). Ali o piloto automático assume, no limite de 100 km/h perto das garagens.
+- **Entrar:** na Subida dos Boxes, a faixa de desaceleração abre colada na pista: é só ir para a esquerda, em cima dela (`querEntrarNoPit`). Ali o piloto automático assume, no limite de 100 km/h perto das garagens.
 - **A troca:** cada carro tem uma vaga. Na do jogador, o Guido passa por todas as rodas em 3,2 s (`faseDaTroca` e `lugarDoGuido` em `pitstop.c`, desenho em `render.c`), e a imagem corta para uma câmera ao lado do carro.
 - **Rivais:** cada um para numa volta (`voltaDoPit`) e leva mais tempo na troca que o Guido. No pit lane, ninguém bate em ninguém.
 
-A Copa Pistão ainda não tem pit lane: lá também são 8 voltas, mas sem parada.
+A Copa Pistão ainda não tem pit lane: lá não há parada.
+
+## Configurações
+
+No menu principal, **CONFIGURAÇÕES** troca as teclas e os botões de cada comando (duas teclas e dois botões para cada um) e as opções do controle: ligar a vibração, a força dela, o tremor no acelerador, a zona morta do analógico, a resposta do volante e inverter a câmera. Tudo fica em `configuracoes.txt`, salvo a cada mudança; apagar o arquivo volta ao padrão. A lógica está em `src/configuracoes.c`, e os menus e a pausa não mudam de tecla.
+
+## Curvas na mão do piloto
+
+A posição do carro é medida em relação à pista, então, sem cuidado, ele acompanharia a curva sozinho. Duas regras evitam isso (`atualizarLateral` em `carro.c`):
+
+- **Curva leve pede volante:** quanto mais folga o pneu tem, mais o carro segue reto se ninguém virar (até o dobro do empurrão). No limite do pneu nada muda, e a velocidade segura de cada curva é a mesma.
+- **O bico não vira sozinho:** o que falta de volante vira um ângulo para fora (`anguloDeFuga`), no carro e na câmera. Só no desenho: quem manda no caminho é a conta da física.
+
+## Vibração no controle
+
+A raylib não tem vibração no macOS, então o jogo fala direto com o sistema de controles da Apple (`src/vibrar_mac.m`). A lógica fica separada e testada em `src/vibracao.c`. Com `make testar-vibracao` dá para sentir cada efeito no controle, sem abrir o jogo. Fora do macOS o jogo não vibra.
+
+| O que acontece | O que se sente |
+|---|---|
+| Asfalto | sempre presente quando o carro anda: textura que cresce com a velocidade, com as juntas do piso de vez em quando |
+| Pneu escorregando | o asfalto some das mãos, o carro flutua, e entra um tremor irregular na mão direita |
+| Drift | tranco quando a traseira solta, o peso na mão de fora da curva, e outro tranco quando o pneu agarra |
+| Nitro | empurrão ao ligar, combustão pulsando enquanto queima, engasgos com o tanque no fim e uma cauda ao apagar |
+| Freada | o peso indo para a frente e, nas freadas fortes, o ABS na mão direita |
+| Arrancada | a roda patinando, na mão direita e no gatilho do acelerador |
+| Zebra e grama | pulsos no ritmo do carro; tremor irregular |
+| Batida, muro, rodada | tranco proporcional à diferença de velocidade; raspar; sacudir |
+| Marchas | um toque a cada troca, maior na reduzida |
+| Boxes | o macaco subindo e descendo, e a pistola do Guido em cada roda |
+| Largada e chegada | um toque a cada número, e um tranco no GO e na bandeirada |
+
+## Níveis, pneus e drift
+
+Na tela CORRIDA se escolhe a pista e o nível (`NIVEIS` em `corrida.c`). O vermelho marca o que está escolhido, e o contorno amarelo, onde o cursor está; confirmar passa para a linha seguinte, e só o CORRER larga:
+
+| Nível | Voltas | Rivais (habilidade) | Pitstop | Pneus gastam |
+|---|---|---|---|---|
+| Fácil | 3 | 0,87 a 0,80 | não | não |
+| Médio | 5 | 0,93 a 0,86 | sim (em Interlagos) | não |
+| Difícil | 8 | 0,97 a 0,91 | sim (em Interlagos) | sim (em Interlagos) |
+
+- **Pneus:** o desgaste cresce com o caminho (um jogo dura cerca de 5 voltas) e 5 vezes mais rápido derrapando. Pneu gasto segura menos nas curvas e tira um pouco da velocidade máxima; a troca do Guido deixa os pneus novos. Os rivais também gastam.
+- **Freio de mão** (Shift, ou Cruz no controle): tira velocidade. Um toque com o volante virado quebra a traseira (`atualizarDrift` em `carro.c`), e o carro fica de lado até 55°. Depois quem manda é o pé: acelerando de lado o drift continua, sem acelerar ele acaba, e o volante controla o ângulo, que tem inércia; virar para o outro lado é o contraesterço. De lado o carro vai para onde o bico aponta (até um limite, para não sair da pista), solta fumaça, gasta pneu e perde velocidade, mais quanto mais de lado.
+- **Câmbio** (`motor.c`): cada marcha é bem mais longa que a anterior, e a nova nasce entre 6.200 e 6.400 rpm, longe do corte de 8.000. A reduzida depende do pé: freando reduz cedo, com uma acelerada de punta-taco; aliviando, deixa a marcha longa; acelerando com o motor fraco, pula direto para a marcha que tem força.
 
 ## Onde a ordenação entra na lógica
 
@@ -323,8 +367,7 @@ que fica onde em Interlagos:
 - a **reta dos boxes**: muro e alambrado dos dois lados, com um funil no fim da Subida dos Boxes, para quem vem pela grama, e o camarote
   Pit Stop Club depois da linha;
 - os **boxes**: o prédio é feito de módulos de 6 garagens (`boxes.glb`), cada um na altura da reta, com pontas envidraçadas e a torre de controle,
-  com um pátio de asfalto e ruas de serviço. Onde o terreno desce, tudo fica sobre uma laje com pilares e vigas (`construirEstruturaDosBoxes`). O **pit lane** sai da pista na Subida dos Boxes, passa por trás do funil,
-  corre atrás do muro e, por dentro do S do Senna e da Curva do Sol, volta à pista na Reta Oposta. É por ele que passa o pitstop (`pitstop.c`);
+  com um pátio de asfalto e ruas de serviço. Onde o terreno desce, tudo fica sobre uma laje com pilares e vigas (`construirEstruturaDosBoxes`). O **pit lane** abre colado na pista na Subida dos Boxes, como uma faixa de desaceleração, passa por trás do funil, corre atrás do muro e, por dentro do S do Senna e da Curva do Sol, volta a colar na pista na Reta Oposta, como uma faixa de aceleração. Nas duas ligações há uma ilha de asfalto pintado. É por ele que passa o pitstop (`pitstop.c`);
 - **árvores** só nos bosques da tabela `BOSQUES` (sorteio com semente fixa: ficam sempre no mesmo lugar). Longe deles, o campo é aberto.
 
 Num circuito sinuoso, o lugar de um objeto pode cair em cima de outro trecho da pista. Por isso `lugarLivre` confere

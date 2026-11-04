@@ -15,7 +15,8 @@
 
 typedef enum {
     NUVEM_DE_PNEU,     /* branca e densa: derrapagem e arrancada */
-    NUVEM_DE_POEIRA    /* marrom: roda na grama */
+    NUVEM_DE_POEIRA,   /* marrom: roda na grama */
+    NUVEM_DE_DRIFT     /* branca, grande e demorada: o carro de lado */
 } TipoDeNuvem;
 
 void carregarFumaca(void);

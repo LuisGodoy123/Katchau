@@ -49,20 +49,23 @@ typedef enum {
 #define UNIDADES_POR_METRO    (COMPRIMENTO_SEGMENTO * SEGMENTOS_POR_METRO)
 
 /* Largura de cada lado da pista, em metros, onde não há outra medida (Interlagos) */
+#define FIM_DO_MURO           320.0f    /* metros depois da linha: onde o muro da reta acaba */
 #define INICIO_DO_FUNIL       3650.0f   /* metros: o muro da reta dos boxes começa aqui, no fim da Subida */
 #define COMPRIMENTO_DO_FUNIL  70.0f
 #define ABERTURA_DO_FUNIL     2.5f      /* larguras da pista: até onde o carro pode ir pela grama */
 #define LARGURA_DO_PIT_LANE   14.0f
-#define ENTRADA_DO_PIT        3470.0f   /* metros: o pit lane sai da pista aqui, na Subida dos Boxes */
-#define METROS_ABRINDO_O_PIT  40.0f     /* em tão poucos metros ele já tem a largura toda */
-#define FIM_DA_SAIDA_DA_PISTA 3640.0f   /* e já se afastou da pista aqui */
+#define ENTRADA_DO_PIT        3400.0f   /* metros: o pit lane abre colado na pista, na Subida dos Boxes */
+#define METROS_ABRINDO_O_PIT  90.0f     /* em tantos metros ele já tem a largura toda, ainda colado */
+#define INICIO_DA_SEPARACAO   3490.0f   /* aqui ele começa a se afastar da pista */
+#define FIM_DA_SAIDA_DA_PISTA 3640.0f   /* e já se afastou */
+#define LADO_DA_ILHA          1.20f     /* larguras: até aqui, entre a pista e o pit lane, é asfalto pintado */
 #define PIT_ATRAS_DO_FUNIL    2.62f     /* larguras da pista: passa por trás do muro do funil */
 #define INICIO_DO_DESVIO_DA_SAIDA 200.0f /* metros: depois dos boxes, ele se afasta do muro da reta */
 #define FIM_DO_DESVIO_DA_SAIDA 320.0f   /* e já passou da ponta do muro */
 #define LADO_DA_SAIDA         1.6f      /* larguras da pista: por dentro do S do Senna e da Curva do Sol */
-#define FIM_DO_PIT_LANE       900.0f    /* volta à pista na Reta Oposta, como em Interlagos */
-#define METROS_VOLTANDO_A_PISTA 120.0f  /* o pit lane encosta na pista aos poucos */
-#define RAMPA_DO_PIT_LANE     70.0f     /* e fecha nos últimos metros */
+#define INICIO_DA_VOLTA       700.0f    /* metros: na Reta Oposta, ele começa a se aproximar da pista */
+#define FIM_DA_VOLTA          800.0f    /* e já está colado nela */
+#define FIM_DO_PIT_LANE       900.0f    /* daqui até o fim ele fecha, colado, como uma faixa de aceleração */
 #define METROS_DO_RETAO_DO_PIT 40.0f    /* depois do funil, ele encosta no muro */
 #define PRIMEIRO_METRO_DOS_BOXES (-270.0f)  /* a partir da linha de chegada */
 #define MEIA_LARGURA_PADRAO   (2000.0f / UNIDADES_POR_METRO)
@@ -97,6 +100,7 @@ typedef struct Segmento {
     int ehLinhaDeChegada;           /* 1 no segmento da largada/chegada, 0 nos outros */
     float altura;                   /* altura do chão no começo do segmento (unidades de mundo) */
     const char *nomeTrecho;         /* nome da parte do autódromo ("S do Senna", "Junção"...) */
+    float asfaltoEsquerda;          /* até onde é asfalto, à esquerda, em larguras: mais que 1 onde o pit lane encosta */
     int temMuro;                    /* 1: muro nos dois lados; 0: grama além do asfalto */
     float lugarDoMuro;              /* onde fica o muro, em larguras da pista (1 = na borda do asfalto) */
 

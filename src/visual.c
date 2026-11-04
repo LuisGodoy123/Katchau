@@ -23,6 +23,9 @@
 #define FOLGA_ENTRE_BLOCOS     2.0f
 #define ALTURA_TECLA           22.0f
 #define LETRA_TECLA            15.0f
+#define LARGURA_DO_OMBRO       30.0f     /* os botões de cima do controle */
+#define COR_CORPO_DO_ICONE     (Color){ 34, 37, 46, 255 }
+#define COR_DO_DIRECIONAL      (Color){ 125, 130, 145, 255 }
 
 /* Todos os caracteres que o jogo escreve: o ASCII visível e as letras
  * acentuadas do português (a fonte padrão da raylib não tem acento). */
@@ -214,23 +217,178 @@ static int ehSeta(const char *tecla) {
            strcmp(tecla, "ESQ") == 0 || strcmp(tecla, "DIR") == 0;
 }
 
+/* ---------- Ícones dos botões do controle ---------- */
+
+/*
+ * ehGatilhoOuOmbro
+ * Recebe: o nome do ícone, sem o @.
+ * Devolve: 1 se é um dos botões de cima do controle.
+ */
+static int ehGatilhoOuOmbro(const char *nome) {
+    static const char *NOMES[] = { "L1", "L2", "R1", "R2", "LB", "LT", "RB", "RT" };
+    for (int i = 0; i < 8; i++) {
+        if (strcmp(nome, NOMES[i]) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/*
+ * larguraDoIcone
+ * Recebe: o nome do ícone, sem o @.
+ * Devolve: a largura dele.
+ */
+static float larguraDoIcone(const char *nome) {
+    if (ehGatilhoOuOmbro(nome)) {
+        return LARGURA_DO_OMBRO;
+    }
+    return ALTURA_TECLA + 2.0f;
+}
+
+/*
+ * letraNoCentro
+ * Recebe: o texto, o centro e a cor.
+ * Devolve: nada.
+ */
+static void letraNoCentro(const char *texto, Vector2 centro, float tamanho, Color cor) {
+    float largura = larguraDoTexto(FONTE_FORTE, texto, tamanho);
+    DrawTextEx(fontes[FONTE_FORTE], texto, (Vector2){ centro.x - largura / 2.0f, centro.y - tamanho / 2.0f - 1.0f }, tamanho,
+               tamanho * ESPACO_ENTRE_LETRAS, cor);
+}
+
+/*
+ * desenharDirecional
+ * Uma cruz, com o braço do lado apertado aceso.
+ * Recebe: o centro e o lado ("CIMA", "BAIXO", "ESQ" ou "DIR").
+ * Devolve: nada.
+ */
+static void desenharDirecional(Vector2 c, const char *lado) {
+    float meio = 3.5f, braco = 10.0f;
+    DrawRectangleRec((Rectangle){ c.x - meio, c.y - braco, meio * 2.0f, braco * 2.0f }, COR_DO_DIRECIONAL);
+    DrawRectangleRec((Rectangle){ c.x - braco, c.y - meio, braco * 2.0f, meio * 2.0f }, COR_DO_DIRECIONAL);
+    Rectangle aceso = { c.x + meio, c.y - meio, braco - meio, meio * 2.0f };
+    if (strcmp(lado, "ESQ") == 0) {
+        aceso.x = c.x - braco;
+    } else if (strcmp(lado, "CIMA") == 0) {
+        aceso = (Rectangle){ c.x - meio, c.y - braco, meio * 2.0f, braco - meio };
+    } else if (strcmp(lado, "BAIXO") == 0) {
+        aceso = (Rectangle){ c.x - meio, c.y + meio, meio * 2.0f, braco - meio };
+    }
+    DrawRectangleRec(aceso, COR_AMARELO);
+}
+
+/*
+ * desenharIconeDoControle
+ * O desenho de um botão: a forma dele no controle de verdade, para reconhecer sem ler.
+ * Recebe: o canto superior esquerdo e o nome, sem o @.
+ * Devolve: a largura do ícone.
+ */
+static float desenharIconeDoControle(float x, float y, const char *nome) {
+    float largura = larguraDoIcone(nome);
+    Vector2 c = { x + largura / 2.0f, y + ALTURA_TECLA / 2.0f + 1.0f };
+    float raio = ALTURA_TECLA / 2.0f + 1.0f;
+
+    /* Os de cima: um "gatilho" (2) é mais alto e arredondado que um "ombro" (1) */
+    if (ehGatilhoOuOmbro(nome)) {
+        int gatilho = (nome[1] == '2' || nome[1] == 'T');
+        Rectangle corpo = { x, y + (gatilho ? 0.0f : 3.0f), largura, ALTURA_TECLA + (gatilho ? 2.0f : -2.0f) };
+        DrawRectangleRounded(corpo, gatilho ? 0.65f : 0.35f, 6, COR_CORPO_DO_ICONE);
+        DrawRectangleRoundedLinesEx(corpo, gatilho ? 0.65f : 0.35f, 6, 1.0f, COR_CROMO);
+        letraNoCentro(nome, c, LETRA_TECLA, COR_TEXTO_CLARO);
+        return largura;
+    }
+    if (strncmp(nome, "DPAD ", 5) == 0) {
+        desenharDirecional(c, nome + 5);
+        return largura;
+    }
+
+    /* Os analógicos: o pino visto de cima */
+    if (strncmp(nome, "ANALOG ", 7) == 0 || !strcmp(nome, "L3") || !strcmp(nome, "R3") || !strcmp(nome, "LS") || !strcmp(nome, "RS")) {
+        DrawCircleV(c, raio, COR_CORPO_DO_ICONE);
+        DrawRing(c, raio - 4.0f, raio - 2.5f, 0.0f, 360.0f, 28, COR_CROMO);
+        const char *texto = (nome[0] == 'A') ? (nome[7] == 'E' ? "L" : "R") : nome;
+        letraNoCentro(texto, c, (nome[0] == 'A') ? 13.0f : 11.0f, COR_TEXTO_CLARO);
+        return largura;
+    }
+
+    /* Os do meio */
+    if (!strcmp(nome, "OPTIONS") || !strcmp(nome, "START") || !strcmp(nome, "CRIAR") || !strcmp(nome, "BACK")) {
+        DrawRectangleRounded((Rectangle){ x + 2.0f, y + 3.0f, largura - 4.0f, ALTURA_TECLA - 4.0f }, 0.45f, 6, COR_CORPO_DO_ICONE);
+        if (!strcmp(nome, "OPTIONS") || !strcmp(nome, "START")) {
+            for (int i = -1; i <= 1; i++) {
+                DrawLineEx((Vector2){ c.x - 5.5f, c.y + i * 4.0f }, (Vector2){ c.x + 5.5f, c.y + i * 4.0f }, 1.6f, COR_TEXTO_CLARO);
+            }
+        } else {
+            DrawRectangleLinesEx((Rectangle){ c.x - 5.0f, c.y - 4.0f, 7.0f, 7.0f }, 1.3f, COR_TEXTO_CLARO);
+            DrawRectangleLinesEx((Rectangle){ c.x - 2.0f, c.y - 1.0f, 7.0f, 7.0f }, 1.3f, COR_TEXTO_CLARO);
+        }
+        return largura;
+    }
+    if (!strcmp(nome, "PS") || !strcmp(nome, "GUIA")) {
+        DrawCircleV(c, raio, COR_CORPO_DO_ICONE);
+        letraNoCentro(!strcmp(nome, "PS") ? "PS" : "X", c, 12.0f, COR_TEXTO_CLARO);
+        return largura;
+    }
+
+    /* Os da frente, no DualSense: a forma e a cor de cada um */
+    DrawCircleV(c, raio, COR_CORPO_DO_ICONE);
+    float r = raio * 0.52f, grossura = 2.1f;
+    if (!strcmp(nome, "CRUZ")) {
+        Color cor = { 120, 170, 240, 255 };
+        DrawLineEx((Vector2){ c.x - r, c.y - r }, (Vector2){ c.x + r, c.y + r }, grossura, cor);
+        DrawLineEx((Vector2){ c.x - r, c.y + r }, (Vector2){ c.x + r, c.y - r }, grossura, cor);
+    } else if (!strcmp(nome, "BOLA")) {
+        DrawRing(c, r - 0.2f, r + grossura - 0.2f, 0.0f, 360.0f, 28, (Color){ 240, 90, 100, 255 });
+    } else if (!strcmp(nome, "QUADRADO")) {
+        DrawRectangleLinesEx((Rectangle){ c.x - r, c.y - r, r * 2.0f, r * 2.0f }, grossura, (Color){ 230, 130, 200, 255 });
+    } else if (!strcmp(nome, "TRIANGULO")) {
+        Color cor = { 90, 210, 170, 255 };
+        Vector2 a = { c.x, c.y - r - 1.5f }, b = { c.x - r - 1.0f, c.y + r - 0.5f }, d = { c.x + r + 1.0f, c.y + r - 0.5f };
+        DrawLineEx(a, b, grossura, cor);
+        DrawLineEx(b, d, grossura, cor);
+        DrawLineEx(d, a, grossura, cor);
+    } else {
+        /* No Xbox: a letra, na cor do botão */
+        Color cor = COR_TEXTO_CLARO;
+        if (!strcmp(nome, "A")) {
+            cor = (Color){ 90, 200, 90, 255 };
+        } else if (!strcmp(nome, "B")) {
+            cor = (Color){ 240, 90, 90, 255 };
+        } else if (!strcmp(nome, "X")) {
+            cor = (Color){ 100, 160, 240, 255 };
+        } else if (!strcmp(nome, "Y")) {
+            cor = (Color){ 240, 200, 70, 255 };
+        }
+        letraNoCentro(nome, c, 15.0f, cor);
+    }
+    return largura;
+}
+
 /*
  * larguraDaTecla
  * Recebe: o nome da tecla.
  * Devolve: quanto ela ocupa na horizontal (para centralizar uma fila de dicas).
  */
 float larguraDaTecla(const char *tecla) {
+    if (tecla[0] == '@') {
+        return larguraDoIcone(tecla + 1);
+    }
     return ehSeta(tecla) ? ALTURA_TECLA : larguraDoTexto(FONTE_FORTE, tecla, LETRA_TECLA) + 14.0f;
 }
 
 /*
  * desenharTecla
  * Uma tecla de teclado, para as dicas de controle. "CIMA", "BAIXO",
- * "ESQ" e "DIR" viram setas desenhadas; o resto é escrito na tecla.
+ * "ESQ" e "DIR" viram setas desenhadas; o resto é escrito na tecla. Com um @ na
+ * frente, é um botão do controle, e vira o ícone dele.
  * Recebe: o canto superior esquerdo e o nome da tecla.
  * Devolve: a largura da tecla (para desenhar a próxima ao lado).
  */
 float desenharTecla(float x, float y, const char *tecla) {
+    if (tecla[0] == '@') {
+        return desenharIconeDoControle(x, y, tecla + 1);
+    }
     float altura = ALTURA_TECLA;
     float tamanhoLetra = LETRA_TECLA;
     float largura = larguraDaTecla(tecla);

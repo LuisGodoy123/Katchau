@@ -18,8 +18,28 @@
 #define TOTAL_RIVAIS   13
 #define TOTAL_CARROS   (TOTAL_RIVAIS + 1)   /* rivais + jogador */
 
+/* Os níveis de dificuldade, escolhidos antes da corrida */
+typedef enum {
+    NIVEL_FACIL,
+    NIVEL_MEDIO,
+    NIVEL_DIFICIL,
+    TOTAL_NIVEIS
+} NivelDaCorrida;
+
+typedef struct {
+    const char *nome;
+    int voltas;
+    float habilidadeDaPole;     /* de 0 a 1: quanto do limite do carro usa o rival que larga na frente */
+    float habilidadeDoUltimo;   /* e o último dos rivais */
+    int temParada;              /* 1: parada obrigatória, onde a pista tem pit lane */
+    int gastaPneu;              /* 1: os pneus gastam (precisa de pit lane para trocar) */
+} FichaDoNivel;
+
 typedef struct {
     Pista *pista;
+    NivelDaCorrida nivel;
+    int totalVoltas;
+    int temParada;              /* 1: esta corrida tem pitstop */
     Carro jogador;
     Carro rivais[TOTAL_RIVAIS];
 
@@ -30,7 +50,7 @@ typedef struct {
 
     float contagemRegressiva;   /* segundos até a largada; a corrida só anda quando chega a 0 */
     float tempoDeCorrida;       /* segundos desde a largada (não para no fim) */
-    int terminou;               /* 1 depois que o jogador completa TOTAL_VOLTAS */
+    int terminou;               /* 1 depois que o jogador completa todas as voltas */
     int desclassificado;        /* 1 se o jogador terminou sem fazer a parada obrigatória */
     int posicaoFinal;           /* posição do jogador na chegada (1 a 8) */
 
@@ -55,7 +75,8 @@ typedef enum {
 } Bandeira;
 
 const FichaTecnica *fichaDoCarro(int numero);
-void iniciarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador);
+const FichaDoNivel *fichaDoNivel(NivelDaCorrida nivel);
+void iniciarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador, NivelDaCorrida nivel);
 void atualizarCorrida(Corrida *corrida, Comandos comandosJogador, float tempoQuadro);
 int todosChegaram(Corrida *corrida);
 int voltaAtual(Carro *carro);

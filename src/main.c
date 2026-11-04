@@ -13,6 +13,7 @@
  */
 
 #include <string.h>
+#include <stdio.h>
 #include "raylib.h"
 #include "config.h"
 #include "pista.h"
@@ -24,28 +25,28 @@
 #include "render.h"
 #include "hud.h"
 #include "menu.h"
+#include "vibrar.h"
+#include "configuracoes.h"
 #include "visual.h"
 #include "audio.h"
 #include "controle.h"
 
 /* Na vitória, o painel de chegada espera um pouco para o jogador ver o
  * confete e o refrão entrando */
+#define SEGUNDOS_ANTES_DE_SEGUIR 1.5f   /* depois da bandeirada */
+#define FORCA_DO_TOQUE 0.7f   /* o toque de teste da vibração, nas configurações */
 #define ATRASO_DO_PAINEL_NA_VITORIA  2.5f   /* segundos depois de cruzar a linha */
 
 /*
  * lerComandos
  * Traduz as teclas apertadas para os comandos do carro.
- * Setas ou WASD funcionam, e o controle também (controle.c).
+ * As teclas e os botões são os escolhidos nas configurações (controle.c).
  * Recebe: nada.
  * Devolve: os comandos deste quadro.
  */
 static Comandos lerComandos(void) {
-    Comandos comandos = { 0, 0, 0, 0, 0.0f, 0 };
-    comandos.acelerar = IsKeyDown(KEY_UP) || IsKeyDown(KEY_W);
-    comandos.frear = IsKeyDown(KEY_DOWN) || IsKeyDown(KEY_S);
-    comandos.esquerda = IsKeyDown(KEY_LEFT) || IsKeyDown(KEY_A);
-    comandos.direita = IsKeyDown(KEY_RIGHT) || IsKeyDown(KEY_D);
-    comandos.nitro = IsKeyDown(KEY_SPACE);
+    Comandos comandos = { 0, 0, 0, 0, 0.0f, 0, 0 };
+    lerComandosDoTeclado(&comandos);
     somarComandosDoControle(&comandos);
     return comandos;
 }
@@ -82,8 +83,11 @@ static Tela atualizarTelaDaCorrida(Corrida *corrida, EstadoMenu *menu, int *paus
     }
 
     atualizarCorrida(corrida, lerComandos(), tempoQuadro);
-    if (corrida->terminou && (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER) ||
-                              controleApertou(BOTAO_CONFIRMAR))) {
+    /* Espera um pouco: o botão de confirmar é também o freio de mão, e quem o aperta
+     * na bandeirada não pode pular a tela da chegada sem querer */
+    int podeSeguir = corrida->tempoDeCorrida - corrida->jogador.tempoDeChegada > SEGUNDOS_ANTES_DE_SEGUIR;
+    if (corrida->terminou && podeSeguir && (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER) ||
+                                            controleApertou(BOTAO_CONFIRMAR))) {
         tocarSom(SOM_CONFIRMAR);
         return TELA_RESULTADO;
     }
@@ -98,26 +102,33 @@ static Tela atualizarTelaDaCorrida(Corrida *corrida, EstadoMenu *menu, int *paus
  * Com --janela na linha de comando, abre numa janela 800x600 (útil para
  * testar e depurar).
  * Recebe: 1 para abrir em janela, 0 para tela cheia.
- * Devolve: nada.
+ * Devolve: 1 se a janela abriu, 0 se não (por exemplo, com a tela desligada).
  */
-static void abrirJanela(int emJanela) {
+static int abrirJanela(int emJanela) {
     /* VSync: cada quadro sai junto com a atualização do monitor, em
      * intervalos regulares, sem os "trancos" de quadros irregulares.
      * Precisa vir antes do InitWindow. O SetTargetFPS logo abaixo
      * continua valendo como limite, caso o driver de vídeo ignore o VSync. */
     SetConfigFlags(FLAG_VSYNC_HINT);
     InitWindow(LARGURA_TELA, ALTURA_TELA, TITULO_JANELA);
+    if (!IsWindowReady()) {
+        return 0;   /* por exemplo, com a tela do computador desligada */
+    }
     if (!emJanela) {
         ToggleBorderlessWindowed();   /* ocupa o monitor inteiro */
         HideCursor();
     }
     SetTargetFPS(QUADROS_POR_SEG);
     SetExitKey(KEY_NULL);   /* ESC volta de tela; para sair, use "SAIR" no menu */
+    return 1;
 }
 
 int main(int argc, char *argv[]) {
     int emJanela = (argc > 1 && strcmp(argv[1], "--janela") == 0);
-    abrirJanela(emJanela);
+    if (!abrirJanela(emJanela)) {
+        printf("Nao deu para abrir a janela do jogo. A tela do computador esta ligada?\n");
+        return 1;
+    }
 
     /* As texturas são procuradas em recursos/, ao lado do executável.
      * Mudar para a pasta do executável faz o jogo achá-las mesmo quando
@@ -136,10 +147,14 @@ int main(int argc, char *argv[]) {
     Corrida corrida;
     EstadoMenu menu;
     iniciarMenu(&menu);
+    carregarConfiguracoes(configuracoesAtuais(), ARQUIVO_DE_CONFIGURACOES);
     Tela tela = TELA_MENU;
     int venceuAntes = 0;   /* para soltar o confete uma vez só, no quadro da vitória */
     Olhar olhar = olharParaAFrente();
     int pausada = 0;       /* a corrida está na pausa (ESC) */
+    EstadoDaVibracao estadoDaVibracao;
+    iniciarEstadoDaVibracao(&estadoDaVibracao);
+    iniciarVibracao();
 
     /* Laço principal: roda uma vez por quadro até escolher SAIR ou fechar a janela */
     while (tela != TELA_SAIR && !WindowShouldClose()) {
@@ -159,6 +174,9 @@ int main(int argc, char *argv[]) {
             case TELA_PISTAS:
                 proxima = atualizarEscolhaDePista(&menu);
                 break;
+            case TELA_CONFIGURACOES:
+                proxima = atualizarConfiguracoes(&menu);
+                break;
             case TELA_COMO_JOGAR:
                 proxima = atualizarComoJogar();
                 break;
@@ -167,7 +185,7 @@ int main(int argc, char *argv[]) {
                 break;
             case TELA_RESULTADO: {
                 /* A corrida continua ao fundo até todos os rivais chegarem */
-                Comandos nenhumComando = { 0, 0, 0, 0, 0.0f, 0 };
+                Comandos nenhumComando = { 0, 0, 0, 0, 0.0f, 0, 0 };
                 atualizarCorrida(&corrida, nenhumComando, tempoQuadro);
                 proxima = atualizarResultado();
                 break;
@@ -178,10 +196,11 @@ int main(int argc, char *argv[]) {
 
         /* Entrar na corrida (do menu ou do "correr de novo") sempre começa uma nova */
         if (proxima == TELA_CORRIDA && tela != TELA_CORRIDA) {
-            iniciarCorrida(&corrida, pistas[menu.pistaEscolhida], menu.carroEscolhido);
+            iniciarCorrida(&corrida, pistas[menu.pistaEscolhida], menu.carroEscolhido, menu.nivelEscolhido);
             limparConfetes();
             limparFumaca();
             olhar = olharParaAFrente();
+            iniciarEstadoDaVibracao(&estadoDaVibracao);
         }
         tela = proxima;
 
@@ -194,7 +213,7 @@ int main(int argc, char *argv[]) {
         venceuAntes = venceu;
 
         /* O mouse só aparece (e só funciona) no menu principal, na garagem e na pausa */
-        int usaMouse = (tela == TELA_MENU || tela == TELA_GARAGEM || tela == TELA_PISTAS
+        int usaMouse = (tela == TELA_MENU || tela == TELA_GARAGEM || tela == TELA_PISTAS || tela == TELA_CONFIGURACOES
                         || (tela == TELA_CORRIDA && pausada));
         if (usaMouse && IsCursorHidden()) {
             ShowCursor();
@@ -202,8 +221,23 @@ int main(int argc, char *argv[]) {
             HideCursor();
         }
 
+        /* O controle só vibra com a corrida andando: nos menus e na pausa, fica quieto */
+        if (tela == TELA_CORRIDA && !pausada) {
+            Vibracao vibracao = calcularVibracao(&estadoDaVibracao, &corrida, tempoQuadro);
+            vibracao = vibracaoAoGosto(vibracao, configuracoesAtuais());
+            aplicarVibracao(&vibracao);
+        } else if (tela == TELA_CONFIGURACOES && menu.pulsoDeVibracao > 0.0f) {
+            /* Mudou a vibração: um toque, para sentir como ficou */
+            Vibracao toque = { FORCA_DO_TOQUE, FORCA_DO_TOQUE, 0.0f };
+            toque = vibracaoAoGosto(toque, configuracoesAtuais());
+            aplicarVibracao(&toque);
+            menu.pulsoDeVibracao -= tempoQuadro;
+        } else {
+            pararVibracao();
+        }
+
         /* A música toca nos menus e some quando a corrida começa */
-        atualizarAudio(tela == TELA_MENU || tela == TELA_GARAGEM || tela == TELA_PISTAS || tela == TELA_COMO_JOGAR);
+        atualizarAudio(tela == TELA_MENU || tela == TELA_GARAGEM || tela == TELA_PISTAS || tela == TELA_CONFIGURACOES || tela == TELA_COMO_JOGAR);
 
         /* Sons da corrida:
          *  - antes do GO, o motor em marcha lenta (som provisório) e o "3... 2... 1... GO!",
@@ -264,6 +298,12 @@ int main(int argc, char *argv[]) {
                 desenharEscolhaDePista(&menu, pistas);
                 terminarInterface();
                 break;
+            case TELA_CONFIGURACOES:
+                desenharFundoAlternado(pistas);
+                comecarInterface(1);
+                desenharConfiguracoes(&menu);
+                terminarInterface();
+                break;
             case TELA_COMO_JOGAR:
                 desenharFundoAlternado(pistas);
                 comecarInterface(1);
@@ -301,6 +341,7 @@ int main(int argc, char *argv[]) {
 
     descarregarFumaca();
     descarregarCarros3D();
+    encerrarVibracao();
     descarregarMundo();
     for (int i = 0; i < TOTAL_PISTAS; i++) {
         liberarPista(pistas[i]);

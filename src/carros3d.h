@@ -30,5 +30,6 @@ int rodaDoCanto(int numero, int canto, Vector3 *centro);
 void trocarRodaNoProximoDesenho(int roda, float andamento);
 void desenharCarro3D(int numero, Matrix noMundo, float anguloDasRodas, float volante);
 void desenharMiniatura(int numero, float centroX, float baseY, float larguraNaTela);
+int bordaDaMiniatura(int numero);
 
 #endif

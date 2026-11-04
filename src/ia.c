@@ -17,7 +17,7 @@
 #include <stddef.h>
 #include "ia.h"
 
-#define METROS_PARA_IR_AO_PIT 300.0f  /* quanto antes do pit lane ela já vai para o lado */
+#define METROS_PARA_IR_AO_PIT 200.0f  /* quanto antes do pit lane ela já vai para o lado */
 #define LADO_PARA_IR_AO_PIT   0.75f   /* em larguras da pista */
 #define SEGMENTOS_OLHADOS         80       /* quantos segmentos à frente a IA enxerga (16000 unidades: */
                                            /* mais que a frenagem de 313 km/h até parar) */
@@ -122,7 +122,7 @@ static int vaiBater(Carro *carro) {
  * Devolve: os comandos (acelerar, frear, esquerda, direita).
  */
 Comandos atualizarIA(Carro *carro) {
-    Comandos comandos = { 0, 0, 0, 0, 0.0f, 0 };
+    Comandos comandos = { 0, 0, 0, 0, 0.0f, 0, 0 };
 
     /* 1) Velocidade: acelera abaixo da desejada (e, dentro da curva,
      *    abaixo do limite de quem acelera), freia bem acima dela. A habilidade
@@ -169,6 +169,7 @@ Comandos atualizarIA(Carro *carro) {
         comandos.esquerda = (erro < -ERRO_PARA_VOLANTE_TODO);
         comandos.direcao = erro / ERRO_PARA_VOLANTE_TODO;
     }
+    comandos.direcao += volanteDaFolgaDaCurva(carro);
 
     return comandos;
 }

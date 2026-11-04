@@ -91,6 +91,13 @@
 #define LARGURA_DA_VAGA       8.0f
 #define LINHA_DO_PIT          0.25f
 #define LINHA_DO_LIMITE       0.8f
+#define LINHA_DA_LISTRA       0.35f      /* as listras da ilha entre a pista e o pit lane */
+#define METROS_ENTRE_LISTRAS  4.0f
+#define SEGMENTOS_DA_LISTRA   3
+#define RAMPA_DO_TALUDE       2.5f      /* metros de rampa por metro de altura */
+#define METROS_DA_GRAMA       12.0f     /* a imagem da grama se repete a cada tanto */
+#define PILHAS_NA_PONTA       3
+#define METROS_ENTRE_PILHAS   1.5f
 #define TRACO_DO_PIT          6.0f      /* traço e vão da linha que separa a pista de trabalho */
 #define COR_DA_VAGA           (Color){ 232, 196,  40, 255 }
 #define COR_DA_ZONA_DE_TRABALHO (Color){ 92, 92, 96, 255 }
@@ -169,7 +176,8 @@ typedef struct {
     Mesh base;
     Mesh muro;              /* o muro de concreto da reta dos boxes */
     Mesh alambrado;         /* e o alambrado em cima dele */
-    Mesh pitLane;
+    Mesh pitLane[2];        /* com os dois asfaltos da pista, nas mesmas faixas */
+    Mesh taludes;           /* a grama descendo do pit lane até o terreno */
     Mesh marcasDoPit;
     Mesh estruturas;        /* arquibancadas: concreto, coberturas e colunas */
     Mesh torcida;           /* os lugares das arquibancadas */
@@ -873,7 +881,7 @@ static void construirUmaArquibancada(Pista *pista, Construcao *estrutura, Constr
     }
 }
 
-static void construirRetaDosBoxes(Pista *pista, Construcao *estruturas);
+static void construirRetaDosBoxes(Pista *pista);
 
 /*
  * construirArquibancadas
@@ -889,7 +897,7 @@ static void construirArquibancadas(Pista *pista) {
             construirUmaArquibancada(pista, &estrutura, &torcida, &tabela[i]);
         }
     }
-    construirRetaDosBoxes(pista, &estrutura);
+    construirRetaDosBoxes(pista);
     interlagos.estruturas = terminarMalha(&estrutura);
     interlagos.torcida = terminarMalha(&torcida);
 }
@@ -1089,14 +1097,38 @@ static void construirPredioDosBoxes(Pista *pista, Construcao *pit, Construcao *m
 }
 
 /*
+ * adicionarTalude
+ * A rampa de grama que desce de uma borda do pit lane até o terreno.
+ * Recebe: a construção, os dois pontos da borda, as laterais deles, os dois segmentos e
+ *         para que lado ela desce (-1 para fora da pista, +1 de volta para ela).
+ * Devolve: nada.
+ */
+static void adicionarTalude(Construcao *c, Vector3 a, Vector3 b, float lateralA, float lateralB, Segmento *sa, Segmento *sb, float sentido) {
+    Vector3 pontos[2] = { a, b };
+    float laterais[2] = { lateralA, lateralB };
+    Segmento *segmentos[2] = { sa, sb };
+    Vector3 baixo[2];
+    for (int i = 0; i < 2; i++) {
+        float queda = fmaxf(pontos[i].y - alturaNaGrade(pontos[i].x, pontos[i].z), 0.2f);
+        float lateral = -laterais[i];
+        float longe = lateral + sentido * queda * RAMPA_DO_TALUDE / segmentos[i]->larguraEsquerda;
+        baixo[i] = pontoNaEstrada(segmentos[i], 0.0f, longe, 0.0f);
+        baixo[i].y = alturaNaGrade(baixo[i].x, baixo[i].z) - 0.05f;
+    }
+    Vector2 u0 = { a.x / METROS_DA_GRAMA, a.z / METROS_DA_GRAMA }, u1 = { b.x / METROS_DA_GRAMA, b.z / METROS_DA_GRAMA };
+    Vector2 u2 = { baixo[1].x / METROS_DA_GRAMA, baixo[1].z / METROS_DA_GRAMA }, u3 = { baixo[0].x / METROS_DA_GRAMA, baixo[0].z / METROS_DA_GRAMA };
+    adicionarQuadrilatero(c, a, b, baixo[1], baixo[0], u0, u1, u2, u3, WHITE);
+}
+
+/*
  * construirRetaDosBoxes
  * O muro e o alambrado dos dois lados da reta; o pit lane, que sai da pista na Subida
  * dos Boxes e volta depois da reta; e o prédio dos boxes.
  * Recebe: a pista e a construção das estruturas (onde entra a barreira).
  * Devolve: nada.
  */
-static void construirRetaDosBoxes(Pista *pista, Construcao *estruturas) {
-    Construcao muro = { 0 }, alambrado = { 0 }, pit = { 0 }, marcas = { 0 };
+static void construirRetaDosBoxes(Pista *pista) {
+    Construcao muro = { 0 }, alambrado = { 0 }, pit[2] = { { 0 }, { 0 } }, marcas = { 0 }, taludes = { 0 };
     float metrosPorSegmento = COMPRIMENTO_SEGMENTO / UNIDADES_POR_METRO;
     float metrosDaVolta = contarSegmentos(pista) * metrosPorSegmento;
     float largura = pista->largada->larguraEsquerda;
@@ -1126,25 +1158,51 @@ static void construirRetaDosBoxes(Pista *pista, Construcao *estruturas) {
         float largura0 = 0.0f, largura1 = 0.0f;
         float lado0 = ladoDentroDoPit(metros, metrosDaVolta, &largura0), lado1 = ladoDentroDoPit(metros1, metrosDaVolta, &largura1);
         if (lado0 > 0.0f && lado1 > 0.0f) {
+            int claro = (atual->indice / SEGMENTOS_POR_FAIXA) % 2;
             float fora0 = lado0 + largura0 / largura, fora1 = lado1 + largura1 / largura;
             Vector3 d0 = noChaoDoPit(atual, -lado0), d1 = noChaoDoPit(seguinte, -lado1);
             Vector3 f0 = noChaoDoPit(atual, -fora0), f1 = noChaoDoPit(seguinte, -fora1);
-            adicionarQuadrilatero(&pit, f0, f1, d1, d0, (Vector2){ 0.0f, 0.0f }, (Vector2){ 0.0f, 1.0f },
-                                  (Vector2){ REPETICOES_ASFALTO, 1.0f }, (Vector2){ REPETICOES_ASFALTO, 0.0f }, WHITE);
 
-            /* Onde o pit lane fica acima do terreno, ele é fechado até o chão dos dois lados */
-            Vector3 f0Chao = { f0.x, alturaNaGrade(f0.x, f0.z) - ABAIXO_DO_TERRENO_PILAR, f0.z }, f1Chao = { f1.x, alturaNaGrade(f1.x, f1.z) - ABAIXO_DO_TERRENO_PILAR, f1.z };
-            quadIluminado(estruturas, f0Chao, f1Chao, f1, f0, COR_DO_CONCRETO);
-            if (lado0 > 1.02f || lado1 > 1.02f) {
-                Vector3 d0Chao = { d0.x, alturaNaGrade(d0.x, d0.z) - ABAIXO_DO_TERRENO_PILAR, d0.z }, d1Chao = { d1.x, alturaNaGrade(d1.x, d1.z) - ABAIXO_DO_TERRENO_PILAR, d1.z };
-                quadIluminado(estruturas, d0Chao, d1Chao, d1, d0, COR_DO_CONCRETO);
+            /* O asfalto é o mesmo da pista, com a imagem continuando de um para o outro */
+            #define U_NA_LATERAL(lateral) ((1.0f - (lateral)) * 0.5f * REPETICOES_ASFALTO)
+            adicionarQuadrilatero(&pit[claro], f0, f1, d1, d0, (Vector2){ U_NA_LATERAL(fora0), 1.0f }, (Vector2){ U_NA_LATERAL(fora1), 0.0f },
+                                  (Vector2){ U_NA_LATERAL(lado1), 0.0f }, (Vector2){ U_NA_LATERAL(lado0), 1.0f }, WHITE);
+
+            /* A ilha: enquanto os dois ainda estão perto, o que fica no meio é asfalto, pintado */
+            int naIlha = (lado0 > 1.01f || lado1 > 1.01f) && lado0 <= LADO_DA_ILHA && lado1 <= LADO_DA_ILHA && !atual->temMuro;
+            if (naIlha) {
+                Vector3 b0 = noChaoDoPit(atual, -1.0f), b1 = noChaoDoPit(seguinte, -1.0f);
+                adicionarQuadrilatero(&pit[claro], d0, d1, b1, b0, (Vector2){ U_NA_LATERAL(lado0), 1.0f }, (Vector2){ U_NA_LATERAL(lado1), 0.0f },
+                                      (Vector2){ U_NA_LATERAL(1.0f), 0.0f }, (Vector2){ U_NA_LATERAL(1.0f), 1.0f }, WHITE);
+                if (fmodf(metros, METROS_ENTRE_LISTRAS) < metrosPorSegmento) {
+                    /* A listra vai da pista até o pit lane, sempre inclinada para a frente */
+                    Segmento *alvo = buscarSegmento(pista, (atual->indice + SEGMENTOS_DA_LISTRA) % contarSegmentos(pista));
+                    float larguraDoAlvo = 0.0f;
+                    float ladoDoAlvo = ladoDentroDoPit(alvo->indice * metrosPorSegmento, metrosDaVolta, &larguraDoAlvo);
+                    if (ladoDoAlvo > 1.03f && ladoDoAlvo <= LADO_DA_ILHA) {
+                        pintarFaixaDoPit(&marcas, b0, noChaoDoPit(alvo, -ladoDoAlvo), LINHA_DA_LISTRA, COR_DA_FAIXA_DO_PIT);
+                    }
+                }
+            }
+            #undef U_NA_LATERAL
+
+            /* A grama desce do asfalto até o terreno, dos dois lados: nada fica flutuando */
+            adicionarTalude(&taludes, f0, f1, fora0, fora1, atual, seguinte, -1.0f);
+            if (lado0 > LADO_DA_ILHA && lado1 > LADO_DA_ILHA) {
+                adicionarTalude(&taludes, d0, d1, lado0, lado1, atual, seguinte, 1.0f);
             }
 
-            /* As linhas: brancas nas bordas e, tracejada, a que separa a pista de trabalho */
-            pintarFaixaDoPit(&marcas, d0, d1, LINHA_DO_PIT, COR_DA_FAIXA_DO_PIT);
-            pintarFaixaDoPit(&marcas, f0, f1, LINHA_DO_PIT, COR_DA_FAIXA_DO_PIT);
+            /* As linhas: branca por fora; por dentro, branca se está separado da pista, e
+             * tracejada onde se pode passar de um para o outro */
+            if (largura0 > LINHA_DO_PIT * 4.0f) {
+                pintarFaixaDoPit(&marcas, f0, f1, LINHA_DO_PIT, COR_DA_FAIXA_DO_PIT);
+            }
             traco += metrosPorSegmento;
-            if (fmodf(traco, TRACO_DO_PIT * 2.0f) < TRACO_DO_PIT && largura0 > LARGURA_DO_PIT_LANE * 0.9f) {
+            int colado = (lado0 <= 1.01f && lado1 <= 1.01f) && !atual->temMuro;
+            if (!colado || fmodf(traco, TRACO_DO_PIT * 2.0f) < TRACO_DO_PIT) {
+                pintarFaixaDoPit(&marcas, d0, d1, LINHA_DO_PIT, COR_DA_FAIXA_DO_PIT);
+            }
+            if (fmodf(traco, TRACO_DO_PIT * 2.0f) < TRACO_DO_PIT && largura0 > LARGURA_DO_PIT_LANE * 0.9f && !colado) {
                 float meio0 = fora0 - FUNDO_DA_VAGA / largura, meio1 = fora1 - FUNDO_DA_VAGA / largura;
                 pintarFaixaDoPit(&marcas, noChaoDoPit(atual, -meio0), noChaoDoPit(seguinte, -meio1), LINHA_DO_PIT, COR_DA_FAIXA_DO_PIT);
             }
@@ -1160,10 +1218,22 @@ static void construirRetaDosBoxes(Pista *pista, Construcao *estruturas) {
         pintarFaixaDoPit(&marcas, noChaoDoPit(naLinha, -1.0f), noChaoDoPit(naLinha, bordaDaPista), LINHA_DO_LIMITE, COR_DA_FAIXA_DO_PIT);
     }
 
-    construirPredioDosBoxes(pista, &pit, &marcas);
+    /* Os pneus de proteção na ponta dos muros, de frente para quem vem */
+    Segmento *pontas[2] = { buscarSegmento(pista, (int) (INICIO_DO_FUNIL * SEGMENTOS_POR_METRO)), buscarSegmento(pista, (int) (FIM_DO_MURO * SEGMENTOS_POR_METRO)) };
+    float ladosDasPontas[2] = { -ABERTURA_DO_FUNIL, -1.0f };
+    for (int i = 0; i < 2; i++) {
+        for (int k = 0; k < PILHAS_NA_PONTA; k++) {
+            Vector3 pe = pontoNaEstrada(pontas[i], 0.0f, ladosDasPontas[i] - k * METROS_ENTRE_PILHAS / largura, 0.0f);
+            colocarModelo((k % 2 == 0) ? MODELO_PNEUS_VERMELHO : MODELO_PNEUS_BRANCO, pe, 0.0f, 1.0f);
+        }
+    }
+
+    construirPredioDosBoxes(pista, &pit[0], &marcas);
     interlagos.muro = terminarMalha(&muro);
     interlagos.alambrado = terminarMalha(&alambrado);
-    interlagos.pitLane = terminarMalha(&pit);
+    interlagos.pitLane[0] = terminarMalha(&pit[0]);
+    interlagos.pitLane[1] = terminarMalha(&pit[1]);
+    interlagos.taludes = terminarMalha(&taludes);
     interlagos.marcasDoPit = terminarMalha(&marcas);
 }
 
@@ -1428,7 +1498,9 @@ void descarregarMundo(void) {
     UnloadMesh(interlagos.base);
     UnloadMesh(interlagos.muro);
     UnloadMesh(interlagos.alambrado);
-    UnloadMesh(interlagos.pitLane);
+    UnloadMesh(interlagos.pitLane[0]);
+    UnloadMesh(interlagos.pitLane[1]);
+    UnloadMesh(interlagos.taludes);
     UnloadMesh(interlagos.marcasDoPit);
     UnloadMesh(interlagos.estruturas);
     UnloadMesh(interlagos.torcida);
@@ -1504,7 +1576,9 @@ void desenharCenario(IdPista id, Vector3 camera) {
     desenharMalha(interlagos.acostamento, texturaGrama, origem);
     desenharMalha(interlagos.asfalto[0], texturaAsfalto[0], origem);
     desenharMalha(interlagos.asfalto[1], texturaAsfalto[1], origem);
-    desenharMalha(interlagos.pitLane, texturaAsfalto[0], origem);
+    desenharMalha(interlagos.pitLane[0], texturaAsfalto[0], origem);
+    desenharMalha(interlagos.pitLane[1], texturaAsfalto[1], origem);
+    desenharMalha(interlagos.taludes, texturaGrama, origem);
     desenharMalha(interlagos.marcasDoPit, semTextura, origem);
     desenharMalha(interlagos.pintura, semTextura, origem);
     desenharMalha(interlagos.muro, estadio.materials[MATERIAL_DO_MURO].maps[MATERIAL_MAP_ALBEDO].texture, origem);

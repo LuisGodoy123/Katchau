@@ -14,12 +14,19 @@
 #include "fumaca.h"
 #include "rlgl.h"
 
-#define MAXIMO_DE_NUVENS     900
+#define MAXIMO_DE_NUVENS     1400
 #define LADO_DA_IMAGEM       96
 #define VARIACOES_DE_IMAGEM  3
 
 #define VIDA_DO_PNEU         1.5f      /* segundos */
 #define VIDA_DA_POEIRA       1.1f
+#define VIDA_DO_DRIFT 1.8f
+#define TAMANHO_INICIAL_DRIFT 0.8f
+#define TAMANHO_FINAL_DRIFT 5.5f
+#define OPACIDADE_DRIFT 0.40f
+#define ARRASTO_DO_DRIFT 0.45f     /* acompanha o carro por mais tempo: a nuvem fica à vista, ao lado dele */
+#define SUBIDA_DO_DRIFT 1.4f
+#define FREIO_DO_AR_NO_DRIFT 1.8f
 #define TAMANHO_INICIAL      0.45f     /* metros */
 #define TAMANHO_FINAL_PNEU   4.2f
 #define TAMANHO_FINAL_POEIRA 3.2f
@@ -144,8 +151,13 @@ void soltarNuvem(Vector3 roda, Vector3 velocidadeDoCarro, float forca, TipoDeNuv
     nuvem->velocidade = (Vector3){ velocidadeDoCarro.x * ARRASTO_DO_CARRO + sortear(-ESPALHAR, ESPALHAR),
                                    SUBIDA * sortear(0.6f, 1.4f),
                                    velocidadeDoCarro.z * ARRASTO_DO_CARRO + sortear(-ESPALHAR, ESPALHAR) };
+    if (tipo == NUVEM_DE_DRIFT) {
+        nuvem->velocidade.x += velocidadeDoCarro.x * (ARRASTO_DO_DRIFT - ARRASTO_DO_CARRO);
+        nuvem->velocidade.z += velocidadeDoCarro.z * (ARRASTO_DO_DRIFT - ARRASTO_DO_CARRO);
+        nuvem->velocidade.y *= SUBIDA_DO_DRIFT / SUBIDA;
+    }
     nuvem->idade = 0.0f;
-    nuvem->vida = ((tipo == NUVEM_DE_PNEU) ? VIDA_DO_PNEU : VIDA_DA_POEIRA) * sortear(0.8f, 1.2f);
+    nuvem->vida = ((tipo == NUVEM_DE_DRIFT) ? VIDA_DO_DRIFT : (tipo == NUVEM_DE_PNEU) ? VIDA_DO_PNEU : VIDA_DA_POEIRA) * sortear(0.8f, 1.2f);
     nuvem->forca = forca;
     nuvem->giro = sortear(0.0f, 360.0f);
     nuvem->giroPorSegundo = sortear(-40.0f, 40.0f);
@@ -161,6 +173,7 @@ void soltarNuvem(Vector3 roda, Vector3 velocidadeDoCarro, float forca, TipoDeNuv
  */
 void atualizarFumaca(float tempoQuadro) {
     float freio = expf(-FREIO_DO_AR * tempoQuadro);
+    float freioNoDrift = expf(-FREIO_DO_AR_NO_DRIFT * tempoQuadro);
     for (int i = 0; i < MAXIMO_DE_NUVENS; i++) {
         Nuvem *nuvem = &nuvens[i];
         if (nuvem->vida <= 0.0f) {
@@ -174,8 +187,9 @@ void atualizarFumaca(float tempoQuadro) {
         nuvem->posicao.x += nuvem->velocidade.x * tempoQuadro;
         nuvem->posicao.y += nuvem->velocidade.y * tempoQuadro;
         nuvem->posicao.z += nuvem->velocidade.z * tempoQuadro;
-        nuvem->velocidade.x *= freio;
-        nuvem->velocidade.z *= freio;
+        float freioDesta = (nuvem->tipo == NUVEM_DE_DRIFT) ? freioNoDrift : freio;
+        nuvem->velocidade.x *= freioDesta;
+        nuvem->velocidade.z *= freioDesta;
         nuvem->giro += nuvem->giroPorSegundo * tempoQuadro;
     }
 }
@@ -199,11 +213,13 @@ void desenharFumaca3D(Camera3D camera) {
             continue;
         }
         float fase = nuvem->idade / nuvem->vida;
-        int ehPneu = (nuvem->tipo == NUVEM_DE_PNEU);
-        float tamanhoFinal = ehPneu ? TAMANHO_FINAL_PNEU : TAMANHO_FINAL_POEIRA;
-        float tamanho = TAMANHO_INICIAL + (tamanhoFinal - TAMANHO_INICIAL) * sqrtf(fase);   /* cresce rápido e depois devagar */
+        int ehDrift = (nuvem->tipo == NUVEM_DE_DRIFT);
+        int ehPneu = (nuvem->tipo == NUVEM_DE_PNEU) || ehDrift;
+        float tamanhoFinal = ehDrift ? TAMANHO_FINAL_DRIFT : ehPneu ? TAMANHO_FINAL_PNEU : TAMANHO_FINAL_POEIRA;
+        float tamanhoInicial = ehDrift ? TAMANHO_INICIAL_DRIFT : TAMANHO_INICIAL;
+        float tamanho = tamanhoInicial + (tamanhoFinal - tamanhoInicial) * sqrtf(fase);   /* cresce rápido e depois devagar */
         float entrada = fminf(fase / 0.08f, 1.0f);                                          /* não aparece de repente */
-        float opacidade = (ehPneu ? OPACIDADE_PNEU : OPACIDADE_POEIRA) * nuvem->forca * entrada * (1.0f - fase) * (1.0f - fase);
+        float opacidade = (ehDrift ? OPACIDADE_DRIFT : ehPneu ? OPACIDADE_PNEU : OPACIDADE_POEIRA) * nuvem->forca * entrada * (1.0f - fase) * (1.0f - fase);
 
         Texture2D imagem = imagens[nuvem->imagem];
         Rectangle origem = { 0.0f, 0.0f, (float) imagem.width, (float) imagem.height };

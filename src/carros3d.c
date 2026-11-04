@@ -20,6 +20,11 @@
 
 #define PASTA_DOS_MODELOS     "recursos/modelos/carros/"
 #define LADO_DA_MINIATURA     512
+#define GRAUS_DA_FOTO         20.0f     /* de longe, para o carro não ficar deformado */
+#define DIRECAO_DA_FOTO       ((Vector3){ 0.95f, 0.42f, 1.15f })   /* de frente e um pouco de lado */
+#define LARGURA_NA_FOTO       0.86f     /* fração da foto que o carro pode ocupar: sobra a margem */
+#define ALTURA_NA_FOTO        0.68f     /* e na altura */
+#define CHAO_NA_FOTO          (-0.62f)  /* a altura do chão na foto, de -1 (embaixo) a +1 */
 #define ALTURA_DA_SOMBRA      0.05f     /* metros acima do chão */
 #define LADO_DA_SOMBRA        128       /* pixels da foto de cima */
 #define FOLGA_DA_SOMBRA       1.35f     /* a foto cobre 1,35 vezes o comprimento do carro */
@@ -127,6 +132,7 @@ static Model modelos[TOTAL_CARROS];
 static Matrix ajuste[TOTAL_CARROS];     /* do modelo como veio para o modelo normalizado */
 static float larguras[TOTAL_CARROS];    /* largura de verdade, em metros */
 static RenderTexture2D miniaturas[TOTAL_CARROS];
+static BoundingBox caixasDosCarros[TOTAL_CARROS];   /* o volume de verdade, já com o ajuste do carro */
 static Shader shaderOpaco, shaderTranslucido, shaderDaSombra;
 static Texture2D sombras[TOTAL_CARROS];
 static RodaDoCarro rodas[TOTAL_CARROS][MAXIMO_DE_RODAS];
@@ -631,6 +637,26 @@ static Mesh malhaVazia(int triangulos) {
 }
 
 /*
+ * medirCaixaDoCarro
+ * Mede o volume de verdade do carro, no carro normalizado (antes de separar as rodas).
+ * Recebe: o número do carro.
+ * Devolve: nada.
+ */
+static void medirCaixaDoCarro(int numero) {
+    Model modelo = modelos[numero];
+    BoundingBox caixa = { { 1e9f, 1e9f, 1e9f }, { -1e9f, -1e9f, -1e9f } };
+    for (int m = 0; m < modelo.meshCount; m++) {
+        Mesh malha = modelo.meshes[m];
+        for (int v = 0; v < malha.vertexCount; v++) {
+            Vector3 ponto = verticeNormalizado(malha, v, ajuste[numero]);
+            caixa.min = Vector3Min(caixa.min, ponto);
+            caixa.max = Vector3Max(caixa.max, ponto);
+        }
+    }
+    caixasDosCarros[numero] = caixa;
+}
+
+/*
  * separarRodas
  * Tira as rodas das malhas do modelo: cada malha fica só com o resto do carro, e
  * as peças de cada roda viram malhas à parte, com o centro da roda na origem.
@@ -728,19 +754,77 @@ static void prepararTexturas(Model modelo) {
 }
 
 /*
+ * extremosNaFoto
+ * Onde os cantos do carro caem na foto, com a câmera numa certa posição.
+ * Recebe: o carro, a câmera, a direção dela para a frente, a direita, o cima, a tangente
+ *         da metade do ângulo de visão e onde guardar os extremos (-1 a +1).
+ * Devolve: nada.
+ */
+static void extremosNaFoto(int numero, Vector3 posicao, Vector3 frente, Vector3 direita, Vector3 cima, float tangente,
+                           float *esquerda, float *direitaMax, float *baixo, float *alto) {
+    BoundingBox caixa = caixasDosCarros[numero];
+    *esquerda = *baixo = 1e9f;
+    *direitaMax = *alto = -1e9f;
+    for (int i = 0; i < 8; i++) {
+        Vector3 canto = { (i & 1) ? caixa.max.x : caixa.min.x, (i & 2) ? caixa.max.y : caixa.min.y, (i & 4) ? caixa.max.z : caixa.min.z };
+        Vector3 relativo = Vector3Subtract(canto, posicao);
+        float profundidade = Vector3DotProduct(relativo, frente);
+        float x = Vector3DotProduct(relativo, direita) / (profundidade * tangente);
+        float y = Vector3DotProduct(relativo, cima) / (profundidade * tangente);
+        *esquerda = fminf(*esquerda, x);
+        *direitaMax = fmaxf(*direitaMax, x);
+        *baixo = fminf(*baixo, y);
+        *alto = fmaxf(*alto, y);
+    }
+}
+
+/*
  * prepararMiniatura
- * Tira uma "foto" do carro, de frente e um pouco de lado, numa textura.
- * O enquadramento segue o comprimento do carro: todos cabem na foto.
+ * Tira uma "foto" do carro, de frente e um pouco de lado, numa textura. O enquadramento
+ * segue o volume de verdade de cada carro (a asa do Wingo, os garfos do Guido): a câmera
+ * se afasta até ele caber na área da foto, e se move para deixá-lo centralizado, com as
+ * rodas sempre na mesma altura.
  * Recebe: o número do carro.
  * Devolve: nada.
  */
 static void prepararMiniatura(int numero) {
-    float tamanho = fichaDoCarro(numero)->comprimento;
+    BoundingBox caixa = caixasDosCarros[numero];
+    Vector3 centro = Vector3Scale(Vector3Add(caixa.min, caixa.max), 0.5f);
+    Vector3 paraCamera = Vector3Normalize(DIRECAO_DA_FOTO);
+    Vector3 frente = Vector3Negate(paraCamera);
+    Vector3 direita = Vector3Normalize(Vector3CrossProduct(frente, (Vector3){ 0.0f, 1.0f, 0.0f }));
+    Vector3 cima = Vector3CrossProduct(direita, frente);
+    float tangente = tanf(GRAUS_DA_FOTO * DEG2RAD / 2.0f);
+
+    /* Primeiro a distância: o mais perto possível, sem sair da área da foto */
+    float perto = 1.0f, longe = 200.0f;
+    for (int passo = 0; passo < 30; passo++) {
+        float distancia = (perto + longe) / 2.0f;
+        Vector3 tentativa = Vector3Add(centro, Vector3Scale(paraCamera, distancia));
+        float e, d, b, a;
+        extremosNaFoto(numero, tentativa, frente, direita, cima, tangente, &e, &d, &b, &a);
+        if (d - e > LARGURA_NA_FOTO * 2.0f || a - b > ALTURA_NA_FOTO * 2.0f) {
+            perto = distancia;
+        } else {
+            longe = distancia;
+        }
+    }
+
+    /* Depois, centraliza na horizontal e põe as rodas na linha do chão da foto */
+    Vector3 posicao = Vector3Add(centro, Vector3Scale(paraCamera, longe));
+    for (int passo = 0; passo < 4; passo++) {
+        float e, d, b, a;
+        extremosNaFoto(numero, posicao, frente, direita, cima, tangente, &e, &d, &b, &a);
+        float profundidade = Vector3DotProduct(Vector3Subtract(centro, posicao), frente);
+        posicao = Vector3Add(posicao, Vector3Scale(direita, (e + d) / 2.0f * profundidade * tangente));
+        posicao = Vector3Add(posicao, Vector3Scale(cima, (b - CHAO_NA_FOTO) * profundidade * tangente));
+    }
+
     Camera3D camera = { 0 };
-    camera.position = (Vector3){ tamanho * 0.95f, tamanho * 0.48f, tamanho * 1.15f };
-    camera.target = (Vector3){ 0.0f, tamanho * 0.13f, 0.0f };
-    camera.up = (Vector3){ 0.0f, 1.0f, 0.0f };
-    camera.fovy = 34.0f;
+    camera.position = posicao;
+    camera.target = Vector3Add(posicao, frente);
+    camera.up = cima;
+    camera.fovy = GRAUS_DA_FOTO;
     camera.projection = CAMERA_PERSPECTIVE;
 
     miniaturas[numero] = LoadRenderTexture(LADO_DA_MINIATURA, LADO_DA_MINIATURA);
@@ -753,21 +837,47 @@ static void prepararMiniatura(int numero) {
     rlEnableBackfaceCulling();
     EndMode3D();
     EndTextureMode();
-    SetTextureFilter(miniaturas[numero].texture, TEXTURE_FILTER_BILINEAR);
+
+    /* Com mipmaps, a foto grande fica nítida também em tamanho pequeno */
+    GenTextureMipmaps(&miniaturas[numero].texture);
+    SetTextureFilter(miniaturas[numero].texture, TEXTURE_FILTER_TRILINEAR);
 }
 
 /*
  * desenharMiniatura
- * A foto de um carro, em 2D, para as telas de menu.
+ * A foto de um carro, em 2D, para as telas de menu. Na foto o chão fica sempre na mesma
+ * altura: é ele que vai na base pedida.
  * Recebe: o número do carro, o centro, a base e a largura na tela.
  * Devolve: nada.
  */
 void desenharMiniatura(int numero, float centroX, float baseY, float larguraNaTela) {
     Texture2D foto = miniaturas[numero].texture;
     Rectangle origem = { 0.0f, 0.0f, (float) foto.width, -(float) foto.height };   /* a foto vem de cabeça para baixo */
-    float lado = larguraNaTela * 1.25f;
-    Rectangle destino = { centroX - lado / 2.0f, baseY - lado * 0.78f, lado, lado };
+    float lado = larguraNaTela / LARGURA_NA_FOTO;
+    float chao = (1.0f - CHAO_NA_FOTO) / 2.0f;     /* de 0 (em cima) a 1 (embaixo) */
+    Rectangle destino = { centroX - lado / 2.0f, baseY - lado * chao, lado, lado };
     DrawTexturePro(foto, origem, destino, (Vector2){ 0.0f, 0.0f }, 0.0f, WHITE);
+}
+
+/*
+ * bordaDaMiniatura
+ * Para conferir o enquadramento: procura pixels do carro encostados na borda da foto.
+ * Recebe: o número do carro.
+ * Devolve: quantos pixels bem opacos estão na borda.
+ */
+int bordaDaMiniatura(int numero) {
+    Image foto = LoadImageFromTexture(miniaturas[numero].texture);
+    ImageFormat(&foto, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
+    Color *pixels = (Color *) foto.data;
+    int total = 0;
+    for (int i = 0; i < foto.width; i++) {
+        total += pixels[i].a > 200;
+        total += pixels[(foto.height - 1) * foto.width + i].a > 200;
+        total += pixels[i * foto.width].a > 200;
+        total += pixels[i * foto.width + foto.width - 1].a > 200;
+    }
+    UnloadImage(foto);
+    return total;
 }
 
 /*
@@ -792,6 +902,7 @@ void carregarCarros3D(void) {
         prepararSombra(numero);
         BoundingBox caixa = GetModelBoundingBox(modelos[numero]);
         float escala = fichaDoCarro(numero)->comprimento / fmaxf(caixa.max.x - caixa.min.x, caixa.max.z - caixa.min.z);
+        medirCaixaDoCarro(numero);
         acharRodas(numero, fichaDoCarro(numero)->largura, (caixa.max.y - caixa.min.y) * escala);
         separarRodas(numero);
         TraceLog(LOG_INFO, "CARRO: %s tem %d rodas, em %d pecas", fichaDoCarro(numero)->nome, totalDeRodas[numero], totalDePecas[numero]);

@@ -107,6 +107,10 @@ void entrarNoPit(Carro *carro) {
     carro->velocidadeDoGiro = 0.0f;
     carro->nitroLigado = 0;
     carro->derrapagem = 0.0f;
+    carro->forcaDoDrift = 0.0f;
+    carro->anguloDeFuga = 0.0f;
+    carro->anguloDeDrift = 0.0f;
+    carro->giroDoDrift = 0.0f;
     carro->velocidadeLateral = 0.0f;
     carro->empurraoPendente = 0.0f;
 }
@@ -136,7 +140,7 @@ int atualizarCarroNoPit(Carro *carro, Pista *pista, float tempoQuadro) {
     float noPit = (metros >= ENTRADA_DO_PIT) ? metros - ENTRADA_DO_PIT : metros + metrosDaVolta - ENTRADA_DO_PIT;
     float vaga = metroDaVagaDoCarro(carro->numero) + metrosDaVolta - ENTRADA_DO_PIT;
     float fim = FIM_DO_PIT_LANE + metrosDaVolta - ENTRADA_DO_PIT;
-    Comandos comandos = { 0, 0, 0, 0, 0.0f, 0 };
+    Comandos comandos = { 0, 0, 0, 0, 0.0f, 0, 0 };
 
     /* Velocidade */
     int dentroDoLimite = (metros >= INICIO_DO_LIMITE_DO_PIT || metros <= FIM_DO_LIMITE_DO_PIT);
@@ -167,6 +171,7 @@ int atualizarCarroNoPit(Carro *carro, Pista *pista, float tempoQuadro) {
             carro->pitFeito = 1;
             carro->querParar = 0;
             carro->ultimaTroca = carro->tempoDaTroca;
+            carro->desgaste = 0.0f;   /* pneus novos */
         }
     }
     int freando = carro->velocidade > alvo;
@@ -185,7 +190,7 @@ int atualizarCarroNoPit(Carro *carro, Pista *pista, float tempoQuadro) {
     if (carro->estadoDoPit == PIT_SAINDO && borda == 0.0f) {
         borda = BORDA_DEPOIS_DA_SAIDA;   /* passou do fim do pit lane: termina de entrar na pista */
     }
-    float noFim = FIM_DO_PIT_LANE - METROS_VOLTANDO_A_PISTA;
+    float noFim = INICIO_DA_VOLTA;
     if (carro->estadoDoPit == PIT_SAINDO && metros < FIM_DO_PIT_LANE && metros > noFim) {
         float metrosAdiante = fminf(metros + metrosPorSegundoAgora * SEGUNDOS_VOLTANDO_A_PISTA, FIM_DO_PIT_LANE);
         borda = ladoDentroDoPit(metrosAdiante, metrosDaVolta, &largura);
@@ -222,7 +227,7 @@ int atualizarCarroNoPit(Carro *carro, Pista *pista, float tempoQuadro) {
         ? fminf(fmaxf(atan2f(rapidez, metrosPorSegundo) * 57.2958f / GRAUS_DO_VOLANTE, -1.0f), 1.0f) : 0.0f;
 
     carro->ultimosComandos = comandos;
-    atualizarMotor(&carro->motor, carro->velocidade / carro->velocidadeMaxima, comandos.acelerar, tempoQuadro);
+    atualizarMotor(&carro->motor, carro->velocidade / carro->velocidadeMaxima, comandos.acelerar, comandos.frear, 0, tempoQuadro);
     carro->anguloDasRodas = fmodf(carro->anguloDasRodas + rapidezDasRodas(carro->velocidade, 0) * tempoQuadro,
                                   2.0f * 3.14159265f);
 

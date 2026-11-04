@@ -2,6 +2,7 @@
 #   make          compila o jogo (gera ./katchau)
 #   make run      compila e roda o jogo
 #   make testes   compila e roda os testes de terminal (sem raylib)
+#   make testar-vibracao  toca cada vibração no controle, para sentir (macOS)
 #   make memoria  roda os testes no valgrind (Linux/WSL)
 #   make zip      gera katchau.zip para a entrega (sem executável)
 #   make clean    apaga os arquivos gerados
@@ -12,13 +13,14 @@ CFLAGS = -std=c99 -Wall -Wextra -g -Isrc
 
 # Módulos de lógica: não usam a raylib (regra 2 do roadmap)
 LOGICA = src/pista.c src/obstaculos.c src/carro.c src/ia.c \
-         src/ordenacao.c src/corrida.c src/motor.c src/olhar.c src/pitstop.c
+         src/ordenacao.c src/corrida.c src/motor.c src/olhar.c src/pitstop.c src/vibracao.c src/configuracoes.c
 
 # Módulos que desenham na tela
 DESENHO = src/render.c src/mundo.c src/carros3d.c src/fumaca.c src/noite.c src/hud.c src/menu.c src/visual.c src/audio.c src/controle.c
 
 FONTES = src/main.c $(LOGICA) $(DESENHO)
 OBJETOS = $(FONTES:src/%.c=build/%.o)
+FRAMEWORKS_DA_VIBRACAO = -framework Foundation -framework GameController -framework CoreHaptics
 
 # ---- Bibliotecas por sistema operacional ----
 ifeq ($(OS),Windows_NT)
@@ -36,11 +38,18 @@ else
         CFLAGS += -I$(BREW_PREFIX)/include
         LIBS    = -L$(BREW_PREFIX)/lib -lraylib \
                   -framework OpenGL -framework Cocoa -framework IOKit \
-                  -framework CoreVideo
+                  -framework CoreVideo $(FRAMEWORKS_DA_VIBRACAO)
+        # A vibração do DualSense fala com o sistema de controles da Apple, em Objective-C
+        OBJETOS += build/vibrar_mac.o
     else
         # Linux (raylib instalada em /usr/local)
         LIBS = -lraylib -lGL -lm -lpthread -ldl -lrt -lX11
     endif
+endif
+
+# Fora do macOS o jogo não vibra (src/vibrar_outros.c não faz nada)
+ifneq ($(SISTEMA),Darwin)
+    OBJETOS += build/vibrar_outros.o
 endif
 
 # ---- Alvos ----
@@ -53,6 +62,10 @@ $(EXE): $(OBJETOS)
 # Assim, mudar só um .h (ex.: a struct Carro) recompila quem o inclui.
 build/%.o: src/%.c | build
 	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
+
+# O arquivo em Objective-C: sem -std=c99, e com a memória automática (ARC)
+build/vibrar_mac.o: src/vibrar_mac.m src/vibrar.h src/vibracao.h | build
+	$(CC) -Wall -Wextra -g -Isrc -fobjc-arc -c $< -o $@
 
 -include $(OBJETOS:.o=.d)
 
@@ -69,6 +82,13 @@ testes: build/teste_pista
 build/teste_pista: testes/teste_pista.c $(LOGICA) $(wildcard src/*.h) | build
 	$(CC) $(CFLAGS) testes/teste_pista.c $(LOGICA) -o $@ -lm
 
+# Para sentir cada vibração no controle (macOS), sem abrir o jogo
+testar-vibracao: build/teste_vibracao
+	./build/teste_vibracao
+
+build/teste_vibracao: testes/teste_vibracao.m src/vibrar_mac.m $(LOGICA) $(wildcard src/*.h) | build
+	$(CC) -Wall -Wextra -g -Isrc -fobjc-arc testes/teste_vibracao.m src/vibrar_mac.m $(LOGICA) -o $@ $(FRAMEWORKS_DA_VIBRACAO) -lm
+
 memoria: build/teste_pista
 	valgrind --leak-check=full --error-exitcode=1 ./build/teste_pista
 
@@ -78,4 +98,4 @@ zip: clean
 clean:
 	rm -rf build $(NOME) $(NOME).exe $(NOME).zip
 
-.PHONY: all run testes memoria zip clean
+.PHONY: all run testes testar-vibracao memoria zip clean

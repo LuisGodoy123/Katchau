@@ -30,13 +30,19 @@ typedef enum {
     BOTAO_CONFIRMAR,   /* A */
     BOTAO_VOLTAR,      /* B */
     BOTAO_START,
+    BOTAO_LIMPAR,      /* Y */
     TOTAL_BOTOES
 } BotaoDoControle;
 
 void atualizarControle(void);
 int controleConectado(void);
 int controleApertou(BotaoDoControle botao);
+void lerComandosDoTeclado(Comandos *comandos);
 void somarComandosDoControle(Comandos *comandos);
+int teclaApertadaAgora(void);
+int botaoApertadoAgora(void);
+const char *nomeDaTecla(int tecla);
+const char *nomeDoBotao(int botao);
 void lerAnalogicoDaCamera(float *eixoX, float *eixoY);
 const char *nomeNoControle(const char *tecla);
 

@@ -13,6 +13,9 @@
 #include "ordenacao.h"
 
 /* ---------- Grid de largada (as medidas ficam em pista.h) ---------- */
+#define VELOCIDADE_DA_PANCADA_FORTE 3000.0f  /* diferença de velocidade numa batida forte */
+#define LADO_DA_PANCADA_FORTE       10.0f    /* metros por segundo, de lado */
+#define PANCADA_MINIMA              0.25f
 #define TROCA_MAIS_RAPIDA_DOS_RIVAIS 4.5f  /* segundos parados na vaga */
 #define PASSO_DA_TROCA_DOS_RIVAIS    0.3f
 #define LUGAR_DO_JOGADOR       (TOTAL_CARROS - 1)   /* o jogador larga em último */
@@ -31,8 +34,6 @@
 #define DISTANCIA_AO_LADO         1.5f      /* metros de folga: mais perto que isso, o lado está ocupado */
 
 /* ---------- Dificuldade ---------- */
-#define HABILIDADE_DA_POLE        0.93f     /* quanto do limite do carro o melhor rival usa... */
-#define HABILIDADE_DO_ULTIMO      0.86f     /* ...e o pior: cai a cada lugar do grid */
 
 /* ---------- Vácuo ---------- */
 #define DISTANCIA_DO_VACUO        3600.0f   /* ~30 m: mais perto que isso atrás de alguém, pega vácuo */
@@ -68,6 +69,22 @@ static const FichaTecnica FICHAS[TOTAL_CARROS] = {
     { "Wingo", "tuner, nervoso na arrancada", 12000.0f, 2550.0f, 0.494f, 4.4f, 2.67f },
     { "Snot Rod", "motorzao, dificil de segurar", 12100.0f, 2500.0f, 0.485f, 4.6f, 2.53f },
 };
+
+/* Os níveis: o médio é o equilíbrio original; o fácil não tem pitstop, e só o difícil gasta os pneus */
+static const FichaDoNivel NIVEIS[TOTAL_NIVEIS] = {
+    { "FÁCIL",   3, 0.87f, 0.80f, 0, 0 },
+    { "MÉDIO",   5, 0.93f, 0.86f, 1, 0 },
+    { "DIFÍCIL", 8, 0.97f, 0.91f, 1, 1 },
+};
+
+/*
+ * fichaDoNivel
+ * Recebe: o nível.
+ * Devolve: a ficha dele.
+ */
+const FichaDoNivel *fichaDoNivel(NivelDaCorrida nivel) {
+    return &NIVEIS[nivel];
+}
 
 /*
  * fichaDoCarro
@@ -137,8 +154,14 @@ static Carro criarCarroDaFicha(FichaTecnica ficha, int numero, Pista *pista) {
  * Recebe: a corrida a preparar, a pista e o número do carro do jogador.
  * Devolve: nada.
  */
-void iniciarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador) {
+void iniciarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador, NivelDaCorrida nivel) {
+    const FichaDoNivel *ficha = fichaDoNivel(nivel);
+    int temParada = ficha->temParada && pista->temPit;
+    int gastaPneu = ficha->gastaPneu && temParada;   /* sem boxes, não haveria como trocar */
+    corrida->temParada = temParada;
     corrida->pista = pista;
+    corrida->nivel = nivel;
+    corrida->totalVoltas = ficha->voltas;
     corrida->tempoDeCorrida = 0.0f;
     corrida->contagemRegressiva = SEGUNDOS_DE_CONTAGEM;
     corrida->terminou = 0;
@@ -148,8 +171,10 @@ void iniciarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador) {
     corrida->jogador = criarCarroDaFicha(FICHAS[carroDoJogador], carroDoJogador, pista);
     colocarNoGrid(&corrida->jogador, LUGAR_DO_JOGADOR);
     corrida->jogador.duracaoDaTroca = DURACAO_DA_TROCA;
-    corrida->jogador.voltaDoPit = pista->temPit ? (TOTAL_VOLTAS + 1) / 2 : 0;   /* se a IA dirigir */
-    corrida->jogador.pitFeito = !pista->temPit;
+    corrida->jogador.voltaDoPit = temParada ? (ficha->voltas + 1) / 2 : 0;   /* se a IA dirigir */
+    corrida->jogador.voltasDaProva = ficha->voltas;
+    corrida->jogador.gastaPneu = gastaPneu;
+    corrida->jogador.pitFeito = !temParada;
     corrida->classificacao[0] = &corrida->jogador;
 
     /* Rivais: todos os carros, menos o que o jogador pegou */
@@ -160,11 +185,13 @@ void iniciarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador) {
         }
         corrida->rivais[rival] = criarCarroDaFicha(FICHAS[numero], numero, pista);
         colocarNoGrid(&corrida->rivais[rival], rival);   /* rivais nos lugares 0 a 6 */
-        corrida->rivais[rival].habilidade = HABILIDADE_DA_POLE
-            - (HABILIDADE_DA_POLE - HABILIDADE_DO_ULTIMO) * rival / (TOTAL_RIVAIS - 1);
+        corrida->rivais[rival].habilidade = ficha->habilidadeDaPole
+            - (ficha->habilidadeDaPole - ficha->habilidadeDoUltimo) * rival / (TOTAL_RIVAIS - 1);
+        corrida->rivais[rival].voltasDaProva = ficha->voltas;
+        corrida->rivais[rival].gastaPneu = gastaPneu;
         /* Cada um para numa volta, para os boxes não lotarem; na troca, eles são mais lentos que o Guido */
-        corrida->rivais[rival].voltaDoPit = pista->temPit ? 2 + rival * 5 % (TOTAL_VOLTAS - 2) : 0;
-        corrida->rivais[rival].pitFeito = !pista->temPit;
+        corrida->rivais[rival].voltaDoPit = temParada ? 2 + rival * 5 % (ficha->voltas - 2) : 0;
+        corrida->rivais[rival].pitFeito = !temParada;
         corrida->rivais[rival].duracaoDaTroca = TROCA_MAIS_RAPIDA_DOS_RIVAIS + (rival % 6) * PASSO_DA_TROCA_DOS_RIVAIS;
         corrida->classificacao[rival + 1] = &corrida->rivais[rival];
         rival++;
@@ -219,7 +246,7 @@ static void atualizarSetores(Corrida *corrida, Carro *carro, int cruzouALinha) {
     if (carro->voltas <= 0 && (cruzouALinha || carro->voltas < 0)) {
         return;   /* ainda saindo do grid: a volta 1 só começou agora */
     }
-    if (carro->voltas > TOTAL_VOLTAS || (carro->voltas == TOTAL_VOLTAS && !cruzouALinha)) {
+    if (carro->voltas > carro->voltasDaProva || (carro->voltas == carro->voltasDaProva && !cruzouALinha)) {
         return;   /* já recebeu a bandeirada: as voltas depois do fim não contam */
     }
 
@@ -258,12 +285,12 @@ static void registrarVolta(Corrida *corrida, Carro *carro) {
     if (carro->voltas == 0) {
         return;   /* acabou de cruzar a linha saindo do grid: começou a volta 1, que conta desde a largada */
     }
-    if (carro->voltas > TOTAL_VOLTAS) {
+    if (carro->voltas > carro->voltasDaProva) {
         return;   /* volta depois da bandeirada: não entra nos tempos nem na melhor volta */
     }
     int indiceDaVolta = carro->voltas - 1;   /* volta 1 fica na posição 0 */
     float tempoDaVolta = tempoDeCorrida - carro->inicioDaVolta;
-    if (indiceDaVolta >= 0 && indiceDaVolta < TOTAL_VOLTAS) {
+    if (indiceDaVolta >= 0 && indiceDaVolta < carro->voltasDaProva) {
         carro->temposDeVolta[indiceDaVolta] = tempoDaVolta;
     }
 
@@ -280,7 +307,7 @@ static void registrarVolta(Corrida *corrida, Carro *carro) {
     for (int s = 0; s < TOTAL_SETORES; s++) {
         carro->setoresDaVolta[s] = 0.0f;   /* volta nova, setores zerados */
     }
-    if (carro->voltas == TOTAL_VOLTAS) {
+    if (carro->voltas == carro->voltasDaProva) {
         carro->tempoDeChegada = tempoDeCorrida;
     }
     carro->inicioDaVolta = tempoDeCorrida;
@@ -396,6 +423,13 @@ static void tratarBatida(Corrida *corrida, Carro *a, Carro *b, float tempoQuadro
     if (!penetracaoEntreCarros(corrida, a, b, &naFrente, &deLado)) {
         return;
     }
+    /* A força da batida, para a vibração do controle: a diferença de velocidade entre os dois */
+    float choque = fabsf(a->velocidade - b->velocidade) / VELOCIDADE_DA_PANCADA_FORTE
+                   + fabsf(a->velocidadeDeLado - b->velocidadeDeLado) / LADO_DA_PANCADA_FORTE;
+    float pancada = fminf(PANCADA_MINIMA + choque, 1.0f);
+    a->pancada = fmaxf(a->pancada, pancada);
+    b->pancada = fmaxf(b->pancada, pancada);
+
     /* Só roda quem bate com o jogador: rodadas entre rivais só atrapalhariam a corrida
      * longe dos olhos dele, e fechariam a pista para todo mundo */
     int podeRodar = (a == &corrida->jogador || b == &corrida->jogador);
@@ -529,7 +563,7 @@ static int moverCarro(Corrida *corrida, Carro *carro, Comandos comandos, float t
         cruzou = atualizarCarroNoPit(carro, corrida->pista, tempoQuadro) > 0;
     } else {
         cruzou = atualizarCarro(carro, comandos, tempoQuadro) > 0;
-        if (querEntrarNoPit(corrida->pista, carro)) {
+        if (corrida->temParada && querEntrarNoPit(corrida->pista, carro)) {
             entrarNoPit(carro);
         }
     }
@@ -558,8 +592,7 @@ void atualizarCorrida(Corrida *corrida, Comandos comandosJogador, float tempoQua
         corrida->contagemRegressiva -= tempoQuadro;
         /* Parado no grid: acelerar só sobe o conta-giros (e acende as lanternas) */
         corrida->jogador.ultimosComandos = comandosJogador;
-        atualizarMotor(&corrida->jogador.motor, 0.0f, comandosJogador.acelerar && !comandosJogador.frear,
-                       tempoQuadro);
+        atualizarMotor(&corrida->jogador.motor, 0.0f, comandosJogador.acelerar && !comandosJogador.frear, 0, 0, tempoQuadro);
         return;
     }
 
@@ -597,7 +630,7 @@ void atualizarCorrida(Corrida *corrida, Comandos comandosJogador, float tempoQua
     ordenarCarrosPorDistancia(corrida->classificacao, TOTAL_CARROS);
 
     /* 5) Fim de corrida */
-    if (!corrida->terminou && corrida->jogador.voltas >= TOTAL_VOLTAS) {
+    if (!corrida->terminou && corrida->jogador.voltas >= corrida->totalVoltas) {
         corrida->terminou = 1;
         corrida->posicaoFinal = posicaoDoCarro(corrida, &corrida->jogador);
         if (!corrida->jogador.pitFeito) {
@@ -610,11 +643,11 @@ void atualizarCorrida(Corrida *corrida, Comandos comandosJogador, float tempoQua
 /*
  * todosChegaram
  * Recebe: a corrida.
- * Devolve: 1 se todos os carros já completaram TOTAL_VOLTAS, 0 se não.
+ * Devolve: 1 se todos os carros já completaram todas as voltas, 0 se não.
  */
 int todosChegaram(Corrida *corrida) {
     for (int i = 0; i < TOTAL_CARROS; i++) {
-        if (corrida->classificacao[i]->voltas < TOTAL_VOLTAS) {
+        if (corrida->classificacao[i]->voltas < corrida->totalVoltas) {
             return 0;
         }
     }
@@ -625,15 +658,15 @@ int todosChegaram(Corrida *corrida) {
  * voltaAtual
  * Número da volta que o carro está correndo, para mostrar na tela.
  * Recebe: o carro.
- * Devolve: de 1 até TOTAL_VOLTAS.
+ * Devolve: de 1 até todas as voltas.
  */
 int voltaAtual(Carro *carro) {
     int volta = carro->voltas + 1;
     if (volta < 1) {
         volta = 1;   /* ainda no grid, antes de cruzar a linha */
     }
-    if (volta > TOTAL_VOLTAS) {
-        volta = TOTAL_VOLTAS;
+    if (volta > carro->voltasDaProva) {
+        volta = carro->voltasDaProva;
     }
     return volta;
 }
@@ -727,12 +760,12 @@ int jogadorVenceu(Corrida *corrida) {
  */
 float segundosAteAVitoria(Corrida *corrida) {
     Carro *jogador = &corrida->jogador;
-    if (corrida->terminou || jogador->voltas != TOTAL_VOLTAS - 1 ||
+    if (corrida->terminou || jogador->voltas != corrida->totalVoltas - 1 ||
         posicaoDoCarro(corrida, jogador) != 1) {
         return -1.0f;
     }
     float comprimentoDaVolta = corrida->totalSegmentos * COMPRIMENTO_SEGMENTO;
-    float falta = TOTAL_VOLTAS * comprimentoDaVolta - jogador->distanciaPercorrida;
+    float falta = corrida->totalVoltas * comprimentoDaVolta - jogador->distanciaPercorrida;
     float velocidade = (jogador->velocidade + jogador->velocidadeMaxima) / 2.0f;
     velocidade = fmaxf(velocidade, jogador->velocidadeMaxima / 3.0f);
     return fmaxf(falta, 0.0f) / velocidade;

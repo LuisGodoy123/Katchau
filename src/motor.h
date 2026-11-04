@@ -29,11 +29,13 @@ typedef struct {
     int marcha;            /* 0 a TOTAL_MARCHAS - 1 */
     float giro;            /* rotação: 0 a 1 (1 = RPM_MAXIMO, o limitador) */
     float carga;           /* 0 = aliviado / freando, 1 = pé no fundo (com folga na troca) */
+    float tempoNaMarcha;   /* segundos desde a última troca: evita trocar sem parar */
+    int reduzindo;         /* 1 durante uma reduzida: o motor dá a acelerada de punta-taco */
     float tempoDeTroca;    /* segundos que faltam para acabar a troca de marcha (0 = engatado) */
 } Motor;
 
 void iniciarMotor(Motor *motor);
-void atualizarMotor(Motor *motor, float fracaoDaVelocidade, int pedeAcelerar, float tempoQuadro);
+void atualizarMotor(Motor *motor, float fracaoDaVelocidade, int pedeAcelerar, int freando, int segurarMarcha, float tempoQuadro);
 int estaTrocandoDeMarcha(const Motor *motor);
 
 #endif

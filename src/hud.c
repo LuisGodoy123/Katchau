@@ -329,7 +329,7 @@ static const char *textoDoTempo(float segundos, char *texto, int tamanho) {
  * Devolve: o tempo da última volta completada (0 se nenhuma).
  */
 static float ultimaVolta(Carro *carro) {
-    int voltas = carro->voltas < TOTAL_VOLTAS ? carro->voltas : TOTAL_VOLTAS;
+    int voltas = carro->voltas < carro->voltasDaProva ? carro->voltas : carro->voltasDaProva;
     return voltas >= 1 ? carro->temposDeVolta[voltas - 1] : 0.0f;
 }
 
@@ -375,7 +375,7 @@ static void desenharPainelDePosicoes(Corrida *corrida) {
     /* Cabeçalho */
     DrawRectangleRec((Rectangle){ x, y, larguraTitulo, ALTURA_CABECALHO_HUD }, COR_GRAFITE);
     escrever(FONTE_FORTE, "CORRIDA", x + 7, y + 1, LETRA_CABECALHO, COR_TEXTO_CLARO);
-    escreverADireita(FONTE_FORTE, TextFormat("VOLTA %d/%d", voltaAtual(jogador), TOTAL_VOLTAS),
+    escreverADireita(FONTE_FORTE, TextFormat("VOLTA %d/%d", voltaAtual(jogador), corrida->totalVoltas),
                      x + larguraTitulo - 7, y + 1, LETRA_CABECALHO, COR_TEXTO_CLARO);
     desenharBandeira(x + larguraTitulo, y, LARGURA_BANDEIRA, ALTURA_CABECALHO_HUD, bandeiraDaCorrida(corrida));
     y += ALTURA_CABECALHO_HUD;
@@ -749,17 +749,30 @@ static void desenharContagemRegressiva(Corrida *corrida) {
  */
 static void desenharAvisosDoPit(Corrida *corrida) {
     Carro *jogador = &corrida->jogador;
-    if (!corrida->pista->temPit || corrida->contagemRegressiva > 0.0f || corrida->terminou) {
+    if (!corrida->temParada || corrida->contagemRegressiva > 0.0f || corrida->terminou) {
         return;
     }
     float centro = larguraVirtual() / 2.0f;
     float direita = larguraVirtual() - 24.0f;
     float metros = metrosNaVolta(jogador);
 
+    /* Os pneus, só quando eles gastam: a barra esvazia, e o verde vira vermelho */
+    if (jogador->gastaPneu) {
+        float sobra = 1.0f - jogador->desgaste;
+        Color cor = (sobra > 0.5f) ? COR_VERDE_HUD : (sobra > 0.25f) ? COR_AMARELO : COR_VERMELHO;
+        float larguraDaBarra = 150.0f, xDaBarra = direita - larguraDaBarra;
+        escrever(FONTE_FORTE, TextFormat("PNEUS %d%%", (int) (sobra * 100.0f + 0.5f)), xDaBarra, 158.0f, 15.0f, cor);
+        DrawRectangleRec((Rectangle){ xDaBarra, 178.0f, larguraDaBarra, 7.0f }, Fade(COR_GRAFITE, 0.85f));
+        DrawRectangleRec((Rectangle){ xDaBarra, 178.0f, larguraDaBarra * sobra, 7.0f }, cor);
+        if (sobra <= 0.25f && !carroNoPit(jogador)) {
+            escreverCentralizado(FONTE_FORTE, "PNEUS NO FIM: PARE NOS BOXES", centro, 108.0f, 20.0f, COR_VERMELHO);
+        }
+    }
+
     /* O estado da parada, embaixo do painel da volta */
     if (jogador->pitFeito) {
         escreverADireita(FONTE_FORTE, TextFormat("PIT FEITO  %.2f s", jogador->ultimaTroca), direita, 134.0f, 16.0f, COR_VERDE_HUD);
-    } else if (voltaAtual(jogador) >= TOTAL_VOLTAS) {
+    } else if (voltaAtual(jogador) >= corrida->totalVoltas) {
         escreverADireita(FONTE_FORTE, "ÚLTIMA VOLTA: PARE OU SERÁ DESCLASSIFICADO", direita, 134.0f, 16.0f, COR_VERMELHO);
     } else {
         escreverADireita(FONTE_FORTE, "PIT OBRIGATÓRIO", direita, 134.0f, 16.0f, COR_AMARELO);
@@ -817,7 +830,7 @@ void desenharFimDeCorrida(Corrida *corrida) {
 
     float largura = 440.0f;
     float linhaDaVolta = 28.0f;
-    float altura = 164.0f + TOTAL_VOLTAS * linhaDaVolta + 46.0f;
+    float altura = 164.0f + corrida->totalVoltas * linhaDaVolta + 46.0f;
     float x = (larguraVirtual() - largura) / 2.0f;
     float y = (alturaVirtual() - altura) / 2.0f - 30.0f;
     float centro = x + largura / 2.0f;
@@ -846,12 +859,12 @@ void desenharFimDeCorrida(Corrida *corrida) {
 
     /* Procura a melhor volta antes de escrever cada uma */
     int melhorVolta = 0;
-    for (int i = 0; i < TOTAL_VOLTAS; i++) {
+    for (int i = 0; i < corrida->totalVoltas; i++) {
         if (jogador->temposDeVolta[i] < jogador->temposDeVolta[melhorVolta]) {
             melhorVolta = i;
         }
     }
-    for (int i = 0; i < TOTAL_VOLTAS; i++) {
+    for (int i = 0; i < corrida->totalVoltas; i++) {
         float linha = y + 156 + i * linhaDaVolta;
         int ehMelhor = (i == melhorVolta);
         DrawRectangleRec((Rectangle){ x + 30, linha - 2, largura - 60, linhaDaVolta - 3 }, Fade(COR_GRAFITE, ehMelhor ? 0.95f : 0.6f));

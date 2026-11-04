@@ -54,6 +54,7 @@ typedef struct {
     int direita;
     float direcao;                 /* analógico: -1 todo à esquerda a +1 todo à direita (0 = só as setas) */
     int nitro;                     /* 1 = quer usar o nitro */
+    int freioDeMao;                /* 1 = puxou o freio de mão */
 } Comandos;
 
 typedef struct {
@@ -81,12 +82,25 @@ typedef struct {
     float velocidadeLateral;       /* metros por segundo para a direita: o tranco de uma batida de lado */
     float velocidadeDeLado;        /* metros por segundo para a direita: o quanto ele está indo para o lado */
 
+    float pancada;                 /* de 0 a 1: a força da última batida (a vibração do controle consome) */
+    int raspandoNoMuro;            /* 1 enquanto o carro está encostado no muro */
+
     /* ---- Rodada ---- */
     int rodando;                   /* 1 enquanto está rodando: o piloto não manda no carro */
     float giro;                    /* graus: quanto o carro está virado em relação à pista */
     float velocidadeDoGiro;        /* graus por segundo */
     float tempoSemRodar;           /* segundos até poder rodar de novo */
     float velocidadeNaRodada;      /* a velocidade quando começou a rodar */
+
+    /* ---- Freio de mão e drift ---- */
+    float anguloDeFuga;            /* graus: sem volante na curva, o carro segue reto, e o bico não acompanha a pista */
+    float forcaDoDrift;            /* de 0 a 1: o quanto a traseira está solta */
+    float anguloDeDrift;           /* graus: o quanto o carro está de lado por causa do drift */
+    float giroDoDrift;             /* graus por segundo: a traseira tem inércia */
+
+    /* ---- Pneus (só no nível difícil) ---- */
+    int gastaPneu;                 /* 1: os pneus gastam nesta corrida */
+    float desgaste;                /* de 0 (novos) a 1 (acabados); o Guido zera na troca */
 
     /* ---- Pitstop ---- */
     EstadoDoPit estadoDoPit;
@@ -104,7 +118,8 @@ typedef struct {
     float lateralAFrente;          /* metros: onde ele está na largura */
     int ocupadoEsquerda, ocupadoDireita;   /* 1 se há um carro encostado nesse lado */
     int voltas;                    /* voltas completadas */
-    float temposDeVolta[TOTAL_VOLTAS];
+    int voltasDaProva;             /* quantas voltas tem esta corrida */
+    float temposDeVolta[MAXIMO_DE_VOLTAS];
     float inicioDaVolta;           /* momento da corrida em que a volta atual começou */
     float tempoDeChegada;          /* momento em que completou a última volta (0 = ainda correndo) */
     float melhorVolta;             /* menor tempo de volta até agora (0 = nenhuma volta completa) */
@@ -137,6 +152,8 @@ float velocidadeSeguraAcelerando(Carro *carro, float curvatura);
 float velocidadeMaximaAgora(Carro *carro);
 float velocidadeParaFrearAte(float alvo, float distancia);
 float rapidezDasRodas(float velocidade, int acelerando);
+float aderenciaAtual(const Carro *carro);
+float volanteDaFolgaDaCurva(const Carro *carro);
 void fazerRodar(Carro *carro, float impulso);
 void meiasMedidasDoCarro(const Carro *carro, float *meioComprimento, float *meiaLargura);
 float tempoAteVelocidade(const FichaTecnica *ficha, float velocidade);

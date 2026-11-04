@@ -62,6 +62,37 @@
 #define FORCA_DO_NITRO             0.90f /* soma isso vezes a "aceleracao" da ficha */
 #define COMPRIMENTO_PADRAO         4.4f  /* metros: quem cria o carro à mão recebe este tamanho */
 #define LARGURA_PADRAO             2.0f
+#define RAPIDEZ_DA_FUGA           7.0f     /* por segundo: o quanto o ângulo de fuga acompanha */
+#define MAIOR_ANGULO_DE_FUGA      28.0f    /* graus */
+#define METROS_POR_SEGUNDO_MINIMOS 10.0f   /* devagar, o ângulo não dispara */
+#define FREIO_DE_MAO              800.0f  /* o que a velocidade cai por segundo com o freio de mão: menos que o freio */
+#define VELOCIDADE_PARA_O_DRIFT   1400.0f  /* abaixo de 35 km/h a traseira não solta */
+#define VOLANTE_PARA_O_DRIFT      0.15f    /* com o volante reto, o carro só perde velocidade */
+#define SOLTANDO_A_TRASEIRA       7.0f     /* por segundo: o freio de mão quebra a traseira */
+#define MANTENDO_O_DRIFT          0.16f    /* por segundo: acelerando de lado, a traseira quase não volta */
+#define VOLTANDO_DO_DRIFT         2.6f     /* por segundo: sem acelerar, ou quase reto, ela volta logo */
+#define ANGULO_DE_MANTER          7.0f     /* graus: menos que isso, o drift acabou */
+#define MAIOR_ANGULO_DO_DRIFT     55.0f    /* graus */
+#define TORQUE_DO_VOLANTE         110.0f   /* graus/s²: o volante, ou o contraesterço, gira o carro */
+#define FORCA_DO_CONTRAESTERCO    3.5f
+#define FOLGA_DA_TRASEIRA         1.6f     /* a traseira só começa a voltar quando a força já caiu bastante: o drift sustenta e solta no fim */
+#define TORQUE_DO_ACELERADOR      38.0f    /* acelerando, a roda de trás empurra a traseira para fora */
+#define TORQUE_DO_FREIO_DE_MAO    280.0f   /* a pancada que quebra a traseira */
+#define VOLTA_DO_ANGULO           5.0f     /* por segundo: o pneu tenta alinhar o carro... */
+#define VOLTA_SEM_ADERENCIA       0.30f    /* ...com menos força se a traseira está solta (fração) */
+#define AMORTECE_O_GIRO           3.0f     /* por segundo */
+#define FRENTE_NO_DRIFT           1.00f    /* de lado, o volante vira menos o caminho: fração */
+#define CAMINHO_PELO_ANGULO       0.70f    /* o caminho vai para onde o bico aponta... */
+#define ANGULO_DO_CAMINHO         28.0f    /* ...até este ângulo: mais de lado que isso é só estilo, e não joga o carro para fora da pista */
+#define EMPURRAO_NO_DRIFT         0.10f    /* e o quanto ele escorrega mais para fora */
+#define PERDA_NO_DRIFT            300.0f   /* o carro de lado gasta velocidade, mesmo acelerando */
+#define ARRASTO_DE_LADO           1500.0f  /* e mais, quanto mais de lado: multiplica o seno² do ângulo */
+#define ROTACAO_NO_DRIFT          0.10f    /* a roda gira mais que o chão: o giro sobe, como fração da velocidade */
+#define SEGURA_A_MARCHA           0.25f    /* de lado, a marcha fica */
+#define METROS_DE_UM_JOGO_DE_PNEUS 38000.0f /* numa corrida de verdade, com as derrapagens, dura cerca de 5 voltas */
+#define GASTO_DERRAPANDO          4.0f     /* derrapando ou de lado, gasta tantas vezes mais */
+#define ADERENCIA_PERDIDA         0.45f    /* com o pneu acabado */
+#define VELOCIDADE_PERDIDA        0.035f   /* com o pneu acabado, a máxima cai esse tanto */
 #define RAIO_DA_RODA               0.35f /* metros: quanto a roda gira por metro andado */
 #define GIRO_MAXIMO_DAS_RODAS     30.0f  /* radianos por segundo: mais que isso, na tela, a roda parece girar ao contrário */
 #define GIRO_PATINANDO            22.0f  /* acelerando na arrancada, a roda gira mais que o carro anda */
@@ -128,7 +159,16 @@ Carro criarCarro(const char *nome, int numero, Segmento *largada, float deslocam
     carro.ocupadoEsquerda = 0;
     carro.ocupadoDireita = 0;
     carro.voltas = 0;
-    for (int i = 0; i < TOTAL_VOLTAS; i++) {
+    carro.voltasDaProva = MAXIMO_DE_VOLTAS;
+    carro.anguloDeFuga = 0.0f;
+    carro.forcaDoDrift = 0.0f;
+    carro.pancada = 0.0f;
+    carro.raspandoNoMuro = 0;
+    carro.anguloDeDrift = 0.0f;
+    carro.giroDoDrift = 0.0f;
+    carro.gastaPneu = 0;
+    carro.desgaste = 0.0f;
+    for (int i = 0; i < MAXIMO_DE_VOLTAS; i++) {
         carro.temposDeVolta[i] = 0.0f;
     }
     carro.inicioDaVolta = 0.0f;
@@ -143,7 +183,7 @@ Carro criarCarro(const char *nome, int numero, Segmento *largada, float deslocam
     carro.diferenca = 0.0f;
     carro.temDiferenca = 0;
     carro.tempoDeChegada = 0.0f;
-    Comandos nenhumComando = { 0, 0, 0, 0, 0.0f, 0 };
+    Comandos nenhumComando = { 0, 0, 0, 0, 0.0f, 0, 0 };
     carro.ultimosComandos = nenhumComando;
     carro.linhaAlvo = deslocamentoLateral * larguraDoLado(largada, deslocamentoLateral);
 
@@ -178,7 +218,7 @@ int estaForaDaPista(Carro *carro) {
     if (carro->estadoDoPit != PIT_FORA) {
         return 0;   /* o pit lane é asfalto, mesmo longe da pista */
     }
-    return carro->deslocamentoLateral < -LIMITE_PISTA ||
+    return carro->deslocamentoLateral < -carro->posicao.segmento->asfaltoEsquerda ||
            carro->deslocamentoLateral > LIMITE_PISTA;
 }
 
@@ -218,7 +258,7 @@ static float perdaSemAcelerar(Carro *carro) {
  * Devolve: nada (altera nitro e nitroLigado).
  */
 static void atualizarNitro(Carro *carro, Comandos comandos, float tempoQuadro) {
-    int quer = comandos.nitro && !comandos.frear;
+    int quer = comandos.nitro && !comandos.frear && !comandos.freioDeMao;
     if (carro->nitroLigado && (!quer || carro->nitro <= 0.0f)) {
         carro->nitroLigado = 0;
     } else if (!carro->nitroLigado && quer && carro->nitro >= MINIMO_PARA_LIGAR) {
@@ -245,7 +285,9 @@ static void atualizarVelocidade(Carro *carro, Comandos comandos, float tempoQuad
     float anterior = carro->velocidade;
     float maxima = velocidadeMaximaAgora(carro);
 
-    if (comandos.acelerar || carro->nitroLigado) {
+    if (comandos.freioDeMao) {
+        carro->velocidade -= (FREIO_DE_MAO + perdaSemAcelerar(carro)) * tempoQuadro;
+    } else if (comandos.acelerar || carro->nitroLigado) {
         carro->velocidade += forcaDoMotor(carro->velocidade, maxima, carro->aceleracao, &carro->motor) * tempoQuadro;
         if (carro->nitroLigado) {
             carro->velocidade += carro->aceleracao * FORCA_DO_NITRO * tempoQuadro;
@@ -255,6 +297,9 @@ static void atualizarVelocidade(Carro *carro, Comandos comandos, float tempoQuad
     } else {
         carro->velocidade -= perdaSemAcelerar(carro) * tempoQuadro;
     }
+
+    float senoDoAngulo = sinf(carro->anguloDeDrift * 0.0174533f);
+    carro->velocidade -= (PERDA_NO_DRIFT * carro->forcaDoDrift + ARRASTO_DE_LADO * senoDoAngulo * senoDoAngulo) * tempoQuadro;
 
     if (estaForaDaPista(carro) && carro->velocidade > VELOCIDADE_MAXIMA_GRAMA) {
         carro->velocidade -= ATRITO_GRAMA * tempoQuadro;
@@ -332,6 +377,101 @@ static float respostaDaDirecao(float proporcaoVelocidade) {
 }
 
 /*
+ * aderenciaAtual
+ * O pneu gasto segura menos: a perda cresce devagar no começo e rápido no fim.
+ * Recebe: o carro.
+ * Devolve: a aderência de agora, de 0 a 1.
+ */
+float aderenciaAtual(const Carro *carro) {
+    return carro->aderencia * (1.0f - ADERENCIA_PERDIDA * carro->desgaste * carro->desgaste);
+}
+
+/*
+ * atualizarDrift
+ * O freio de mão, com o volante virado, quebra a traseira. Depois disso quem manda é o
+ * pé: acelerando de lado o drift continua, sem acelerar ele acaba, e o volante controla
+ * o ângulo (virar para o outro lado é o contraesterço).
+ * Recebe: o carro, os comandos e o tempo do quadro.
+ * Devolve: nada.
+ */
+static void atualizarDrift(Carro *carro, Comandos comandos, float tempoQuadro) {
+    int rapidoOBastante = carro->velocidade > VELOCIDADE_PARA_O_DRIFT;
+    int quebrouATraseira = comandos.freioDeMao && rapidoOBastante && fabsf(carro->volante) > VOLANTE_PARA_O_DRIFT;
+    int aceleraDeLado = comandos.acelerar && !comandos.frear && rapidoOBastante
+                        && fabsf(carro->anguloDeDrift) > ANGULO_DE_MANTER;
+
+    if (quebrouATraseira) {
+        carro->forcaDoDrift = fminf(carro->forcaDoDrift + SOLTANDO_A_TRASEIRA * tempoQuadro, 1.0f);
+    } else {
+        float volta = aceleraDeLado ? MANTENDO_O_DRIFT : VOLTANDO_DO_DRIFT;
+        carro->forcaDoDrift = fmaxf(carro->forcaDoDrift - volta * tempoQuadro, 0.0f);
+    }
+
+    /* O ângulo tem inércia: o volante gira o carro (e o contraesterço segura), o acelerador
+     * empurra a traseira, e o pneu tenta alinhar, com menos força quanto mais solta ela está */
+    float forca = fminf(carro->forcaDoDrift * FOLGA_DA_TRASEIRA, 1.0f);
+    float lado = (carro->anguloDeDrift > 0.0f) ? 1.0f : -1.0f;
+    float torque = carro->volante * TORQUE_DO_VOLANTE * forca;
+    if (carro->volante * carro->anguloDeDrift < 0.0f) {
+        torque *= FORCA_DO_CONTRAESTERCO;   /* corrigir segura mais do que virar gira */
+    }
+    if (quebrouATraseira) {
+        torque += ((carro->volante > 0.0f) ? 1.0f : -1.0f) * TORQUE_DO_FREIO_DE_MAO;
+    }
+    if (aceleraDeLado) {
+        torque += lado * TORQUE_DO_ACELERADOR * forca;
+    }
+    float alinhar = VOLTA_DO_ANGULO * (1.0f - (1.0f - VOLTA_SEM_ADERENCIA) * forca);
+    float aceleracaoDoGiro = torque - carro->anguloDeDrift * alinhar * alinhar - carro->giroDoDrift * AMORTECE_O_GIRO;
+    carro->giroDoDrift += aceleracaoDoGiro * tempoQuadro;
+    carro->anguloDeDrift += carro->giroDoDrift * tempoQuadro;
+    if (fabsf(carro->anguloDeDrift) > MAIOR_ANGULO_DO_DRIFT) {
+        carro->anguloDeDrift = limitar(carro->anguloDeDrift, -MAIOR_ANGULO_DO_DRIFT, MAIOR_ANGULO_DO_DRIFT);
+        carro->giroDoDrift = 0.0f;
+    }
+}
+
+/*
+ * atualizarDesgaste
+ * Os pneus gastam com o caminho, e bem mais derrapando ou de lado.
+ * Recebe: o carro e quantas unidades ele andou.
+ * Devolve: nada.
+ */
+static void atualizarDesgaste(Carro *carro, float distancia) {
+    if (!carro->gastaPneu || distancia <= 0.0f) {
+        return;
+    }
+    float metros = distancia / UNIDADES_POR_METRO * (1.0f + GASTO_DERRAPANDO * carro->derrapagem);
+    carro->desgaste = fminf(carro->desgaste + metros / METROS_DE_UM_JOGO_DE_PNEUS, 1.0f);
+}
+
+/*
+ * volanteDaFolgaDaCurva
+ * Quanto de volante cancela o empurrão extra das curvas leves (veja atualizarLateral).
+ * A IA soma isso ao volante dela: a regra existe para o piloto ter que virar, e não
+ * pode tirar os rivais da linha.
+ * Recebe: o carro.
+ * Devolve: de -1 a +1.
+ */
+float volanteDaFolgaDaCurva(const Carro *carro) {
+    float proporcao = carro->velocidade / carro->velocidadeMaxima;
+    float direcao = VELOCIDADE_DE_VIRADA * respostaDaDirecao(proporcao);
+    if (direcao <= 0.0f) {
+        return 0.0f;
+    }
+    float pe = EMPURRAO_SEM_PEDAL;
+    if (carro->ultimosComandos.acelerar || carro->nitroLigado) {
+        pe = 1.0f;
+    } else if (carro->ultimosComandos.frear) {
+        pe = EMPURRAO_FREANDO;
+    }
+    float empurrao = carro->posicao.segmento->curvatura * FORCA_CENTRIFUGA * proporcao * proporcao
+                     * (1.0f - aderenciaAtual(carro)) * pe;
+    float uso = fminf(fabsf(empurrao) / direcao, 1.0f);
+    return limitar(empurrao * (1.0f - uso) / direcao, -1.0f, 1.0f);
+}
+
+/*
  * atualizarLateral
  * Vira o carro conforme o volante e aplica o empurrão da curva.
  * Também mede a derrapagem: quanto do volante a curva está "gastando".
@@ -346,12 +486,18 @@ static float respostaDaDirecao(float proporcaoVelocidade) {
 static void atualizarLateral(Carro *carro, Comandos comandos, float tempoQuadro) {
     /* 0 parado, 1 na velocidade máxima */
     float proporcaoVelocidade = carro->velocidade / carro->velocidadeMaxima;
-    float direcao = VELOCIDADE_DE_VIRADA * respostaDaDirecao(proporcaoVelocidade);
+    float direcao = VELOCIDADE_DE_VIRADA * respostaDaDirecao(proporcaoVelocidade) * (1.0f - (1.0f - FRENTE_NO_DRIFT) * carro->forcaDoDrift);
 
     /* Volante: o quanto vira depende de quanto o volante está girado */
     Segmento *aqui = carro->posicao.segmento;
     float paraMetros = MEIA_LARGURA_PADRAO / larguraDoLado(aqui, carro->deslocamentoLateral);
     carro->deslocamentoLateral += direcao * carro->volante * paraMetros * tempoQuadro;
+
+    /* De lado, o carro vai para onde o bico aponta: é o que faz o drift entrar na curva */
+    float anguloDoCaminho = limitar(carro->anguloDeDrift, -ANGULO_DO_CAMINHO, ANGULO_DO_CAMINHO);
+    float paraOndeAponta = sinf(anguloDoCaminho * 0.0174533f) * carro->velocidade / UNIDADES_POR_METRO
+                           * CAMINHO_PELO_ANGULO * carro->forcaDoDrift;
+    carro->deslocamentoLateral += paraOndeAponta / larguraDoLado(aqui, carro->deslocamentoLateral) * tempoQuadro;
 
     /* Força centrífuga: curva para a direita (curvatura > 0) empurra
      * para a esquerda, e vice-versa. Mais aderência, menos empurrão.
@@ -364,8 +510,26 @@ static void atualizarLateral(Carro *carro, Comandos comandos, float tempoQuadro)
     }
     float curvatura = carro->posicao.segmento->curvatura;
     float empurrao = curvatura * FORCA_CENTRIFUGA * proporcaoVelocidade * proporcaoVelocidade
-                     * (1.0f - carro->aderencia) * pe;
-    carro->deslocamentoLateral -= empurrao * paraMetros * tempoQuadro;
+                     * (1.0f - aderenciaAtual(carro)) * pe * (1.0f + EMPURRAO_NO_DRIFT * carro->forcaDoDrift);
+
+    /* Curva leve também pede volante: quanto mais folga o pneu tem, mais o carro segue reto
+     * se ninguém virar (até o dobro). No limite não muda nada: a velocidade segura é a mesma. */
+    float usoDoPneu = (direcao > 0.0f) ? fminf(fabsf(empurrao) / direcao, 1.0f) : 1.0f;
+    float empurraoReal = empurrao * (2.0f - usoDoPneu);
+    carro->deslocamentoLateral -= empurraoReal * paraMetros * tempoQuadro;
+
+    /* O bico só acompanha a curva se o piloto estiver virando: o que falta de volante vira
+     * um ângulo para fora (só no desenho e na câmera; quem manda no caminho é a conta acima) */
+    float virandoParaDentro = (empurraoReal > 0.0f) ? direcao * carro->volante : -direcao * carro->volante;
+    float semVolante = fmaxf(fabsf(empurraoReal) - fmaxf(virandoParaDentro, 0.0f), 0.0f);
+    float fugaEmMetros = semVolante * MEIA_LARGURA_PADRAO;
+    float rapidezEmMetros = fmaxf(carro->velocidade / UNIDADES_POR_METRO, METROS_POR_SEGUNDO_MINIMOS);
+    float alvoDaFuga = atan2f(fugaEmMetros, rapidezEmMetros) * 57.2958f;
+    alvoDaFuga = fminf(alvoDaFuga, MAIOR_ANGULO_DE_FUGA) * ((empurraoReal > 0.0f) ? -1.0f : 1.0f);
+    if (carro->velocidade <= 0.0f) {
+        alvoDaFuga = 0.0f;
+    }
+    carro->anguloDeFuga += (alvoDaFuga - carro->anguloDeFuga) * fminf(RAPIDEZ_DA_FUGA * tempoQuadro, 1.0f);
 
     /* O tranco de uma batida de lado, que some logo */
     carro->deslocamentoLateral += carro->velocidadeLateral / larguraDoLado(aqui, carro->deslocamentoLateral) * tempoQuadro;
@@ -378,16 +542,19 @@ static void atualizarLateral(Carro *carro, Comandos comandos, float tempoQuadro)
         uso = (empurrao < 0 ? -empurrao : empurrao) / direcao;
     }
     carro->derrapagem = limitar((uso - INICIO_DA_DERRAPAGEM) / (1.0f - INICIO_DA_DERRAPAGEM), 0.0f, 1.0f);
+    carro->derrapagem = fmaxf(carro->derrapagem, carro->forcaDoDrift);   /* de lado, sai fumaça */
 
     /* Passou do limite: o pneu arrasta. Com menos velocidade o empurrão
      * cai (com o quadrado), e o carro volta a obedecer o volante */
-    float excesso = limitar(uso - 1.0f, 0.0f, EXCESSO_MAXIMO);
+    float excesso = limitar(uso - 1.0f, 0.0f, EXCESSO_MAXIMO) * (1.0f - carro->forcaDoDrift);   /* de lado, quem gasta é o drift */
     carro->velocidade -= PERDA_NA_DERRAPAGEM * excesso * tempoQuadro;
     if (carro->velocidade < 0.0f) {
         carro->velocidade = 0.0f;
     }
 
     carro->deslocamentoLateral = limitar(carro->deslocamentoLateral, -LIMITE_LATERAL, LIMITE_LATERAL);
+
+    carro->raspandoNoMuro = 0;
 
     /* Muro (só no oval): o carro não passa dele, e raspar custa velocidade.
      * A largura de cada lado muda ao longo da pista, então a conta é em metros */
@@ -397,6 +564,7 @@ static void atualizarLateral(Carro *carro, Comandos comandos, float tempoQuadro)
         if (carro->deslocamentoLateral > limiteDireita || carro->deslocamentoLateral < -limiteEsquerda) {
             carro->deslocamentoLateral = limitar(carro->deslocamentoLateral, -limiteEsquerda, limiteDireita);
             carro->velocidade = fmaxf(carro->velocidade - PERDA_NO_MURO * tempoQuadro, 0.0f);
+            carro->raspandoNoMuro = 1;
         }
     }
 }
@@ -476,7 +644,7 @@ static void atualizarRodada(Carro *carro, float tempoQuadro) {
  * Devolve: nada.
  */
 void meiasMedidasDoCarro(const Carro *carro, float *meioComprimento, float *meiaLargura) {
-    float angulo = (carro->giro + carro->volante * GRAUS_DO_VOLANTE) * 0.0174533f;
+    float angulo = (carro->giro + carro->anguloDeDrift + carro->volante * GRAUS_DO_VOLANTE) * 0.0174533f;
     float seno = fabsf(sinf(angulo)), cosseno = fabsf(cosf(angulo));
     *meioComprimento = (carro->comprimento * cosseno + carro->largura * seno) / 2.0f;
     *meiaLargura = (carro->comprimento * seno + carro->largura * cosseno) / 2.0f;
@@ -491,7 +659,7 @@ void meiasMedidasDoCarro(const Carro *carro, float *meioComprimento, float *meia
  */
 int atualizarCarro(Carro *carro, Comandos comandos, float tempoQuadro) {
     if (carro->rodando) {
-        Comandos nenhumComando = { 0, 0, 0, 0, 0.0f, 0 };
+        Comandos nenhumComando = { 0, 0, 0, 0, 0.0f, 0, 0 };
         comandos = nenhumComando;
     }
     atualizarRodada(carro, tempoQuadro);
@@ -499,10 +667,12 @@ int atualizarCarro(Carro *carro, Comandos comandos, float tempoQuadro) {
 
     carro->ultimosComandos = comandos;
     atualizarNitro(carro, comandos, tempoQuadro);
-    atualizarMotor(&carro->motor, carro->velocidade / carro->velocidadeMaxima,
-                   (comandos.acelerar || carro->nitroLigado) && !comandos.frear, tempoQuadro);
+    atualizarMotor(&carro->motor, carro->velocidade / carro->velocidadeMaxima + ROTACAO_NO_DRIFT * carro->forcaDoDrift,
+                   (comandos.acelerar || carro->nitroLigado) && !comandos.frear && !comandos.freioDeMao,
+                   comandos.frear, carro->forcaDoDrift > SEGURA_A_MARCHA, tempoQuadro);
     atualizarVelocidade(carro, comandos, tempoQuadro);
     atualizarVolante(carro, comandos, tempoQuadro);
+    atualizarDrift(carro, comandos, tempoQuadro);
     atualizarLateral(carro, comandos, tempoQuadro);
     carro->anguloDasRodas = fmodf(carro->anguloDasRodas
                                   + rapidezDasRodas(carro->velocidade, comandos.acelerar || carro->nitroLigado) * tempoQuadro,
@@ -519,6 +689,7 @@ int atualizarCarro(Carro *carro, Comandos comandos, float tempoQuadro) {
         distancia = -carro->posicao.distanciaNoSegmento;
     }
     carro->distanciaPercorrida += distancia;
+    atualizarDesgaste(carro, distancia);
 
     /* Mudando de segmento, o carro continua no mesmo lugar em metros: se a pista
      * alarga ou estreita daquele lado, muda a fração da largura, não o caminho dele */
@@ -576,7 +747,7 @@ static float velocidadeSeguraComPe(Carro *carro, float curvatura, float pe) {
         return carro->velocidadeMaxima;   /* reta: sem limite */
     }
 
-    float k = curvatura * FORCA_CENTRIFUGA * (1.0f - carro->aderencia) * pe;
+    float k = curvatura * FORCA_CENTRIFUGA * (1.0f - aderenciaAtual(carro)) * pe;
     float proporcao = 2.0f * VELOCIDADE_DE_VIRADA / (k + VELOCIDADE_DE_VIRADA);
     if (proporcao > 1.0f) {
         proporcao = 1.0f;   /* curva suave: dá para fazer no máximo */
@@ -655,7 +826,7 @@ float tempoAteVelocidade(const FichaTecnica *ficha, float velocidade) {
     Motor motor;
     iniciarMotor(&motor);
     while (atual < velocidade) {
-        atualizarMotor(&motor, atual / ficha->velocidadeMaxima, 1, passo);
+        atualizarMotor(&motor, atual / ficha->velocidadeMaxima, 1, 0, 0, passo);
         atual += forcaDoMotor(atual, ficha->velocidadeMaxima, ficha->aceleracao, &motor) * passo;
         tempo += passo;
     }

@@ -12,3 +12,6 @@ katchau.zip
 
 # Cache do Python (ferramentas/)
 __pycache__/
+
+# As escolhas do jogador
+configuracoes.txt

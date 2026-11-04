@@ -26,7 +26,7 @@
 #define LIMITE_DO_PIT          4000.0f /* unidades por segundo: 100 km/h, perto das garagens */
 #define INICIO_DO_LIMITE_DO_PIT 3990.0f /* metros: a linha do limite, antes da primeira garagem */
 #define FIM_DO_LIMITE_DO_PIT   160.0f   /* e a outra, depois da última */
-#define INICIO_DA_ENTRADA_LIVRE 3490.0f /* antes disso o pit lane ainda está abrindo */
+#define INICIO_DA_ENTRADA_LIVRE 3440.0f /* antes disso o pit lane ainda está abrindo */
 #define METROS_PARA_ENTRAR     3.0f    /* ele entra com o carro essa distância dentro do pit lane: ninguém entra sem querer */
 
 /* Onde o Guido está, em relação ao carro parado: x para a esquerda, z para a frente */

@@ -26,6 +26,7 @@
 
 /* ---------- Câmera ---------- */
 #define GIRO_DAS_RODAS_DO_GUIDO 18.0f   /* radianos por segundo */
+#define CAMERA_NA_FUGA         0.75f    /* quanto do ângulo de fuga do carro a câmera acompanha */
 #define NUMERO_DO_GUIDO        7        /* na tabela FICHAS */
 #define ALTURA_NA_TROCA        0.10f    /* metros: o macaco levanta o carro */
 #define CAMERA_DA_TROCA_LADO   4.6f     /* a câmera da troca: à direita do carro, na frente e no alto */
@@ -56,6 +57,9 @@
 
 /* ---------- Fumaça ---------- */
 #define INICIO_DA_FUMACA      0.55f    /* derrapagem abaixo disso não solta fumaça */
+#define ANGULO_DA_FUMACA_DO_DRIFT 4.0f   /* graus */
+#define ANGULO_DA_FUMACA_CHEIA 30.0f
+#define MAIS_NUVENS_NO_DRIFT 1.3f
 #define NUVENS_POR_SEGUNDO    55.0f    /* por roda, na derrapagem cheia */
 #define VELOCIDADE_DA_ARRANCADA 1600.0f /* abaixo disso (40 km/h), acelerar patina um pouco */
 #define ALTURA_DO_ESCAPAMENTO 0.42f    /* metros acima do chão */
@@ -187,7 +191,7 @@ static Matrix matrizDoCarro(Carro *carro) {
         y += ALTURA_NA_TROCA * fminf(tempo / SEGUNDOS_PARA_A_RODA, 1.0f);
     }
 
-    float rumo = (aqui.rumo + carro->giro + carro->volante * GRAUS_DO_VOLANTE) * DEG2RAD;
+    float rumo = (aqui.rumo + carro->giro + carro->anguloDeDrift + carro->anguloDeFuga + carro->volante * GRAUS_DO_VOLANTE) * DEG2RAD;
     Vector3 frente = Vector3Normalize((Vector3){ sinf(rumo), ladeira, -cosf(rumo) });
 
     float rolagem = atanf(inclinacao) + carro->volante * GRAUS_DE_ROLAGEM * DEG2RAD;
@@ -221,7 +225,7 @@ static void desenharSombraDoCarro(Camera3D camera, Carro *carro) {
     Vector3 grade[PONTOS_DA_SOMBRA * PONTOS_DA_SOMBRA];
     float meio = ladoDaSombra(carro->numero) / 2.0f;
     float lateral = carro->deslocamentoLateral * larguraDoLado(carro->posicao.segmento, carro->deslocamentoLateral);
-    float giro = (carro->giro + carro->volante * GRAUS_DO_VOLANTE) * DEG2RAD;
+    float giro = (carro->giro + carro->anguloDeDrift + carro->anguloDeFuga + carro->volante * GRAUS_DO_VOLANTE) * DEG2RAD;
     for (int i = 0; i < PONTOS_DA_SOMBRA; i++) {
         for (int j = 0; j < PONTOS_DA_SOMBRA; j++) {
             float paraDireita = -meio + 2.0f * meio * i / (PONTOS_DA_SOMBRA - 1);
@@ -339,6 +343,10 @@ static void soltarFumacaDoCarro(Camera3D camera, Carro *carro, float tempoQuadro
         tipo = NUVEM_DE_POEIRA;
     } else if (carro->rodando) {
         forca = 1.0f;
+    } else if (carro->forcaDoDrift > 0.05f && fabsf(carro->anguloDeDrift) > ANGULO_DA_FUMACA_DO_DRIFT) {
+        /* De lado, os pneus de trás queimam de verdade: quanto mais de lado, mais fumaça */
+        forca = 0.65f + 0.35f * fminf(fabsf(carro->anguloDeDrift) / ANGULO_DA_FUMACA_CHEIA, 1.0f);
+        tipo = NUVEM_DE_DRIFT;
     } else if (carro->derrapagem > INICIO_DA_FUMACA) {
         forca = (carro->derrapagem - INICIO_DA_FUMACA) / (1.0f - INICIO_DA_FUMACA);
     } else if (carro->ultimosComandos.acelerar && carro->velocidade < VELOCIDADE_DA_ARRANCADA) {
@@ -354,6 +362,9 @@ static void soltarFumacaDoCarro(Camera3D camera, Carro *carro, float tempoQuadro
 
     /* Quantas nuvens neste quadro: a parte fracionária é sorteada */
     float quantas = NUVENS_POR_SEGUNDO * tempoQuadro * (0.4f + 0.6f * forca);
+    if (tipo == NUVEM_DE_DRIFT) {
+        quantas *= MAIS_NUVENS_NO_DRIFT;
+    }
     int inteiras = (int) quantas;
     if (GetRandomValue(0, 1000) / 1000.0f < quantas - inteiras) {
         inteiras++;
@@ -415,7 +426,7 @@ static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
             desenharCarroNoMundo(camera, &corrida->rivais[r]);
         }
         desenharCarroNoMundo(camera, &corrida->jogador);
-        if (pista->temPit) {
+        if (corrida->temParada) {
             desenharGuido(camera, pista, &corrida->jogador);
         }
         desenharFumaca3D(camera);
@@ -459,7 +470,10 @@ static Camera3D cameraDaTroca(Camera3D normal, Carro *carro) {
  */
 void desenharVisaoDoJogador(Corrida *corrida) {
     Carro *jogador = &corrida->jogador;
-    Camera3D camera = montarCamera(jogador->posicao, jogador->deslocamentoLateral, olharDoJogador);
+    /* A câmera acompanha o carro, não a pista: sem volante na curva, ela também não vira sozinha */
+    Olhar olhar = olharDoJogador;
+    olhar.giro += jogador->anguloDeFuga * CAMERA_NA_FUGA;
+    Camera3D camera = montarCamera(jogador->posicao, jogador->deslocamentoLateral, olhar);
     if (jogador->estadoDoPit == PIT_TROCANDO) {
         camera = cameraDaTroca(camera, jogador);
     }

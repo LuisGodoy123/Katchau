@@ -18,6 +18,7 @@
 #include <math.h>
 #include "raylib.h"
 #include "menu.h"
+#include "configuracoes.h"
 #include "render.h"
 #include "hud.h"
 #include "visual.h"
@@ -36,7 +37,8 @@
 #define VELOCIDADE_DESTAQUE   7.0f    /* 1/s: a animação de uma opção leva ~0,15 s */
 #define LARGURA_LOGO         440.0f
 #define Y_PRIMEIRA_OPCAO      284.0f
-#define ESPACO_OPCOES         56.0f
+#define ESPACO_OPCOES         50.0f
+#define FOCO_INICIAL_DA_CORRIDA 0        /* a linha da pista */
 #define ALTURA_OPCAO          44.0f
 #define LARGURA_OPCAO         280.0f
 #define LARGURA_OPCAO_MARCADA 320.0f
@@ -78,8 +80,8 @@
 #define X_COLUNA_TEMPO        470.0f
 #define X_COLUNA_MELHOR       620.0f
 
-static const char *TEXTOS_OPCOES[TOTAL_OPCOES] = { "CORRER", "GARAGEM", "COMO JOGAR", "SAIR" };
-static const Tela DESTINOS_OPCOES[TOTAL_OPCOES] = { TELA_PISTAS, TELA_GARAGEM, TELA_COMO_JOGAR, TELA_SAIR };
+static const char *TEXTOS_OPCOES[TOTAL_OPCOES] = { "CORRER", "GARAGEM", "COMO JOGAR", "CONFIGURAÇÕES", "SAIR" };
+static const Tela DESTINOS_OPCOES[TOTAL_OPCOES] = { TELA_PISTAS, TELA_GARAGEM, TELA_COMO_JOGAR, TELA_CONFIGURACOES, TELA_SAIR };
 static const char *TEXTOS_PAUSA[TOTAL_OPCOES_PAUSA] = { "CONTINUAR", "MENU PRINCIPAL" };
 static const EscolhaDaPausa ESCOLHAS_PAUSA[TOTAL_OPCOES_PAUSA] = { PAUSA_CONTINUAR, PAUSA_SAIR };
 
@@ -394,7 +396,19 @@ void iniciarMenu(EstadoMenu *menu) {
     menu->voltarAnterior = 0;
     menu->destaqueVoltar = 0.0f;
     abrirPausa(menu);
+    menu->linhaConfig = 0;
+    menu->colunaConfig = 0;
+    menu->esperandoComando = 0;
+    menu->tempoEsperando = 0.0f;
+    menu->confirmarPadrao = 0.0f;
+    menu->pulsoDeVibracao = 0.0f;
     menu->pistaEscolhida = PISTA_INTERLAGOS;
+    menu->nivelEscolhido = NIVEL_MEDIO;
+    menu->focoDaCorrida = FOCO_INICIAL_DA_CORRIDA;
+    menu->destaqueCorrer = 0.0f;
+    for (int i = 0; i < TOTAL_NIVEIS; i++) {
+        menu->destaqueNivel[i] = (i == (int) menu->nivelEscolhido) ? 1.0f : 0.0f;
+    }
     for (int i = 0; i < TOTAL_PISTAS; i++) {
         menu->destaquePista[i] = (i == menu->pistaEscolhida) ? 1.0f : 0.0f;
     }
@@ -514,7 +528,7 @@ static void desenharCartaoDoCarro(int numero) {
 
     desenharBrilho(centro, y + 96, 76, Fade(COR_AMARELO, 0.35f));
     DrawEllipse((int) centro, (int) (y + 140), 70, 9, Fade(BLACK, 0.55f));
-    desenharCarroParado(numero, centro, y + 142, 0.85f);
+    desenharCarroParado(numero, centro, y + 140, 0.86f);
 
     escreverCentralizado(FONTE_TITULO, fichaDoCarro(numero)->nome, centro, y + 148, 30.0f, COR_AMARELO);
 }
@@ -869,7 +883,7 @@ static void desenharFichaMarcada(EstadoMenu *menu) {
     /* Holofote e sombra embaixo do carro */
     desenharBrilho(centroX, topo + 110, 120, Fade(COR_AMARELO, 0.32f));
     DrawEllipse((int) centroX, (int) (topo + 168), 110, 12, Fade(BLACK, 0.6f));
-    desenharCarroParado(numero, centroX, topo + 170, 1.15f);
+    desenharCarroParado(numero, centroX, topo + 176, 1.22f);
 
     escreverCentralizado(FONTE_TITULO, ficha->nome, centroX, topo + 172, 42.0f, COR_AMARELO);
     escreverCentralizado(FONTE_TEXTO, ficha->descricao, centroX, topo + 220, 18.0f, COR_CROMO);
@@ -914,91 +928,31 @@ void desenharGaragem(EstadoMenu *menu) {
 }
 
 /* ==================================================================
- * Escolha da pista
+ * Preparar a corrida: pista e dificuldade, na mesma tela
  * ================================================================== */
 
-#define Y_CARTAO_PISTA        120.0f
-#define LARGURA_CARTAO_PISTA  356.0f
-#define ALTURA_CARTAO_PISTA   390.0f
-#define ESPACO_ENTRE_CARTOES  24.0f
-#define LADO_DO_TRACADO       174.0f
+/* As linhas da tela */
+enum { FOCO_NA_PISTA, FOCO_NO_NIVEL, FOCO_NO_CORRER, TOTAL_FOCOS };
+
+#define Y_CARTAO_PISTA        112.0f
+#define LARGURA_CARTAO_PISTA  350.0f
+#define ALTURA_CARTAO_PISTA   190.0f
+#define ESPACO_ENTRE_CARTOES  20.0f
+#define LADO_DO_TRACADO       112.0f
 #define PASSO_DO_TRACADO      4        /* desenha o traçado de 4 em 4 segmentos */
-
-/* O jeito de cada pista, na ordem de IdPista */
-static const char *DESCRICOES_PISTA[TOTAL_PISTAS] = {
-    "Circuito misto, sobe e desce. Curvas de todo tipo, e a grama perdoa pouco.",
-    "Oval rápido, com curvas inclinadas, cercado de arquibancadas. Quem erra a curva raspa no muro.",
-};
-
-/*
- * xDoCartao
- * Recebe: o número do cartão.
- * Devolve: o x do canto esquerdo dele (os cartões ficam centralizados).
- */
-static float xDoCartao(int cartao) {
-    float total = TOTAL_PISTAS * LARGURA_CARTAO_PISTA + (TOTAL_PISTAS - 1) * ESPACO_ENTRE_CARTOES;
-    return (larguraVirtual() - total) / 2.0f + cartao * (LARGURA_CARTAO_PISTA + ESPACO_ENTRE_CARTOES);
-}
-
-/*
- * cartaoSobOMouse
- * Recebe: a posição do mouse na tela virtual.
- * Devolve: o número do cartão sob o mouse, ou -1.
- */
-static int cartaoSobOMouse(float mouseX, float mouseY) {
-    for (int i = 0; i < TOTAL_PISTAS; i++) {
-        if (dentroDoRetangulo(mouseX, mouseY, xDoCartao(i), Y_CARTAO_PISTA, LARGURA_CARTAO_PISTA,
-                              ALTURA_CARTAO_PISTA)) {
-            return i;
-        }
-    }
-    return -1;
-}
-
-/*
- * atualizarEscolhaDePista
- * Esquerda/direita marcam uma pista (o fundo da tela mostra a marcada);
- * ENTER larga nela; ESC volta ao menu. Com o mouse: passar por cima marca,
- * clicar larga.
- * Recebe: o estado do menu.
- * Devolve: a próxima tela.
- */
-Tela atualizarEscolhaDePista(EstadoMenu *menu) {
-    int anterior = menu->pistaEscolhida;
-    if (apertouParaDireita()) {
-        menu->pistaEscolhida = (menu->pistaEscolhida + 1) % TOTAL_PISTAS;
-    }
-    if (apertouParaEsquerda()) {
-        menu->pistaEscolhida = (menu->pistaEscolhida + TOTAL_PISTAS - 1) % TOTAL_PISTAS;
-    }
-
-    float mouseX, mouseY;
-    posicaoDoMouseNaInterface(&mouseX, &mouseY);
-    int cartao = cartaoSobOMouse(mouseX, mouseY);
-    int voltar = sobreOVoltar(mouseX, mouseY);
-    if (cartao >= 0 && mouseSeMexeu()) {
-        menu->pistaEscolhida = cartao;
-    }
-    if (menu->pistaEscolhida != anterior || (voltar && !menu->voltarAnterior)) {
-        tocarSom(SOM_CURSOR);
-    }
-    menu->voltarAnterior = voltar;
-
-    for (int i = 0; i < TOTAL_PISTAS; i++) {
-        menu->destaquePista[i] = animarDestaque(menu->destaquePista[i], i == menu->pistaEscolhida);
-    }
-    menu->destaqueVoltar = animarDestaque(menu->destaqueVoltar, voltar);
-
-    if (apertouVoltar() || (voltar && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))) {
-        tocarSom(SOM_VOLTAR);
-        return TELA_MENU;
-    }
-    if (apertouConfirmar() || (cartao >= 0 && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))) {
-        tocarSom(SOM_CONFIRMAR);
-        return TELA_CORRIDA;
-    }
-    return TELA_PISTAS;
-}
+#define Y_TITULO_PISTA        90.0f
+#define Y_TITULO_NIVEL        316.0f
+#define Y_BOTAO_NIVEL         338.0f
+#define LARGURA_BOTAO_NIVEL   224.0f
+#define ALTURA_BOTAO_NIVEL    52.0f
+#define ESPACO_ENTRE_NIVEIS   24.0f
+#define Y_RESUMO              404.0f
+#define Y_BOTAO_CORRER        452.0f
+#define FOLGA_DO_CURSOR       5.0f     /* o contorno amarelo fica um pouco para fora do item */
+#define GROSSURA_DO_CURSOR    3.0f
+#define RAPIDEZ_DO_CURSOR     5.0f     /* a pulsação dele */
+#define X_SETA_ESQUERDA       20.0f    /* as setas da linha marcada: ela muda para os lados */
+#define X_SETA_DIREITA        780.0f
 
 /*
  * desenharTracado
@@ -1037,51 +991,689 @@ static void desenharTracado(Pista *pista, float centroX, float centroY, float la
 }
 
 /*
- * desenharCartaoDePista
- * Um cartão: o traçado, o nome, a extensão e o jeito da pista. O marcado
- * acende em amarelo.
- * Recebe: o número do cartão, a pista e o destaque (0 a 1).
+ * xDoCartao
+ * Recebe: o número do cartão.
+ * Devolve: o x do canto esquerdo dele (os cartões ficam centralizados).
+ */
+static float xDoCartao(int cartao) {
+    float total = TOTAL_PISTAS * LARGURA_CARTAO_PISTA + (TOTAL_PISTAS - 1) * ESPACO_ENTRE_CARTOES;
+    return (LARGURA_TELA - total) / 2.0f + cartao * (LARGURA_CARTAO_PISTA + ESPACO_ENTRE_CARTOES);
+}
+
+/*
+ * xDoNivel
+ * Recebe: o nível.
+ * Devolve: o x do canto esquerdo do botão dele.
+ */
+static float xDoNivel(int nivel) {
+    /* O paralelogramo passa da largura pela inclinação: desconta metade, para o conjunto ficar no meio */
+    float total = TOTAL_NIVEIS * LARGURA_BOTAO_NIVEL + (TOTAL_NIVEIS - 1) * ESPACO_ENTRE_NIVEIS;
+    return (LARGURA_TELA - total) / 2.0f - INCLINACAO / 4.0f + nivel * (LARGURA_BOTAO_NIVEL + ESPACO_ENTRE_NIVEIS);
+}
+
+/*
+ * cartaoSobOMouse
+ * Recebe: a posição do mouse na tela virtual.
+ * Devolve: o número do cartão sob o mouse, ou -1.
+ */
+static int cartaoSobOMouse(float mouseX, float mouseY) {
+    for (int i = 0; i < TOTAL_PISTAS; i++) {
+        if (dentroDoRetangulo(mouseX, mouseY, xDoCartao(i), Y_CARTAO_PISTA, LARGURA_CARTAO_PISTA, ALTURA_CARTAO_PISTA)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+/*
+ * nivelSobOMouse
+ * Recebe: a posição do mouse.
+ * Devolve: o nível sob ele, ou -1.
+ */
+static int nivelSobOMouse(float mouseX, float mouseY) {
+    for (int i = 0; i < TOTAL_NIVEIS; i++) {
+        if (dentroDoRetangulo(mouseX, mouseY, xDoNivel(i), Y_BOTAO_NIVEL, LARGURA_BOTAO_NIVEL, ALTURA_BOTAO_NIVEL)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+/*
+ * atualizarEscolhaDePista
+ * Cima e baixo trocam de linha; esquerda e direita mudam a pista ou o nível. Confirmar
+ * passa para a linha seguinte, e só no CORRER começa a corrida: ninguém larga sem querer.
+ * Recebe: o estado do menu.
+ * Devolve: a tela do próximo quadro.
+ */
+Tela atualizarEscolhaDePista(EstadoMenu *menu) {
+    int pistaAntes = menu->pistaEscolhida, nivelAntes = menu->nivelEscolhido, focoAntes = menu->focoDaCorrida;
+    menu->focoDaCorrida = andarNaLista(menu->focoDaCorrida, TOTAL_FOCOS);
+    int mudou = apertouParaDireita() ? 1 : (apertouParaEsquerda() ? -1 : 0);
+    if (menu->focoDaCorrida == FOCO_NA_PISTA && mudou != 0) {
+        menu->pistaEscolhida = (menu->pistaEscolhida + mudou + TOTAL_PISTAS) % TOTAL_PISTAS;
+    } else if (menu->focoDaCorrida == FOCO_NO_NIVEL && mudou != 0) {
+        menu->nivelEscolhido = (NivelDaCorrida) ((menu->nivelEscolhido + mudou + TOTAL_NIVEIS) % TOTAL_NIVEIS);
+    }
+
+    /* O mouse: passar marca a linha; clicar escolhe; só o CORRER começa a corrida */
+    float mouseX, mouseY;
+    posicaoDoMouseNaInterface(&mouseX, &mouseY);
+    int cartao = cartaoSobOMouse(mouseX, mouseY);
+    int nivel = nivelSobOMouse(mouseX, mouseY);
+    int sobreCorrer = opcaoSobOMouse(Y_BOTAO_CORRER, 1) == 0;
+    int voltar = sobreOVoltar(mouseX, mouseY);
+    if (mouseSeMexeu()) {
+        menu->focoDaCorrida = (cartao >= 0) ? FOCO_NA_PISTA : (nivel >= 0) ? FOCO_NO_NIVEL : sobreCorrer ? FOCO_NO_CORRER : menu->focoDaCorrida;
+    }
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        if (cartao >= 0) {
+            menu->pistaEscolhida = cartao;
+            menu->focoDaCorrida = FOCO_NA_PISTA;
+        } else if (nivel >= 0) {
+            menu->nivelEscolhido = (NivelDaCorrida) nivel;
+            menu->focoDaCorrida = FOCO_NO_NIVEL;
+        }
+    }
+    if (menu->pistaEscolhida != pistaAntes || (int) menu->nivelEscolhido != nivelAntes || menu->focoDaCorrida != focoAntes
+        || (voltar && !menu->voltarAnterior)) {
+        tocarSom(SOM_CURSOR);
+    }
+    menu->voltarAnterior = voltar;
+
+    for (int i = 0; i < TOTAL_PISTAS; i++) {
+        menu->destaquePista[i] = animarDestaque(menu->destaquePista[i], i == menu->pistaEscolhida);
+    }
+    for (int i = 0; i < TOTAL_NIVEIS; i++) {
+        menu->destaqueNivel[i] = animarDestaque(menu->destaqueNivel[i], i == (int) menu->nivelEscolhido);
+    }
+    menu->destaqueCorrer = animarDestaque(menu->destaqueCorrer, menu->focoDaCorrida == FOCO_NO_CORRER);
+    menu->destaqueVoltar = animarDestaque(menu->destaqueVoltar, voltar);
+
+    if (apertouVoltar() || (voltar && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))) {
+        tocarSom(SOM_VOLTAR);
+        menu->focoDaCorrida = FOCO_NA_PISTA;   /* na próxima vez, começa pela primeira linha */
+        return TELA_MENU;
+    }
+    if (sobreCorrer && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        tocarSom(SOM_CONFIRMAR);
+        return TELA_CORRIDA;
+    }
+    if (apertouConfirmar()) {
+        tocarSom(SOM_CONFIRMAR);
+        if (menu->focoDaCorrida == FOCO_NO_CORRER) {
+            return TELA_CORRIDA;
+        }
+        menu->focoDaCorrida++;
+    }
+    return TELA_PISTAS;
+}
+
+/*
+ * corDoCursor
+ * O contorno de "você está aqui" é sempre amarelo, e pulsa de leve, para chamar o olho.
+ * Recebe: nada.
+ * Devolve: a cor deste quadro.
+ */
+static Color corDoCursor(void) {
+    return ColorLerp(COR_AMARELO, WHITE, 0.25f + 0.25f * sinf((float) GetTime() * RAPIDEZ_DO_CURSOR));
+}
+
+/*
+ * desenharTituloDaLinha
+ * Recebe: o texto, a altura e se o cursor está nesta linha.
  * Devolve: nada.
  */
-static void desenharCartaoDePista(int cartao, Pista *pista, float destaque) {
+static void desenharTituloDaLinha(const char *texto, float y, int marcada) {
+    escreverCentralizado(FONTE_FORTE, texto, LARGURA_TELA / 2.0f, y, 16.0f, marcada ? COR_TEXTO_CLARO : COR_TEXTO_FRACO);
+}
+
+/*
+ * desenharSetasDaLinha
+ * As setas nas pontas da linha marcada: dizem que ela muda para os lados.
+ * Recebe: o centro da linha, na altura.
+ * Devolve: nada.
+ */
+static void desenharSetasDaLinha(float y) {
+    desenharSetas(X_SETA_ESQUERDA, y, -1.0f);
+    desenharSetas(X_SETA_DIREITA, y, 1.0f);
+}
+
+/*
+ * desenharCartaoDePista
+ * Só o que importa: o traçado, o nome e o tamanho. O vermelho diz qual está escolhida;
+ * o contorno amarelo, que o cursor está aqui.
+ * Recebe: o cartão, a pista, o destaque (0 a 1) e se o cursor está nele.
+ * Devolve: nada.
+ */
+static void desenharCartaoDePista(int cartao, Pista *pista, float destaque, int comCursor) {
     float suave = suavizar(destaque);
     float x = xDoCartao(cartao);
-    desenharPainel(x, Y_CARTAO_PISTA, LARGURA_CARTAO_PISTA, ALTURA_CARTAO_PISTA);
-    DrawRectangleLinesEx((Rectangle){ x, Y_CARTAO_PISTA, LARGURA_CARTAO_PISTA, ALTURA_CARTAO_PISTA },
-                         1.0f + suave, ColorLerp(Fade(COR_CROMO, 0.25f), COR_AMARELO, suave));
+    Rectangle cartaoInteiro = { x, Y_CARTAO_PISTA, LARGURA_CARTAO_PISTA, ALTURA_CARTAO_PISTA };
+    DrawRectangleRec(cartaoInteiro, COR_PAINEL);
+    DrawRectangleRec(cartaoInteiro, Fade(COR_VERMELHO, 0.28f * suave));
+    DrawRectangleLinesEx(cartaoInteiro, 1.0f + suave, ColorLerp(Fade(COR_CROMO, 0.25f), COR_VERMELHO, suave));
+    if (comCursor) {
+        DrawRectangleLinesEx((Rectangle){ x - FOLGA_DO_CURSOR, Y_CARTAO_PISTA - FOLGA_DO_CURSOR, LARGURA_CARTAO_PISTA + FOLGA_DO_CURSOR * 2.0f,
+                                          ALTURA_CARTAO_PISTA + FOLGA_DO_CURSOR * 2.0f }, GROSSURA_DO_CURSOR, corDoCursor());
+    }
 
     float centroX = x + LARGURA_CARTAO_PISTA / 2.0f;
-    desenharTracado(pista, centroX, Y_CARTAO_PISTA + 118.0f, LADO_DO_TRACADO,
-                    ColorLerp(COR_TEXTO_FRACO, COR_TEXTO_CLARO, suave));
+    desenharTracado(pista, centroX, Y_CARTAO_PISTA + 70.0f, LADO_DO_TRACADO, ColorLerp(COR_TEXTO_FRACO, COR_TEXTO_CLARO, suave));
 
-    float y = Y_CARTAO_PISTA + 222.0f;
-    escreverCentralizado(FONTE_TITULO, pista->nome, centroX, y, 22.0f, ColorLerp(COR_TEXTO_CLARO, COR_AMARELO, suave));
     float metros = contarSegmentos(pista) * COMPRIMENTO_SEGMENTO / UNIDADES_POR_METRO;
-    escreverCentralizado(FONTE_FORTE, TextFormat("%.2f km por volta  -  %d voltas", metros / 1000.0f, TOTAL_VOLTAS),
-                         centroX, y + 36.0f, 16.0f, COR_TEXTO_FRACO);
-    escreverComQuebra(FONTE_TEXTO, DESCRICOES_PISTA[cartao], x + 24.0f, y + 70.0f, 18.0f,
-                      LARGURA_CARTAO_PISTA - 48.0f, COR_TEXTO_CLARO);
+    escreverCentralizado(FONTE_TITULO, pista->nome, centroX, Y_CARTAO_PISTA + 134.0f, 22.0f, ColorLerp(COR_TEXTO_FRACO, COR_TEXTO_CLARO, suave));
+    escreverCentralizado(FONTE_FORTE, TextFormat("%.2f km", metros / 1000.0f), centroX, Y_CARTAO_PISTA + 162.0f, 16.0f, ColorLerp(COR_TEXTO_FRACO, COR_TEXTO_CLARO, suave));
+}
+
+/*
+ * desenharBotaoDeNivel
+ * Recebe: o nível, o destaque (0 a 1) e se o cursor está nele.
+ * Devolve: nada.
+ */
+static void desenharBotaoDeNivel(int nivel, float destaque, int comCursor) {
+    float suave = suavizar(destaque);
+    float x = xDoNivel(nivel);
+    desenharParalelogramo(x, Y_BOTAO_NIVEL, LARGURA_BOTAO_NIVEL, ALTURA_BOTAO_NIVEL, INCLINACAO / 2.0f, ColorLerp(COR_PAINEL, COR_VERMELHO, suave));
+    if (suave < 1.0f) {
+        desenharContornoParalelogramo(x, Y_BOTAO_NIVEL, LARGURA_BOTAO_NIVEL, ALTURA_BOTAO_NIVEL, INCLINACAO / 2.0f, 1.5f, Fade(COR_CROMO, 0.35f * (1.0f - suave)));
+    }
+    if (comCursor) {
+        desenharContornoParalelogramo(x - FOLGA_DO_CURSOR, Y_BOTAO_NIVEL - FOLGA_DO_CURSOR, LARGURA_BOTAO_NIVEL + FOLGA_DO_CURSOR * 2.0f,
+                                      ALTURA_BOTAO_NIVEL + FOLGA_DO_CURSOR * 2.0f, INCLINACAO / 2.0f, GROSSURA_DO_CURSOR, corDoCursor());
+    }
+    escreverCentralizado(FONTE_TITULO, fichaDoNivel((NivelDaCorrida) nivel)->nome, x + (LARGURA_BOTAO_NIVEL + INCLINACAO / 2.0f) / 2.0f, Y_BOTAO_NIVEL + 12.0f, 24.0f,
+                         ColorLerp(COR_TEXTO_FRACO, COR_TEXTO_CLARO, suave));
+}
+
+/*
+ * desenharBotaoCorrer
+ * Sempre vermelho, por ser a ação principal; mais apagado até o cursor chegar nele.
+ * Recebe: se o cursor está nele.
+ * Devolve: nada.
+ */
+static void desenharBotaoCorrer(int comCursor) {
+    float largura = LARGURA_OPCAO_MARCADA;
+    float x = LARGURA_TELA / 2.0f - largura / 2.0f - INCLINACAO / 2.0f;
+    desenharParalelogramo(x, Y_BOTAO_CORRER, largura, ALTURA_OPCAO, INCLINACAO, comCursor ? COR_VERMELHO : ColorLerp(COR_PAINEL, COR_VERMELHO, 0.45f));
+    if (comCursor) {
+        desenharContornoParalelogramo(x - FOLGA_DO_CURSOR, Y_BOTAO_CORRER - FOLGA_DO_CURSOR, largura + FOLGA_DO_CURSOR * 2.0f,
+                                      ALTURA_OPCAO + FOLGA_DO_CURSOR * 2.0f, INCLINACAO, GROSSURA_DO_CURSOR, corDoCursor());
+    }
+    escreverCentralizado(FONTE_TITULO, "CORRER", LARGURA_TELA / 2.0f, Y_BOTAO_CORRER + 3.0f, 36.0f, comCursor ? COR_TEXTO_CLARO : Fade(COR_TEXTO_CLARO, 0.65f));
+}
+
+/*
+ * desenharResumoDaCorrida
+ * O que muda na corrida marcada, em uma linha.
+ * Recebe: o estado do menu.
+ * Devolve: nada.
+ */
+static void desenharResumoDaCorrida(EstadoMenu *menu) {
+    const FichaDoNivel *ficha = fichaDoNivel(menu->nivelEscolhido);
+    int temPit = (menu->pistaEscolhida == PISTA_INTERLAGOS);
+    int parada = ficha->temParada && temPit;
+    int gasta = ficha->gastaPneu && parada;
+    const char *partes[3] = { TextFormat("%d VOLTAS", ficha->voltas), parada ? "PITSTOP OBRIGATÓRIO" : "SEM PITSTOP", "PNEUS GASTAM" };
+    char voltas[32];
+    snprintf(voltas, sizeof(voltas), "%s", partes[0]);   /* TextFormat reaproveita o próprio texto */
+    partes[0] = voltas;
+    int total = gasta ? 3 : 2;
+    float tamanho = 18.0f, espaco = 34.0f, largura = (total - 1) * espaco;
+    for (int i = 0; i < total; i++) {
+        largura += larguraDoTexto(FONTE_FORTE, partes[i], tamanho);
+    }
+    float x = (LARGURA_TELA - largura) / 2.0f;
+    for (int i = 0; i < total; i++) {
+        escrever(FONTE_FORTE, partes[i], x, Y_RESUMO, tamanho, (i == 2) ? COR_AMARELO : COR_TEXTO_CLARO);
+        x += larguraDoTexto(FONTE_FORTE, partes[i], tamanho);
+        if (i + 1 < total) {
+            desenharParalelogramo(x + espaco / 2.0f - 4.0f, Y_RESUMO + 7.0f, 8.0f, 8.0f, 3.0f, COR_VERMELHO);
+            x += espaco;
+        }
+    }
 }
 
 /*
  * desenharEscolhaDePista
- * Recebe: o estado do menu e as pistas (o fundo é desenhado antes, pelo main.c).
+ * Recebe: o estado do menu e as pistas.
  * Devolve: nada.
  */
 void desenharEscolhaDePista(EstadoMenu *menu, Pista *pistas[]) {
     escurecerTela(0.7f, 0.55f, 0.75f);
-    desenharCabecalho("PISTA");
+    desenharCabecalho("CORRIDA");
     desenharBotaoVoltar(menu->destaqueVoltar);
+
+    int foco = menu->focoDaCorrida;
+    desenharTituloDaLinha("PISTA", Y_TITULO_PISTA, foco == FOCO_NA_PISTA);
     for (int i = 0; i < TOTAL_PISTAS; i++) {
-        desenharCartaoDePista(i, pistas[i], menu->destaquePista[i]);
+        desenharCartaoDePista(i, pistas[i], menu->destaquePista[i], foco == FOCO_NA_PISTA && i == menu->pistaEscolhida);
+    }
+    desenharTituloDaLinha("DIFICULDADE", Y_TITULO_NIVEL, foco == FOCO_NO_NIVEL);
+    for (int i = 0; i < TOTAL_NIVEIS; i++) {
+        desenharBotaoDeNivel(i, menu->destaqueNivel[i], foco == FOCO_NO_NIVEL && i == (int) menu->nivelEscolhido);
+    }
+    desenharResumoDaCorrida(menu);
+    desenharBotaoCorrer(foco == FOCO_NO_CORRER);
+
+    if (foco == FOCO_NA_PISTA) {
+        desenharSetasDaLinha(Y_CARTAO_PISTA + ALTURA_CARTAO_PISTA / 2.0f);
+    } else if (foco == FOCO_NO_NIVEL) {
+        desenharSetasDaLinha(Y_BOTAO_NIVEL + ALTURA_BOTAO_NIVEL / 2.0f);
     }
 
-    Dica dicas[] = {
-        { { "ESQ", "DIR", NULL }, "PISTA" },
-        { { "ENTER", NULL }, "CORRER" },
-        { { "ESC", NULL }, "VOLTAR" },
-    };
-    desenharBarraDeDicas(dicas, 3);
+    /* As dicas dizem o que cada botão faz na linha em que o cursor está */
+    if (foco == FOCO_NO_CORRER) {
+        Dica dicas[] = {
+            { { "CIMA", NULL }, "SUBIR" },
+            { { "ENTER", NULL }, "CORRER" },
+            { { "ESC", NULL }, "VOLTAR" },
+        };
+        desenharBarraDeDicas(dicas, 3);
+    } else {
+        Dica dicas[] = {
+            { { "ESQ", "DIR", NULL }, (foco == FOCO_NA_PISTA) ? "TROCAR A PISTA" : "TROCAR A DIFICULDADE" },
+            { { "ENTER", NULL }, "PRÓXIMO" },
+            { { "ESC", NULL }, "VOLTAR" },
+        };
+        desenharBarraDeDicas(dicas, 3);
+    }
+}
+
+/* ==================================================================
+ * Configurações
+ * ================================================================== */
+
+/* As linhas da tela, depois das 6 de comandos */
+enum {
+    LINHA_VIBRACAO = TOTAL_ACOES,
+    LINHA_FORCA,
+    LINHA_GATILHOS,
+    LINHA_ZONA_MORTA,
+    LINHA_VOLANTE,
+    LINHA_CAMERA_X,
+    LINHA_CAMERA_Y,
+    LINHA_PADRAO,
+    TOTAL_LINHAS_CONFIG
+};
+
+#define Y_TITULO_COMANDOS     92.0f
+#define Y_COMANDOS            114.0f
+#define ALTURA_LINHA_COMANDO  29.0f
+#define Y_TITULO_CONTROLE     294.0f
+#define Y_OPCOES_CONTROLE     316.0f
+#define ALTURA_LINHA_OPCAO    26.0f
+#define X_LINHAS_CONFIG       24.0f
+#define LARGURA_LINHAS_CONFIG 752.0f
+#define X_COLUNAS_COMANDO     212.0f
+#define LARGURA_COLUNA_COMANDO 138.0f
+#define X_VALOR_OPCAO         560.0f
+#define LARGURA_VALOR_OPCAO   190.0f
+#define SEGUNDOS_ESPERANDO    6.0f    /* sem apertar nada, desiste de trocar */
+#define SEGUNDOS_PARA_CONFIRMAR 3.0f
+#define SEGUNDOS_DO_TOQUE     0.3f
+
+/*
+ * yDaLinhaConfig
+ * Recebe: a linha.
+ * Devolve: o topo dela na tela.
+ */
+static float yDaLinhaConfig(int linha) {
+    if (linha < TOTAL_ACOES) {
+        return Y_COMANDOS + linha * ALTURA_LINHA_COMANDO;
+    }
+    return Y_OPCOES_CONTROLE + (linha - TOTAL_ACOES) * ALTURA_LINHA_OPCAO;
+}
+
+/*
+ * alturaDaLinhaConfig
+ * Recebe: a linha.
+ * Devolve: a altura dela.
+ */
+static float alturaDaLinhaConfig(int linha) {
+    return (linha < TOTAL_ACOES) ? ALTURA_LINHA_COMANDO : ALTURA_LINHA_OPCAO;
+}
+
+/*
+ * guardarConfiguracoes
+ * Salva a cada mudança: fechar o jogo não perde nada.
+ * Recebe: nada.
+ * Devolve: nada.
+ */
+static void guardarConfiguracoes(void) {
+    salvarConfiguracoes(configuracoesAtuais(), ARQUIVO_DE_CONFIGURACOES);
+}
+
+/*
+ * mudarOpcao
+ * Muda o valor de uma opção do controle, nos dois sentidos.
+ * Recebe: o estado do menu, a linha e o sentido (+1 ou -1).
+ * Devolve: nada.
+ */
+static void mudarOpcao(EstadoMenu *menu, int linha, int sentido) {
+    Configuracoes *config = configuracoesAtuais();
+    int vibrou = 0;
+    switch (linha) {
+        case LINHA_VIBRACAO:
+            config->vibracaoLigada = !config->vibracaoLigada;
+            vibrou = 1;
+            break;
+        case LINHA_FORCA:
+            config->forcaDaVibracao += sentido * PASSO_DA_FORCA;
+            if (config->forcaDaVibracao > 100) {
+                config->forcaDaVibracao = MENOR_FORCA_DA_VIBRACAO;
+            } else if (config->forcaDaVibracao < MENOR_FORCA_DA_VIBRACAO) {
+                config->forcaDaVibracao = 100;
+            }
+            vibrou = 1;
+            break;
+        case LINHA_GATILHOS:
+            config->gatilhosAdaptativos = !config->gatilhosAdaptativos;
+            break;
+        case LINHA_ZONA_MORTA:
+            config->zonaMorta += sentido * PASSO_DA_ZONA_MORTA;
+            if (config->zonaMorta > MAIOR_ZONA_MORTA) {
+                config->zonaMorta = MENOR_ZONA_MORTA;
+            } else if (config->zonaMorta < MENOR_ZONA_MORTA) {
+                config->zonaMorta = MAIOR_ZONA_MORTA;
+            }
+            break;
+        case LINHA_VOLANTE:
+            config->respostaDoVolante = (config->respostaDoVolante + sentido + TOTAL_VOLANTES) % TOTAL_VOLANTES;
+            break;
+        case LINHA_CAMERA_X:
+            config->inverterCameraX = !config->inverterCameraX;
+            break;
+        case LINHA_CAMERA_Y:
+            config->inverterCameraY = !config->inverterCameraY;
+            break;
+        default:
+            return;
+    }
+    if (vibrou) {
+        menu->pulsoDeVibracao = SEGUNDOS_DO_TOQUE;
+    }
+    tocarSom(SOM_CURSOR);
+    guardarConfiguracoes();
+}
+
+/*
+ * esperarComando
+ * Esperando a tecla ou o botão novo. ESC ou START desistem; se ele não apertar nada, a
+ * espera acaba sozinha.
+ * Recebe: o estado do menu.
+ * Devolve: nada.
+ */
+static void esperarComando(EstadoMenu *menu) {
+    AcaoDeCorrida acao = (AcaoDeCorrida) menu->linhaConfig;
+    ColunaDeComando coluna = (ColunaDeComando) menu->colunaConfig;
+    int ehBotao = (coluna >= COLUNA_BOTAO_1);
+    menu->tempoEsperando += GetFrameTime();
+    if (IsKeyPressed(KEY_ESCAPE) || controleApertou(BOTAO_START) || menu->tempoEsperando > SEGUNDOS_ESPERANDO
+        || (ehBotao && !controleConectado())) {
+        menu->esperandoComando = 0;
+        tocarSom(SOM_VOLTAR);
+        return;
+    }
+    int codigo = ehBotao ? botaoApertadoAgora() : teclaApertadaAgora();
+    if (codigo != SEM_COMANDO && codigo != KEY_ESCAPE) {
+        definirComando(configuracoesAtuais(), acao, coluna, codigo);
+        guardarConfiguracoes();
+        menu->esperandoComando = 0;
+        tocarSom(SOM_CONFIRMAR);
+    }
+}
+
+/*
+ * colunaSobOMouse
+ * Recebe: a posição do mouse.
+ * Devolve: a coluna de comando sob ele, ou -1.
+ */
+static int colunaSobOMouse(float mouseX) {
+    if (mouseX < X_COLUNAS_COMANDO || mouseX >= X_COLUNAS_COMANDO + TOTAL_COLUNAS * LARGURA_COLUNA_COMANDO) {
+        return -1;
+    }
+    return (int) ((mouseX - X_COLUNAS_COMANDO) / LARGURA_COLUNA_COMANDO);
+}
+
+/*
+ * apertarLinhaConfig
+ * Confirmou na linha marcada: troca o comando, muda a opção, ou volta ao padrão.
+ * Recebe: o estado do menu.
+ * Devolve: nada.
+ */
+static void apertarLinhaConfig(EstadoMenu *menu) {
+    if (menu->linhaConfig < TOTAL_ACOES) {
+        if (menu->colunaConfig >= COLUNA_BOTAO_1 && !controleConectado()) {
+            tocarSom(SOM_VOLTAR);   /* sem controle, não há como apertar o botão novo */
+            return;
+        }
+        menu->esperandoComando = 1;
+        menu->tempoEsperando = 0.0f;
+        while (GetKeyPressed() != 0) {
+            /* a tecla que abriu a espera não conta */
+        }
+        tocarSom(SOM_CONFIRMAR);
+    } else if (menu->linhaConfig == LINHA_PADRAO) {
+        if (menu->confirmarPadrao > 0.0f) {
+            configuracoesPadrao(configuracoesAtuais());
+            guardarConfiguracoes();
+            menu->confirmarPadrao = 0.0f;
+            menu->pulsoDeVibracao = SEGUNDOS_DO_TOQUE;
+            tocarSom(SOM_CONFIRMAR);
+        } else {
+            menu->confirmarPadrao = SEGUNDOS_PARA_CONFIRMAR;
+            tocarSom(SOM_CURSOR);
+        }
+    } else {
+        mudarOpcao(menu, menu->linhaConfig, 1);
+    }
+}
+
+/*
+ * atualizarConfiguracoes
+ * Recebe: o estado do menu.
+ * Devolve: a tela do próximo quadro.
+ */
+Tela atualizarConfiguracoes(EstadoMenu *menu) {
+    if (menu->esperandoComando) {
+        esperarComando(menu);
+        return TELA_CONFIGURACOES;
+    }
+    menu->confirmarPadrao = fmaxf(menu->confirmarPadrao - GetFrameTime(), 0.0f);
+
+    int anterior = menu->linhaConfig, colunaAnterior = menu->colunaConfig;
+    menu->linhaConfig = andarNaLista(menu->linhaConfig, TOTAL_LINHAS_CONFIG);
+    if (menu->linhaConfig < TOTAL_ACOES) {
+        if (apertouParaDireita()) {
+            menu->colunaConfig = (menu->colunaConfig + 1) % TOTAL_COLUNAS;
+        }
+        if (apertouParaEsquerda()) {
+            menu->colunaConfig = (menu->colunaConfig + TOTAL_COLUNAS - 1) % TOTAL_COLUNAS;
+        }
+    } else if (apertouParaDireita()) {
+        mudarOpcao(menu, menu->linhaConfig, 1);
+    } else if (apertouParaEsquerda()) {
+        mudarOpcao(menu, menu->linhaConfig, -1);
+    }
+
+    /* O mouse: passar marca, e clicar faz o mesmo que confirmar */
+    float mouseX, mouseY;
+    posicaoDoMouseNaInterface(&mouseX, &mouseY);
+    int voltar = sobreOVoltar(mouseX, mouseY);
+    int sobre = -1;
+    for (int i = 0; i < TOTAL_LINHAS_CONFIG; i++) {
+        if (dentroDoRetangulo(mouseX, mouseY, X_LINHAS_CONFIG, yDaLinhaConfig(i), LARGURA_LINHAS_CONFIG, alturaDaLinhaConfig(i))) {
+            sobre = i;
+        }
+    }
+    int sobreColuna = colunaSobOMouse(mouseX);
+    if (sobre >= 0 && mouseSeMexeu()) {
+        menu->linhaConfig = sobre;
+        if (sobre < TOTAL_ACOES && sobreColuna >= 0) {
+            menu->colunaConfig = sobreColuna;
+        }
+    }
+    if (menu->linhaConfig != anterior || menu->colunaConfig != colunaAnterior || (voltar && !menu->voltarAnterior)) {
+        tocarSom(SOM_CURSOR);
+    }
+    if (menu->linhaConfig != anterior) {
+        menu->confirmarPadrao = 0.0f;
+    }
+    menu->voltarAnterior = voltar;
+    menu->destaqueVoltar = animarDestaque(menu->destaqueVoltar, voltar);
+
+    if (apertouVoltar() || (voltar && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))) {
+        tocarSom(SOM_VOLTAR);
+        return TELA_MENU;
+    }
+
+    /* Tirar uma tecla do comando: não vale para a última que ele tem */
+    if (menu->linhaConfig < TOTAL_ACOES && (IsKeyPressed(KEY_BACKSPACE) || IsKeyPressed(KEY_DELETE) || controleApertou(BOTAO_LIMPAR))) {
+        if (limparComando(configuracoesAtuais(), (AcaoDeCorrida) menu->linhaConfig, (ColunaDeComando) menu->colunaConfig)) {
+            guardarConfiguracoes();
+            tocarSom(SOM_VOLTAR);
+        }
+    }
+
+    if (apertouConfirmar() || (sobre >= 0 && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && (sobre >= TOTAL_ACOES || sobreColuna >= 0))) {
+        apertarLinhaConfig(menu);
+    }
+    return TELA_CONFIGURACOES;
+}
+
+/*
+ * desenharTituloDeSecao
+ * Recebe: o texto e a altura.
+ * Devolve: nada.
+ */
+static void desenharTituloDeSecao(const char *texto, float y) {
+    escrever(FONTE_TITULO, texto, X_LINHAS_CONFIG + 10.0f, y, 17.0f, COR_AMARELO);
+}
+
+/*
+ * desenharFundoDaLinhaConfig
+ * Recebe: a linha e se ela está marcada.
+ * Devolve: nada.
+ */
+static void desenharFundoDaLinhaConfig(int linha, int marcada) {
+    float y = yDaLinhaConfig(linha), altura = alturaDaLinhaConfig(linha);
+    DrawRectangleRec((Rectangle){ X_LINHAS_CONFIG, y, LARGURA_LINHAS_CONFIG, altura - 2.0f },
+                     marcada ? Fade(COR_CROMO, 0.14f) : Fade(COR_GRAFITE, 0.78f));
+    if (marcada && linha >= TOTAL_ACOES) {
+        DrawRectangleLinesEx((Rectangle){ X_LINHAS_CONFIG, y, LARGURA_LINHAS_CONFIG, altura - 2.0f }, 2.0f, corDoCursor());
+    }
+}
+
+/*
+ * desenharLinhaDeComando
+ * Um comando e as suas 4 colunas.
+ * Recebe: o estado do menu e a linha.
+ * Devolve: nada.
+ */
+static void desenharLinhaDeComando(EstadoMenu *menu, int linha) {
+    const Configuracoes *config = configuracoesAtuais();
+    int marcada = (linha == menu->linhaConfig);
+    float y = yDaLinhaConfig(linha);
+    desenharFundoDaLinhaConfig(linha, marcada);
+    escrever(FONTE_FORTE, nomeDaAcao((AcaoDeCorrida) linha), X_LINHAS_CONFIG + 12.0f, y + 5.0f, 15.0f, marcada ? COR_TEXTO_CLARO : COR_CROMO);
+
+    for (int c = 0; c < TOTAL_COLUNAS; c++) {
+        float x = X_COLUNAS_COMANDO + c * LARGURA_COLUNA_COMANDO;
+        int codigo = config->comandos[linha][c];
+        int aqui = marcada && c == menu->colunaConfig;
+        if (aqui) {
+            DrawRectangleLinesEx((Rectangle){ x + 2.0f, y + 1.0f, LARGURA_COLUNA_COMANDO - 4.0f, ALTURA_LINHA_COMANDO - 4.0f }, 2.0f, corDoCursor());
+        }
+        if (aqui && menu->esperandoComando) {
+            const char *pedido = (c >= COLUNA_BOTAO_1) ? "APERTE UM BOTÃO" : "APERTE UMA TECLA";
+            escreverCentralizado(FONTE_FORTE, pedido, x + LARGURA_COLUNA_COMANDO / 2.0f, y + 6.0f, 12.0f, COR_AMARELO);
+        } else if (codigo == SEM_COMANDO) {
+            escreverCentralizado(FONTE_FORTE, "---", x + LARGURA_COLUNA_COMANDO / 2.0f, y + 5.0f, 15.0f, COR_TEXTO_FRACO);
+        } else {
+            const char *nome = (c >= COLUNA_BOTAO_1) ? nomeDoBotao(codigo) : nomeDaTecla(codigo);
+            desenharTecla(x + (LARGURA_COLUNA_COMANDO - larguraDaTecla(nome)) / 2.0f, y + 2.0f, nome);
+        }
+    }
+}
+
+/*
+ * desenharLinhaDeOpcao
+ * Recebe: o estado do menu, a linha, o nome, o valor e se ela está apagada (depende de outra).
+ * Devolve: nada.
+ */
+static void desenharLinhaDeOpcao(EstadoMenu *menu, int linha, const char *nome, const char *valor, int apagada) {
+    int marcada = (linha == menu->linhaConfig);
+    float y = yDaLinhaConfig(linha);
+    Color corDoTexto = apagada ? COR_TEXTO_FRACO : (marcada ? COR_TEXTO_CLARO : COR_CROMO);
+    desenharFundoDaLinhaConfig(linha, marcada);
+    escrever(FONTE_FORTE, nome, X_LINHAS_CONFIG + 12.0f, y + 3.0f, 15.0f, corDoTexto);
+    escreverCentralizado(FONTE_FORTE, valor, X_VALOR_OPCAO + LARGURA_VALOR_OPCAO / 2.0f, y + 3.0f, 15.0f,
+                         apagada ? COR_TEXTO_FRACO : COR_AMARELO);
+    if (marcada && linha != LINHA_PADRAO) {
+        escrever(FONTE_FORTE, "<", X_VALOR_OPCAO, y + 3.0f, 15.0f, COR_AMARELO);
+        escreverADireita(FONTE_FORTE, ">", X_VALOR_OPCAO + LARGURA_VALOR_OPCAO, y + 3.0f, 15.0f, COR_AMARELO);
+    }
+}
+
+/*
+ * desenharConfiguracoes
+ * Recebe: o estado do menu.
+ * Devolve: nada.
+ */
+void desenharConfiguracoes(EstadoMenu *menu) {
+    static const char *VOLANTES[TOTAL_VOLANTES] = { "SUAVE", "NORMAL", "DIRETO" };
+    const Configuracoes *config = configuracoesAtuais();
+    escurecerTela(0.75f, 0.6f, 0.8f);
+    desenharCabecalho("CONFIGURAÇÕES");
+    desenharBotaoVoltar(menu->destaqueVoltar);
+
+    /* Comandos */
+    desenharTituloDeSecao("COMANDOS", Y_TITULO_COMANDOS);
+    static const char *COLUNAS[TOTAL_COLUNAS] = { "TECLA", "TECLA 2", "CONTROLE", "CONTROLE 2" };
+    for (int c = 0; c < TOTAL_COLUNAS; c++) {
+        escreverCentralizado(FONTE_FORTE, COLUNAS[c], X_COLUNAS_COMANDO + (c + 0.5f) * LARGURA_COLUNA_COMANDO, Y_TITULO_COMANDOS + 2.0f, 13.0f, COR_TEXTO_FRACO);
+    }
+    for (int i = 0; i < TOTAL_ACOES; i++) {
+        desenharLinhaDeComando(menu, i);
+    }
+
+    /* Controle */
+    int vibra = config->vibracaoLigada;
+    desenharTituloDeSecao("CONTROLE", Y_TITULO_CONTROLE);
+    desenharLinhaDeOpcao(menu, LINHA_VIBRACAO, "VIBRAÇÃO", vibra ? "LIGADA" : "DESLIGADA", 0);
+    desenharLinhaDeOpcao(menu, LINHA_FORCA, "FORÇA DA VIBRAÇÃO", TextFormat("%d%%", config->forcaDaVibracao), !vibra);
+    desenharLinhaDeOpcao(menu, LINHA_GATILHOS, "TREMOR NO ACELERADOR (DUALSENSE)", config->gatilhosAdaptativos ? "LIGADO" : "DESLIGADO", !vibra);
+    desenharLinhaDeOpcao(menu, LINHA_ZONA_MORTA, "ZONA MORTA DO ANALÓGICO", TextFormat("%d%%", config->zonaMorta), 0);
+    desenharLinhaDeOpcao(menu, LINHA_VOLANTE, "RESPOSTA DO VOLANTE NO ANALÓGICO", VOLANTES[config->respostaDoVolante], 0);
+    desenharLinhaDeOpcao(menu, LINHA_CAMERA_X, "INVERTER A CÂMERA NA HORIZONTAL", config->inverterCameraX ? "SIM" : "NÃO", 0);
+    desenharLinhaDeOpcao(menu, LINHA_CAMERA_Y, "INVERTER A CÂMERA NA VERTICAL", config->inverterCameraY ? "SIM" : "NÃO", 0);
+    desenharLinhaDeOpcao(menu, LINHA_PADRAO, "VOLTAR TUDO AO PADRÃO", (menu->confirmarPadrao > 0.0f) ? "APERTE DE NOVO" : "", 0);
+
+    if (menu->esperandoComando) {
+        /* Aqui o botão de voltar seria gravado como o botão novo: quem desiste é o da pausa */
+        Dica esperando[] = { { { controleConectado() ? nomeDoBotao(GAMEPAD_BUTTON_MIDDLE_RIGHT) : "TECLA ESC", NULL }, "DESISTIR" } };
+        desenharBarraDeDicas(esperando, 1);
+    } else if (menu->linhaConfig < TOTAL_ACOES) {
+        Dica dicas[] = {
+            { { "ENTER", NULL }, "TROCAR" },
+            { { controleConectado() ? nomeDoBotao(GAMEPAD_BUTTON_RIGHT_FACE_UP) : "APAGAR", NULL }, "LIMPAR" },
+            { { "ESC", NULL }, "VOLTAR" },
+        };
+        desenharBarraDeDicas(dicas, 3);
+    } else if (menu->linhaConfig == LINHA_PADRAO) {
+        Dica dicas[] = {
+            { { "ENTER", NULL }, "VOLTAR AO PADRÃO" },
+            { { "ESC", NULL }, "VOLTAR" },
+        };
+        desenharBarraDeDicas(dicas, 2);
+    } else {
+        Dica dicas[] = {
+            { { "ESQ", "DIR", NULL }, "MUDAR" },
+            { { "ESC", NULL }, "VOLTAR" },
+        };
+        desenharBarraDeDicas(dicas, 2);
+    }
 }
 
 /* ==================================================================
@@ -1129,35 +1721,40 @@ void desenharComoJogar(void) {
     desenharPainel(x, topo, 352, 444);
     desenharTituloDePainel("CONTROLES", x + 20, topo + 14);
 
-    static const char *TECLAS[][4] = {
-        { "CIMA", "W", NULL },
-        { "BAIXO", "S", NULL },
-        { "ESQ", "DIR", "A", "D" },
-        { "ESPACO", NULL },
-        { "ESC", NULL },
-        { "ENTER", NULL },
+    /* O que está nas configurações: de cada comando, as teclas, ou os botões com um controle ligado */
+    const Configuracoes *config = configuracoesAtuais();
+    int ligado = controleConectado();
+    int primeira = ligado ? COLUNA_BOTAO_1 : COLUNA_TECLA_1;
+    static const AcaoDeCorrida LINHAS[][2] = {
+        { ACAO_ACELERAR, ACAO_ACELERAR }, { ACAO_FREAR, ACAO_FREAR }, { ACAO_ESQUERDA, ACAO_DIREITA },
+        { ACAO_NITRO, ACAO_NITRO }, { ACAO_FREIO_DE_MAO, ACAO_FREIO_DE_MAO },
     };
-    static const char *BOTOES[][4] = {   /* nomes do controle de Xbox */
-        { "RT", "A", NULL },
-        { "LT", "X", NULL },
-        { "ESQ", "DIR", "ANALOG", NULL },
-        { "RB", "B", NULL },
-        { "START", NULL },
-        { "A", NULL },
-        { "ANALOG D", NULL },
-    };
-    const char *(*teclas)[4] = controleConectado() ? BOTOES : TECLAS;
-    const char *acoes[] =  { "ACELERAR", "FREAR", "VIRAR", "NITRO", "PAUSAR A CORRIDA", "CONFIRMAR NOS MENUS", "OLHAR EM VOLTA" };
-    int linhas = controleConectado() ? 7 : 6;   /* a câmera livre só existe no controle */
+    const char *acoes[] = { "ACELERAR", "FREAR", "VIRAR", "NITRO", "FREIO DE MÃO", "PAUSAR A CORRIDA", "CONFIRMAR NOS MENUS", "OLHAR EM VOLTA" };
+    int linhas = ligado ? 8 : 7;   /* a câmera livre só existe no controle */
     for (int i = 0; i < linhas; i++) {
-        float y = topo + 72 + i * (controleConectado() ? 51 : 60);
+        float y = topo + 72 + i * (ligado ? 45 : 51);
         float xTecla = x + 20;
-        for (int t = 0; t < 4 && teclas[i][t] != NULL; t++) {
-            xTecla += desenharTecla(xTecla, y, teclas[i][t]) + 5;
+        if (i < 5) {
+            /* Virar mostra os dois sentidos; os outros, as duas teclas do comando */
+            if (ligado && LINHAS[i][0] == ACAO_ESQUERDA) {
+                xTecla += desenharTecla(xTecla, y, nomeNoControle("ANALOG E")) + 5;
+            }
+            for (int lado = 0; lado < ((LINHAS[i][0] == LINHAS[i][1]) ? 1 : 2); lado++) {
+                for (int c = primeira; c < primeira + ((LINHAS[i][0] == LINHAS[i][1]) ? 2 : 1); c++) {
+                    int codigo = config->comandos[LINHAS[i][lado]][c];
+                    if (codigo != SEM_COMANDO) {
+                        const char *nome = ligado ? nomeDoBotao(codigo) : nomeDaTecla(codigo);
+                        xTecla += desenharTecla(xTecla, y, nome) + 5;
+                    }
+                }
+            }
+        } else {
+            const char *fixas[] = { ligado ? nomeDoBotao(GAMEPAD_BUTTON_MIDDLE_RIGHT) : "ESC", ligado ? nomeNoControle("ENTER") : "ENTER", nomeNoControle("ANALOG D") };
+            xTecla += desenharTecla(xTecla, y, fixas[i - 5]) + 5;
         }
-        escrever(FONTE_TITULO, acoes[i], x + 140, y - 2, 20.0f, COR_TEXTO_CLARO);
-        if (i < 4) {
-            DrawRectangleRec((Rectangle){ x + 20, y + 44, 312, 1 }, Fade(COR_CROMO, 0.15f));
+        escrever(FONTE_TITULO, acoes[i], x + 150, y - 2, 20.0f, COR_TEXTO_CLARO);
+        if (i < 5) {
+            DrawRectangleRec((Rectangle){ x + 20, y + 40, 312, 1 }, Fade(COR_CROMO, 0.15f));
         }
     }
 
@@ -1167,9 +1764,9 @@ void desenharComoJogar(void) {
     desenharTituloDePainel("DICAS", x + 20, topo + 14);
 
     const char *dicas[] = {
-        TextFormat("%d voltas contra %d rivais. Você larga em último.", TOTAL_VOLTAS, TOTAL_RIVAIS),
-        "Em Interlagos a parada nos boxes é obrigatória: saia pela esquerda na Subida dos Boxes. Quem não para é desclassificado.",
-        "O carro acelera como um F1: forte na saída e cada vez menos perto dos 300 km/h.",
+        TextFormat("Você larga em último, contra %d rivais. O nível muda as voltas e os rivais; no difícil, os pneus gastam.", TOTAL_RIVAIS),
+        "Em Interlagos, no médio e no difícil, a parada é obrigatória: saia pela esquerda na Subida dos Boxes. Quem não para é desclassificado.",
+        "Freio de mão com o volante virado: a traseira solta e o carro entra em drift. Vira mais, mas perde velocidade e gasta pneu.",
         "Freie antes das curvas e alivie no meio: acelerando, o carro sai de frente. Fumaça = pneu no limite; passar dele custa velocidade.",
         "Na grama (sai poeira) o carro não passa de 75 km/h.",
         "Colado atrás de alguém você pega vácuo. Os carros são sólidos: batendo na quina ou de lado, quem toma a batida roda.",
@@ -1299,7 +1896,7 @@ Tela atualizarResultado(void) {
  */
 static float melhorVolta(Carro *carro) {
     float melhor = 0.0f;
-    for (int i = 0; i < carro->voltas && i < TOTAL_VOLTAS; i++) {
+    for (int i = 0; i < carro->voltas && i < carro->voltasDaProva; i++) {
         if (melhor == 0.0f || carro->temposDeVolta[i] < melhor) {
             melhor = carro->temposDeVolta[i];
         }
@@ -1354,11 +1951,11 @@ static void desenharLinhaDoResultado(Corrida *corrida, int posicao, float y) {
     }
 
     Color corTempo = ehJogador ? COR_TEXTO_CLARO : COR_CROMO;
-    if (carro->voltas >= TOTAL_VOLTAS) {
+    if (carro->voltas >= carro->voltasDaProva) {
         formatarTempo(carro->tempoDeChegada, tempo, sizeof(tempo));
         escrever(FONTE_FORTE, tempo, X_COLUNA_TEMPO, y + 6, 16.0f, corTempo);
     } else {
-        escrever(FONTE_FORTE, TextFormat("VOLTA %d/%d", voltaAtual(carro), TOTAL_VOLTAS),
+        escrever(FONTE_FORTE, TextFormat("VOLTA %d/%d", voltaAtual(carro), carro->voltasDaProva),
                  X_COLUNA_TEMPO, y + 6, 16.0f, COR_TEXTO_FRACO);
     }
 

@@ -18,7 +18,6 @@
 #define SUBPASSOS_DO_TRACADO  64      /* entre dois pontos da tabela: bem menor que um segmento */
 #include "obstaculos.h"
 
-#define FIM_DO_MURO           320.0f    /* metros depois da linha */
 
 /* ==================================================================
  * Funções auxiliares (static = só podem ser usadas dentro deste arquivo)
@@ -44,6 +43,7 @@ static Segmento *criarSegmento(float curvatura) {
     novo->nomeTrecho = "";
     novo->temMuro = 0;
     novo->lugarDoMuro = 1.0f;
+    novo->asfaltoEsquerda = 1.0f;
     novo->xMundo = 0.0f;
     novo->zMundo = 0.0f;
     novo->rumo = 0.0f;
@@ -300,9 +300,10 @@ static float suave(float t) {
 
 /*
  * ladoDentroDoPit
- * O traçado do pit lane: sai da pista na Subida dos Boxes, se afasta, passa por trás do
- * funil, encosta no muro da reta, se afasta de novo depois dos boxes e, por dentro do
- * S do Senna e da Curva do Sol, volta à pista na Reta Oposta.
+ * O traçado do pit lane: abre colado na pista, na Subida dos Boxes, como uma faixa de
+ * desaceleração; se afasta, passa por trás do funil, encosta no muro da reta, se afasta
+ * de novo depois dos boxes e, por dentro do S do Senna e da Curva do Sol, volta a colar
+ * na pista na Reta Oposta, como uma faixa de aceleração, e fecha.
  * Recebe: os metros desde a linha de chegada, o comprimento da volta e onde guardar a
  *         largura do pit lane ali (em metros).
  * Devolve: onde fica a borda dele perto da pista, em larguras (ou 0 se ali não há pit lane).
@@ -313,19 +314,19 @@ float ladoDentroDoPit(float metros, float metrosDaVolta, float *largura) {
     if (!depoisDaLinha && metros < ENTRADA_DO_PIT) {
         return 0.0f;
     }
-    float abrindo = fminf((noPit - ENTRADA_DO_PIT) / METROS_ABRINDO_O_PIT, 1.0f);
-    float fechando = fminf((metrosDaVolta + FIM_DO_PIT_LANE - noPit) / RAMPA_DO_PIT_LANE, 1.0f);
+    float abrindo = suave((noPit - ENTRADA_DO_PIT) / METROS_ABRINDO_O_PIT);
+    float fechando = suave((metrosDaVolta + FIM_DO_PIT_LANE - noPit) / (FIM_DO_PIT_LANE - FIM_DA_VOLTA));
     *largura = LARGURA_DO_PIT_LANE * fminf(abrindo, fechando);
 
     if (depoisDaLinha) {
         float afastado = suave((metros - INICIO_DO_DESVIO_DA_SAIDA) / (FIM_DO_DESVIO_DA_SAIDA - INICIO_DO_DESVIO_DA_SAIDA));
-        float voltando = suave((metros - (FIM_DO_PIT_LANE - METROS_VOLTANDO_A_PISTA)) / METROS_VOLTANDO_A_PISTA);
+        float voltando = suave((metros - INICIO_DA_VOLTA) / (FIM_DA_VOLTA - INICIO_DA_VOLTA));
         return 1.0f + (LADO_DA_SAIDA - 1.0f) * afastado * (1.0f - voltando);
     }
 
     float fimDoFunil = INICIO_DO_FUNIL + COMPRIMENTO_DO_FUNIL;
     if (noPit < FIM_DA_SAIDA_DA_PISTA) {
-        return 1.0f + (PIT_ATRAS_DO_FUNIL - 1.0f) * suave((noPit - ENTRADA_DO_PIT) / (FIM_DA_SAIDA_DA_PISTA - ENTRADA_DO_PIT));
+        return 1.0f + (PIT_ATRAS_DO_FUNIL - 1.0f) * suave((noPit - INICIO_DA_SEPARACAO) / (FIM_DA_SAIDA_DA_PISTA - INICIO_DA_SEPARACAO));
     }
     if (noPit < INICIO_DO_FUNIL) {
         return PIT_ATRAS_DO_FUNIL;
@@ -336,6 +337,25 @@ float ladoDentroDoPit(float metros, float metrosDaVolta, float *largura) {
     }
     float encostando = fminf((noPit - fimDoFunil) / METROS_DO_RETAO_DO_PIT, 1.0f);
     return 1.0f + (PIT_ATRAS_DO_FUNIL - ABERTURA_DO_FUNIL) * (1.0f - encostando);
+}
+
+/*
+ * marcarAsfaltoDoPit
+ * Onde o pit lane encosta na pista, é tudo asfalto: quem passa por ali não está na grama.
+ * Recebe: a pista.
+ * Devolve: nada.
+ */
+static void marcarAsfaltoDoPit(Pista *pista) {
+    Segmento *atual = pista->largada;
+    do {
+        float metros = atual->indice * COMPRIMENTO_SEGMENTO / UNIDADES_POR_METRO;
+        float largura = 0.0f;
+        float lado = ladoDentroDoPit(metros, pista->metrosDaVolta, &largura);
+        if (lado > 0.0f && lado <= LADO_DA_ILHA && !atual->temMuro) {
+            atual->asfaltoEsquerda = lado + largura / atual->larguraEsquerda;
+        }
+        atual = atual->proximo;
+    } while (atual != pista->largada);
 }
 
 /*
@@ -372,6 +392,7 @@ Pista *criarPista(void) {
     murarRetaDosBoxes(pista);
     pista->temPit = 1;
     pista->metrosDaVolta = contarSegmentos(pista) * COMPRIMENTO_SEGMENTO / UNIDADES_POR_METRO;
+    marcarAsfaltoDoPit(pista);
     decorarPista(pista);   /* árvores, pórtico, placas... (depois: as zebras dependem das curvas) */
     return pista;
 }

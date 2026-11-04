@@ -20,12 +20,13 @@ typedef enum {
     TELA_GARAGEM,
     TELA_PISTAS,
     TELA_COMO_JOGAR,
+    TELA_CONFIGURACOES,
     TELA_CORRIDA,
     TELA_RESULTADO,
     TELA_SAIR
 } Tela;
 
-#define TOTAL_OPCOES 4   /* CORRER, GARAGEM, COMO JOGAR, SAIR */
+#define TOTAL_OPCOES 5   /* CORRER, GARAGEM, COMO JOGAR, CONFIGURAÇÕES, SAIR */
 #define TOTAL_OPCOES_PAUSA 2   /* CONTINUAR, MENU PRINCIPAL */
 
 /* O que o jogador escolheu na pausa neste quadro */
@@ -50,7 +51,17 @@ typedef struct {
     float destaqueVoltar;                       /* animação (0 a 1) do botão VOLTAR */
     int opcaoPausa;                             /* item marcado na pausa */
     float destaquePausa[TOTAL_OPCOES_PAUSA];    /* animação (0 a 1) de cada botão da pausa */
+    int linhaConfig;                            /* a linha marcada nas configurações */
+    int colunaConfig;                           /* a coluna marcada, nas linhas de comandos */
+    int esperandoComando;                       /* 1: esperando apertar a tecla ou o botão novo */
+    float tempoEsperando;                       /* há quanto tempo está esperando */
+    float confirmarPadrao;                      /* segundos para confirmar a volta ao padrão (0 = não pediu) */
+    float pulsoDeVibracao;                      /* segundos do toque de teste da vibração */
     int pistaEscolhida;                         /* em qual pista correr (IdPista) */
+    NivelDaCorrida nivelEscolhido;              /* fácil, médio ou difícil */
+    float destaqueNivel[TOTAL_NIVEIS];          /* animação (0 a 1) de cada botão de nível */
+    int focoDaCorrida;                          /* a linha marcada na tela da corrida: pista, nível ou CORRER */
+    float destaqueCorrer;                       /* animação (0 a 1) do botão CORRER */
     float destaquePista[TOTAL_PISTAS];          /* animação (0 a 1) de cada cartão de pista */
 } EstadoMenu;
 
@@ -64,6 +75,9 @@ void desenharGaragem(EstadoMenu *menu);
 
 Tela atualizarEscolhaDePista(EstadoMenu *menu);
 void desenharEscolhaDePista(EstadoMenu *menu, Pista *pistas[]);
+
+Tela atualizarConfiguracoes(EstadoMenu *menu);
+void desenharConfiguracoes(EstadoMenu *menu);
 
 Tela atualizarComoJogar(void);
 void desenharComoJogar(void);

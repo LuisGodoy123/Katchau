@@ -10,7 +10,7 @@
 #define TITULO_JANELA    "KATCHAU"
 
 /* Corrida */
-#define TOTAL_VOLTAS     8
+#define MAXIMO_DE_VOLTAS 8   /* a corrida mais longa: cada nível tem o seu número de voltas (corrida.c) */
 #define ESPERA_ANTES_DA_CONTAGEM 1.2f  /* segundos só com o som do motor, antes do 3 aparecer */
 #define NUMEROS_DA_CONTAGEM   3      /* 3, 2, 1... */
 #define SEGUNDOS_POR_NUMERO   1.0f   /* quanto cada número fica na tela (o som da contagem tem 1 bip por segundo) */
