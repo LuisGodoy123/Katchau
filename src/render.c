@@ -35,8 +35,7 @@
 #define ALTURA_DA_SOMBRA_NO_CHAO 0.04f  /* metros acima do chão */
 #define SOMBRA_PERTO_DA_CAMERA   0.40f  /* metros: quanto ela é puxada na direção da câmera */
 #define GRAUS_DE_VISAO        65.0f    /* na vertical */
-#define CAMERA_ATRAS          8.5f     /* metros atrás do centro do carro */
-#define CAMERA_ALTURA         3.4f     /* metros acima do chão */
+#define VELOCIDADE_DA_TROCA_DE_CAMERA 7.0f   /* 1/s: a câmera leva ~0,3 s para ir de uma distância à outra */
 #define OLHAR_PARA_BAIXO      5.0f     /* graus abaixo do horizonte */
 #define FOLGA_DA_CAMERA_NO_MURO 1.0f   /* metros: a câmera livre não encosta no muro */
 #define VELOCIDADE_CAMERA_MENU 3000.0f /* a câmera do fundo do menu anda a 75 km/h */
@@ -84,6 +83,21 @@ static float aFrenteDaCamera(Camera3D camera, Vector3 ponto) {
 static int cenaPausada = 0;
 static Olhar olharDoJogador = { 0.0f, 0.0f, 0.0f, 0.0f };
 
+/* As três distâncias da câmera do jogador: perto, médio (a de sempre) e longe */
+typedef struct {
+    float atras;    /* metros atrás do centro do carro */
+    float altura;   /* metros acima do chão */
+} DistanciaDaCamera;
+
+#define DISTANCIA_MEDIA 1
+static const DistanciaDaCamera DISTANCIAS_DA_CAMERA[TOTAL_DISTANCIAS_DA_CAMERA] = {
+    { 5.2f, 2.1f },
+    { 8.5f, 3.4f },
+    { 13.0f, 5.0f },
+};
+static int distanciaEscolhida = DISTANCIA_MEDIA;
+static DistanciaDaCamera distanciaAtual = { 8.5f, 3.4f };   /* anda até a escolhida, sem pulo */
+
 /*
  * alturaEmVoltaDoCarro
  * A altura do chão num ponto em volta do carro.
@@ -115,13 +129,14 @@ static float rumoDesenhado(const Carro *carro, float rumoDaPista) {
  * a curva, ou para onde o jogador está olhando. De lado ela fica presa ao carro, que
  * por isso aparece no centro da tela, e não atravessa os muros do oval. Nas curvas
  * inclinadas ela inclina junto com o chão.
- * Recebe: a posição do carro, o deslocamento lateral dele, o olhar e, sem a direção guiada,
- *         o rumo real do carro (senão, NULL).
+ * Recebe: a posição do carro, o deslocamento lateral dele, o olhar, a distância da câmera e,
+ *         sem a direção guiada, o rumo real do carro (senão, NULL).
  * Devolve: a câmera.
  */
-static Camera3D montarCamera(PosicaoNaPista carro, float lateral, Olhar olhar, const float *rumoDoCarro) {
+static Camera3D montarCamera(PosicaoNaPista carro, float lateral, Olhar olhar, DistanciaDaCamera distancia,
+                             const float *rumoDoCarro) {
     PosicaoNaPista atras = carro;
-    moverNaPista(&atras, -CAMERA_ATRAS * UNIDADES_POR_METRO);
+    moverNaPista(&atras, -distancia.atras * UNIDADES_POR_METRO);
     PontoNoMundo deCamera = pontoNoMundo(atras, lateral);
     PontoNoMundo doCarro = pontoNoMundo(carro, lateral);
 
@@ -156,7 +171,7 @@ static Camera3D montarCamera(PosicaoNaPista carro, float lateral, Olhar olhar, c
     float ladeira = (doCarro.y - chao) / comprimento;
 
     Camera3D camera = { 0 };
-    camera.position = (Vector3){ doCarro.x - dx * atrasNaPista + direitaX * aoLado, chao + CAMERA_ALTURA,
+    camera.position = (Vector3){ doCarro.x - dx * atrasNaPista + direitaX * aoLado, chao + distancia.altura,
                                  doCarro.z - dz * atrasNaPista + direitaZ * aoLado };
     camera.target = (Vector3){ camera.position.x + olhaX,
                                camera.position.y + ladeira + tanf((olhar.elevacao - OLHAR_PARA_BAIXO) * DEG2RAD),
@@ -484,6 +499,18 @@ static Camera3D cameraDaTroca(Camera3D normal, Carro *carro) {
 }
 
 /*
+ * alternarDistanciaDaCamera
+ * Passa a câmera da corrida para a próxima distância: perto, médio, longe e de volta
+ * ao perto. A escolha vale também nas próximas corridas.
+ * Recebe: nada.
+ * Devolve: a distância escolhida (0 = perto, 1 = médio, 2 = longe).
+ */
+int alternarDistanciaDaCamera(void) {
+    distanciaEscolhida = (distanciaEscolhida + 1) % TOTAL_DISTANCIAS_DA_CAMERA;
+    return distanciaEscolhida;
+}
+
+/*
  * desenharVisaoDoJogador
  * Desenha o que o jogador vê: o mundo pela câmera atrás do carro.
  * Recebe: a corrida.
@@ -497,7 +524,13 @@ void desenharVisaoDoJogador(Corrida *corrida) {
     if (!comRumoReal) {
         olhar.giro += jogador->anguloDeFuga * CAMERA_NA_FUGA;
     }
-    Camera3D camera = montarCamera(jogador->posicao, jogador->deslocamentoLateral, olhar, comRumoReal ? &jogador->rumoNoMundo : NULL);
+    /* A distância anda aos poucos até a escolhida (perto, médio ou longe) */
+    const DistanciaDaCamera *alvo = &DISTANCIAS_DA_CAMERA[distanciaEscolhida];
+    float passo = fminf(VELOCIDADE_DA_TROCA_DE_CAMERA * GetFrameTime(), 1.0f);
+    distanciaAtual.atras += (alvo->atras - distanciaAtual.atras) * passo;
+    distanciaAtual.altura += (alvo->altura - distanciaAtual.altura) * passo;
+    Camera3D camera = montarCamera(jogador->posicao, jogador->deslocamentoLateral, olhar, distanciaAtual,
+                                   comRumoReal ? &jogador->rumoNoMundo : NULL);
     if (jogador->estadoDoPit == PIT_TROCANDO) {
         camera = cameraDaTroca(camera, jogador);
     }
@@ -537,7 +570,8 @@ void desenharPistaDeFundo(Pista *pista) {
         passeio->segmento = pista->largada;
     }
     moverNaPista(passeio, VELOCIDADE_CAMERA_MENU * GetFrameTime());
-    desenharMundo3D(montarCamera(*passeio, 0.0f, olharParaAFrente(), NULL), pista, NULL);
+    desenharMundo3D(montarCamera(*passeio, 0.0f, olharParaAFrente(), DISTANCIAS_DA_CAMERA[DISTANCIA_MEDIA], NULL),
+                    pista, NULL);
 }
 
 /*

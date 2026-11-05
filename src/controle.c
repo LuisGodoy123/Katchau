@@ -18,7 +18,17 @@
 /* As 4 direções do analógico, na ordem de BOTAO_CIMA a BOTAO_DIREITA */
 #define TOTAL_DIRECOES 4
 
+/* O touchpad do PlayStation não é um botão "padrão" da raylib (que só conhece os 15 do
+ * controle de Xbox): lemos o botão cru da GLFW, que a raylib já traz embutida. No
+ * DualShock 4 e no DualSense (USB ou Bluetooth) o touchpad é o botão 13. */
+extern const unsigned char *glfwGetJoystickButtons(int jid, int *count);
+#define BOTAO_CRU_DO_TOUCHPAD 13
+
+static int ehDualSense(void);
+
 static int controle = -1;                     /* qual controle está em uso (-1 = nenhum) */
+static int touchpadApertado;                  /* o touchpad está apertado */
+static int acabouDeApertarOTouchpad;          /* ...e começou a estar neste quadro */
 static int inclinado[TOTAL_DIRECOES];         /* o analógico está inclinado para esse lado */
 static int acabouDeInclinar[TOTAL_DIRECOES];  /* ...e começou a estar neste quadro */
 
@@ -52,6 +62,15 @@ void atualizarControle(void) {
         acabouDeInclinar[d] = agora && !inclinado[d];
         inclinado[d] = agora;
     }
+
+    int touchpad = 0;
+    if (ehDualSense()) {   /* nos outros controles o botão 13 é outra coisa */
+        int total = 0;
+        const unsigned char *botoes = glfwGetJoystickButtons(controle, &total);
+        touchpad = botoes != NULL && total > BOTAO_CRU_DO_TOUCHPAD && botoes[BOTAO_CRU_DO_TOUCHPAD];
+    }
+    acabouDeApertarOTouchpad = touchpad && !touchpadApertado;
+    touchpadApertado = touchpad;
 }
 
 /*
@@ -91,6 +110,8 @@ int controleApertou(BotaoDoControle botao) {
             return IsGamepadButtonPressed(controle, GAMEPAD_BUTTON_MIDDLE_RIGHT);
         case BOTAO_LIMPAR:
             return IsGamepadButtonPressed(controle, GAMEPAD_BUTTON_RIGHT_FACE_UP);
+        case BOTAO_CAMERA:
+            return acabouDeApertarOTouchpad || IsGamepadButtonPressed(controle, GAMEPAD_BUTTON_MIDDLE_LEFT);
         default:
             return 0;
     }

@@ -304,8 +304,8 @@ static void testarCarro(void) {
         if (tempo300 == 0.0f && kmh >= 300) tempo300 = i * quadro;
     }
     printf("     0-100 km/h: %.1f s   0-200: %.1f s   0-300: %.1f s\n", tempo100, tempo200, tempo300);
-    verificar(tempo100 > 2.0f && tempo100 < 3.0f, "0-100 km/h em 2 a 3 s (como um F1)");
-    verificar(tempo300 > 9.0f && tempo300 < 13.0f, "0-300 km/h em 9 a 13 s, nao em 5");
+    verificar(tempo100 > 3.0f && tempo100 < 4.0f, "0-100 km/h em 3 a 4 s (arrancada mais calma que a de um F1)");
+    verificar(tempo300 > 13.0f && tempo300 < 17.0f, "0-300 km/h em 13 a 17 s, nao em 5");
     verificar(tempo200 - tempo100 < tempo300 - tempo200,
               "de 200 a 300 demora mais que de 100 a 200 (o ar segura o carro)");
     verificar(carro.velocidade == carro.velocidadeMaxima, "acelerando, chega na velocidade maxima e para ali");
@@ -1556,8 +1556,18 @@ static void testarColisaoEEquilibrio(void) {
     Comandos reto = { 1, 0, 0, 0, 0.0f, 0, 0 };
     float antes = 9000.0f;
     int passou = 0;
+    int primeiroContato = -1;     /* o quadro da batida de centro a centro */
+    int rodouNoPrimeiroContato = 0;
     for (int i = 0; i < 90; i++) {
         atualizarCorrida(&corrida, reto, quadro);
+        /* Só a primeira batida é de centro a centro: depois dela o rival se afasta da linha e,
+         * se o jogador o alcança de novo, a segunda batida já é fora do centro e pode fazê-lo rodar */
+        if (primeiroContato < 0 && corrida.jogador.velocidade < antes - 500.0f) {
+            primeiroContato = i;
+        }
+        if (primeiroContato >= 0 && i == primeiroContato + 3) {
+            rodouNoPrimeiroContato = rival->rodando || corrida.jogador.rodando;
+        }
         /* Atravessar é cruzar o outro carro com as caixas alinhadas; ultrapassar pelo lado e ele voltar à linha depois não conta */
         passou = passou || (corrida.jogador.distanciaPercorrida > rival->distanciaPercorrida
                             && corrida.jogador.distanciaPercorrida < rival->distanciaPercorrida + rival->comprimento * UNIDADES_POR_METRO
@@ -1565,7 +1575,7 @@ static void testarColisaoEEquilibrio(void) {
     }
     verificar(!passou, "batendo por tras, de frente, nao passa por dentro");
     verificar(corrida.jogador.velocidade < antes, "e perde velocidade");
-    verificar(!rival->rodando && !corrida.jogador.rodando, "bem no centro, ninguem roda");
+    verificar(primeiroContato >= 0 && !rodouNoPrimeiroContato, "bem no centro, ninguem roda");
 
     /* Por trás, na quina: quem está na frente roda, perde velocidade e depois volta ao normal */
     ladoALado(&corrida, pista, rival, -6.0f, 1.4f, 0.0f, 10000.0f, 5000.0f);

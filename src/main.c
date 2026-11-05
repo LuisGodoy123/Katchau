@@ -88,8 +88,8 @@ static void registrarTelemetria(const Corrida *corrida, const Comandos *comandos
  * atualizarTelaDaCorrida
  * Um quadro da corrida: o jogador dirige, a IA dirige os rivais.
  * ESC (ou START) pausa: a corrida e os sons congelam e o jogador escolhe
- * entre continuar e voltar ao menu principal. Depois da chegada, ENTER
- * (ou A) vai ao resultado.
+ * entre continuar e voltar ao menu principal. O touchpad (ou C) troca a
+ * distância da câmera. Depois da chegada, ENTER (ou A) vai ao resultado.
  * Recebe: a corrida, o estado do menu (para a pausa), se a corrida está
  *         pausada (é alterado aqui) e o tempo do quadro.
  * Devolve: a próxima tela.
@@ -113,6 +113,12 @@ static Tela atualizarTelaDaCorrida(Corrida *corrida, EstadoMenu *menu, int *paus
         abrirPausa(menu);
         pausarSonsDaCorrida(1);
         return TELA_CORRIDA;
+    }
+
+    /* Touchpad (ou C): a câmera vai de perto para médio, longe e volta */
+    if (IsKeyPressed(KEY_C) || controleApertou(BOTAO_CAMERA)) {
+        alternarDistanciaDaCamera();
+        tocarSom(SOM_CURSOR);
     }
 
     Comandos comandos = lerComandos();

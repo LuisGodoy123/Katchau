@@ -92,8 +92,8 @@ mais fina que no fim do curso, para corrigir a linha na reta sem ziguezague
 
 Para fechar o jogo, use **SAIR** no menu (ou feche a janela).
 
-O carro acelera como um F1: forte na saída (0-100 km/h em ~2,3 s) e cada vez menos
-perto da máxima (0-300 km/h em ~11 s).
+O carro acelera como um F1: forte na saída (0-100 km/h em ~3,5 s) e cada vez menos
+perto da máxima (0-300 km/h em ~15 s).
 
 Curvas fechadas jogam o carro para fora em alta velocidade: freie antes delas. Quando
 sai **fumaça dos pneus**, a curva está quase vencendo o volante: alivie ou ele escapa.

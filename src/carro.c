@@ -42,7 +42,7 @@
 #define GIRO_DO_VOLANTE            6.0f  /* com a seta apertada, o volante vai de 0 a 1 em ~0,17 s */
 #define RETORNO_DO_VOLANTE         8.0f  /* sem seta, o volante volta ao centro em ~0,12 s */
 #define FORCA_CENTRIFUGA           6.0f  /* intensidade do empurrão para fora nas curvas */
-#define FORCA_DA_ARRANCADA         0.75f /* a aceleração parado é 75% da "aceleracao" da ficha... */
+#define FORCA_DA_ARRANCADA         0.55f /* a aceleração parado é 55% da "aceleracao" da ficha (era 75%: rápido demais)... */
 #define PERDA_NA_MAXIMA            0.8f  /* ...e na velocidade máxima cai 80% (sobram 20%) */
 #define INICIO_DA_DERRAPAGEM       0.7f  /* a curva usando 70% do volante: começa a derrapar */
 #define LIMITE_LATERAL             2.5f  /* até onde o carro pode ir pela grama */
@@ -240,7 +240,7 @@ int estaForaDaPista(Carro *carro) {
  * forcaDoMotor
  * Quanto a velocidade sobe por segundo com o pé no fundo. Curva de F1:
  * a força cai com o quadrado da velocidade (o ar segura o carro). Com a
- * ficha do Katchau: 0-100 km/h em ~2,4 s e 0-200 em ~5 s. Durante a troca
+ * ficha do Katchau: 0-100 km/h em ~3,5 s e 0-200 em ~7,6 s. Durante a troca
  * de marcha a potência é cortada (sobra CORTE_NA_TROCA).
  * Recebe: a velocidade, a velocidade máxima, a aceleração da ficha e o motor.
  * Devolve: a aceleração, em unidades por segundo ao quadrado.
