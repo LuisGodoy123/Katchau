@@ -69,6 +69,7 @@ void configuracoesPadrao(Configuracoes *config) {
     config->gatilhosAdaptativos = 1;
     config->zonaMorta = 12;
     config->respostaDoVolante = VOLANTE_NORMAL;
+    config->direcaoGuiada = 1;
     config->inverterCameraX = 0;
     config->inverterCameraY = 0;
 }
@@ -133,9 +134,9 @@ int salvarConfiguracoes(const Configuracoes *config, const char *arquivo) {
         fprintf(saida, "comando %s %d %d %d %d\n", CHAVES_DAS_ACOES[a], config->comandos[a][0], config->comandos[a][1],
                 config->comandos[a][2], config->comandos[a][3]);
     }
-    fprintf(saida, "vibracao %d\nforca %d\ngatilhos %d\nzona_morta %d\nvolante %d\ncamera_x %d\ncamera_y %d\n",
+    fprintf(saida, "vibracao %d\nforca %d\ngatilhos %d\nzona_morta %d\nvolante %d\ndirecao_guiada %d\ncamera_x %d\ncamera_y %d\n",
             config->vibracaoLigada, config->forcaDaVibracao, config->gatilhosAdaptativos, config->zonaMorta,
-            config->respostaDoVolante, config->inverterCameraX, config->inverterCameraY);
+            config->respostaDoVolante, config->direcaoGuiada, config->inverterCameraX, config->inverterCameraY);
     fclose(saida);
     return 1;
 }
@@ -188,6 +189,8 @@ int carregarConfiguracoes(Configuracoes *config, const char *arquivo) {
                 valorValido(valor, MENOR_ZONA_MORTA, MAIOR_ZONA_MORTA, &config->zonaMorta);
             } else if (strcmp(chave, "volante") == 0) {
                 valorValido(valor, 0, TOTAL_VOLANTES - 1, &config->respostaDoVolante);
+            } else if (strcmp(chave, "direcao_guiada") == 0) {
+                valorValido(valor, 0, 1, &config->direcaoGuiada);
             } else if (strcmp(chave, "camera_x") == 0) {
                 valorValido(valor, 0, 1, &config->inverterCameraX);
             } else if (strcmp(chave, "camera_y") == 0) {

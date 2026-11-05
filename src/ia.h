@@ -16,6 +16,6 @@
 
 #include "carro.h"
 
-Comandos atualizarIA(Carro *carro);
+Comandos atualizarIA(Carro *carro, const Pista *pista);
 
 #endif

@@ -14,6 +14,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "raylib.h"
 #include "config.h"
 #include "pista.h"
@@ -22,6 +23,7 @@
 #include "fumaca.h"
 #include "carro.h"
 #include "corrida.h"
+#include "pitstop.h"
 #include "render.h"
 #include "hud.h"
 #include "menu.h"
@@ -49,6 +51,37 @@ static Comandos lerComandos(void) {
     lerComandosDoTeclado(&comandos);
     somarComandosDoControle(&comandos);
     return comandos;
+}
+
+/*
+ * registrarTelemetria
+ * Com a variável de ambiente KATCHAU_TELEMETRIA ligada, grava em telemetria.csv o que o carro
+ * do jogador fez em cada quadro da corrida, para investigar como ele se comporta de verdade.
+ * Recebe: a corrida e os comandos do quadro.
+ * Devolve: nada.
+ */
+static void registrarTelemetria(const Corrida *corrida, const Comandos *comandos) {
+    static FILE *arquivo = NULL;
+    static int decidiu = 0;
+    if (!decidiu) {
+        decidiu = 1;
+        if (getenv("KATCHAU_TELEMETRIA") != NULL) {
+            arquivo = fopen("telemetria.csv", "w");
+            if (arquivo != NULL) {
+                fprintf(arquivo, "t,pista,livre,m,lateral,acelerar,frear,esq,dir,analogico,volante,kmh,rumo,rumoPista,desvio,muro,fora,pit,x,z\n");
+            }
+        }
+    }
+    if (arquivo == NULL || corrida->contagemRegressiva > 0.0f) {
+        return;
+    }
+    const Carro *j = &corrida->jogador;
+    PontoNoMundo p = pontoNoMundo(j->posicao, j->deslocamentoLateral);
+    fprintf(arquivo, "%.3f,%d,%d,%.1f,%.3f,%d,%d,%d,%d,%.3f,%.3f,%d,%.1f,%.1f,%.1f,%d,%d,%d,%.2f,%.2f\n",
+            corrida->tempoDeCorrida, corrida->pista->id, j->direcaoLivre, metrosNaVolta(j), j->deslocamentoLateral,
+            comandos->acelerar, comandos->frear, comandos->esquerda, comandos->direita, comandos->direcao, j->volante,
+            converterParaKmh(j->velocidade), j->rumoNoMundo, p.rumo, j->desvioDoRumo, j->raspandoNoMuro, estaForaDaPista((Carro *) j), j->estadoDoPit, p.x, p.z);
+    fflush(arquivo);
 }
 
 /*
@@ -82,7 +115,9 @@ static Tela atualizarTelaDaCorrida(Corrida *corrida, EstadoMenu *menu, int *paus
         return TELA_CORRIDA;
     }
 
-    atualizarCorrida(corrida, lerComandos(), tempoQuadro);
+    Comandos comandos = lerComandos();
+    atualizarCorrida(corrida, comandos, tempoQuadro);
+    registrarTelemetria(corrida, &comandos);
     /* Espera um pouco: o botão de confirmar é também o freio de mão, e quem o aperta
      * na bandeirada não pode pular a tela da chegada sem querer */
     int podeSeguir = corrida->tempoDeCorrida - corrida->jogador.tempoDeChegada > SEGUNDOS_ANTES_DE_SEGUIR;

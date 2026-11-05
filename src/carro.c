@@ -62,6 +62,15 @@
 #define FORCA_DO_NITRO             0.90f /* soma isso vezes a "aceleracao" da ficha */
 #define COMPRIMENTO_PADRAO         4.4f  /* metros: quem cria o carro à mão recebe este tamanho */
 #define LARGURA_PADRAO             2.0f
+#define RAIO_MINIMO_DA_DIRECAO    12.0f    /* metros: a curva mais fechada que o volante todo faz, devagar, sem a direção guiada */
+#define ACELERACAO_DE_CURVA_BASE  34.0f    /* m/s²: sem a guiada, o que o pneu segura na curva é isto... */
+#define ACELERACAO_DE_CURVA_NO_PNEU 18.0f  /* ...mais isto vezes a aderência */
+#define AGARRE_NO_DRIFT           0.6f     /* de lado, o bico gira mais depressa */
+#define PERDA_NO_LIMITE_DO_PNEU   600.0f   /* o que a velocidade cai por segundo, no limite do pneu */
+#define PASSOS_PROCURANDO_NA_LINHA 200     /* segmentos: procurando onde o carro está */
+#define FOLGA_DA_CONTA_NO_LIMITE  0.01f    /* metros */
+#define VOLANTE_PARA_SAIR_DO_LIMITE 0.1f
+#define GIRO_SAINDO_DO_LIMITE     120.0f   /* graus por segundo: manobrando para sair do limite */
 #define RAPIDEZ_DA_FUGA           7.0f     /* por segundo: o quanto o ângulo de fuga acompanha */
 #define MAIOR_ANGULO_DE_FUGA      28.0f    /* graus */
 #define METROS_POR_SEGUNDO_MINIMOS 10.0f   /* devagar, o ângulo não dispara */
@@ -133,6 +142,10 @@ Carro criarCarro(const char *nome, int numero, Segmento *largada, float deslocam
     carro.vacuo = 0.0f;
     iniciarMotor(&carro.motor);
     carro.anguloDasRodas = 0.0f;
+    carro.direcaoLivre = 0;
+    carro.desvioDoRumo = 0.0f;
+    carro.temRumoNoMundo = 0;
+    carro.rumoNoMundo = 0.0f;
     carro.estadoDoPit = PIT_FORA;
     carro.voltaDoPit = 0;
     carro.querParar = 0;
@@ -473,6 +486,59 @@ float volanteDaFolgaDaCurva(const Carro *carro) {
 }
 
 /*
+ * encostarNoLimite
+ * O carro encostou no muro ou no fim da área de escape: perde velocidade. O limite não
+ * endireita o carro, senão ele sairia andando junto dele, como num trilho: com o bico
+ * apontado para fora ele fica ali, e é o volante que tira o bico de lá.
+ * Recebe: o carro, o lado do limite (+1 direita, -1 esquerda) e o tempo do quadro.
+ * Devolve: nada.
+ */
+static void encostarNoLimite(Carro *carro, float lado, float tempoQuadro) {
+    carro->velocidade = fmaxf(carro->velocidade - PERDA_NO_MURO * tempoQuadro, 0.0f);
+    carro->raspandoNoMuro = 1;
+    if (carro->direcaoLivre && carro->desvioDoRumo * lado > 0.0f && carro->volante * lado < -VOLANTE_PARA_SAIR_DO_LIMITE) {
+        float gira = fminf(GIRO_SAINDO_DO_LIMITE * tempoQuadro, fabsf(carro->desvioDoRumo));
+        carro->rumoNoMundo -= lado * gira;
+        carro->desvioDoRumo -= lado * gira;
+    }
+}
+
+/*
+ * aplicarLimites
+ * O que o carro não atravessa: o fim da grama, os muros e o que a pista mediu em cada lado.
+ * Recebe: o carro e o tempo do quadro.
+ * Devolve: nada.
+ */
+static void aplicarLimites(Carro *carro, float tempoQuadro) {
+    Segmento *aqui = carro->posicao.segmento;
+    carro->deslocamentoLateral = limitar(carro->deslocamentoLateral, -LIMITE_LATERAL, LIMITE_LATERAL);
+
+    carro->raspandoNoMuro = 0;
+
+    /* Muro (só no oval): o carro não passa dele, e raspar custa velocidade.
+     * A largura de cada lado muda ao longo da pista, então a conta é em metros */
+    if (aqui->temMuro) {
+        float limiteDireita = aqui->lugarDoMuro - FOLGA_DO_MURO / aqui->larguraDireita;
+        float limiteEsquerda = aqui->lugarDoMuro - FOLGA_DO_MURO / aqui->larguraEsquerda;
+        if (carro->deslocamentoLateral > limiteDireita || carro->deslocamentoLateral < -limiteEsquerda) {
+            carro->deslocamentoLateral = limitar(carro->deslocamentoLateral, -limiteEsquerda, limiteDireita);
+            encostarNoLimite(carro, (carro->deslocamentoLateral > 0.0f) ? 1.0f : -1.0f, tempoQuadro);
+        }
+    }
+
+    /* Onde a pista mediu o que para o carro em cada lado, o limite é isso, em metros */
+    if (aqui->limiteDireita > 0.0f) {
+        float emMetros = carro->deslocamentoLateral * larguraDoLado(aqui, carro->deslocamentoLateral);
+        float limitado = limitar(emMetros, -(aqui->limiteEsquerda - FOLGA_DO_MURO), aqui->limiteDireita - FOLGA_DO_MURO);
+        /* A folga é para o arredondamento da conta não contar como batida, quadro após quadro */
+        if (fabsf(limitado - emMetros) > FOLGA_DA_CONTA_NO_LIMITE) {
+            carro->deslocamentoLateral = limitado / larguraDoLado(aqui, limitado);
+            encostarNoLimite(carro, (limitado > 0.0f) ? 1.0f : -1.0f, tempoQuadro);
+        }
+    }
+}
+
+/*
  * atualizarLateral
  * Vira o carro conforme o volante e aplica o empurrão da curva.
  * Também mede a derrapagem: quanto do volante a curva está "gastando".
@@ -553,21 +619,7 @@ static void atualizarLateral(Carro *carro, Comandos comandos, float tempoQuadro)
         carro->velocidade = 0.0f;
     }
 
-    carro->deslocamentoLateral = limitar(carro->deslocamentoLateral, -LIMITE_LATERAL, LIMITE_LATERAL);
-
-    carro->raspandoNoMuro = 0;
-
-    /* Muro (só no oval): o carro não passa dele, e raspar custa velocidade.
-     * A largura de cada lado muda ao longo da pista, então a conta é em metros */
-    if (aqui->temMuro) {
-        float limiteDireita = aqui->lugarDoMuro - FOLGA_DO_MURO / aqui->larguraDireita;
-        float limiteEsquerda = aqui->lugarDoMuro - FOLGA_DO_MURO / aqui->larguraEsquerda;
-        if (carro->deslocamentoLateral > limiteDireita || carro->deslocamentoLateral < -limiteEsquerda) {
-            carro->deslocamentoLateral = limitar(carro->deslocamentoLateral, -limiteEsquerda, limiteDireita);
-            carro->velocidade = fmaxf(carro->velocidade - PERDA_NO_MURO * tempoQuadro, 0.0f);
-            carro->raspandoNoMuro = 1;
-        }
-    }
+    aplicarLimites(carro, tempoQuadro);
 }
 
 /*
@@ -652,6 +704,130 @@ void meiasMedidasDoCarro(const Carro *carro, float *meioComprimento, float *meia
 }
 
 /*
+ * aceleracaoDeCurva
+ * Recebe: o carro.
+ * Devolve: o quanto o pneu segura na curva, sem a direção guiada, em metros por segundo ao quadrado.
+ */
+float aceleracaoDeCurva(const Carro *carro) {
+    return ACELERACAO_DE_CURVA_BASE + ACELERACAO_DE_CURVA_NO_PNEU * aderenciaAtual(carro);
+}
+
+/*
+ * erroAoLongo
+ * Recebe: um segmento, o andamento dentro dele (0 a 1) e um ponto do mundo.
+ * Devolve: quantos metros o ponto está à frente desse lugar da linha, medidos no rumo dela.
+ */
+static float erroAoLongo(const Segmento *a, float t, float x, float z) {
+    const Segmento *b = a->proximo;
+    float mudou = b->rumo - a->rumo;
+    mudou -= 360.0f * roundf(mudou / 360.0f);
+    float rumo = (a->rumo + mudou * t) * 0.0174533f;
+    float cx = a->xMundo + (b->xMundo - a->xMundo) * t, cz = a->zMundo + (b->zMundo - a->zMundo) * t;
+    return (x - cx) * sinf(rumo) - (z - cz) * cosf(rumo);
+}
+
+/*
+ * andarNoMundo
+ * Sem a direção guiada, a pista não leva o carro: ele tem lugar e rumo próprios no mundo, e o
+ * volante é a única coisa que muda o rumo. Sem volante, o caminho é uma reta. Depois de andar,
+ * a pista só responde onde ele está: em que segmento e a quantos metros da linha.
+ * O volante vira cada vez menos com a velocidade: a aderência limita o quanto o carro curva.
+ * Recebe: o carro e o tempo do quadro.
+ * Devolve: quantas vezes ele cruzou a linha de chegada.
+ */
+static int andarNoMundo(Carro *carro, float tempoQuadro) {
+    PontoNoMundo aqui = pontoNoMundo(carro->posicao, carro->deslocamentoLateral);
+    if (!carro->temRumoNoMundo) {
+        carro->rumoNoMundo = aqui.rumo;
+        carro->temRumoNoMundo = 1;
+    }
+
+    /* O volante muda o rumo, até onde o pneu segura */
+    float metrosPorSegundo = carro->velocidade / UNIDADES_POR_METRO;
+    float agarra = aceleracaoDeCurva(carro) * (1.0f + AGARRE_NO_DRIFT * carro->forcaDoDrift);
+    /* Volante todo é o máximo que dá nessa velocidade: devagar, o raio mínimo; rápido, o que o pneu segura */
+    float maximo = fminf(metrosPorSegundo / RAIO_MINIMO_DA_DIRECAO, agarra / fmaxf(metrosPorSegundo, 1.0f));
+    carro->rumoNoMundo += carro->volante * maximo * 57.2958f * tempoQuadro;
+
+    /* Levando o pneu ao limite, ele canta e o carro perde um pouco de velocidade */
+    float uso = fabsf(carro->volante) * maximo * metrosPorSegundo / agarra;
+    carro->derrapagem = fmaxf(limitar((uso - INICIO_DA_DERRAPAGEM) / (1.0f - INICIO_DA_DERRAPAGEM), 0.0f, 1.0f), carro->forcaDoDrift);
+    float gastaNaCurva = PERDA_NO_LIMITE_DO_PNEU * limitar((uso - INICIO_DA_DERRAPAGEM) / (1.0f - INICIO_DA_DERRAPAGEM), 0.0f, 1.0f);
+    carro->velocidade = fmaxf(carro->velocidade - gastaNaCurva * (1.0f - carro->forcaDoDrift) * tempoQuadro, 0.0f);
+
+    /* Anda para onde aponta. De lado, o drift e as batidas somam o seu pedaço */
+    float rumo = carro->rumoNoMundo * 0.0174533f;
+    float frenteX = sinf(rumo), frenteZ = -cosf(rumo), direitaX = cosf(rumo), direitaZ = sinf(rumo);
+    float anguloDoCaminho = limitar(carro->anguloDeDrift, -ANGULO_DO_CAMINHO, ANGULO_DO_CAMINHO);
+    float deLado = sinf(anguloDoCaminho * 0.0174533f) * metrosPorSegundo * CAMINHO_PELO_ANGULO * carro->forcaDoDrift + carro->velocidadeLateral;
+    carro->velocidadeLateral *= expf(-QUEDA_DO_TRANCO * tempoQuadro);
+    float adiante = carro->velocidade * tempoQuadro / UNIDADES_POR_METRO + carro->empurraoPendente / UNIDADES_POR_METRO;
+    carro->empurraoPendente = 0.0f;
+    float x = aqui.x + frenteX * adiante + direitaX * deLado * tempoQuadro;
+    float z = aqui.z + frenteZ * adiante + direitaZ * deLado * tempoQuadro;
+
+    /* Agora a pista diz onde ele está */
+    Segmento *antes = carro->posicao.segmento;
+    Segmento *novo = antes;
+    for (int i = 0; i < PASSOS_PROCURANDO_NA_LINHA; i++) {
+        if (erroAoLongo(novo, 0.0f, x, z) < 0.0f) {
+            novo = novo->anterior;
+        } else if (erroAoLongo(novo, 1.0f, x, z) >= 0.0f) {
+            novo = novo->proximo;
+        } else {
+            break;
+        }
+    }
+    float t0 = 0.0f, t1 = 1.0f;
+    for (int i = 0; i < 10; i++) {
+        float meio = (t0 + t1) / 2.0f;
+        if (erroAoLongo(novo, meio, x, z) >= 0.0f) {
+            t0 = meio;
+        } else {
+            t1 = meio;
+        }
+    }
+    float t = (t0 + t1) / 2.0f;
+
+    /* Da linha de chegada para trás ele não passa, para a volta não contar duas vezes */
+    int total = antes->indice - novo->indice;
+    int voltou = antes->indice < novo->indice && novo->indice - antes->indice > PASSOS_PROCURANDO_NA_LINHA * 2;
+    if (voltou) {
+        novo = antes;
+        t = 0.0f;
+    }
+    int cruzou = total > PASSOS_PROCURANDO_NA_LINHA * 2;
+
+    /* O quanto andou conta na linha, como para todo mundo */
+    float antesNaLinha = antes->indice * COMPRIMENTO_SEGMENTO + carro->posicao.distanciaNoSegmento;
+    float agoraNaLinha = novo->indice * COMPRIMENTO_SEGMENTO + t * COMPRIMENTO_SEGMENTO;
+    float andou = agoraNaLinha - antesNaLinha;
+    if (cruzou) {
+        andou += (antes->indice + 1) * COMPRIMENTO_SEGMENTO;
+    }
+    carro->distanciaPercorrida += andou;
+    atualizarDesgaste(carro, fabsf(andou));
+    carro->posicao.segmento = novo;
+    carro->posicao.distanciaNoSegmento = t * COMPRIMENTO_SEGMENTO;
+
+    const Segmento *seguinte = novo->proximo;
+    float mudou = seguinte->rumo - novo->rumo;
+    mudou -= 360.0f * roundf(mudou / 360.0f);
+    float rumoDaLinha = novo->rumo + mudou * t;
+    float angulo = rumoDaLinha * 0.0174533f;
+    float cx = novo->xMundo + (seguinte->xMundo - novo->xMundo) * t, cz = novo->zMundo + (seguinte->zMundo - novo->zMundo) * t;
+    float lateral = (x - cx) * cosf(angulo) + (z - cz) * sinf(angulo);
+    float largura = larguraDoLado(novo, lateral) + (larguraDoLado((Segmento *) seguinte, lateral) - larguraDoLado(novo, lateral)) * t;
+    carro->deslocamentoLateral = lateral / largura;
+    float diferenca = carro->rumoNoMundo - rumoDaLinha;
+    carro->desvioDoRumo = diferenca - 360.0f * roundf(diferenca / 360.0f);
+    carro->anguloDeFuga = 0.0f;
+
+    aplicarLimites(carro, tempoQuadro);
+    return cruzou ? 1 : 0;
+}
+
+/*
  * atualizarCarro
  * Avança o carro um quadro: motor (marcha), velocidade, volante, lateral e depois anda
  * pela lista da pista com moverNaPista().
@@ -674,6 +850,17 @@ int atualizarCarro(Carro *carro, Comandos comandos, float tempoQuadro) {
     atualizarVelocidade(carro, comandos, tempoQuadro);
     atualizarVolante(carro, comandos, tempoQuadro);
     atualizarDrift(carro, comandos, tempoQuadro);
+    if (carro->direcaoLivre) {
+        float lateralAntesLivre = carro->deslocamentoLateral * larguraDoLado(carro->posicao.segmento, carro->deslocamentoLateral);
+        int cruzouLivre = andarNoMundo(carro, tempoQuadro);
+        carro->anguloDasRodas = fmodf(carro->anguloDasRodas
+                                      + rapidezDasRodas(carro->velocidade, comandos.acelerar || carro->nitroLigado) * tempoQuadro,
+                                      2.0f * 3.14159265f);
+        float lateralDepoisLivre = carro->deslocamentoLateral * larguraDoLado(carro->posicao.segmento, carro->deslocamentoLateral);
+        carro->velocidadeDeLado = (tempoQuadro > 0.0f) ? (lateralDepoisLivre - lateralAntesLivre) / tempoQuadro : 0.0f;
+        carro->voltas += cruzouLivre;
+        return cruzouLivre;
+    }
     atualizarLateral(carro, comandos, tempoQuadro);
     carro->anguloDasRodas = fmodf(carro->anguloDasRodas
                                   + rapidezDasRodas(carro->velocidade, comandos.acelerar || carro->nitroLigado) * tempoQuadro,

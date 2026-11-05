@@ -20,13 +20,9 @@
 #define CANTOS_DO_CARRO        4       /* frente esquerda, trás esquerda, trás direita, frente direita */
 #define DURACAO_DA_TROCA       ((CANTOS_DO_CARRO + 1) * SEGUNDOS_PARA_A_RODA + CANTOS_DO_CARRO * SEGUNDOS_POR_RODA)
 #define METROS_DA_VAGA_AO_PREDIO 4.5f  /* o carro para com o centro a essa distância do prédio */
-#define FIM_DA_ZONA_DE_ENTRADA 3600.0f /* metros: até aqui ainda dá para entrar no pit lane */
 #define MEIO_COMPRIMENTO_DO_GUIDO 1.2f /* metros */
 #define MEIA_LARGURA_DO_GUIDO  0.58f
 #define LIMITE_DO_PIT          4000.0f /* unidades por segundo: 100 km/h, perto das garagens */
-#define INICIO_DO_LIMITE_DO_PIT 3990.0f /* metros: a linha do limite, antes da primeira garagem */
-#define FIM_DO_LIMITE_DO_PIT   160.0f   /* e a outra, depois da última */
-#define INICIO_DA_ENTRADA_LIVRE 3440.0f /* antes disso o pit lane ainda está abrindo */
 #define METROS_PARA_ENTRAR     3.0f    /* ele entra com o carro essa distância dentro do pit lane: ninguém entra sem querer */
 
 /* Onde o Guido está, em relação ao carro parado: x para a esquerda, z para a frente */
@@ -37,7 +33,8 @@ typedef struct {
 
 int carroNoPit(const Carro *carro);
 float metrosNaVolta(const Carro *carro);
-float metroDaVagaDoCarro(int numero);
+float metroDaVagaDoCarro(const Pista *pista, int numero);
+int dentroDoLimiteDoPit(const Pista *pista, float metros);
 void lugarDaVaga(Pista *pista, const Carro *carro, PosicaoNaPista *lugar, float *lateral);
 int querEntrarNoPit(const Pista *pista, const Carro *carro);
 void entrarNoPit(Carro *carro);

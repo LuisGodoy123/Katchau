@@ -98,15 +98,28 @@ static float alturaEmVoltaDoCarro(PosicaoNaPista carro, float lateral, float fre
 }
 
 /*
+ * rumoDesenhado
+ * Recebe: o carro e o rumo da pista onde ele está.
+ * Devolve: para onde o desenho do carro aponta, em graus, sem contar o volante e o drift.
+ */
+static float rumoDesenhado(const Carro *carro, float rumoDaPista) {
+    if (carro->direcaoLivre && carro->temRumoNoMundo && carro->estadoDoPit == PIT_FORA) {
+        return carro->rumoNoMundo;
+    }
+    return rumoDaPista + carro->anguloDeFuga;
+}
+
+/*
  * montarCamera
  * Põe a câmera em volta de um ponto da pista: normalmente atrás dele, seguindo
  * a curva, ou para onde o jogador está olhando. De lado ela fica presa ao carro, que
  * por isso aparece no centro da tela, e não atravessa os muros do oval. Nas curvas
  * inclinadas ela inclina junto com o chão.
- * Recebe: a posição do carro, o deslocamento lateral dele e o olhar.
+ * Recebe: a posição do carro, o deslocamento lateral dele, o olhar e, sem a direção guiada,
+ *         o rumo real do carro (senão, NULL).
  * Devolve: a câmera.
  */
-static Camera3D montarCamera(PosicaoNaPista carro, float lateral, Olhar olhar) {
+static Camera3D montarCamera(PosicaoNaPista carro, float lateral, Olhar olhar, const float *rumoDoCarro) {
     PosicaoNaPista atras = carro;
     moverNaPista(&atras, -CAMERA_ATRAS * UNIDADES_POR_METRO);
     PontoNoMundo deCamera = pontoNoMundo(atras, lateral);
@@ -117,6 +130,11 @@ static Camera3D montarCamera(PosicaoNaPista carro, float lateral, Olhar olhar) {
     float comprimento = hypotf(dx, dz);
     dx /= comprimento;
     dz /= comprimento;
+    if (rumoDoCarro != NULL) {
+        /* Sem a direção guiada a câmera vem atrás do carro, para onde ele vai: a curva da pista não a gira */
+        dx = sinf(*rumoDoCarro * DEG2RAD);
+        dz = -cosf(*rumoDoCarro * DEG2RAD);
+    }
     float direitaX = -dz, direitaZ = dx;
 
     /* Para onde a câmera olha, girando em volta do carro */
@@ -191,7 +209,9 @@ static Matrix matrizDoCarro(Carro *carro) {
         y += ALTURA_NA_TROCA * fminf(tempo / SEGUNDOS_PARA_A_RODA, 1.0f);
     }
 
-    float rumo = (aqui.rumo + carro->giro + carro->anguloDeDrift + carro->anguloDeFuga + carro->volante * GRAUS_DO_VOLANTE) * DEG2RAD;
+    /* Sem a direção guiada, o bico aponta para onde o carro está indo de verdade */
+    float rumoBase = rumoDesenhado(carro, aqui.rumo);
+    float rumo = (rumoBase + carro->giro + carro->anguloDeDrift + carro->volante * GRAUS_DO_VOLANTE) * DEG2RAD;
     Vector3 frente = Vector3Normalize((Vector3){ sinf(rumo), ladeira, -cosf(rumo) });
 
     float rolagem = atanf(inclinacao) + carro->volante * GRAUS_DE_ROLAGEM * DEG2RAD;
@@ -225,7 +245,8 @@ static void desenharSombraDoCarro(Camera3D camera, Carro *carro) {
     Vector3 grade[PONTOS_DA_SOMBRA * PONTOS_DA_SOMBRA];
     float meio = ladoDaSombra(carro->numero) / 2.0f;
     float lateral = carro->deslocamentoLateral * larguraDoLado(carro->posicao.segmento, carro->deslocamentoLateral);
-    float giro = (carro->giro + carro->anguloDeDrift + carro->anguloDeFuga + carro->volante * GRAUS_DO_VOLANTE) * DEG2RAD;
+    float rumoDaPista = pontoNoMundo(carro->posicao, carro->deslocamentoLateral).rumo;
+    float giro = (rumoDesenhado(carro, rumoDaPista) - rumoDaPista + carro->giro + carro->anguloDeDrift + carro->volante * GRAUS_DO_VOLANTE) * DEG2RAD;
     for (int i = 0; i < PONTOS_DA_SOMBRA; i++) {
         for (int j = 0; j < PONTOS_DA_SOMBRA; j++) {
             float paraDireita = -meio + 2.0f * meio * i / (PONTOS_DA_SOMBRA - 1);
@@ -472,8 +493,11 @@ void desenharVisaoDoJogador(Corrida *corrida) {
     Carro *jogador = &corrida->jogador;
     /* A câmera acompanha o carro, não a pista: sem volante na curva, ela também não vira sozinha */
     Olhar olhar = olharDoJogador;
-    olhar.giro += jogador->anguloDeFuga * CAMERA_NA_FUGA;
-    Camera3D camera = montarCamera(jogador->posicao, jogador->deslocamentoLateral, olhar);
+    int comRumoReal = jogador->direcaoLivre && jogador->temRumoNoMundo && jogador->estadoDoPit == PIT_FORA;
+    if (!comRumoReal) {
+        olhar.giro += jogador->anguloDeFuga * CAMERA_NA_FUGA;
+    }
+    Camera3D camera = montarCamera(jogador->posicao, jogador->deslocamentoLateral, olhar, comRumoReal ? &jogador->rumoNoMundo : NULL);
     if (jogador->estadoDoPit == PIT_TROCANDO) {
         camera = cameraDaTroca(camera, jogador);
     }
@@ -513,7 +537,7 @@ void desenharPistaDeFundo(Pista *pista) {
         passeio->segmento = pista->largada;
     }
     moverNaPista(passeio, VELOCIDADE_CAMERA_MENU * GetFrameTime());
-    desenharMundo3D(montarCamera(*passeio, 0.0f, olharParaAFrente()), pista, NULL);
+    desenharMundo3D(montarCamera(*passeio, 0.0f, olharParaAFrente(), NULL), pista, NULL);
 }
 
 /*

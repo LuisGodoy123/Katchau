@@ -57,6 +57,7 @@ typedef struct {
     int gatilhosAdaptativos;  /* 1: o gatilho do acelerador treme com a roda patinando (DualSense) */
     int zonaMorta;            /* porcentagem do analógico que conta como "reto" */
     int respostaDoVolante;    /* RespostaDoVolante */
+    int direcaoGuiada;        /* 1: o carro acompanha a curva; 0: ele mantém o rumo e quem vira é o volante */
     int inverterCameraX;
     int inverterCameraY;
 } Configuracoes;

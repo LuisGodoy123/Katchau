@@ -133,6 +133,8 @@ src/
   fumaca.c/.h      fumaça dos pneus e poeira da grama
   noite.c/.h       noite da Copa Pistão: refletores, torcida e flashes
   copa_pistao.h    traçado da Copa Pistão, medido no modelo 3D
+  oval.h, splat.h  traçado e lugares da torcida dos outros dois modelos 3D
+  tracado.h        o formato dessas tabelas
   carro.c/.h       struct Carro, Comandos e movimento                  (fase 3)
   corrida.c/.h     grid, voltas, colisão, classificação e fim          (fases 3 e 4)
   ia.c/.h          decisões dos rivais                                 (fase 4)
@@ -423,6 +425,50 @@ Modelo: [Motor Speedway of the South](https://sketchfab.com/3d-models/motor-spee
 de DinseyPixarCarsModels, publicado como CC-BY-4.0. O estádio é do universo de *Carros* (Disney/Pixar) e
 traz os logotipos do filme. A única mudança no arquivo foi converter uma textura JPEG para PNG, porque
 a raylib da Homebrew não lê JPEG.
+
+### Direção guiada
+
+O carro anda pela lista de segmentos, então a pista faz a curva por ele; o que o tira da linha é o empurrão para
+fora, que cresce com o quadrado da velocidade. Devagar, ele quase contorna a curva sozinho. Isso é a direção
+guiada, e vem ligada. Desligada nas configurações, vale só para o jogador: o carro guarda para onde o bico aponta
+(`desvioDoRumo`), a curva da pista aumenta a diferença e só o volante a tira, então sem volante ele segue reto
+em qualquer velocidade. A IA sempre dirige com ela ligada, inclusive com o carro do jogador depois da chegada.
+No Splat ela não existe (`semDirecaoGuiada`): lá o jogador sempre dirige sem ela, seja qual for a opção. E a
+pista não tem muro invisível: cada lado para no que existe de verdade (`LIMITES_SPLAT`, medido no modelo): muro,
+barranco, buraco, outro trecho da corrida, os pneus das ruas fechadas ou, no máximo, 22 m de área de escape na grama.
+
+Sem a direção guiada, o carro anda no mundo (`andarNoMundo`): tem lugar e rumo próprios, e só o volante muda o rumo,
+até o que o pneu segura naquela velocidade. Sem volante, o caminho é uma reta. A pista só é consultada depois, para
+saber em que segmento ele está e a quantos metros da linha. O carro e a câmera usam esse rumo.
+
+Para investigar como o carro se comporta, `KATCHAU_TELEMETRIA=1 ./katchau` grava cada quadro da corrida em `telemetria.csv`.
+
+### Oval e Splat
+
+Duas pistas de dia que vêm prontas em um modelo 3D (`recursos/modelos/oval.glb` e `splat.glb`). O traçado e
+os lugares da torcida (`oval.h`, `splat.h`) foram medidos nos modelos, e a arquibancada recebe uma figura em
+cada lugar, com o mesmo shader de torcida da Copa Pistão. O pit lane de cada uma é o que o modelo mostra: no
+oval, entre o muro dos boxes e as garagens; no Splat, a estrada paralela à reta, na frente do prédio das
+garagens. Na Copa Pistão não há garagens: a equipe arma as tendas no pátio por dentro da Reta Oposta.
+
+As árvores e estruturas dos dois mapas (`cenario_mapas.h`) usam os mesmos modelos de Interlagos, mais pinheiros
+e um telão próprio. Cada lugar foi conferido contra a malha do modelo: arquibancadas e camarotes nas retas,
+olhando para a pista; caminhões no paddock; carros no estacionamento; postos de fiscal e torres de TV em
+volta do circuito; e a mata em uma cortina acompanhando a pista e em manchas mais longe.
+
+Os modelos têm mais ruas do que a corrida usa. Onde a estrada continua além do limite da pista, uma fileira de
+pneus fecha a passagem, deixando só as aberturas do pit lane. No Splat, os três pórticos de checkpoint saíram.
+
+Modelos:
+- [Cartoon Race Track - Oval](https://sketchfab.com/3d-models/cartoon-race-track-oval-f88b33a3a65c4965b03578dc7f4f6eb4),
+  de [RCC Design](https://sketchfab.com/retrovalorem), publicado como CC-BY-4.0. Alterado para o jogo: árvores,
+  pneus e arquibancadas com menos polígonos, imagens em 1024 pixels, malhas juntadas por material e sem os
+  cones, as barreiras e o muro que ficavam em cima do asfalto do oval. As árvores do modelo foram trocadas
+  pelas do jogo, nos mesmos lugares.
+- [Splat Track](https://sketchfab.com/3d-models/splat-track-9878cad018a9440c8cfa2ab2c9d1eda7),
+  de [Geedtopia](https://sketchfab.com/Geedtopia), publicado como **CC-BY-NC-4.0: só para uso não comercial**.
+  Alterado para o jogo: sem os pórticos de checkpoint, malhas juntadas por material, e o magenta que marcava os pixels transparentes das
+  imagens trocado pela cor média de cada uma, senão ele vazava para as folhas.
 
 ### Interlagos
 

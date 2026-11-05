@@ -91,7 +91,6 @@ void terminarInterface(void) {
     EndMode2D();
 }
 
-#define METROS_DO_AVISO_DO_BOX 3150.0f  /* a partir daqui, o aviso de entrar nos boxes */
 #define TAMANHO_TITULO_FIM    48
 #define TAMANHO_TEXTO_FIM     22
 #define MARGEM_HUD            12
@@ -741,6 +740,17 @@ static void desenharContagemRegressiva(Corrida *corrida) {
 }
 
 /*
+ * avisoDoBox
+ * Recebe: a pista e onde o carro está, em metros.
+ * Devolve: 1 se ele está chegando ao pit lane, entre o aviso e o fim da zona de entrada.
+ */
+static int avisoDoBox(const Pista *pista, float metros) {
+    float depois = fmodf(metros - pista->pit.aviso + pista->metrosDaVolta, pista->metrosDaVolta);
+    float fim = fmodf(pista->pit.fimDaZona - pista->pit.aviso + pista->metrosDaVolta, pista->metrosDaVolta);
+    return depois < fim;
+}
+
+/*
  * desenharAvisosDoPit
  * O que falta da parada obrigatória, o caminho até os boxes, o limite do pit lane e
  * o cronômetro da troca de pneus.
@@ -782,13 +792,13 @@ static void desenharAvisosDoPit(Corrida *corrida) {
         escreverCentralizado(FONTE_TITULO, TextFormat("%.2f", jogador->tempoDaTroca), centro, 70.0f, 52.0f, COR_AMARELO);
         escreverCentralizado(FONTE_FORTE, "GUIDO TROCANDO OS PNEUS!", centro, 130.0f, 20.0f, COR_TEXTO_CLARO);
     } else if (carroNoPit(jogador)) {
-        if (metros >= INICIO_DO_LIMITE_DO_PIT || metros <= FIM_DO_LIMITE_DO_PIT) {
+        if (dentroDoLimiteDoPit(corrida->pista, metros)) {
             escreverCentralizado(FONTE_FORTE, "LIMITE DOS BOXES: 100 KM/H", centro, 70.0f, 24.0f, COR_AMARELO);
         } else {
             escreverCentralizado(FONTE_FORTE, "PIT LANE", centro, 70.0f, 24.0f, COR_TEXTO_CLARO);
         }
-    } else if (!jogador->pitFeito && metros > METROS_DO_AVISO_DO_BOX && metros < FIM_DA_ZONA_DE_ENTRADA) {
-        escreverCentralizado(FONTE_TITULO, "BOX PELA ESQUERDA", centro, 70.0f, 30.0f, COR_AMARELO);
+    } else if (!jogador->pitFeito && avisoDoBox(corrida->pista, metros)) {
+        escreverCentralizado(FONTE_TITULO, (corrida->pista->pit.lado < 0) ? "BOX PELA ESQUERDA" : "BOX PELA DIREITA", centro, 70.0f, 30.0f, COR_AMARELO);
     }
 }
 

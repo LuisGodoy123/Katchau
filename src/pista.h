@@ -35,7 +35,9 @@
 /* As pistas do jogo */
 typedef enum {
     PISTA_INTERLAGOS,
-    PISTA_COPA_PISTAO,   /* o oval do modelo 3D (copa_pistao.h) */
+    PISTA_COPA_PISTAO,   /* o estádio do modelo 3D (copa_pistao.h) */
+    PISTA_OVAL,          /* o oval de desenho animado (oval.h) */
+    PISTA_SPLAT,         /* o circuito sinuoso, montado em blocos (splat.h) */
     TOTAL_PISTAS
 } IdPista;
 
@@ -76,6 +78,10 @@ typedef enum {
 #define COMPRIMENTO_COPA_PISTAO  4023.0f
 #define ESCALA_COPA_PISTAO       (COMPRIMENTO_COPA_PISTAO / 93.67f)
 
+/* As outras pistas de modelo 3D: a escala deixa o asfalto com uma largura boa para correr */
+#define ESCALA_OVAL              2.0f
+#define ESCALA_SPLAT             24.0f
+
 /* Grid de largada, pintado no asfalto ANTES da linha de chegada, em
  * zigue-zague (pares à esquerda, ímpares à direita). O lugar 0 (pole) é
  * o mais perto da linha. As distâncias são múltiplas do segmento, então
@@ -103,6 +109,7 @@ typedef struct Segmento {
     float asfaltoEsquerda;          /* até onde é asfalto, à esquerda, em larguras: mais que 1 onde o pit lane encosta */
     int temMuro;                    /* 1: muro nos dois lados; 0: grama além do asfalto */
     float lugarDoMuro;              /* onde fica o muro, em larguras da pista (1 = na borda do asfalto) */
+    float limiteDireita, limiteEsquerda; /* metros da linha até o que para o carro em cada lado; 0: não há medida */
 
     /* Onde o começo do segmento fica no mundo 3D, em metros */
     float xMundo, zMundo;           /* centro da pista, visto de cima (a altura é o campo "altura") */
@@ -115,6 +122,35 @@ typedef struct Segmento {
     struct Segmento *anterior;      /* segmento anterior (o primeiro aponta para o último) */
 } Segmento;
 
+/* O pit lane de uma pista. Os metros são a partir da linha de chegada.
+ * Interlagos tem um pit lane construído, com o desenho em ladoDentroDoPit; nas pistas de
+ * modelo 3D o caminho é uma faixa paralela à pista, na medida do que o modelo mostra. */
+typedef struct {
+    int lado;              /* -1: à esquerda da pista; +1: à direita */
+    int noModelo;          /* 1: faixa paralela à pista, com as medidas abaixo */
+    float entrada;         /* onde ele abre */
+    float inicioLivre;     /* a partir daqui o jogador pode entrar */
+    float fimDaZona;       /* até aqui ainda dá para entrar */
+    float fimDaEntrada;    /* até aqui ele entra em velocidade reduzida */
+    float velocidadeNaEntrada;
+    float aviso;           /* a partir daqui o painel avisa do box */
+    float inicioDoLimite, fimDoLimite;   /* as linhas do limite de velocidade */
+    float fim;             /* onde o carro já voltou à pista */
+    float primeiraVaga;    /* a vaga do carro 0: as outras seguem depois dela */
+    float entreVagas;      /* metros de uma vaga até a próxima */
+    float encostar;        /* a tantos metros da vaga ele deixa a faixa rápida */
+
+    /* Só no pit lane do modelo: metros da linha da pista até cada coisa */
+    float noCaminhoDaFaixa;  /* onde ele já está na faixa rápida */
+    float deixaAFaixa;       /* onde começa a voltar para a pista */
+    float borda;             /* o lugar na pista onde ele sai dela e volta */
+    float faixa;             /* a faixa rápida */
+    float vaga;              /* a vaga */
+    float paraEntrar;        /* o jogador entra quando passa disto, na zona de entrada */
+    const float (*caminho)[2];  /* se a estrada dobra: { metros a partir da linha, metros até a linha da pista } */
+    int pontosDoCaminho;
+} DadosDoPit;
+
 /* A pista em si guarda só a "porta de entrada" da lista circular.
  * Ela existe como struct para que funções que mudam o início da lista
  * (inserir na pista vazia, remover a largada) possam atualizá-lo sem
@@ -122,6 +158,8 @@ typedef struct Segmento {
 typedef struct {
     Segmento *largada;   /* segmento da linha de largada/chegada; NULL se a pista estiver vazia */
     int temPit;          /* 1: tem pit lane e a parada é obrigatória */
+    DadosDoPit pit;
+    int semDirecaoGuiada; /* 1: aqui o jogador sempre dirige sem a direção guiada, seja qual for a opção */
     float metrosDaVolta;
     IdPista id;          /* qual pista é (define o cenário 3D em mundo.c) */
     const char *nome;    /* o nome que aparece no menu */
@@ -145,8 +183,11 @@ typedef struct {
 Pista *criarPistaVazia(void);
 Pista *criarPista(void);
 Pista *criarCopaPistao(void);
+Pista *criarOval(void);
+Pista *criarSplat(void);
 Pista *criarPistaPorId(IdPista id);
 float ladoDentroDoPit(float metros, float metrosDaVolta, float *largura);
+float metrosDesdeAEntrada(const Pista *pista, float metros);
 void adicionarTrecho(Pista *pista, const char *nome, int quantidade, float curvatura,
                      float alturaInicial, float alturaFinal);
 

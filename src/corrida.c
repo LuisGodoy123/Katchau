@@ -8,6 +8,7 @@
 #include <stddef.h>
 #include <math.h>
 #include "corrida.h"
+#include "configuracoes.h"
 #include "pitstop.h"
 #include "ia.h"
 #include "ordenacao.h"
@@ -31,6 +32,7 @@
 
 /* ---------- O que a IA enxerga ---------- */
 #define VISAO_PARA_TRAS_NO_PIT    22.0f     /* metros: quem sai da vaga não entra na frente de quem vem */
+#define FOLGA_DE_FAIXA_NO_PIT     0.4f      /* metros de lado: mais que isso, passa ao lado */
 #define ALCANCE_DA_VISAO          60.0f     /* metros à frente */
 #define DISTANCIA_AO_LADO         1.5f      /* metros de folga: mais perto que isso, o lado está ocupado */
 
@@ -176,6 +178,7 @@ void iniciarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador, NivelDaC
     corrida->jogador.voltasDaProva = ficha->voltas;
     corrida->jogador.gastaPneu = gastaPneu;
     corrida->jogador.pitFeito = !temParada;
+    corrida->jogador.direcaoLivre = pista->semDirecaoGuiada || !configuracoesAtuais()->direcaoGuiada;
     corrida->classificacao[0] = &corrida->jogador;
 
     /* Rivais: todos os carros, menos o que o jogador pegou */
@@ -532,7 +535,13 @@ static void olharEmVolta(Corrida *corrida) {
             if (d < 0.0f && vaoNaFrente < VISAO_PARA_TRAS_NO_PIT && carroNoPit(carro) && carroNoPit(outro) && outro->velocidade > 0.0f && outro->estadoDoPit != PIT_SAINDO) {
                 carro->vemAlguemAtras = 1;
             }
-            if (d > 0.0f && vaoDeLado < DISTANCIA_AO_LADO && vaoNaFrente < ALCANCE_DA_VISAO
+            /* No pit lane, quem está parado na vaga só conta como "na frente" para quem está de
+             * fato na mesma faixa: quem passa ao lado segue em frente */
+            int mesmaFaixa = vaoDeLado < DISTANCIA_AO_LADO;
+            if (carroNoPit(carro) && carroNoPit(outro) && outro->velocidade <= 0.0f) {
+                mesmaFaixa = vaoDeLado < FOLGA_DE_FAIXA_NO_PIT;
+            }
+            if (d > 0.0f && mesmaFaixa && vaoNaFrente < ALCANCE_DA_VISAO
                 && (carro->distanciaAFrente < 0.0f || vaoNaFrente < carro->distanciaAFrente)) {
                 carro->distanciaAFrente = fmaxf(vaoNaFrente, 0.0f);
                 carro->velocidadeAFrente = outro->velocidade;
@@ -636,7 +645,7 @@ void atualizarCorrida(Corrida *corrida, Comandos comandosJogador, float tempoQua
     corrida->tempoDeCorrida += tempoQuadro;
     olharEmVolta(corrida);
     if (corrida->terminou) {
-        comandosJogador = atualizarIA(&corrida->jogador);
+        comandosJogador = atualizarIA(&corrida->jogador, corrida->pista);
     }
 
     /* 0) Vácuo, antes de mover: todos medem com os carros no mesmo lugar */
@@ -652,7 +661,7 @@ void atualizarCorrida(Corrida *corrida, Comandos comandosJogador, float tempoQua
     /* 2) Rivais: a IA olha o carro logo à frente de cada um */
     for (int i = 0; i < TOTAL_RIVAIS; i++) {
         Carro *rival = &corrida->rivais[i];
-        Comandos comandosIA = atualizarIA(rival);
+        Comandos comandosIA = atualizarIA(rival, corrida->pista);
         cruzou = moverCarro(corrida, rival, comandosIA, tempoQuadro);
         atualizarSetores(corrida, rival, cruzou);
         if (cruzou) {

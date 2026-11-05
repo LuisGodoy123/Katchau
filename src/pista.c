@@ -11,6 +11,8 @@
 #include <math.h>
 #include "pista.h"
 #include "copa_pistao.h"
+#include "oval.h"
+#include "splat.h"
 
 #define GRAUS_PARA_RADIANOS   0.017453292f
 #define META_LARGURA_DA_INCLINACAO 3.0f   /* mede a inclinação 3 m para cada lado */
@@ -43,6 +45,8 @@ static Segmento *criarSegmento(float curvatura) {
     novo->nomeTrecho = "";
     novo->temMuro = 0;
     novo->lugarDoMuro = 1.0f;
+    novo->limiteDireita = 0.0f;
+    novo->limiteEsquerda = 0.0f;
     novo->asfaltoEsquerda = 1.0f;
     novo->xMundo = 0.0f;
     novo->zMundo = 0.0f;
@@ -104,6 +108,7 @@ Pista *criarPistaVazia(void) {
     pista->id = PISTA_INTERLAGOS;
     pista->nome = "";
     pista->temPit = 0;
+    pista->semDirecaoGuiada = 0;
     pista->metrosDaVolta = 0.0f;
     return pista;
 }
@@ -391,6 +396,21 @@ Pista *criarPista(void) {
     calcularPosicoesNoMundo(pista);
     murarRetaDosBoxes(pista);
     pista->temPit = 1;
+    DadosDoPit pit = { 0 };
+    pit.lado = -1;
+    pit.entrada = ENTRADA_DO_PIT;
+    pit.inicioLivre = 3440.0f;
+    pit.fimDaZona = 3600.0f;
+    pit.fimDaEntrada = 3730.0f;
+    pit.velocidadeNaEntrada = 5000.0f;
+    pit.aviso = 3150.0f;
+    pit.inicioDoLimite = 3990.0f;
+    pit.fimDoLimite = 160.0f;
+    pit.fim = FIM_DO_PIT_LANE;
+    pit.primeiraVaga = PRIMEIRO_METRO_DOS_BOXES + 5.0f;
+    pit.entreVagas = 20.0f;
+    pit.encostar = 14.0f;
+    pista->pit = pit;
     pista->metrosDaVolta = contarSegmentos(pista) * COMPRIMENTO_SEGMENTO / UNIDADES_POR_METRO;
     marcarAsfaltoDoPit(pista);
     decorarPista(pista);   /* árvores, pórtico, placas... (depois: as zebras dependem das curvas) */
@@ -413,34 +433,37 @@ static float catmullRom(float a, float b, float c, float d, float t) {
  * Recebe: um índice qualquer (a tabela é circular).
  * Devolve: o ponto do traçado da Copa Pistão.
  */
-static PontoDoTracado pontoDaTabela(int indice) {
-    return TRACADO_COPA_PISTAO[(indice + TOTAL_PONTOS_COPA_PISTAO) % TOTAL_PONTOS_COPA_PISTAO];
+static PontoDoTracado pontoDaTabela(const PontoDoTracado *tabela, int total, int indice) {
+    return tabela[(indice + total) % total];
 }
 
 /*
- * criarCopaPistao
- * Monta o oval a partir do traçado medido no modelo 3D (copa_pistao.h): anda
- * pela tabela criando um segmento a cada COMPRIMENTO_SEGMENTO, já na posição
- * exata do modelo, e deduz a curvatura de cada um da mudança de rumo. Assim a
- * física anda sobre a mesma linha que a imagem mostra.
- * Recebe: nada.
+ * criarPistaDaTabela
+ * Monta a pista a partir do traçado medido no modelo 3D: anda pela tabela criando
+ * um segmento a cada COMPRIMENTO_SEGMENTO, já na posição exata do modelo, e deduz a
+ * curvatura de cada um da mudança de rumo. Assim a física anda sobre a mesma linha
+ * que a imagem mostra.
+ * Recebe: a tabela, os limites de cada lado (NULL: muro na borda do asfalto), quantos pontos
+ *         ela tem, a escala do modelo, qual pista é e o nome.
  * Devolve: a pista completa.
  */
-Pista *criarCopaPistao(void) {
+static Pista *criarPistaDaTabela(const PontoDoTracado *tabela, const float (*limites)[2], int totalDePontos, float escala,
+                                 IdPista id, const char *nome) {
     Pista *pista = criarPistaVazia();
-    pista->id = PISTA_COPA_PISTAO;
-    pista->nome = "Copa Pistão";
+    pista->id = id;
+    pista->nome = nome;
     float passo = COMPRIMENTO_SEGMENTO / UNIDADES_POR_METRO;
 
     /* 1) Anda pela tabela em passos curtos, medindo o caminho em metros */
-    float ultimoX = pontoDaTabela(0).x * ESCALA_COPA_PISTAO, ultimoZ = pontoDaTabela(0).z * ESCALA_COPA_PISTAO;
+    float ultimoX = pontoDaTabela(tabela, totalDePontos, 0).x * escala, ultimoZ = pontoDaTabela(tabela, totalDePontos, 0).z * escala;
     float andou = passo;   /* força um segmento logo no primeiro ponto */
-    for (int i = 0; i < TOTAL_PONTOS_COPA_PISTAO; i++) {
-        PontoDoTracado a = pontoDaTabela(i - 1), b = pontoDaTabela(i), c = pontoDaTabela(i + 1), d = pontoDaTabela(i + 2);
+    for (int i = 0; i < totalDePontos; i++) {
+        PontoDoTracado a = pontoDaTabela(tabela, totalDePontos, i - 1), b = pontoDaTabela(tabela, totalDePontos, i),
+                       c = pontoDaTabela(tabela, totalDePontos, i + 1), d = pontoDaTabela(tabela, totalDePontos, i + 2);
         for (int sub = 0; sub < SUBPASSOS_DO_TRACADO; sub++) {
             float t = (float) sub / SUBPASSOS_DO_TRACADO;
-            float x = catmullRom(a.x, b.x, c.x, d.x, t) * ESCALA_COPA_PISTAO;
-            float z = catmullRom(a.z, b.z, c.z, d.z, t) * ESCALA_COPA_PISTAO;
+            float x = catmullRom(a.x, b.x, c.x, d.x, t) * escala;
+            float z = catmullRom(a.z, b.z, c.z, d.z, t) * escala;
             andou += hypotf(x - ultimoX, z - ultimoZ);
             ultimoX = x;
             ultimoZ = z;
@@ -449,15 +472,20 @@ Pista *criarCopaPistao(void) {
             }
             andou -= passo;
             Segmento *novo = inserirSegmento(pista, pista->largada == NULL ? NULL : pista->largada->anterior, 0.0f);
-            novo->temMuro = 1;
+            novo->temMuro = (limites == NULL);
+            if (limites != NULL) {
+                const float *l0 = limites[i], *l1 = limites[(i + 1) % totalDePontos];
+                novo->limiteDireita = (l0[0] + (l1[0] - l0[0]) * t) * escala;
+                novo->limiteEsquerda = (l0[1] + (l1[1] - l0[1]) * t) * escala;
+            }
             novo->xMundo = x;
             novo->zMundo = z;
-            novo->altura = (b.altura + (c.altura - b.altura) * t) * ESCALA_COPA_PISTAO * UNIDADES_POR_METRO;
+            novo->altura = (b.altura + (c.altura - b.altura) * t) * escala * UNIDADES_POR_METRO;
             for (int k = 0; k < PONTOS_DO_PERFIL; k++) {
-                novo->perfil[k] = (b.perfil[k] + (c.perfil[k] - b.perfil[k]) * t) * ESCALA_COPA_PISTAO;
+                novo->perfil[k] = (b.perfil[k] + (c.perfil[k] - b.perfil[k]) * t) * escala;
             }
-            novo->larguraDireita = (b.ateMuroDireita + (c.ateMuroDireita - b.ateMuroDireita) * t) * ESCALA_COPA_PISTAO;
-            novo->larguraEsquerda = (b.ateMuroEsquerda + (c.ateMuroEsquerda - b.ateMuroEsquerda) * t) * ESCALA_COPA_PISTAO;
+            novo->larguraDireita = (b.ateMuroDireita + (c.ateMuroDireita - b.ateMuroDireita) * t) * escala;
+            novo->larguraEsquerda = (b.ateMuroEsquerda + (c.ateMuroEsquerda - b.ateMuroEsquerda) * t) * escala;
         }
     }
 
@@ -483,8 +511,11 @@ Pista *criarCopaPistao(void) {
 
     /* 3) Nome de cada trecho: conta as curvas, na ordem. A curva é decidida pela
      * média em volta, para uma variação pequena não partir uma curva em duas */
-    static const char *CURVAS[] = { "Curva 1", "Curva 2", "Curva 3", "Curva 4" };
-    static const char *RETAS[] = { "Reta dos Boxes", "Reta Curta", "Reta Oposta", "Reta Curta", "Reta dos Boxes" };
+    static const char *CURVAS[] = { "Curva 1", "Curva 2", "Curva 3", "Curva 4", "Curva 5", "Curva 6", "Curva 7", "Curva 8",
+                                    "Curva 9", "Curva 10", "Curva 11", "Curva 12", "Curva 13", "Curva 14", "Curva 15", "Curva 16",
+                                    "Curva 17", "Curva 18", "Curva 19", "Curva 20", "Curva 21", "Curva 22", "Curva 23", "Curva 24" };
+    static const char *RETAS_DO_ESTADIO[] = { "Reta dos Boxes", "Reta Curta", "Reta Oposta", "Reta Curta", "Reta dos Boxes" };
+    int maiorCurva = (int) (sizeof(CURVAS) / sizeof(CURVAS[0])) - 1;
     int curvasFeitas = 0, naCurva = 0;
     do {
         float soma = 0.0f;
@@ -496,17 +527,151 @@ Pista *criarCopaPistao(void) {
             soma += vizinho->curvatura;
             vizinho = vizinho->proximo;
         }
-        int ehCurva = soma / (2 * RAIO_DA_MEDIA_DO_NOME + 1) <= -CURVATURA_MINIMA_ZEBRA;
+        int ehCurva = fabsf(soma) / (2 * RAIO_DA_MEDIA_DO_NOME + 1) >= CURVATURA_MINIMA_ZEBRA;
         if (naCurva && !ehCurva) {
             curvasFeitas++;
         }
         naCurva = ehCurva;
-        atual->nomeTrecho = ehCurva ? CURVAS[curvasFeitas] : RETAS[curvasFeitas];
+        int qual = (curvasFeitas < maiorCurva) ? curvasFeitas : maiorCurva;
+        atual->nomeTrecho = ehCurva ? CURVAS[qual]
+                                    : ((id == PISTA_COPA_PISTAO && qual < 5) ? RETAS_DO_ESTADIO[qual] : "Reta");
         atual = atual->proximo;
     } while (atual != pista->largada);
 
     decorarOval(pista);
+    pista->metrosDaVolta = contarSegmentos(pista) * COMPRIMENTO_SEGMENTO / UNIDADES_POR_METRO;
     return pista;
+}
+
+/*
+ * criarCopaPistao
+ * O estádio: sem área reservada, a equipe monta tudo ao ar livre, no pátio largo
+ * que fica por dentro da Reta Oposta.
+ * Recebe: nada.
+ * Devolve: a pista completa.
+ */
+Pista *criarCopaPistao(void) {
+    Pista *pista = criarPistaDaTabela(TRACADO_COPA_PISTAO, NULL, TOTAL_PONTOS_COPA_PISTAO, ESCALA_COPA_PISTAO,
+                                      PISTA_COPA_PISTAO, "Copa Pistão");
+    DadosDoPit pit = { 0 };
+    pit.lado = -1;
+    pit.noModelo = 1;
+    pit.entrada = 1660.0f;
+    pit.inicioLivre = 1660.0f;
+    pit.fimDaZona = 1760.0f;
+    pit.fimDaEntrada = 1760.0f;
+    pit.velocidadeNaEntrada = 5000.0f;
+    pit.aviso = 1480.0f;
+    pit.inicioDoLimite = 1790.0f;
+    pit.fimDoLimite = 2110.0f;
+    pit.fim = 2300.0f;
+    pit.primeiraVaga = 1815.0f;
+    pit.entreVagas = 20.0f;
+    pit.encostar = 14.0f;
+    pit.noCaminhoDaFaixa = 1770.0f;
+    pit.deixaAFaixa = 2180.0f;
+    pit.borda = 8.0f;
+    pit.faixa = 20.0f;
+    pit.vaga = 28.0f;
+    pit.paraEntrar = 15.0f;
+    pista->pit = pit;
+    pista->temPit = 1;
+    return pista;
+}
+
+/*
+ * criarOval
+ * O pit lane do modelo fica por fora da reta da largada, entre o muro dos boxes e as
+ * garagens: abre em x = -125 e fecha em x = 140 (metros aqui a partir da linha, x = 15,7).
+ * Recebe: nada.
+ * Devolve: a pista completa.
+ */
+Pista *criarOval(void) {
+    Pista *pista = criarPistaDaTabela(TRACADO_OVAL, NULL, TOTAL_PONTOS_OVAL, ESCALA_OVAL, PISTA_OVAL, "Oval");
+    float volta = pista->metrosDaVolta;
+    DadosDoPit pit = { 0 };
+    pit.lado = 1;
+    pit.noModelo = 1;
+    pit.entrada = volta - 280.0f;
+    pit.inicioLivre = pit.entrada;
+    pit.fimDaZona = volta - 225.0f;
+    pit.fimDaEntrada = volta - 205.0f;
+    pit.velocidadeNaEntrada = 5000.0f;
+    pit.aviso = volta - 500.0f;
+    pit.inicioDoLimite = volta - 185.0f;
+    pit.fimDoLimite = 60.0f;
+    pit.fim = 248.0f;
+    pit.primeiraVaga = -160.0f;
+    pit.entreVagas = 11.0f;
+    pit.encostar = 9.0f;
+    pit.noCaminhoDaFaixa = volta - 205.0f;
+    pit.deixaAFaixa = 90.0f;
+    pit.borda = 12.0f;
+    pit.faixa = 27.0f;
+    pit.vaga = 35.0f;
+    pit.paraEntrar = 13.0f;
+    pista->pit = pit;
+    pista->temPit = 1;
+    return pista;
+}
+
+/* A estrada do pit do Splat, medida no modelo: passa pela abertura entre os dois muros da
+ * ilha que a separa da pista (uns 220 m antes da linha), sai pela ponte sobre a estrada de baixo
+ * e só volta depois do fim do muro da saída */
+static const float CAMINHO_DO_PIT_DO_SPLAT[][2] = {
+    { -240.0f, 8.0f }, { -228.0f, 10.0f }, { -220.0f, 14.5f }, { -210.0f, 19.0f }, { -200.0f, 21.0f }, { -190.0f, 26.0f },
+    { -180.0f, 35.0f }, { -170.0f, 42.0f }, { -160.0f, 44.0f }, { -8.0f, 44.0f }, { -2.0f, 42.0f }, { 3.0f, 38.0f },
+    { 8.0f, 33.0f }, { 12.0f, 29.0f }, { 16.0f, 26.0f }, { 20.0f, 23.0f }, { 24.0f, 21.0f }, { 28.0f, 20.0f }, { 40.0f, 19.0f },
+    { 48.0f, 17.0f }, { 52.0f, 14.0f }, { 60.0f, 9.0f }, { 70.0f, 8.0f }
+};
+
+/*
+ * criarSplat
+ * A pista é corrida no sentido em que o grid fica antes da linha, no começo da reta.
+ * O pit lane é a estrada paralela à reta, à direita, na frente do prédio das garagens.
+ * Recebe: nada.
+ * Devolve: a pista completa.
+ */
+Pista *criarSplat(void) {
+    Pista *pista = criarPistaDaTabela(TRACADO_SPLAT, LIMITES_SPLAT, TOTAL_PONTOS_SPLAT, ESCALA_SPLAT, PISTA_SPLAT, "Splat");
+    pista->semDirecaoGuiada = 1;   /* nas curvas fechadas dele, a guiada deixa o carro parecer preso a um traçado */
+    float volta = pista->metrosDaVolta;
+    DadosDoPit pit = { 0 };
+    pit.lado = 1;
+    pit.noModelo = 1;
+    pit.entrada = volta - 240.0f;
+    pit.inicioLivre = pit.entrada;
+    pit.fimDaZona = volta - 225.0f;
+    pit.fimDaEntrada = volta - 172.0f;
+    pit.velocidadeNaEntrada = 3200.0f;   /* a estrada dobra logo depois de sair da pista */
+    pit.aviso = volta - 440.0f;
+    pit.inicioDoLimite = volta - 172.0f;
+    pit.fimDoLimite = 62.0f;             /* e dobra de novo para voltar: só dá para fazer devagar */
+    pit.fim = 72.0f;
+    pit.primeiraVaga = -165.0f;
+    pit.entreVagas = 11.0f;
+    pit.encostar = 9.0f;
+    pit.noCaminhoDaFaixa = volta - 160.0f;
+    pit.deixaAFaixa = volta - 10.0f;
+    pit.borda = 8.0f;
+    pit.faixa = 44.0f;
+    pit.vaga = 48.5f;
+    pit.paraEntrar = 9.0f;
+    pit.caminho = CAMINHO_DO_PIT_DO_SPLAT;
+    pit.pontosDoCaminho = (int) (sizeof(CAMINHO_DO_PIT_DO_SPLAT) / sizeof(CAMINHO_DO_PIT_DO_SPLAT[0]));
+    pista->pit = pit;
+    pista->temPit = 1;
+    return pista;
+}
+
+/*
+ * metrosDesdeAEntrada
+ * Recebe: a pista e um lugar, em metros a partir da linha (pode ser negativo).
+ * Devolve: quantos metros esse lugar está depois da entrada do pit lane, dando a volta na linha.
+ */
+float metrosDesdeAEntrada(const Pista *pista, float metros) {
+    float depois = fmodf(metros - pista->pit.entrada, pista->metrosDaVolta);
+    return (depois < 0.0f) ? depois + pista->metrosDaVolta : depois;
 }
 
 /*
@@ -515,7 +680,12 @@ Pista *criarCopaPistao(void) {
  * Devolve: a pista completa.
  */
 Pista *criarPistaPorId(IdPista id) {
-    return (id == PISTA_COPA_PISTAO) ? criarCopaPistao() : criarPista();
+    switch (id) {
+        case PISTA_COPA_PISTAO: return criarCopaPistao();
+        case PISTA_OVAL: return criarOval();
+        case PISTA_SPLAT: return criarSplat();
+        default: return criarPista();
+    }
 }
 
 /* ==================================================================

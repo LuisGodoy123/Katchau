@@ -18,13 +18,7 @@
 #ifndef COPA_PISTAO_H
 #define COPA_PISTAO_H
 
-typedef struct {
-    float x, z;              /* a linha de referência, vista de cima */
-    float ateMuroDireita;    /* da linha até o muro de fora */
-    float ateMuroEsquerda;   /* da linha até o muro de dentro */
-    float altura;            /* altura do asfalto na linha */
-    float perfil[9];         /* altura em relação à linha, da borda esquerda à direita */
-} PontoDoTracado;
+#include "tracado.h"
 
 static const PontoDoTracado TRACADO_COPA_PISTAO[] = {
     {   -0.648f,   -8.472f,  0.300f,  0.217f, 0.5671f, {  0.0000f,  0.0000f, -0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f,  0.0000f } },

@@ -935,9 +935,9 @@ void desenharGaragem(EstadoMenu *menu) {
 enum { FOCO_NA_PISTA, FOCO_NO_NIVEL, FOCO_NO_CORRER, TOTAL_FOCOS };
 
 #define Y_CARTAO_PISTA        112.0f
-#define LARGURA_CARTAO_PISTA  350.0f
+#define LARGURA_CARTAO_PISTA  170.0f
 #define ALTURA_CARTAO_PISTA   190.0f
-#define ESPACO_ENTRE_CARTOES  20.0f
+#define ESPACO_ENTRE_CARTOES  13.0f
 #define LADO_DO_TRACADO       112.0f
 #define PASSO_DO_TRACADO      4        /* desenha o traçado de 4 em 4 segmentos */
 #define Y_TITULO_PISTA        90.0f
@@ -1162,7 +1162,7 @@ static void desenharCartaoDePista(int cartao, Pista *pista, float destaque, int 
     desenharTracado(pista, centroX, Y_CARTAO_PISTA + 70.0f, LADO_DO_TRACADO, ColorLerp(COR_TEXTO_FRACO, COR_TEXTO_CLARO, suave));
 
     float metros = contarSegmentos(pista) * COMPRIMENTO_SEGMENTO / UNIDADES_POR_METRO;
-    escreverCentralizado(FONTE_TITULO, pista->nome, centroX, Y_CARTAO_PISTA + 134.0f, 22.0f, ColorLerp(COR_TEXTO_FRACO, COR_TEXTO_CLARO, suave));
+    escreverCentralizado(FONTE_TITULO, pista->nome, centroX, Y_CARTAO_PISTA + 134.0f, 20.0f, ColorLerp(COR_TEXTO_FRACO, COR_TEXTO_CLARO, suave));
     escreverCentralizado(FONTE_FORTE, TextFormat("%.2f km", metros / 1000.0f), centroX, Y_CARTAO_PISTA + 162.0f, 16.0f, ColorLerp(COR_TEXTO_FRACO, COR_TEXTO_CLARO, suave));
 }
 
@@ -1211,8 +1211,7 @@ static void desenharBotaoCorrer(int comCursor) {
  */
 static void desenharResumoDaCorrida(EstadoMenu *menu) {
     const FichaDoNivel *ficha = fichaDoNivel(menu->nivelEscolhido);
-    int temPit = (menu->pistaEscolhida == PISTA_INTERLAGOS);
-    int parada = ficha->temParada && temPit;
+    int parada = ficha->temParada;
     int gasta = ficha->gastaPneu && parada;
     const char *partes[3] = { TextFormat("%d VOLTAS", ficha->voltas), parada ? "PITSTOP OBRIGATÓRIO" : "SEM PITSTOP", "PNEUS GASTAM" };
     char voltas[32];
@@ -1291,6 +1290,7 @@ enum {
     LINHA_GATILHOS,
     LINHA_ZONA_MORTA,
     LINHA_VOLANTE,
+    LINHA_DIRECAO_GUIADA,
     LINHA_CAMERA_X,
     LINHA_CAMERA_Y,
     LINHA_PADRAO,
@@ -1380,6 +1380,9 @@ static void mudarOpcao(EstadoMenu *menu, int linha, int sentido) {
             break;
         case LINHA_VOLANTE:
             config->respostaDoVolante = (config->respostaDoVolante + sentido + TOTAL_VOLANTES) % TOTAL_VOLANTES;
+            break;
+        case LINHA_DIRECAO_GUIADA:
+            config->direcaoGuiada = !config->direcaoGuiada;
             break;
         case LINHA_CAMERA_X:
             config->inverterCameraX = !config->inverterCameraX;
@@ -1646,6 +1649,7 @@ void desenharConfiguracoes(EstadoMenu *menu) {
     desenharLinhaDeOpcao(menu, LINHA_GATILHOS, "TREMOR NO ACELERADOR (DUALSENSE)", config->gatilhosAdaptativos ? "LIGADO" : "DESLIGADO", !vibra);
     desenharLinhaDeOpcao(menu, LINHA_ZONA_MORTA, "ZONA MORTA DO ANALÓGICO", TextFormat("%d%%", config->zonaMorta), 0);
     desenharLinhaDeOpcao(menu, LINHA_VOLANTE, "RESPOSTA DO VOLANTE NO ANALÓGICO", VOLANTES[config->respostaDoVolante], 0);
+    desenharLinhaDeOpcao(menu, LINHA_DIRECAO_GUIADA, "DIREÇÃO GUIADA", config->direcaoGuiada ? "LIGADA" : "DESLIGADA", 0);
     desenharLinhaDeOpcao(menu, LINHA_CAMERA_X, "INVERTER A CÂMERA NA HORIZONTAL", config->inverterCameraX ? "SIM" : "NÃO", 0);
     desenharLinhaDeOpcao(menu, LINHA_CAMERA_Y, "INVERTER A CÂMERA NA VERTICAL", config->inverterCameraY ? "SIM" : "NÃO", 0);
     desenharLinhaDeOpcao(menu, LINHA_PADRAO, "VOLTAR TUDO AO PADRÃO", (menu->confirmarPadrao > 0.0f) ? "APERTE DE NOVO" : "", 0);

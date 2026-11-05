@@ -93,6 +93,10 @@ typedef struct {
     float velocidadeNaRodada;      /* a velocidade quando começou a rodar */
 
     /* ---- Freio de mão e drift ---- */
+    int direcaoLivre;              /* 1: sem direção guiada, o carro anda no mundo e quem faz a curva é o volante */
+    float desvioDoRumo;            /* graus: para onde o bico aponta em relação à linha da pista, sem a direção guiada */
+    int temRumoNoMundo;            /* sem a direção guiada: 1 quando o campo abaixo já vale */
+    float rumoNoMundo;             /* graus: para onde o carro aponta no mundo; é o volante que muda */
     float anguloDeFuga;            /* graus: sem volante na curva, o carro segue reto, e o bico não acompanha a pista */
     float forcaDoDrift;            /* de 0 a 1: o quanto a traseira está solta */
     float anguloDeDrift;           /* graus: o quanto o carro está de lado por causa do drift */
@@ -146,6 +150,7 @@ Carro criarCarro(const char *nome, int numero, Segmento *largada, float deslocam
                  float velocidadeMaxima, float aceleracao, float aderencia);
 int atualizarCarro(Carro *carro, Comandos comandos, float tempoQuadro);
 int estaForaDaPista(Carro *carro);
+float aceleracaoDeCurva(const Carro *carro);
 int velocidadeEmKmh(Carro *carro);
 int converterParaKmh(float velocidade);
 float velocidadeSeguraNaCurva(Carro *carro, float curvatura);

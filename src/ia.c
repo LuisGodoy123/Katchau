@@ -18,6 +18,7 @@
 #include "ia.h"
 
 #define METROS_PARA_IR_AO_PIT 200.0f  /* quanto antes do pit lane ela já vai para o lado */
+#define FOLGA_DO_LIMITE_NA_IA 2.2f    /* metros */
 #define LADO_PARA_IR_AO_PIT   0.75f   /* em larguras da pista */
 #define SEGMENTOS_OLHADOS         80       /* quantos segmentos à frente a IA enxerga (16000 unidades: */
                                            /* mais que a frenagem de 313 km/h até parar) */
@@ -69,6 +70,11 @@ static float velocidadeDesejada(Carro *carro) {
  */
 static float limitarLinha(Segmento *segmento, float metros) {
     float limite = larguraDoLado(segmento, metros) * LIMITE_LINHA;
+    if (segmento->limiteDireita > 0.0f) {
+        /* Onde a pista mediu o que para o carro, a IA guarda distância disso */
+        float ateOLimite = ((metros < 0.0f) ? segmento->limiteEsquerda : segmento->limiteDireita) - FOLGA_DO_LIMITE_NA_IA;
+        limite = (ateOLimite < limite) ? ateOLimite : limite;
+    }
     if (metros < -limite) {
         return -limite;
     }
@@ -121,7 +127,11 @@ static int vaiBater(Carro *carro) {
  * Recebe: o carro da IA (corrida.c já preencheu o que ele enxerga).
  * Devolve: os comandos (acelerar, frear, esquerda, direita).
  */
-Comandos atualizarIA(Carro *carro) {
+Comandos atualizarIA(Carro *carro, const Pista *pista) {
+    /* A IA sempre dirige com a direção guiada, inclusive com o carro do jogador depois da chegada */
+    carro->direcaoLivre = 0;
+    carro->desvioDoRumo = 0.0f;
+    carro->temRumoNoMundo = 0;
     Comandos comandos = { 0, 0, 0, 0, 0.0f, 0, 0 };
 
     /* 1) Velocidade: acelera abaixo da desejada (e, dentro da curva,
@@ -148,8 +158,9 @@ Comandos atualizarIA(Carro *carro) {
     escolherLinha(carro, desejada);
     carro->querParar = (carro->voltaDoPit > 0 && carro->voltas + 1 == carro->voltaDoPit && !carro->pitFeito);
     float metros = (carro->posicao.segmento->indice * COMPRIMENTO_SEGMENTO + carro->posicao.distanciaNoSegmento) / UNIDADES_POR_METRO;
-    if (carro->querParar && metros > ENTRADA_DO_PIT - METROS_PARA_IR_AO_PIT) {
-        carro->linhaAlvo = -carro->posicao.segmento->larguraEsquerda * LADO_PARA_IR_AO_PIT;
+    if (carro->querParar && metrosDesdeAEntrada(pista, metros + METROS_PARA_IR_AO_PIT) < METROS_PARA_IR_AO_PIT) {
+        carro->linhaAlvo = pista->pit.lado * LADO_PARA_IR_AO_PIT
+                           * ((pista->pit.lado < 0) ? carro->posicao.segmento->larguraEsquerda : carro->posicao.segmento->larguraDireita);
     }
 
     /* Sem espaço para desviar e chegando rápido: freia atrás dele */
