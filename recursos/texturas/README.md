@@ -41,27 +41,9 @@ UnloadTexture(carro);   /* antes do CloseWindow() */
 |            | `placa_150.png`        | 128x224  | placa de frenagem 150 m                     |
 | `logo/`    | `katchau.png`          | 1774x887 | logo do menu principal (`visual.c`)         |
 
-## Como gerar de novo
+## Como trocar uma imagem
 
-Os **morros** (`fundo/morros.png`) são desenhados por código em
-`ferramentas/gerar_morros.py`: três camadas de cristas lisas, no estilo da
-cidade, que emendam sem costura nas bordas. Para mudar a altura, as cores ou
-o formato, mude as `CAMADAS` no script e rode (precisa de Python 3 com numpy;
-o Python do Blender já tem):
-
-A **barreira de pneus** (`sprites/pneus.png`) sai de `ferramentas/gerar_pneus.py`:
-6 pilhas de 5 pneus deitados, vistas de lado e um pouco de cima, com o pneu do topo
-pintado (vermelho e branco, alternando). O número de pilhas, de pneus, as cores e o
-achatamento ficam nas constantes do começo do script.
-
-```sh
-PY=/Applications/Blender.app/Contents/Resources/5.2/python/bin/python3.13
-$PY ferramentas/gerar_morros.py
-$PY ferramentas/gerar_pneus.py
-```
-
-As outras imagens não têm script no repositório: para trocá-las, substitua o PNG
-mantendo o nome.
+Substitua o PNG mantendo o nome.
 
 O `render.c` não depende do tamanho das imagens: a grama usa a largura da
 textura e o fundo converte para a largura de referência `LARGURA_FUNDO`

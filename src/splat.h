@@ -1,7 +1,7 @@
 /*
  * splat.h
  * ------------------------------------------------------------------
- * Medido no modelo 3D recursos/modelos/splat.glb (gerado por build/exp/extrair_mapa.py):
+ * Medido no modelo 3D recursos/modelos/splat.glb:
  * a linha da pista, na ordem da corrida a partir da largada, e os lugares da torcida,
  * nas unidades e nos eixos do próprio modelo.
  * ------------------------------------------------------------------

@@ -10,9 +10,6 @@ katchau.zip
 .vscode/
 .idea/
 
-# Cache do Python (ferramentas/)
-__pycache__/
-
 # As escolhas do jogador
 configuracoes.txt
 telemetria.csv

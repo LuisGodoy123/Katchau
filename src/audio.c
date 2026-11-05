@@ -8,6 +8,7 @@
 #include <math.h>
 #include "raylib.h"
 #include "audio.h"
+#include "efeitos.h"
 
 #define ARQUIVO_MUSICA_MENU   "recursos/sons/menu_theme.mp3"
 #define VOLUME_SONS           0.7f   /* volume dos efeitos (0 a 1) */
@@ -34,30 +35,11 @@ typedef struct {
 enum { CORRIDA_MOTOR, CORRIDA_CONTAGEM, CORRIDA_MUSICA, TOTAL_SONS_CORRIDA };
 
 static SomDeCorrida somCorrida[TOTAL_SONS_CORRIDA] = {
-    [CORRIDA_MOTOR] = { .arquivo = "recursos/sons/motor_largada.wav", .volumeMaximo = 0.5f },   /* provisório */
+    [CORRIDA_MOTOR] = { .arquivo = "recursos/sons/nascar/nascar_largada.wav", .volumeMaximo = 0.8f },   /* o motor aquecendo */
     [CORRIDA_CONTAGEM] = { .arquivo = "recursos/sons/contagem_largada.mp3", .volumeMaximo = 1.0f },
     [CORRIDA_MUSICA] = { .arquivo = "recursos/sons/musica_corrida.mp3", .volumeMaximo = 0.5f,
                          .velocidadeFade = 1.0f, .repetir = 1 },
 };
-
-/* O motor do carro: dois loops da mesma rotação, um com o motor sob carga e
- * outro aliviado (freio-motor). Os dois tocam sempre e o volume de cada um
- * segue o pé do piloto; o tom dos dois segue a rotação. */
-#define ARQUIVO_MOTOR_ACELERANDO "recursos/sons/motor_acelerando.wav"
-#define ARQUIVO_MOTOR_ALIVIANDO  "recursos/sons/motor_aliviando.wav"
-#define VOLUME_MOTOR             0.65f   /* volume máximo do motor (0 a 1) */
-#define VOLUME_ALIVIADO          0.80f   /* o loop aliviado soa mais forte que o outro; aqui ele é baixado */
-#define PITCH_MARCHA_LENTA       0.70f   /* tom dos loops com a rotação mínima (1.0 = como gravado) */
-#define PITCH_LIMITADOR          2.00f   /* ...e no limitador */
-#define VELOCIDADE_ENTRADA_MOTOR 4.0f    /* 1/s: o motor entra em ~0,25 s */
-#define VELOCIDADE_SAIDA_MOTOR   3.0f    /* 1/s: e sai em ~0,3 s */
-
-static Music motorAcelerando;
-static Music motorAliviando;
-static int motorSomCarregado = 0;
-static int motorSomTocando = 0;
-static int motorSomAtivoAntes = 0;
-static float entradaMotor = 0.0f;   /* 0 a 1: o fade de entrada e saída */
 
 /* A música da vitória. Na última volta, com o jogador em 1º, ela começa
  * baixinho ANTECEDENCIA_DO_REFRAO segundos antes da linha, já no ponto
@@ -179,13 +161,7 @@ void carregarAudio(void) {
         }
     }
 
-    if (FileExists(ARQUIVO_MOTOR_ACELERANDO) && FileExists(ARQUIVO_MOTOR_ALIVIANDO)) {
-        motorAcelerando = LoadMusicStream(ARQUIVO_MOTOR_ACELERANDO);
-        motorAliviando = LoadMusicStream(ARQUIVO_MOTOR_ALIVIANDO);
-        motorSomCarregado = IsMusicValid(motorAcelerando) && IsMusicValid(motorAliviando);
-        motorAcelerando.looping = true;
-        motorAliviando.looping = true;
-    }
+    carregarEfeitos();   /* os motores NASCAR e os efeitos da corrida (efeitos.c) */
 
     if (FileExists(ARQUIVO_MUSICA_VITORIA)) {
         musicaVitoria = LoadMusicStream(ARQUIVO_MUSICA_VITORIA);
@@ -389,63 +365,6 @@ void atualizarSonsDaCorrida(int motorAtivo, int contagemAtiva, int musicaAtiva) 
 }
 
 /*
- * atualizarSomDoMotor
- * Chamar uma vez por quadro. Liga os dois loops do motor do carro e faz
- * o som acompanhar o motor:
- *   - o tom sobe com a rotação (e cai quando o câmbio troca de marcha);
- *   - com o pé no fundo toca o loop "acelerando" e, ao soltar ou frear,
- *     o som passa aos poucos para o "aliviando" (mistura de potência igual);
- *   - o motor fica mais alto quanto mais gira.
- * Ao ficar inativo, o som some em ~0,3 s e para.
- * Recebe: se o motor deve soar, a rotação e a carga (0 a 1, de motor.h).
- * Devolve: nada.
- */
-void atualizarSomDoMotor(int ativo, float giro, float carga) {
-    if (!motorSomCarregado) {
-        return;
-    }
-
-    if (ativo && !motorSomAtivoAntes) {
-        StopMusicStream(motorAcelerando);
-        StopMusicStream(motorAliviando);
-        PlayMusicStream(motorAcelerando);
-        PlayMusicStream(motorAliviando);
-        motorSomTocando = 1;
-        entradaMotor = 0.0f;
-    }
-    motorSomAtivoAntes = ativo;
-    if (!motorSomTocando) {
-        return;
-    }
-
-    float passo = GetFrameTime();
-    if (ativo) {
-        entradaMotor = fminf(entradaMotor + passo * VELOCIDADE_ENTRADA_MOTOR, 1.0f);
-    } else {
-        entradaMotor -= passo * VELOCIDADE_SAIDA_MOTOR;
-        if (entradaMotor <= 0.0f) {
-            StopMusicStream(motorAcelerando);
-            StopMusicStream(motorAliviando);
-            motorSomTocando = 0;
-            entradaMotor = 0.0f;
-            return;
-        }
-    }
-
-    giro = fminf(fmaxf(giro, 0.0f), 1.0f);
-    carga = fminf(fmaxf(carga, 0.0f), 1.0f);
-    float pitch = PITCH_MARCHA_LENTA + (PITCH_LIMITADOR - PITCH_MARCHA_LENTA) * giro;
-    float forca = VOLUME_MOTOR * entradaMotor * (0.5f + 0.5f * giro);
-
-    SetMusicPitch(motorAcelerando, pitch);
-    SetMusicPitch(motorAliviando, pitch);
-    SetMusicVolume(motorAcelerando, forca * sqrtf(carga));
-    SetMusicVolume(motorAliviando, forca * VOLUME_ALIVIADO * sqrtf(1.0f - carga));
-    UpdateMusicStream(motorAcelerando);
-    UpdateMusicStream(motorAliviando);
-}
-
-/*
  * acertarMusicaDaVitoria
  * Se a música está longe demais do ponto em que deveria estar, pula
  * para ele.
@@ -531,7 +450,7 @@ int musicaDaVitoriaTocando(void) {
 
 /*
  * pausarSonsDaCorrida
- * Congela (ou solta) todos os sons da corrida de uma vez: o motor, a
+ * Congela (ou solta) todos os sons da corrida de uma vez: os motores, a
  * contagem, a música de fundo e a da vitória. Ao soltar, cada um volta
  * do ponto exato em que parou (o "3, 2, 1" continua junto com os números
  * e o refrão continua sincronizado). Enquanto estiver pausado, o main.c
@@ -547,13 +466,11 @@ void pausarSonsDaCorrida(int pausar) {
             musicas[total++] = &somCorrida[i].musica;
         }
     }
-    if (motorSomCarregado) {
-        musicas[total++] = &motorAcelerando;
-        musicas[total++] = &motorAliviando;
-    }
     if (musicaVitoriaCarregada) {
         musicas[total++] = &musicaVitoria;
     }
+
+    pausarEfeitosDaCorrida(pausar);   /* os motores e os loops do efeitos.c */
 
     /* Pausar ou continuar um som que não está tocando não faz nada */
     for (int i = 0; i < total; i++) {
@@ -597,11 +514,7 @@ void descarregarAudio(void) {
             somCorrida[i].carregado = 0;
         }
     }
-    if (motorSomCarregado) {
-        UnloadMusicStream(motorAcelerando);
-        UnloadMusicStream(motorAliviando);
-        motorSomCarregado = 0;
-    }
+    descarregarEfeitos();
     if (musicaVitoriaCarregada) {
         UnloadMusicStream(musicaVitoria);
         musicaVitoriaCarregada = 0;

@@ -145,24 +145,26 @@ src/
   visual.c/.h      identidade visual: cores, fontes, logo e formas     (fase 6)
   olhar.c/.h       câmera livre: transforma o analógico direito em ângulos
   motor.c/.h       rotação, marcha e carga do motor (câmbio de cada carro; também comanda o som)
-  audio.c/.h       música, efeitos dos menus, largada e o som do motor do carro
+  audio.c/.h       música, efeitos dos menus, largada, falas do McQueen
+  efeitos.c/.h     sons do carro e da corrida: motores NASCAR (jogador e rivais), vento, pneu,
+                   grama, muro, nitro, câmbio, voltas e pit stop
   controle.c/.h    controle (gamepad): comandos do carro e botões dos menus
 testes/
   teste_pista.c    testa pista, carro, corrida, IA e ordenação no terminal
 recursos/
   fontes/          Racing Sans One e Saira Condensed (licença OFL, arquivos *_licenca.txt)
-  sons/            música dos menus e da vitória, efeitos dos menus e motor da largada (*.wav, *.mp3)
+  sons/            música, efeitos dos menus e falas do McQueen (*.wav, *.mp3)
+    nascar/        motores V8 estilo NASCAR em várias rotações (loops) e o motor da largada
+    efeitos/       vento, pneu, grama, muro, nitro, câmbio, voltas e pit stop
   texturas/        PNGs do jogo (ver recursos/texturas/README.md)
     logo/          katchau.png, a logo do menu principal
     estrada/       asfalto, grama, zebra e faixa
     fundo/         céu, cidade e morros (camadas do horizonte)
     carro/         carro reto, virando à esquerda e à direita
     sprites/       árvores, pórtico, pneus e placas
-ferramentas/
-  gerar_sprites.py script do Blender: modelo 3D (.glb) vira sprite PNG
 ```
 
-Regra: só `render.c`, `mundo.c`, `carros3d.c`, `fumaca.c`, `noite.c`, `hud.c`, `menu.c`, `visual.c`, `audio.c` e `controle.c` incluem `raylib.h` (além do `main.c`, que abre
+Regra: só `render.c`, `mundo.c`, `carros3d.c`, `fumaca.c`, `noite.c`, `hud.c`, `menu.c`, `visual.c`, `audio.c`, `efeitos.c` e `controle.c` incluem `raylib.h` (além do `main.c`, que abre
 a janela). O resto é lógica pura e pode ser testado no terminal.
 
 ## Os carros

@@ -2,7 +2,7 @@
  * cenario_mapas.h
  * ------------------------------------------------------------------
  * As árvores e estruturas das pistas de modelo 3D, nos eixos do mundo, em metros.
- * Gerado por build/exp/popular_mapas.py: cada lugar foi conferido contra a malha do
+ * Cada lugar foi conferido contra a malha do
  * modelo (só cai em grama ou no pátio, longe do asfalto e dos muros).
  * ------------------------------------------------------------------
  */

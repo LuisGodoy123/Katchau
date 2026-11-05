@@ -31,6 +31,7 @@
 #include "configuracoes.h"
 #include "visual.h"
 #include "audio.h"
+#include "efeitos.h"
 #include "controle.h"
 
 /* Na vitória, o painel de chegada espera um pouco para o jogador ver o
@@ -242,6 +243,7 @@ int main(int argc, char *argv[]) {
             limparFumaca();
             olhar = olharParaAFrente();
             iniciarEstadoDaVibracao(&estadoDaVibracao);
+            iniciarEfeitosDaCorrida();
         }
         tela = proxima;
 
@@ -307,9 +309,11 @@ int main(int argc, char *argv[]) {
             atualizarMusicaDaVitoria(segundosAteALinha, venceu);
             atualizarSonsDaCorrida(antesDoGo, naContagem,
                                    depoisDoGo && !corrida.terminou && !musicaDaVitoriaTocando());
-            Motor *motor = &corrida.jogador.motor;   /* cada carro tem o seu; o som é o do jogador */
-            atualizarSomDoMotor(depoisDoGo && !venceu, naCorrida ? motor->giro : 0.0f,
-                                naCorrida ? motor->carga : 0.0f);
+            if (naCorrida) {
+                /* Os motores NASCAR (o do jogador e os dos rivais mais próximos), o vento, o pneu,
+                 * a grama, o muro, o nitro, o câmbio, as voltas e o pit stop: do GO até a bandeirada */
+                atualizarEfeitosDaCorrida(&corrida, depoisDoGo && !venceu, tempoQuadro);
+            }
         }
 
         /* ---- 2) Desenhar a tela atual ----
