@@ -83,6 +83,7 @@ typedef struct {
     float velocidadeDeLado;        /* metros por segundo para a direita: o quanto ele está indo para o lado */
 
     float pancada;                 /* de 0 a 1: a força da última batida (a vibração do controle consome) */
+    float batidaNova;              /* de 0 a 1: uma batida que o som ainda não tocou (batidaDoMcQueen consome) */
     int raspandoNoMuro;            /* 1 enquanto o carro está encostado no muro */
 
     /* ---- Rodada ---- */

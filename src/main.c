@@ -262,6 +262,15 @@ int main(int argc, char *argv[]) {
             HideCursor();
         }
 
+        /* O McQueen bateu em alguma coisa (carro ou muro), assumiu ou perdeu a liderança: ele reage */
+        if (tela == TELA_CORRIDA && !pausada) {
+            tocarSomDaBatida(batidaDoMcQueen(&corrida));
+            int lideranca = mudancaDeLiderancaDoMcQueen(&corrida, tempoQuadro);
+            if (lideranca != 0) {
+                tocarFalaDeLideranca(lideranca > 0);
+            }
+        }
+
         /* O controle só vibra com a corrida andando: nos menus e na pausa, fica quieto */
         if (tela == TELA_CORRIDA && !pausada) {
             Vibracao vibracao = calcularVibracao(&estadoDaVibracao, &corrida, tempoQuadro);

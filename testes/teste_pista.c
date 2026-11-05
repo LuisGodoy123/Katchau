@@ -867,6 +867,103 @@ static void testarDirigibilidade(void) {
     liberarPista(pista);
 }
 
+/* ---------- Som da batida: só o McQueen ---------- */
+static void testarBatidaDoMcQueen(void) {
+    printf("\n[Teste] Batida do McQueen (so ele tem som de batida)\n");
+    Pista *pista = criarPista();
+    Corrida corrida;
+
+    /* O jogador é o McQueen: a batida dele toca, com a força dela, e some depois de lida */
+    iniciarCorrida(&corrida, pista, 0, NIVEL_MEDIO);
+    corrida.jogador.batidaNova = 0.8f;
+    verificar(fabsf(batidaDoMcQueen(&corrida) - 0.8f) < 0.001f, "o McQueen jogador bate: o volume e a forca da batida");
+    verificar(batidaDoMcQueen(&corrida) == 0.0f, "a batida so toca uma vez");
+
+    /* O jogador é outro carro: a batida dele não toca */
+    iniciarCorrida(&corrida, pista, 4, NIVEL_MEDIO);
+    corrida.jogador.batidaNova = 1.0f;
+    verificar(batidaDoMcQueen(&corrida) == 0.0f, "outro carro bate: sem som");
+
+    /* O McQueen é rival: só soa se bater perto do jogador, e mais baixo */
+    Carro *mcqueen = NULL;
+    for (int r = 0; r < TOTAL_RIVAIS; r++) {
+        if (corrida.rivais[r].numero == 0) {
+            mcqueen = &corrida.rivais[r];
+        }
+    }
+    verificar(mcqueen != NULL, "com outro carro escolhido, o McQueen e um rival");
+    if (mcqueen != NULL) {
+        mcqueen->distanciaPercorrida = corrida.jogador.distanciaPercorrida + 10.0f * UNIDADES_POR_METRO;
+        mcqueen->batidaNova = 1.0f;
+        float perto = batidaDoMcQueen(&corrida);
+        verificar(perto > 0.0f && perto < 1.0f, "o McQueen rival bate perto: soa, mais baixo");
+        mcqueen->distanciaPercorrida = corrida.jogador.distanciaPercorrida + 500.0f * UNIDADES_POR_METRO;
+        mcqueen->batidaNova = 1.0f;
+        verificar(batidaDoMcQueen(&corrida) == 0.0f, "o McQueen rival bate longe: ninguem ouve");
+    }
+
+    /* Batida de carro com carro: os dois ficam com a batida nova */
+    iniciarCorrida(&corrida, pista, 0, NIVEL_MEDIO);
+    corrida.jogador.batidaNova = 0.0f;
+    verificar(batidaDoMcQueen(&corrida) == 0.0f, "sem batida, sem som");
+    liberarPista(pista);
+}
+
+/* ---------- Falas do McQueen: liderança ---------- */
+static void testarLiderancaDoMcQueen(void) {
+    printf("\n[Teste] Falas de lideranca do McQueen (sem repetir na ultrapassagem em serie)\n");
+    Pista *pista = criarPista();
+    Corrida corrida;
+    float quadro = 1.0f / 60.0f;
+
+    /* Na contagem, nada: ele larga em último e ninguém lidera */
+    iniciarCorrida(&corrida, pista, 0, NIVEL_MEDIO);
+    verificar(mudancaDeLiderancaDoMcQueen(&corrida, quadro) == 0, "na contagem nao ha fala de lideranca");
+
+    /* Assume a ponta: uma fala só, e depois silêncio enquanto continua lá */
+    corrida.contagemRegressiva = 0.0f;
+    Carro *primeiro = corrida.classificacao[0];
+    int posicaoDele = 0;
+    for (int i = 0; i < TOTAL_CARROS; i++) {
+        if (corrida.classificacao[i] == &corrida.jogador) {
+            posicaoDele = i;
+        }
+    }
+    corrida.classificacao[0] = &corrida.jogador;
+    corrida.classificacao[posicaoDele] = primeiro;
+    verificar(mudancaDeLiderancaDoMcQueen(&corrida, quadro) == 1, "assumiu a lideranca: uma fala");
+    int repetiu = 0;
+    for (int i = 0; i < 60 * 3; i++) {
+        repetiu = repetiu || mudancaDeLiderancaDoMcQueen(&corrida, quadro) != 0;
+    }
+    verificar(!repetiu, "continuando na ponta, nao fala de novo");
+
+    /* Vários carros o passam em seguida: a perda é uma só */
+    Carro *outro = corrida.classificacao[1];
+    corrida.classificacao[0] = outro;
+    corrida.classificacao[1] = &corrida.jogador;
+    verificar(mudancaDeLiderancaDoMcQueen(&corrida, quadro) == -1, "perdeu a lideranca: uma fala");
+    int quantas = 0;
+    for (int i = 0; i < 60; i++) {
+        corrida.classificacao[1] = corrida.classificacao[2];
+        corrida.classificacao[2] = &corrida.jogador;   /* e continua caindo */
+        quantas += mudancaDeLiderancaDoMcQueen(&corrida, quadro) != 0;
+    }
+    verificar(quantas == 0, "ultrapassado por varios, nao repete a fala");
+
+    /* Ficou na ponta menos de 2 s e perdeu: nem conta como perda */
+    corrida.classificacao[0] = &corrida.jogador;
+    verificar(mudancaDeLiderancaDoMcQueen(&corrida, quadro) == 1, "voltou para a ponta: fala de assumir");
+    corrida.classificacao[0] = outro;
+    verificar(mudancaDeLiderancaDoMcQueen(&corrida, quadro) == 0, "ficou na ponta menos de 2 s: nao conta como perda");
+
+    /* Outro carro escolhido: o McQueen rival liderando não faz a voz do jogador falar */
+    iniciarCorrida(&corrida, pista, 4, NIVEL_MEDIO);
+    corrida.contagemRegressiva = 0.0f;
+    verificar(mudancaDeLiderancaDoMcQueen(&corrida, quadro) == 0, "jogador de outro carro: sem falas de lideranca");
+    liberarPista(pista);
+}
+
 static void testarGridDeLargada(void) {
     printf("\n14) Grid de largada antes da linha de chegada\n");
     Pista *pista = criarPista();
@@ -3743,6 +3840,8 @@ int main(int argc, char *argv[]) {
     testarObjetosDaPista();
     testarDirigibilidade();
     testarGridDeLargada();
+    testarBatidaDoMcQueen();
+    testarLiderancaDoMcQueen();
     testarSetoresEIntervalos();
     testarMotor();
     testarVoltaDaVitoria();

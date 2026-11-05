@@ -115,6 +115,7 @@
 #define PERDA_RODANDO           5200.0f  /* velocidade perdida por segundo com o carro todo de lado */
 #define RESTO_DA_RODADA            0.40f /* o carro nunca para de vez: sobra isso da velocidade que tinha */
 #define TEMPO_ENTRE_RODADAS        3.0f  /* segundos sem poder rodar de novo */
+#define BATIDA_NO_MURO_MINIMA      0.15f /* encostar no muro abaixo dessa fração da velocidade máxima não conta como batida */
 #define KMH_POR_UNIDADE            0.025f /* 12000 unidades/s viram 300 km/h no velocímetro */
 
 /*
@@ -177,6 +178,7 @@ Carro criarCarro(const char *nome, int numero, Segmento *largada, float deslocam
     carro.anguloDeFuga = 0.0f;
     carro.forcaDoDrift = 0.0f;
     carro.pancada = 0.0f;
+    carro.batidaNova = 0.0f;
     carro.raspandoNoMuro = 0;
     carro.anguloDeDrift = 0.0f;
     carro.giroDoDrift = 0.0f;
@@ -513,6 +515,7 @@ static void aplicarLimites(Carro *carro, float tempoQuadro) {
     Segmento *aqui = carro->posicao.segmento;
     carro->deslocamentoLateral = limitar(carro->deslocamentoLateral, -LIMITE_LATERAL, LIMITE_LATERAL);
 
+    int jaRaspava = carro->raspandoNoMuro;
     carro->raspandoNoMuro = 0;
 
     /* Muro (só no oval): o carro não passa dele, e raspar custa velocidade.
@@ -534,6 +537,14 @@ static void aplicarLimites(Carro *carro, float tempoQuadro) {
         if (fabsf(limitado - emMetros) > FOLGA_DA_CONTA_NO_LIMITE) {
             carro->deslocamentoLateral = limitado / larguraDoLado(aqui, limitado);
             encostarNoLimite(carro, (limitado > 0.0f) ? 1.0f : -1.0f, tempoQuadro);
+        }
+    }
+
+    /* Encostar no muro, vindo de fora dele e com velocidade, é uma batida (raspar depois não é) */
+    if (carro->raspandoNoMuro && !jaRaspava) {
+        float proporcao = carro->velocidade / carro->velocidadeMaxima;
+        if (proporcao > BATIDA_NO_MURO_MINIMA) {
+            carro->batidaNova = fmaxf(carro->batidaNova, fminf(0.3f + proporcao, 1.0f));
         }
     }
 }

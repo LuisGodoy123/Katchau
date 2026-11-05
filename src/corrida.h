@@ -53,6 +53,8 @@ typedef struct {
     int terminou;               /* 1 depois que o jogador completa todas as voltas */
     int desclassificado;        /* 1 se o jogador terminou sem fazer a parada obrigatória */
     int posicaoFinal;           /* posição do jogador na chegada (1 a 8) */
+    int mcqueenLiderava;        /* 1 enquanto o jogador, sendo o McQueen, está em 1º (para as falas dele) */
+    float mcqueenTempoNaPonta;  /* segundos seguidos em 1º */
 
     int totalSegmentos;                          /* tamanho da volta, para saber o setor de cada carro */
     float melhoresSetoresDaCorrida[TOTAL_SETORES];   /* o melhor de cada setor entre todos (0 = nenhum) */
@@ -79,6 +81,8 @@ const FichaDoNivel *fichaDoNivel(NivelDaCorrida nivel);
 void iniciarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador, NivelDaCorrida nivel);
 void atualizarCorrida(Corrida *corrida, Comandos comandosJogador, float tempoQuadro);
 int todosChegaram(Corrida *corrida);
+float batidaDoMcQueen(Corrida *corrida);
+int mudancaDeLiderancaDoMcQueen(Corrida *corrida, float tempoQuadro);
 int voltaAtual(Carro *carro);
 int posicaoDoCarro(Corrida *corrida, Carro *carro);
 int penetracaoEntreCarros(const Corrida *corrida, const Carro *a, const Carro *b, float *naFrente, float *deLado);

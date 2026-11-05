@@ -83,6 +83,40 @@ static int musicaVitoriaCarregada = 0;
 static EstadoDaVitoria estadoVitoria = VITORIA_PARADA;
 static float volumeVitoria = 0.0f;   /* 0 a 1, multiplicado por VOLUME_VITORIA */
 
+/* As batidas do McQueen: 12 sons (ENG_LMby 1 a 11 e 13), um sorteado a cada batida */
+#define TOTAL_SONS_DE_BATIDA     12
+#define VOLUME_BATIDA            1.0f    /* volume máximo (0 a 1); a força da batida baixa a partir daí */
+#define VOLUME_BATIDA_FRACA      0.45f   /* o volume da batida mais fraca, em relação à mais forte */
+#define PAUSA_ENTRE_BATIDAS      0.35f   /* segundos: uma batida que dura vários quadros toca um som só */
+static const int NUMEROS_DAS_BATIDAS[TOTAL_SONS_DE_BATIDA] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13 };
+/* As falas do McQueen: o grito da batida forte e as de quando ele assume ou perde a liderança.
+ * Tudo que ele diz (inclusive os sons de batida acima) passa por uma só "voz": enquanto uma fala
+ * toca, nenhuma outra começa, para nunca haver uma em cima da outra. */
+enum { FALA_GRITO, FALA_LIDER_1, FALA_LIDER_2, FALA_PERDEU_1, FALA_PERDEU_2, TOTAL_FALAS };
+static const char *ARQUIVOS_FALAS[TOTAL_FALAS] = {
+    "recursos/sons/mcqueen_grito.wav",
+    "recursos/sons/mcqueen_lider_1.wav",
+    "recursos/sons/mcqueen_lider_2.wav",
+    "recursos/sons/mcqueen_perdeu_1.wav",
+    "recursos/sons/mcqueen_perdeu_2.wav",
+};
+#define BATIDA_FORTE                 0.8f   /* a batida desta força (ou mais) faz o McQueen gritar */
+#define PAUSA_ENTRE_GRITOS           6.0    /* segundos: batida forte seguida toca só os sons de batida comuns */
+#define PAUSA_DEPOIS_DA_FALA         0.5    /* segundos de silêncio depois de qualquer fala */
+#define PAUSA_ENTRE_FALAS_DE_PONTA   8.0    /* segundos entre duas falas de liderança (ultrapassagens em série) */
+static Sound falas[TOTAL_FALAS];
+static int falaCarregada[TOTAL_FALAS];
+static int ultimaFalaDeLider = -1;
+static int ultimaFalaDePerda = -1;
+static double fimDaVoz = 0.0;               /* hora em que a fala atual acaba (mais a pausa) */
+static double horaDoUltimoGrito = -100.0;
+static double horaDaUltimaFalaDePonta = -100.0;
+
+static Sound sonsDeBatida[TOTAL_SONS_DE_BATIDA];
+static int somDeBatidaCarregado[TOTAL_SONS_DE_BATIDA];
+static int ultimaBatida = -1;
+static double horaDaUltimaBatida = -10.0;
+
 static const char *ARQUIVOS_SONS[TOTAL_SONS] = {
     "recursos/sons/cursor.wav",
     "recursos/sons/confirmar.wav",
@@ -117,6 +151,21 @@ void carregarAudio(void) {
             if (somCarregado[i]) {
                 SetSoundVolume(sons[i], VOLUME_SONS);
             }
+        }
+    }
+
+    for (int i = 0; i < TOTAL_SONS_DE_BATIDA; i++) {
+        const char *caminho = TextFormat("recursos/sons/batida_mcqueen_%d.wav", NUMEROS_DAS_BATIDAS[i]);
+        if (FileExists(caminho)) {
+            sonsDeBatida[i] = LoadSound(caminho);
+            somDeBatidaCarregado[i] = IsSoundValid(sonsDeBatida[i]);
+        }
+    }
+
+    for (int i = 0; i < TOTAL_FALAS; i++) {
+        if (FileExists(ARQUIVOS_FALAS[i])) {
+            falas[i] = LoadSound(ARQUIVOS_FALAS[i]);
+            falaCarregada[i] = IsSoundValid(falas[i]);
         }
     }
 
@@ -202,6 +251,89 @@ void tocarSom(TipoSom som) {
         StopSound(sons[som]);
         PlaySound(sons[som]);
     }
+}
+
+/*
+ * falar
+ * Toca uma fala do McQueen e ocupa a voz até ela acabar: nenhuma outra começa antes.
+ * Recebe: o som, o volume (0 a 1) e a hora de agora.
+ * Devolve: nada.
+ */
+static void falar(Sound som, float volume, double agora) {
+    SetSoundVolume(som, volume);
+    StopSound(som);
+    PlaySound(som);
+    fimDaVoz = agora + (double) som.frameCount / (double) som.stream.sampleRate + PAUSA_DEPOIS_DA_FALA;
+}
+
+/*
+ * tocarSomDaBatida
+ * O McQueen bateu. Batida forte faz ele gritar (a fala do grito); as outras tocam um dos sons de
+ * batida, sorteado (nunca o mesmo duas vezes seguidas). Uma batida que dura vários quadros, como
+ * um carro raspando no outro, toca um som só. Se ele está falando, a batida não toca: nunca
+ * há uma fala em cima da outra.
+ * Recebe: o volume da batida (0 a 1, de batidaDoMcQueen).
+ * Devolve: nada.
+ */
+void tocarSomDaBatida(float volume) {
+    double agora = GetTime();
+    if (volume <= 0.0f || agora - horaDaUltimaBatida < PAUSA_ENTRE_BATIDAS || agora < fimDaVoz) {
+        return;
+    }
+    float forca = fminf(volume, 1.0f);
+    float altura = VOLUME_BATIDA * (VOLUME_BATIDA_FRACA + (1.0f - VOLUME_BATIDA_FRACA) * forca);
+
+    if (forca >= BATIDA_FORTE && falaCarregada[FALA_GRITO] && agora - horaDoUltimoGrito >= PAUSA_ENTRE_GRITOS) {
+        horaDoUltimoGrito = agora;
+        horaDaUltimaBatida = agora;
+        falar(falas[FALA_GRITO], altura, agora);
+        return;
+    }
+
+    int carregados = 0;
+    for (int i = 0; i < TOTAL_SONS_DE_BATIDA; i++) {
+        carregados += somDeBatidaCarregado[i];
+    }
+    if (carregados == 0) {
+        return;
+    }
+    int escolhido;
+    do {
+        escolhido = GetRandomValue(0, TOTAL_SONS_DE_BATIDA - 1);
+    } while (!somDeBatidaCarregado[escolhido] || (escolhido == ultimaBatida && carregados > 1));
+    ultimaBatida = escolhido;
+    horaDaUltimaBatida = agora;
+    falar(sonsDeBatida[escolhido], altura, agora);
+}
+
+/*
+ * tocarFalaDeLideranca
+ * O McQueen assume a liderança ou a perde: fala uma de duas frases, sorteada (não repete a
+ * última do mesmo tipo). Se ele já está falando, ou falou de liderança há pouco (vários carros o
+ * passando em seguida), fica quieto: nunca há uma fala em cima da outra.
+ * Recebe: 1 se ele acabou de assumir a liderança, 0 se acabou de perdê-la.
+ * Devolve: nada.
+ */
+void tocarFalaDeLideranca(int comecou) {
+    double agora = GetTime();
+    if (agora < fimDaVoz || agora - horaDaUltimaFalaDePonta < PAUSA_ENTRE_FALAS_DE_PONTA) {
+        return;
+    }
+    int primeira = comecou ? FALA_LIDER_1 : FALA_PERDEU_1;
+    int *ultima = comecou ? &ultimaFalaDeLider : &ultimaFalaDePerda;
+    int escolhida = primeira + GetRandomValue(0, 1);
+    if (escolhida == *ultima) {
+        escolhida = (escolhida == primeira) ? primeira + 1 : primeira;   /* a outra frase */
+    }
+    if (!falaCarregada[escolhida]) {
+        escolhida = (escolhida == primeira) ? primeira + 1 : primeira;
+        if (!falaCarregada[escolhida]) {
+            return;
+        }
+    }
+    *ultima = escolhida;
+    horaDaUltimaFalaDePonta = agora;
+    falar(falas[escolhida], VOLUME_BATIDA, agora);
 }
 
 /*
@@ -441,6 +573,18 @@ void pausarSonsDaCorrida(int pausar) {
  * Devolve: nada.
  */
 void descarregarAudio(void) {
+    for (int i = 0; i < TOTAL_FALAS; i++) {
+        if (falaCarregada[i]) {
+            UnloadSound(falas[i]);
+            falaCarregada[i] = 0;
+        }
+    }
+    for (int i = 0; i < TOTAL_SONS_DE_BATIDA; i++) {
+        if (somDeBatidaCarregado[i]) {
+            UnloadSound(sonsDeBatida[i]);
+            somDeBatidaCarregado[i] = 0;
+        }
+    }
     for (int i = 0; i < TOTAL_SONS; i++) {
         if (somCarregado[i]) {
             UnloadSound(sons[i]);
