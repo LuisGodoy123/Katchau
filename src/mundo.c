@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include "mundo.h"
+#include "torcida3d.h"
 #include "tracado.h"
 #include "oval.h"
 #include "splat.h"
@@ -75,6 +76,8 @@
 #define ARQUIVO_DO_SPLAT      "recursos/modelos/splat.glb"
 #define FIGURA_DO_OVAL        1.5f      /* metros de largura de uma figura da torcida */
 #define FIGURA_DO_SPLAT       1.1f
+#define FIGURA_EM_PE          254       /* marca, no alfa, as figuras em pé da torcida (somem onde há torcida 3D) */
+#define CARRINHO_POR_FIGURA   0.36f     /* o carrinho 3D, do tamanho da figura: o modelo tem 3 m */
 #define ALTURA_DA_FIGURA      0.85f     /* em larguras */
 #define PASSOS_PROCURANDO_A_PISTA 7     /* segmentos pulados, procurando o lugar mais perto */
 #define METADE_DA_VAGA_PINTADA 4.2f     /* metros: do meio da vaga até a ponta */
@@ -136,6 +139,9 @@
 #define FUNDO_DA_FILEIRA      0.85f
 #define ALTURA_DA_FILEIRA     0.50f
 #define METROS_POR_LUGAR      0.60f
+#define FILEIRAS_POR_CARRINHO 3         /* a torcida 3D: um carrinho a cada tantas fileiras... */
+#define METROS_ENTRE_CARRINHOS 2.0f     /* ...e a cada tantos metros ao longo delas */
+#define CARRINHO_DE_INTERLAGOS 0.72f    /* do tamanho do modelo (3 m): cabe no fundo de 3 fileiras */
 #define FILEIRAS_POR_CORREDOR 60.0f     /* a torcida se repete em blocos, com um corredor no meio */
 #define ALTURA_DA_COBERTURA   5.0f      /* acima da última fileira */
 #define VAO_ENTRE_COLUNAS     5         /* uma coluna a cada tantos cortes */
@@ -877,6 +883,28 @@ static void faixaEntreCortes(Construcao *c, CorteDaArquibancada a, CorteDaArquib
 }
 
 /*
+ * lugaresNaFileira
+ * Os lugares da torcida 3D num pedaço de arquibancada de Interlagos: um carrinho a cada
+ * FILEIRAS_POR_CARRINHO fileiras e a cada METROS_ENTRE_CARRINHOS ao longo delas, de frente para a pista.
+ * Recebe: os dois cortes do pedaço e quantas fileiras a arquibancada tem.
+ * Devolve: nada.
+ */
+static void lugaresNaFileira(CorteDaArquibancada anterior, CorteDaArquibancada b, int fileiras) {
+    float comprimento = Vector3Distance(anterior.frente, b.frente);
+    int quantos = (int) (comprimento / METROS_ENTRE_CARRINHOS + 0.5f);
+    for (int f = FILEIRAS_POR_CARRINHO / 2; f < fileiras; f += FILEIRAS_POR_CARRINHO) {
+        float fora = PASSARELA + (f + 0.5f) * FUNDO_DA_FILEIRA, cima = ALTURA_DA_FRENTE + (f + 0.5f) * ALTURA_DA_FILEIRA;
+        Vector3 p0 = noCorte(anterior, fora, cima), p1 = noCorte(b, fora, cima);
+        for (int j = 0; j < quantos; j++) {
+            float t = (j + 0.5f) / quantos;
+            Vector3 lugar = Vector3Lerp(p0, p1, t);
+            Vector3 paraAPista = Vector3Negate(Vector3Lerp(anterior.fora, b.fora, t));
+            adicionarLugarTorcida3D(PISTA_INTERLAGOS, lugar.x, lugar.y, lugar.z, atan2f(paraAPista.x, paraAPista.z));
+        }
+    }
+}
+
+/*
  * construirUmaArquibancada
  * Levanta uma arquibancada contínua, cortada em fatias ao longo da pista: muro da
  * frente com a faixa colorida, corredor, fileiras com a torcida, corredor de trás,
@@ -918,6 +946,7 @@ static void construirUmaArquibancada(Pista *pista, Construcao *estrutura, Constr
             float u0 = anterior.metros / METROS_POR_LUGAR / FILEIRAS_POR_CORREDOR;
             float u1 = corte.metros / METROS_POR_LUGAR / FILEIRAS_POR_CORREDOR;
             float v = a->fileiras / 52.0f;
+            lugaresNaFileira(anterior, b, a->fileiras);
             adicionarQuadrilatero(torcida, noCorte(anterior, PASSARELA, ALTURA_DA_FRENTE), noCorte(anterior, PASSARELA + fundoDasFileiras, topo),
                                   noCorte(b, PASSARELA + fundoDasFileiras, topo), noCorte(b, PASSARELA, ALTURA_DA_FRENTE),
                                   (Vector2){ u0, 0.0f }, (Vector2){ u0, v }, (Vector2){ u1, v }, (Vector2){ u1, 0.0f }, corDaTorcida);
@@ -1606,6 +1635,7 @@ static void montarEquipeAoArLivre(Pista *pista) {
 static void carregarEstadio(Pista *pista) {
     estadio = LoadModel(ARQUIVO_DO_ESTADIO);
     carregarNoite(estadio, MATERIAL_DOS_ASSENTOS, ESCALA_COPA_PISTAO);
+    carregarTorcidaDoEstadio(estadio, MATERIAL_DOS_ASSENTOS, ESCALA_COPA_PISTAO);
     for (int i = 0; i < estadio.materialCount; i++) {
         estadio.materials[i].shader = (i == MATERIAL_DOS_ASSENTOS) ? shaderDaTorcida() : shaderDaNoite();
         Texture2D *textura = &estadio.materials[i].maps[MATERIAL_MAP_ALBEDO].texture;
@@ -1660,8 +1690,10 @@ static Mesh construirTorcida(const LugarNaTorcida *lugares, int total, float esc
         int linha = (i / 28) % 52;
         Vector2 uv0 = { coluna / 60.0f, (linha + 1) / 52.0f }, uv1 = { (coluna + 1) / 60.0f, (linha + 1) / 52.0f };
         Vector2 uv2 = { (coluna + 1) / 60.0f, linha / 52.0f }, uv3 = { coluna / 60.0f, linha / 52.0f };
-        adicionarQuadrilatero(&c, a, b, d, e, uv0, uv1, uv2, uv3, WHITE);
+        adicionarQuadrilatero(&c, a, b, d, e, uv0, uv1, uv2, uv3, (Color){ 255, 255, 255, FIGURA_EM_PE });
+        adicionarLugarTorcida3D(pista->id, pe.x, pe.y, pe.z, atan2f(olhaX, olhaZ));
     }
+    definirTamanhoTorcida3D(pista->id, tamanho * CARRINHO_POR_FIGURA);
     return terminarMalha(&c);
 }
 
@@ -1774,8 +1806,10 @@ void carregarMundo(Pista *pistas[]) {
     carregarEstadio(pistas[PISTA_COPA_PISTAO]);
     carregarMapaDeDia(pistas[PISTA_OVAL], ARQUIVO_DO_OVAL, ESCALA_OVAL, TORCIDA_OVAL, TOTAL_TORCIDA_OVAL, FIGURA_DO_OVAL,
                       CENARIO_OVAL, TOTAL_CENARIO_OVAL);
+    definirTamanhoTorcida3D(PISTA_INTERLAGOS, CARRINHO_DE_INTERLAGOS);
     carregarMapaDeDia(pistas[PISTA_SPLAT], ARQUIVO_DO_SPLAT, ESCALA_SPLAT, TORCIDA_SPLAT, TOTAL_TORCIDA_SPLAT, FIGURA_DO_SPLAT,
                       CENARIO_SPLAT, TOTAL_CENARIO_SPLAT);
+    iniciarTorcida3D();
 }
 
 /*
@@ -1789,6 +1823,7 @@ void descarregarMundo(void) {
     for (int i = 0; i < estadio.materialCount; i++) {
         estadio.materials[i].shader.id = rlGetShaderIdDefault();
     }
+    descarregarTorcida3D();
     UnloadModel(estadio);
     for (int i = 0; i < TOTAL_PISTAS; i++) {
         if (mapasDeDia[i].existe) {

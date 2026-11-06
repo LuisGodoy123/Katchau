@@ -2053,6 +2053,7 @@ static void testarPitstop(void) {
 
     /* O jogador entra de propósito, e o carro segue sozinho */
     iniciarCorrida(&corrida, pista, 0, NIVEL_MEDIO);
+    corrida.jogador.controladoPeloJogador = 0;   /* aqui é o piloto automático do pit que está em teste */
     corrida.contagemRegressiva = 0.0f;
     Carro *jogador = &corrida.jogador;
     verificar(!jogador->pitFeito && pista->temPit, "a corrida comeca com a parada pendente");
@@ -2114,6 +2115,7 @@ static void testarPitstop(void) {
     for (float inicio = pista->pit.inicioLivre; inicio <= pista->pit.fimDaZona - 40.0f; inicio += 20.0f) {
         float larguraAqui = 0.0f;
         iniciarCorrida(&corrida, pista, 0, NIVEL_MEDIO);
+        corrida.jogador.controladoPeloJogador = 0;   /* aqui é o piloto automático do pit que está em teste */
         corrida.contagemRegressiva = 0.0f;
         jogador->voltas = 2;
         jogador->posicao.segmento = buscarSegmento(pista, (int) (inicio * SEGMENTOS_POR_METRO));
@@ -3779,6 +3781,7 @@ static void testarSairDaVagaComCarroNaFrente(void) {
         int todos = 1;
         for (int numero = 0; numero + 1 < TOTAL_CARROS; numero += 3) {
             iniciarCorrida(&corrida, pista, numero, NIVEL_MEDIO);
+            corrida.jogador.controladoPeloJogador = 0;   /* aqui é o piloto automático do pit que está em teste */
             corrida.contagemRegressiva = 0.0f;
             corrida.tempoDeCorrida = 30.0f;
             Carro *jogador = &corrida.jogador, *frente = NULL;
@@ -3827,6 +3830,173 @@ static void testarSairDaVagaComCarroNaFrente(void) {
     }
 }
 
+/*
+ * testarGuidoForaDoCarro
+ * Com qualquer carro e em todas as pistas, ao longo da troca inteira, o Guido não entra no
+ * carro que ele está trocando: nem andando de canto a canto, nem virando com o pneu.
+ */
+static void testarGuidoForaDoCarro(void) {
+    printf("\n38) O Guido nao entra no carro\n");
+    static Corrida corrida;
+    float pior = 0.0f, piorSemGarantia = 0.0f;
+    for (int id = 0; id < TOTAL_PISTAS; id++) {
+        Pista *pista = criarPistaPorId((IdPista) id);
+        for (int numero = 0; numero < TOTAL_CARROS; numero++) {
+            iniciarCorrida(&corrida, pista, numero, NIVEL_MEDIO);
+            Carro *carro = &corrida.jogador;
+            const FichaTecnica *ficha = fichaDoCarro(numero);
+            float meiaLargura = ficha->largura / 2.0f, meioComprimento = ficha->comprimento / 2.0f;
+            float zFrente = meioComprimento * 0.62f, zTras = -meioComprimento * 0.62f;
+            lugarDaVaga(pista, carro, &carro->posicao, &carro->deslocamentoLateral);
+            carro->estadoDoPit = PIT_TROCANDO;
+            for (float t = 0.0f; t < DURACAO_DA_TROCA; t += 0.01f) {
+                carro->tempoDaTroca = t;
+                LugarDoGuido g = poseDoGuido(carro, meiaLargura, meioComprimento, zFrente, zTras);
+                pior = fmaxf(pior, entradaDoGuidoNoCarro(g, meiaLargura, meioComprimento));
+                LugarDoGuido semGarantia = lugarDoGuido(carro, meiaLargura, meioComprimento, zFrente, zTras);
+                piorSemGarantia = fmaxf(piorSemGarantia, entradaDoGuidoNoCarro(semGarantia, meiaLargura, meioComprimento));
+            }
+        }
+        liberarPista(pista);
+    }
+    printf("     maior entrada do Guido no carro: %.3f m (o caminho antigo, sem a garantia: %.3f m)\n", pior, piorSemGarantia);
+    verificar(pior == 0.0f, "em nenhum carro, nenhuma pista e nenhum momento o Guido entra no carro");
+}
+
+/*
+ * testarSuspensao
+ * Numa volta da IA, o corpo inclina para fora nas curvas e mergulha nas freadas, sutil: poucos graus.
+ */
+static void testarSuspensao(void) {
+    printf("\n39) A suspensao\n");
+    static Corrida corrida;
+    for (int id = 0; id < TOTAL_PISTAS; id++) {
+        Pista *pista = criarPistaPorId((IdPista) id);
+        iniciarCorrida(&corrida, pista, 0, NIVEL_MEDIO);
+        float maiorRolagem = 0.0f, maiorArfagem = 0.0f, menorArfagem = 0.0f;
+        int paraFora = 0, curvas = 0;
+        float somaLeve = 0.0f;
+        int leves = 0;
+        for (int q = 0; q < 60 * 70; q++) {
+            atualizarCorrida(&corrida, atualizarIA(&corrida.jogador, corrida.pista), 1.0f / 60.0f);
+            Carro *j = &corrida.jogador;
+            maiorRolagem = fmaxf(maiorRolagem, fabsf(j->rolagem));
+            maiorArfagem = fmaxf(maiorArfagem, j->arfagem);
+            menorArfagem = fminf(menorArfagem, j->arfagem);
+            if (fabsf(j->posicao.segmento->curvatura) > 0.3f && j->velocidade > 3000.0f && !carroNoPit(j)) {
+                curvas++;
+                paraFora += (j->rolagem * j->posicao.segmento->curvatura > 0.0f);
+            }
+            if (fabsf(j->posicao.segmento->curvatura) > 0.05f && fabsf(j->posicao.segmento->curvatura) < 0.3f && j->velocidade > 3000.0f) {
+                somaLeve += fabsf(j->rolagem);
+                leves++;   /* curva à direita: inclina para a esquerda */
+            }
+        }
+        printf("     %s: curva leve inclina em media %.1f graus\n", pista->nome, leves ? somaLeve / leves : 0.0f);
+        printf("     %s: rolagem ate %.1f graus, arfagem de %.1f a %.1f; inclinou para fora em %d de %d quadros de curva\n",
+               pista->nome, maiorRolagem, menorArfagem, maiorArfagem, paraFora, curvas);
+        verificar(maiorRolagem > 0.5f && maiorRolagem <= 6.05f && maiorArfagem <= 3.55f && menorArfagem >= -3.55f, "a suspensao mexe, sem exagero");
+        verificar(curvas == 0 || paraFora > curvas * 0.8f, "nas curvas o corpo inclina para fora");
+        liberarPista(pista);
+    }
+}
+
+/*
+ * testarRe
+ * Parado, segurando o freio, o jogador engata a ré: anda para trás até 25 km/h, vira de lado com
+ * o volante, não atravessa a linha de chegada de ré e, acelerando, volta a andar para a frente.
+ * A IA nunca dá ré.
+ */
+static void testarRe(void) {
+    printf("\n40) A re\n");
+    static Corrida corrida;
+    Pista *pista = criarPistaPorId(PISTA_INTERLAGOS);
+    iniciarCorrida(&corrida, pista, 0, NIVEL_MEDIO);
+    corrida.contagemRegressiva = 0.0f;
+    Carro *j = &corrida.jogador;
+    j->posicao.segmento = buscarSegmento(pista, (int) (600 * SEGMENTOS_POR_METRO));
+    j->velocidade = 0.0f;
+    for (int r = 0; r < TOTAL_RIVAIS; r++) {
+        corrida.rivais[r].posicao.segmento = buscarSegmento(pista, (int) (2000 * SEGMENTOS_POR_METRO));
+    }
+    float antes = metrosNaVolta(j), lateralAntes = j->deslocamentoLateral;
+    Comandos c = { 0 };
+    c.frear = 1;
+    float maior = 0.0f;
+    for (int q = 0; q < 60 * 4; q++) {
+        c.direcao = (q > 120) ? -1.0f : 0.0f;
+        atualizarCorrida(&corrida, c, 1.0f / 60.0f);
+        maior = fmaxf(maior, j->re);
+    }
+    float voltou = antes - metrosNaVolta(j);
+    printf("     de re por 4 s: %.1f m para tras, ate %d km/h, de lado %.2f\n", voltou, (int) (maior / 40.0f), j->deslocamentoLateral - lateralAntes);
+    verificar(voltou > 5.0f && maior <= 1800.0f && maior > 1600.0f, "segurando o freio parado, ele anda de re ate 45 km/h");
+    verificar(j->deslocamentoLateral < lateralAntes, "de re, o volante para a esquerda leva o carro para a esquerda");
+    Comandos acelera = { 0 };
+    acelera.acelerar = 1;
+    for (int q = 0; q < 60 * 2; q++) {
+        atualizarCorrida(&corrida, acelera, 1.0f / 60.0f);
+    }
+    verificar(j->re == 0.0f && j->velocidade > 1000.0f, "acelerando, a re para e ele volta a andar para a frente");
+
+    /* Na linha de chegada, de re, ele para nela */
+    j->posicao.segmento = buscarSegmento(pista, 2);
+    j->posicao.distanciaNoSegmento = 0.0f;
+    j->velocidade = 0.0f;
+    int voltas = j->voltas;
+    for (int q = 0; q < 60 * 4; q++) {
+        atualizarCorrida(&corrida, c, 1.0f / 60.0f);
+    }
+    verificar(j->voltas == voltas, "de re, ele nao atravessa a linha de chegada");
+    verificar(!corrida.rivais[0].controladoPeloJogador, "a IA nao da re");
+    liberarPista(pista);
+}
+
+/*
+ * testarSaidaDoPitNaMaoDoJogador
+ * Em todas as pistas: o piloto automático leva o carro da vaga até a pista e devolve o volante
+ * assim que ele está de volta ao asfalto da pista, sem limite de velocidade dali em diante.
+ */
+static void testarSaidaDoPitNaMaoDoJogador(void) {
+    printf("\n41) O box devolve o carro assim que ele volta a pista\n");
+    static Corrida k;
+    for (int id = 0; id < TOTAL_PISTAS; id++) {
+        Pista *p = criarPistaPorId((IdPista) id);
+        iniciarCorrida(&k, p, 0, NIVEL_MEDIO);
+        k.contagemRegressiva = 0.0f;
+        Carro *j = &k.jogador;
+        float antes = fmodf(p->pit.entrada - 250.0f + p->metrosDaVolta, p->metrosDaVolta);
+        j->posicao.segmento = buscarSegmento(p, (int) (antes * SEGMENTOS_POR_METRO));
+        j->distanciaPercorrida = antes * UNIDADES_POR_METRO;
+        j->voltaDoPit = 1;
+        for (int r = 0; r < TOTAL_RIVAIS; r++) {
+            k.rivais[r].pitFeito = 1;
+            k.rivais[r].posicao.segmento = buscarSegmento(p, (int) (fmodf(p->pit.fim + 400.0f + r * 80.0f, p->metrosDaVolta) * SEGMENTOS_POR_METRO));
+        }
+        float t = 0.0f, saiu = -1.0f, devolveu = -1.0f, voltou = -1.0f;
+        int acimaDoLimite = 0;
+        for (int q = 0; q < 60 * 120 && voltou < 0.0f; q++) {
+            t += 1.0f / 60.0f;
+            Comandos c = atualizarIA(j, k.pista);
+            if (devolveu >= 0.0f) {
+                c.acelerar = 1;
+                c.frear = 0;
+            }
+            atualizarCorrida(&k, c, 1.0f / 60.0f);
+            if (j->estadoDoPit == PIT_SAINDO && saiu < 0.0f) saiu = t;
+            if (saiu >= 0.0f && !carroNoPit(j) && devolveu < 0.0f) {
+                devolveu = t;
+                acimaDoLimite = fabsf(j->deslocamentoLateral) > 1.0f;   /* devolvido fora da pista? */
+            }
+            if (devolveu >= 0.0f && voltou < 0.0f && t > devolveu + 3.0f) voltou = j->velocidade;
+        }
+        printf("     %s: o piloto assume %.1f s depois de sair da vaga; 3 s depois esta a %d km/h\n", p->nome, devolveu - saiu, (int) (voltou / 40.0f));
+        verificar(devolveu >= 0.0f && acimaDoLimite == 0, "o volante volta com o carro dentro da pista");
+        verificar(voltou > LIMITE_DO_PIT, "e dali em diante nao ha limite de velocidade");
+        liberarPista(p);
+    }
+}
+
 int main(int argc, char *argv[]) {
     int modoDetalhado = (argc > 1 && strcmp(argv[1], "-v") == 0);
 
@@ -3867,6 +4037,10 @@ int main(int argc, char *argv[]) {
     testarCenarioDosMapas();
     testarDirecaoGuiada();
     testarSairDaVagaComCarroNaFrente();
+    testarGuidoForaDoCarro();
+    testarSuspensao();
+    testarRe();
+    testarSaidaDoPitNaMaoDoJogador();
     testarGiroDasRodas();
     testarColisaoEEquilibrio();
     testarCameraLivre();

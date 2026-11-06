@@ -545,35 +545,39 @@ static Pista *criarPistaDaTabela(const PontoDoTracado *tabela, const float (*lim
 
 /*
  * criarCopaPistao
- * O estádio: sem área reservada, a equipe monta tudo ao ar livre, no pátio largo
- * que fica por dentro da Reta Oposta.
+ * O estádio: o pit lane é o do próprio modelo, atrás do muro de pit da reta da largada,
+ * com as equipes montadas ao ar livre no pátio logo depois dos boxes.
  * Recebe: nada.
  * Devolve: a pista completa.
  */
 Pista *criarCopaPistao(void) {
     Pista *pista = criarPistaDaTabela(TRACADO_COPA_PISTAO, NULL, TOTAL_PONTOS_COPA_PISTAO, ESCALA_COPA_PISTAO,
                                       PISTA_COPA_PISTAO, "Copa Pistão");
+    float volta = pista->metrosDaVolta;
+    /* O pit lane do estádio é o corredor entre o muro de pit (a uns 10 m da pista, de 325 m antes
+     * da linha até 325 m depois) e o muro do pátio (a uns 40 m). Entra e sai pelas pontas abertas
+     * do muro de pit, sem atravessar nenhum dos dois */
     DadosDoPit pit = { 0 };
     pit.lado = -1;
     pit.noModelo = 1;
-    pit.entrada = 1660.0f;
-    pit.inicioLivre = 1660.0f;
-    pit.fimDaZona = 1760.0f;
-    pit.fimDaEntrada = 1760.0f;
-    pit.velocidadeNaEntrada = 5000.0f;
-    pit.aviso = 1480.0f;
-    pit.inicioDoLimite = 1790.0f;
-    pit.fimDoLimite = 2110.0f;
-    pit.fim = 2300.0f;
-    pit.primeiraVaga = 1815.0f;
-    pit.entreVagas = 20.0f;
-    pit.encostar = 14.0f;
-    pit.noCaminhoDaFaixa = 1770.0f;
-    pit.deixaAFaixa = 2180.0f;
+    pit.entrada = volta - 500.0f;
+    pit.inicioLivre = pit.entrada;
+    pit.fimDaZona = volta - 338.0f;       /* até perto da abertura do corredor, onde a pista se afunila */
+    pit.fimDaEntrada = volta - 335.0f;
+    pit.velocidadeNaEntrada = 3600.0f;
+    pit.aviso = volta - 720.0f;
+    pit.inicioDoLimite = volta - 350.0f;
+    pit.fimDoLimite = 330.0f;            /* o limite acaba no fim do muro de pit */
+    pit.fim = 440.0f;
+    pit.primeiraVaga = -260.0f;          /* todas antes da linha: quem para na última volta ainda cruza */
+    pit.entreVagas = 18.0f;
+    pit.encostar = 12.0f;
+    pit.noCaminhoDaFaixa = volta - 360.0f;   /* já no corredor antes do muro de pit começar */
+    pit.deixaAFaixa = 330.0f;                /* só sai do corredor depois que o muro de pit acaba */
     pit.borda = 8.0f;
-    pit.faixa = 20.0f;
-    pit.vaga = 28.0f;
-    pit.paraEntrar = 15.0f;
+    pit.faixa = 22.0f;
+    pit.vaga = 32.0f;                    /* encostado no muro do pátio, que fica a uns 40 m */
+    pit.paraEntrar = 12.0f;
     pista->pit = pit;
     pista->temPit = 1;
     return pista;

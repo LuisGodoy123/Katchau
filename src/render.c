@@ -22,6 +22,7 @@
 #include "carros3d.h"
 #include "fumaca.h"
 #include "marcas.h"
+#include "torcida3d.h"
 #include "configuracoes.h"
 #include "noite.h"
 #include "raymath.h"
@@ -193,6 +194,19 @@ static Camera3D montarCamera(PosicaoNaPista carro, float lateral, Olhar olhar, D
 }
 
 /*
+ * volanteDesenhado
+ * Recebe: o carro.
+ * Devolve: o volante para virar o bico no desenho (de ré, o bico vai para o outro lado).
+ */
+static float volanteDesenhado(const Carro *carro) {
+    if (carro->estadoDoPit != PIT_FORA) {
+        return 0.0f;   /* no pit lane o bico já vem pronto no anguloDeFuga */
+    }
+    float deRe = carro->rumoDeRe / GRAUS_DO_VOLANTE;   /* o quanto a ré girou o bico */
+    return (carro->re > 0.0f && !carro->direcaoLivre) ? deRe : carro->volante + deRe;
+}
+
+/*
  * matrizDoCarro
  * Assenta o carro no chão: mede a altura do asfalto embaixo das quatro
  * rodas e, com elas, acha a altura, a ladeira e a inclinação do carro. Em
@@ -219,9 +233,6 @@ static Matrix matrizDoCarro(Carro *carro) {
     float inclinacao = ((frenteDireita + trasDireita) - (frenteEsquerda + trasEsquerda)) / (4.0f * meiaBitola);
     float y = (frenteEsquerda + frenteDireita + trasEsquerda + trasDireita) / 4.0f;
 
-    if (carro->ultimosComandos.frear && carro->velocidade > 0.0f) {
-        ladeira -= MERGULHO_NA_FREADA;
-    }
     if (estaForaDaPista(carro) && carro->velocidade > 0.0f) {
         y += TREPIDACAO_NA_GRAMA * sinf(carro->distanciaPercorrida * 0.05f);
     }
@@ -232,10 +243,10 @@ static Matrix matrizDoCarro(Carro *carro) {
 
     /* Sem a direção guiada, o bico aponta para onde o carro está indo de verdade */
     float rumoBase = rumoDesenhado(carro, aqui.rumo);
-    float rumo = (rumoBase + carro->giro + carro->anguloDeDrift + carro->volante * GRAUS_DO_VOLANTE) * DEG2RAD;
+    float rumo = (rumoBase + carro->giro + carro->anguloDeDrift + volanteDesenhado(carro) * GRAUS_DO_VOLANTE) * DEG2RAD;
     Vector3 frente = Vector3Normalize((Vector3){ sinf(rumo), ladeira, -cosf(rumo) });
 
-    float rolagem = atanf(inclinacao) + carro->volante * GRAUS_DE_ROLAGEM * DEG2RAD;
+    float rolagem = atanf(inclinacao);   /* o corpo inclina à parte, pela suspensão (desenharCarroNoMundo) */
     Vector3 cima = { -cosf(rumo) * sinf(rolagem), cosf(rolagem), -sinf(rumo) * sinf(rolagem) };
     Vector3 lado = Vector3Normalize(Vector3CrossProduct(cima, frente));   /* a esquerda do carro é +x no modelo */
     cima = Vector3CrossProduct(frente, lado);
@@ -267,7 +278,7 @@ static void desenharSombraDoCarro(Camera3D camera, Carro *carro) {
     float meio = ladoDaSombra(carro->numero) / 2.0f;
     float lateral = carro->deslocamentoLateral * larguraDoLado(carro->posicao.segmento, carro->deslocamentoLateral);
     float rumoDaPista = pontoNoMundo(carro->posicao, carro->deslocamentoLateral).rumo;
-    float giro = (rumoDesenhado(carro, rumoDaPista) - rumoDaPista + carro->giro + carro->anguloDeDrift + carro->volante * GRAUS_DO_VOLANTE) * DEG2RAD;
+    float giro = (rumoDesenhado(carro, rumoDaPista) - rumoDaPista + carro->giro + carro->anguloDeDrift + volanteDesenhado(carro) * GRAUS_DO_VOLANTE) * DEG2RAD;
     for (int i = 0; i < PONTOS_DA_SOMBRA; i++) {
         for (int j = 0; j < PONTOS_DA_SOMBRA; j++) {
             float paraDireita = -meio + 2.0f * meio * i / (PONTOS_DA_SOMBRA - 1);
@@ -296,11 +307,12 @@ static void desenharCarroNoMundo(Camera3D camera, Carro *carro) {
     if (carro->estadoDoPit == PIT_TROCANDO && carro->duracaoDaTroca == DURACAO_DA_TROCA) {
         int canto;
         float andamento;
-        if (faseDaTroca(carro, &canto, &andamento)) {
+        if (faseDaTroca(carro, &canto, &andamento) && andamento < ENCAIXOU) {
             Vector3 centro;
-            trocarRodaNoProximoDesenho(rodaDoCanto(carro->numero, canto, &centro), andamento);
+            esconderRodaNoProximoDesenho(rodaDoCanto(carro->numero, canto, &centro));   /* saiu, e o novo ainda está caindo */
         }
     }
+    inclinarCorpoNoProximoDesenho(carro->numero, carro->rolagem * DEG2RAD, -carro->arfagem * DEG2RAD);
     desenharCarro3D(carro->numero, matrizDoCarro(carro), carro->anguloDasRodas, carro->volante);
 }
 
@@ -310,11 +322,67 @@ static void desenharCarroNoMundo(Camera3D camera, Carro *carro) {
  * Recebe: a câmera e o carro.
  * Devolve: nada.
  */
+#define MEIA_BANDA      0.12f    /* metros: a metade da largura do pneu, deitado */
+#define ALTURA_DO_LANCAMENTO 3.2f /* metros: o primeiro pneu sobe tanto acima da linha até a roda... */
+#define MAIS_ALTO_POR_PNEU 0.8f  /* ...e cada um dos outros, mais um pouco: caem um depois do outro */
+#define GIROS_NO_AR     18.0f    /* radianos que cada pneu gira no ar */
+#define VOO_DO_VELHO    0.55f    /* segundos: o pneu velho voando até o chão */
+#define LONGE_DO_VELHO  2.6f     /* metros: onde ele cai, para o lado */
+#define PULO_DO_VELHO   1.0f     /* metros de altura do voo */
+
+static float suaveDe(float a, float de, float ate) {
+    float t = fminf(fmaxf((a - de) / (ate - de), 0.0f), 1.0f);
+    return t * t * (3.0f - 2.0f * t);
+}
+
+/*
+ * guidoNoTempo
+ * Recebe: o jogador, as medidas do carro, as rodas da frente e de trás e um momento da troca.
+ * Devolve: onde o Guido estava nesse momento.
+ */
+static LugarDoGuido guidoNoTempo(const Carro *jogador, float meiaLargura, float meioComprimento, float zFrente, float zTras, float tempo) {
+    Carro trocando = *jogador;
+    trocando.estadoDoPit = PIT_TROCANDO;
+    trocando.tempoDaTroca = tempo;
+    return poseDoGuido(&trocando, meiaLargura, meioComprimento, zFrente, zTras);
+}
+
+/*
+ * naPontaDosGarfos
+ * Recebe: o Guido, a ponta dos garfos, a subida deles e a altura acima da pá.
+ * Devolve: o ponto, no carro normalizado.
+ */
+static Vector3 naPontaDosGarfos(LugarDoGuido g, Vector3 ponta, float subida, float acima) {
+    return (Vector3){ g.x + sinf(g.olha) * ponta.z, ponta.y + subida + acima, g.z + cosf(g.olha) * ponta.z };
+}
+
+/*
+ * desenharPneuDeitado
+ * Recebe: o carro dono do pneu, a roda, onde ele fica (carro normalizado), o giro do eixo em
+ *         volta do chão, o quanto deitou (0 a 1), o quanto rodou no próprio eixo e a matriz da vaga.
+ * Devolve: nada.
+ */
+static void desenharPneuDeitado(int numero, int roda, Vector3 lugar, float giro, float deitado, float rodou, Matrix vaga) {
+    Matrix m = MatrixMultiply(MatrixMultiply(MatrixMultiply(MatrixRotateX(rodou), MatrixRotateZ(deitado * 1.5707963f)), MatrixRotateY(giro)),
+                              MatrixTranslate(lugar.x, lugar.y, lugar.z));
+    desenharRodaSolta(numero, roda, MatrixMultiply(m, vaga));
+}
+
+/*
+ * ondeCaiOVelho
+ * Recebe: a roda e o lado do carro.
+ * Devolve: onde o pneu velho dessa roda fica no chão.
+ */
+static Vector3 ondeCaiOVelho(Vector3 roda, float lado) {
+    return (Vector3){ roda.x + lado * LONGE_DO_VELHO, MEIA_BANDA, roda.z + ((roda.z > 0.0f) ? 0.9f : -0.9f) };
+}
+
 /*
  * desenharGuido
- * O Guido fica na vaga do jogador esperando. Na troca ele dispara de roda em roda,
- * contornando o carro pela traseira e pela frente (o caminho está em pitstop.c).
- * Recebe: a câmera e o jogador.
+ * Como no filme: o Guido espera na vaga com os quatro pneus novos empilhados nos garfos.
+ * Quando o carro para, ele joga os quatro para cima e corre em volta do carro: em cada roda,
+ * arranca o pneu velho, que voa e cai deitado no chão, e o novo cai do alto bem no cubo.
+ * Recebe: a câmera, a pista e o jogador.
  * Devolve: nada.
  */
 static void desenharGuido(Camera3D camera, Pista *pista, Carro *jogador) {
@@ -325,6 +393,7 @@ static void desenharGuido(Camera3D camera, Pista *pista, Carro *jogador) {
     naVaga.giro = 0.0f;
     naVaga.velocidade = 0.0f;
     naVaga.estadoDoPit = PIT_FORA;
+    naVaga.direcaoLivre = 0;
     naVaga.ultimosComandos.frear = 0;
     PontoNoMundo ponto = pontoNoMundo(naVaga.posicao, naVaga.deslocamentoLateral);
     float distancia = aFrenteDaCamera(camera, (Vector3){ ponto.x, ponto.y, ponto.z });
@@ -333,14 +402,90 @@ static void desenharGuido(Camera3D camera, Pista *pista, Carro *jogador) {
     }
     Matrix vaga = matrizDoCarro(&naVaga);
 
+    int numero = jogador->numero;
     Vector3 frente = { 0 }, tras = { 0 };
-    rodaDoCanto(jogador->numero, 0, &frente);
-    rodaDoCanto(jogador->numero, 1, &tras);
-    LugarDoGuido lugar = lugarDoGuido(jogador, larguraDoCarro3D(jogador->numero) / 2.0f, comprimentoDoCarro3D(jogador->numero) / 2.0f, frente.z, tras.z);
-    float rodas = (jogador->estadoDoPit == PIT_TROCANDO) ? jogador->tempoDaTroca * GIRO_DAS_RODAS_DO_GUIDO : 0.0f;
-    Matrix noCarro = MatrixMultiply(MatrixRotateY(lugar.olha), MatrixTranslate(lugar.x, 0.0f, lugar.z));
+    rodaDoCanto(numero, 0, &frente);
+    rodaDoCanto(numero, 1, &tras);
+    float meiaLargura = larguraDoCarro3D(numero) / 2.0f, meioComprimento = comprimentoDoCarro3D(numero) / 2.0f;
+    Vector3 ponta = pontaDosGarfos();
+    int trocando = (jogador->estadoDoPit == PIT_TROCANDO);
+    float t = trocando ? jogador->tempoDaTroca : 0.0f;
+    float duracao = jogador->duracaoDaTroca;
+    float levantado = trocando ? ALTURA_NA_TROCA * fminf(fminf(t, duracao - t) / SEGUNDOS_PARA_A_RODA, 1.0f) : 0.0f;
+
+    LugarDoGuido guido = poseDoGuido(jogador, meiaLargura, meioComprimento, frente.z, tras.z);
+    float subida = 0.0f, inclinacao = 0.0f;
+    int esperando = !trocando && !jogador->pitFeito;   /* chega com os quatro pneus novos nos garfos */
+    if (esperando) {
+        subida = 0.35f;
+        inclinacao = 0.12f;
+    }
+
+    LugarDoGuido lancamento = guidoNoTempo(jogador, meiaLargura, meioComprimento, frente.z, tras.z, LANCOU);
+    for (int c = 0; c < CANTOS_DO_CARRO; c++) {
+        Vector3 roda;
+        int r = rodaDoCanto(numero, c, &roda);
+        if (r < 0) {
+            continue;
+        }
+        float lado = (roda.x > 0.0f) ? 1.0f : -1.0f;
+        float inicio = (c + 1) * SEGUNDOS_PARA_A_RODA + c * SEGUNDOS_POR_RODA;
+        float arrancou = inicio + ARRANCOU * SEGUNDOS_POR_RODA, encaixou = inicio + ENCAIXOU * SEGUNDOS_POR_RODA;
+        Vector3 cubo = { roda.x, roda.y + levantado, roda.z };
+
+        /* O novo: empilhado nos garfos, depois no ar, caindo na sua roda */
+        if (esperando || (trocando && t < LANCOU)) {
+            float flick = trocando ? suaveDe(t, 0.0f, LANCOU) : 0.0f;
+            LugarDoGuido g = trocando ? guido : guido;
+            Vector3 lugar = naPontaDosGarfos(g, ponta, 0.35f + 0.6f * flick, MEIA_BANDA + c * 2.0f * MEIA_BANDA);
+            desenharPneuDeitado(numero, r, lugar, g.olha - 1.5707963f, 1.0f, 0.0f, vaga);
+        } else if (trocando && t < encaixou) {
+            float s = (t - LANCOU) / (encaixou - LANCOU);
+            Vector3 de = naPontaDosGarfos(lancamento, ponta, 0.95f, MEIA_BANDA + c * 2.0f * MEIA_BANDA);
+            float altura = ALTURA_DO_LANCAMENTO + MAIS_ALTO_POR_PNEU * c;
+            Vector3 lugar = { de.x + (cubo.x - de.x) * s, de.y + (cubo.y - de.y) * s + 4.0f * altura * s * (1.0f - s), de.z + (cubo.z - de.z) * s };
+            float giro = (lancamento.olha - 1.5707963f) * (1.0f - s);
+            desenharPneuDeitado(numero, r, lugar, giro, 1.0f - suaveDe(s, 0.2f, 0.85f), s * GIROS_NO_AR, vaga);
+        }
+
+        /* O velho: sai do cubo com o puxão, voa para o lado e fica deitado no chão */
+        if (trocando && t >= inicio && t < arrancou) {
+            float puxou = suaveDe(t, inicio, arrancou);
+            desenharPneuDeitado(numero, r, (Vector3){ cubo.x + lado * PUXADA * puxou, cubo.y, cubo.z }, 0.0f, 0.0f, 0.0f, vaga);
+        } else if (trocando && t >= arrancou) {
+            float s = fminf((t - arrancou) / VOO_DO_VELHO, 1.0f);
+            Vector3 de = { cubo.x + lado * PUXADA, cubo.y, cubo.z }, ate = ondeCaiOVelho(roda, lado);
+            Vector3 lugar = { de.x + (ate.x - de.x) * s, de.y + (ate.y - de.y) * s + 4.0f * PULO_DO_VELHO * s * (1.0f - s), de.z + (ate.z - de.z) * s };
+            desenharPneuDeitado(numero, r, lugar, 0.0f, suaveDe(s, 0.0f, 1.0f), s * 8.0f, vaga);
+        } else if (jogador->estadoDoPit == PIT_SAINDO) {
+            desenharPneuDeitado(numero, r, ondeCaiOVelho(roda, lado), 0.0f, 1.0f, 0.0f, vaga);
+        }
+    }
+
+    /* Os garfos: jogam os pneus para cima; em cada roda, descem até o cubo e dão o puxão */
+    if (trocando) {
+        int canto;
+        float a;
+        if (t < LANCOU) {
+            float flick = suaveDe(t, 0.0f, LANCOU);
+            subida = 0.35f + 0.6f * flick;
+            inclinacao = 0.12f - 0.4f * flick;
+        } else if (faseDaTroca(jogador, &canto, &a)) {
+            Vector3 roda;
+            int r = rodaDoCanto(numero, canto, &roda);
+            subida = roda.y + levantado - raioDaRoda(numero, r) - ponta.y + 0.15f * (suaveDe(a, 0.0f, ARRANCOU) - suaveDe(a, ARRANCOU, ENCAIXOU));
+            inclinacao = 0.10f * suaveDe(a, 0.0f, ARRANCOU) * (1.0f - suaveDe(a, ARRANCOU, 1.0f));
+        } else {
+            subida = 0.05f;
+            inclinacao = 0.04f * sinf((float) GetTime() * 18.0f);   /* balançam enquanto ele corre de um canto ao outro */
+        }
+    }
+
+    float rodas = trocando ? t * GIRO_DAS_RODAS_DO_GUIDO : 0.0f;
+    Matrix noCarro = MatrixMultiply(MatrixRotateY(guido.olha), MatrixTranslate(guido.x, 0.0f, guido.z));
     Matrix noMundo = MatrixMultiply(noCarro, vaga);
     desenharSombra(NUMERO_DO_GUIDO, noMundo);
+    moverGarfosNoProximoDesenho(subida, inclinacao);
     desenharCarro3D(NUMERO_DO_GUIDO, noMundo, rodas, 0.0f);
 }
 
@@ -532,11 +677,13 @@ static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
     }
     prepararLuzes(ehNoite);
     prepararSombras(pista->id, camera, configuracoesAtuais()->sombras);
+    prepararTorcida3D(pista->id, camera);
 
     prepararPlanosDaCamera();
     BeginMode3D(camera);
     rlDisableBackfaceCulling();
     desenharCenario(pista->id, camera.position);
+    desenharTorcida3D();
 
     if (corrida != NULL) {
         desenharMarcas();
@@ -638,6 +785,16 @@ void desenharVisaoDoJogador(Corrida *corrida) {
     atualizarFumaca(passou);
     atualizarMarcas(passou);
 
+    desenharMundo3D(camera, corrida->pista, corrida);
+}
+
+/*
+ * desenharCorridaVistaDe
+ * A corrida vista de uma câmera qualquer (para replays e para conferir cenas).
+ * Recebe: a corrida e a câmera.
+ * Devolve: nada.
+ */
+void desenharCorridaVistaDe(Corrida *corrida, Camera3D camera) {
     desenharMundo3D(camera, corrida->pista, corrida);
 }
 

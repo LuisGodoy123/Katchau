@@ -445,6 +445,18 @@ saber em que segmento ele está e a quantos metros da linha. O carro e a câmera
 
 Para investigar como o carro se comporta, `KATCHAU_TELEMETRIA=1 ./katchau` grava cada quadro da corrida em `telemetria.csv`.
 
+### Torcida 3D
+
+Em todas as pistas, os lugares das arquibancadas perto da câmera ganham carrinhos de verdade (`torcida3d.c`): o
+completo (76 triângulos, `objetos/carro_torcida.glb`) até 200 m e um simples (28 triângulos,
+`carro_torcida_longe.glb`) de 200 a 400 m; os dois são gerados por `build/exp/gerar_torcida.py`. Cada um fica
+virado para a pista, com cor sorteada e pulando, e cada grupo vai para a placa de vídeo numa chamada só
+(os lugares ficam na placa de vídeo desde a carga; por quadro, o processador só escolhe os trechos da grade perto
+da câmera, e o shader gira, posiciona e escala cada carrinho). Os lugares vêm dos degraus do estádio (Copa Pistão), das fileiras das arquibancadas
+(Interlagos) e dos lugares medidos nos modelos (Oval e Splat); uma grade de células acha os lugares perto sem
+olhar todos. Mais longe continua a torcida pintada, que some onde os carrinhos aparecem. Na onda da Copa Pistão,
+os faróis deles acendem. `KATCHAU_SEM_TORCIDA3D=1 ./katchau` desliga, para comparar o desempenho.
+
 ### Marcas de pneu e sombras
 
 Quando o pneu escorrega (drift, derrapagem, arrancada patinando, rodada e freada forte em alta), cada roda deixa um
@@ -458,7 +470,8 @@ na Copa Pistão, não há sombra do sol. Dá para desligar em Configurações, s
 
 Na Copa Pistão, quando o líder chega à metade da corrida, a torcida de carrinhos faz a onda: começando um pouco
 à frente do jogador, os carros de cada setor acendem os faróis e disparam as câmeras, um setor depois do outro,
-até dar a volta inteira no estádio (7 s). Tudo no shader da torcida (`noite.c`), pelo ângulo em volta do centro.
+até dar a volta inteira no estádio (7 s). Os faróis são fileiras de pares de luzes amareladas sobre os assentos
+(`acenderFarol` em `noite.c`); o clarão de leve do setor fica no shader da torcida.
 
 ### Oval e Splat
 

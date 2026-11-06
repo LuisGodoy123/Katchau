@@ -17,6 +17,7 @@
 #define TOTAL_DISTANCIAS_DA_CAMERA 3   /* perto, médio e longe */
 
 void desenharVisaoDoJogador(Corrida *corrida);
+void desenharCorridaVistaDe(Corrida *corrida, Camera3D camera);
 int alternarDistanciaDaCamera(void);
 void congelarCena(int pausada);
 void definirOlhar(Olhar olhar);

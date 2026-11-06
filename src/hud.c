@@ -586,7 +586,7 @@ static void desenharContaGiros(Vector2 centro, float raio, float giro) {
  * Recebe: o centro do círculo, o motor e se a corrida já largou.
  * Devolve: nada.
  */
-static void desenharMarcha(Vector2 centro, const Motor *motor, int largou) {
+static void desenharMarcha(Vector2 centro, const Motor *motor, int largou, int deRe) {
     static int marchaAnterior = 0;
     static float pulo = 0.0f;   /* de 1 (acabou de trocar) a 0 */
     if (motor->marcha != marchaAnterior) {
@@ -604,7 +604,7 @@ static void desenharMarcha(Vector2 centro, const Motor *motor, int largou) {
     DrawCircleV(centro, raio, fundo);
     DrawRing(centro, raio, raio + 1.5f, 0.0f, 360.0f, 48, Fade(COR_TEXTO_CLARO, 0.8f));
 
-    const char *texto = largou ? TextFormat("%d", motor->marcha + 1) : "N";
+    const char *texto = deRe ? "R" : (largou ? TextFormat("%d", motor->marcha + 1) : "N");
     float tamanho = 19.0f * (1.0f + 0.2f * pulo);
     escreverCentralizado(FONTE_TITULO, texto, centro.x + 1.0f, centro.y - tamanho * 0.55f, tamanho, numero);
 }
@@ -634,7 +634,7 @@ static void desenharVelocimetro(Corrida *corrida, const Motor *motor) {
     escreverCentralizado(FONTE_FORTE, "KM/H", centro.x, centro.y + 12.0f, 11.0f, Fade(COR_TEXTO_CLARO, 0.7f));
 
     Vector2 marcha = { centro.x, centro.y + raio * 0.72f };
-    desenharMarcha(marcha, motor, corrida->contagemRegressiva <= 0.0f);
+    desenharMarcha(marcha, motor, corrida->contagemRegressiva <= 0.0f, jogador->re > 0.0f);
 }
 
 /*
