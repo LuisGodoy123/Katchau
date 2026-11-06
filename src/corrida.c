@@ -33,6 +33,7 @@
 /* ---------- Som da batida (só o McQueen) ---------- */
 #define NUMERO_DO_MCQUEEN          0         /* o número dele na tabela FICHAS */
 #define ALCANCE_DA_BATIDA_DE_RIVAL 60.0f     /* metros: o McQueen rival bate mais longe que isso, ninguém ouve */
+#define SEGUNDOS_PARA_CONFIRMAR_POSICAO 0.4f /* uma troca de posição só vale se durar isso (vários carros o passando juntos viram uma troca só) */
 #define SEGUNDOS_PARA_VALER_A_PONTA 2.0f     /* quem ficou em 1º menos que isso e perdeu a ponta não "perdeu a liderança" */
 #define VOLUME_DA_BATIDA_DE_RIVAL  0.6f      /* a batida do McQueen rival, colado no jogador, soa assim, em vez de 1 */
 
@@ -176,6 +177,9 @@ void iniciarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador, NivelDaC
     corrida->terminou = 0;
     corrida->mcqueenLiderava = 0;
     corrida->mcqueenTempoNaPonta = 0.0f;
+    corrida->mcqueenPosicao = 0;
+    corrida->mcqueenPosicaoNova = 0;
+    corrida->mcqueenTempoNaPosicaoNova = 0.0f;
     corrida->desclassificado = 0;
     corrida->posicaoFinal = 0;
 
@@ -482,29 +486,117 @@ int mudancaDeLiderancaDoMcQueen(Corrida *corrida, float tempoQuadro) {
 }
 
 /*
+ * mudancaDePosicaoDoMcQueen
+ * Diz se o McQueen do jogador ganhou ou perdeu posição (ultrapassou ou foi ultrapassado), em
+ * qualquer lugar da fila, para as falas dele. Chamar uma vez por quadro. A posição nova só vale se
+ * se mantiver por um instante: vários carros passando juntos, ou dois trocando de lugar a todo
+ * quadro, viram uma troca só (ou nenhuma). Não vale na contagem, depois da bandeirada, nem no
+ * pit lane (quem para perde posições sem ter sido ultrapassado de verdade).
+ * Recebe: a corrida e o tempo do quadro.
+ * Devolve: +1 se ganhou posição, -1 se perdeu, 0 no resto do tempo.
+ */
+int mudancaDePosicaoDoMcQueen(Corrida *corrida, float tempoQuadro) {
+    Carro *jogador = &corrida->jogador;
+    int posicao = 0;
+    for (int i = 0; i < TOTAL_CARROS; i++) {
+        if (corrida->classificacao[i] == jogador) {
+            posicao = i + 1;
+        }
+    }
+    int vale = jogador->numero == NUMERO_DO_MCQUEEN && corrida->contagemRegressiva <= 0.0f && !corrida->terminou
+               && !carroNoPit(jogador) && posicao > 0;
+    if (!vale || corrida->mcqueenPosicao == 0) {
+        corrida->mcqueenPosicao = vale ? posicao : 0;   /* só acompanha: nada a dizer */
+        corrida->mcqueenPosicaoNova = posicao;
+        corrida->mcqueenTempoNaPosicaoNova = 0.0f;
+        return 0;
+    }
+    if (posicao == corrida->mcqueenPosicao) {
+        corrida->mcqueenPosicaoNova = posicao;
+        corrida->mcqueenTempoNaPosicaoNova = 0.0f;
+        return 0;
+    }
+    if (posicao != corrida->mcqueenPosicaoNova) {
+        corrida->mcqueenPosicaoNova = posicao;   /* mudou de novo antes de confirmar: recomeça a contar */
+        corrida->mcqueenTempoNaPosicaoNova = 0.0f;
+        return 0;
+    }
+    corrida->mcqueenTempoNaPosicaoNova += tempoQuadro;
+    if (corrida->mcqueenTempoNaPosicaoNova < SEGUNDOS_PARA_CONFIRMAR_POSICAO) {
+        return 0;
+    }
+    int ganhou = posicao < corrida->mcqueenPosicao;
+    corrida->mcqueenPosicao = posicao;
+    corrida->mcqueenTempoNaPosicaoNova = 0.0f;
+    return ganhou ? 1 : -1;
+}
+
+/*
+ * proximidadeDoMcQueen
+ * O quanto o jogador ouve o McQueen: ele mesmo, em cheio; um McQueen rival, só se estiver perto e
+ * mais baixo.
+ * Recebe: a corrida e o carro (o jogador ou um rival).
+ * Devolve: de 0 a 1.
+ */
+static float proximidadeDoMcQueen(Corrida *corrida, const Carro *carro) {
+    if (carro == &corrida->jogador) {
+        return 1.0f;
+    }
+    float metros = fabsf(carro->distanciaPercorrida - corrida->jogador.distanciaPercorrida) / UNIDADES_POR_METRO;
+    return fmaxf(1.0f - metros / ALCANCE_DA_BATIDA_DE_RIVAL, 0.0f) * VOLUME_DA_BATIDA_DE_RIVAL;
+}
+
+/*
+ * rodadaDoMcQueen
+ * Diz se o McQueen começou a rodar (girar descontrolado) desde a última vez que isto foi chamado.
+ * Só a rodada DELE conta: um carro que gira porque o McQueen bateu nele não faz o McQueen gritar.
+ * Chamar uma vez por quadro: zera o aviso de rodada de todos os carros.
+ * Recebe: a corrida.
+ * Devolve: o volume do grito (0 a 1; 0 = não rodou, ou rodou longe demais para ser ouvido).
+ */
+float rodadaDoMcQueen(Corrida *corrida) {
+    float volume = 0.0f;
+    for (int i = -1; i < TOTAL_RIVAIS; i++) {
+        Carro *carro = (i < 0) ? &corrida->jogador : &corrida->rivais[i];
+        int rodou = carro->rodadaNova;
+        carro->rodadaNova = 0;
+        if (rodou && carro->numero == NUMERO_DO_MCQUEEN) {
+            volume = fmaxf(volume, proximidadeDoMcQueen(corrida, carro));
+        }
+    }
+    return volume;
+}
+
+/*
  * batidaDoMcQueen
  * Diz se o McQueen bateu em alguma coisa (em outro carro ou no muro) desde a última vez que
  * isto foi chamado. Os sons de batida são dele: se o jogador escolheu outro carro, só
  * soam quando o McQueen rival bate perto o bastante para ser ouvido. Chamar uma vez por
  * quadro: zera as batidas novas de todos os carros.
- * Recebe: a corrida.
+ * Recebe: a corrida e onde guardar se a batida foi contra outro carro (1) ou no muro (0); pode ser NULL.
  * Devolve: o volume da batida (0 a 1; 0 = não bateu, ou bateu longe demais).
  */
-float batidaDoMcQueen(Corrida *corrida) {
+float batidaDoMcQueen(Corrida *corrida, int *contraCarro) {
     float volume = 0.0f;
+    if (contraCarro != NULL) {
+        *contraCarro = 0;
+    }
     for (int i = -1; i < TOTAL_RIVAIS; i++) {
         Carro *carro = (i < 0) ? &corrida->jogador : &corrida->rivais[i];
         float batida = carro->batidaNova;
+        int deCarro = carro->batidaNovaDeCarro;
         carro->batidaNova = 0.0f;
+        carro->batidaNovaDeCarro = 0;
         if (carro->numero != NUMERO_DO_MCQUEEN || batida <= 0.0f) {
             continue;
         }
-        float proximidade = 1.0f;
-        if (carro != &corrida->jogador) {
-            float metros = fabsf(carro->distanciaPercorrida - corrida->jogador.distanciaPercorrida) / UNIDADES_POR_METRO;
-            proximidade = fmaxf(1.0f - metros / ALCANCE_DA_BATIDA_DE_RIVAL, 0.0f) * VOLUME_DA_BATIDA_DE_RIVAL;
+        float proximidade = proximidadeDoMcQueen(corrida, carro);
+        if (batida * proximidade > volume) {
+            volume = batida * proximidade;
+            if (contraCarro != NULL) {
+                *contraCarro = deCarro;
+            }
         }
-        volume = fmaxf(volume, batida * proximidade);
     }
     return volume;
 }
@@ -534,6 +626,8 @@ static void tratarBatida(Corrida *corrida, Carro *a, Carro *b, float tempoQuadro
     b->pancada = fmaxf(b->pancada, pancada);
     a->batidaNova = fmaxf(a->batidaNova, pancada);
     b->batidaNova = fmaxf(b->batidaNova, pancada);
+    a->batidaNovaDeCarro = 1;
+    b->batidaNovaDeCarro = 1;
 
     /* Só roda quem bate com o jogador: rodadas entre rivais só atrapalhariam a corrida
      * longe dos olhos dele, e fechariam a pista para todo mundo */

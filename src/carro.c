@@ -179,6 +179,8 @@ Carro criarCarro(const char *nome, int numero, Segmento *largada, float deslocam
     carro.forcaDoDrift = 0.0f;
     carro.pancada = 0.0f;
     carro.batidaNova = 0.0f;
+    carro.batidaNovaDeCarro = 0;
+    carro.rodadaNova = 0;
     carro.raspandoNoMuro = 0;
     carro.anguloDeDrift = 0.0f;
     carro.giroDoDrift = 0.0f;
@@ -662,6 +664,7 @@ void fazerRodar(Carro *carro, float impulso) {
         return;
     }
     carro->rodando = 1;
+    carro->rodadaNova = 1;
     carro->nitroLigado = 0;
     carro->velocidadeNaRodada = carro->velocidade;
     carro->velocidadeDoGiro = limitar(impulso, -MAIOR_GIRO, MAIOR_GIRO);

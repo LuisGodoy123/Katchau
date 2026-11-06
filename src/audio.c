@@ -74,18 +74,40 @@ static const int NUMEROS_DAS_BATIDAS[TOTAL_SONS_DE_BATIDA] = { 1, 2, 3, 4, 5, 6,
 /* As falas do McQueen: o grito da batida forte e as de quando ele assume ou perde a liderança.
  * Tudo que ele diz (inclusive os sons de batida acima) passa por uma só "voz": enquanto uma fala
  * toca, nenhuma outra começa, para nunca haver uma em cima da outra. */
-enum { FALA_GRITO, FALA_LIDER_1, FALA_LIDER_2, FALA_PERDEU_1, FALA_PERDEU_2, TOTAL_FALAS };
+enum {
+    FALA_GRITO, FALA_LIDER_1, FALA_LIDER_2, FALA_PERDEU_1, FALA_PERDEU_2,
+    FALA_ULTRAPASSA_1,                               /* 7 falas de quando ele ultrapassa alguém */
+    FALA_ULTRAPASSADO_1 = FALA_ULTRAPASSA_1 + 7,     /* 4 falas de quando ele é ultrapassado */
+    FALA_BATE_1 = FALA_ULTRAPASSADO_1 + 4,           /* 2 falas de quando ele bate em alguém */
+    TOTAL_FALAS = FALA_BATE_1 + 2
+};
+#define TOTAL_FALAS_ULTRAPASSA    7
+#define TOTAL_FALAS_ULTRAPASSADO  4
+#define TOTAL_FALAS_BATE          2
 static const char *ARQUIVOS_FALAS[TOTAL_FALAS] = {
     "recursos/sons/mcqueen_grito.wav",
     "recursos/sons/mcqueen_lider_1.wav",
     "recursos/sons/mcqueen_lider_2.wav",
     "recursos/sons/mcqueen_perdeu_1.wav",
     "recursos/sons/mcqueen_perdeu_2.wav",
+    "recursos/sons/mcqueen_ultrapassa_13.wav",
+    "recursos/sons/mcqueen_ultrapassa_11.wav",
+    "recursos/sons/mcqueen_ultrapassa_10.wav",
+    "recursos/sons/mcqueen_ultrapassa_9.wav",
+    "recursos/sons/mcqueen_ultrapassa_5.wav",
+    "recursos/sons/mcqueen_ultrapassa_3.wav",
+    "recursos/sons/mcqueen_ultrapassa_16.wav",
+    "recursos/sons/mcqueen_ultrapassado_n3.wav",
+    "recursos/sons/mcqueen_ultrapassado_d11.wav",
+    "recursos/sons/mcqueen_ultrapassado_d8.wav",
+    "recursos/sons/mcqueen_ultrapassado_d9.wav",
+    "recursos/sons/mcqueen_bate_6.wav",
+    "recursos/sons/mcqueen_bate_4.wav",
 };
-#define BATIDA_FORTE                 0.8f   /* a batida desta força (ou mais) faz o McQueen gritar */
-#define PAUSA_ENTRE_GRITOS           6.0    /* segundos: batida forte seguida toca só os sons de batida comuns */
+#define PAUSA_ENTRE_GRITOS           3.0    /* segundos entre dois gritos de rodada */
 #define PAUSA_DEPOIS_DA_FALA         0.5    /* segundos de silêncio depois de qualquer fala */
 #define PAUSA_ENTRE_FALAS_DE_PONTA   8.0    /* segundos entre duas falas de liderança (ultrapassagens em série) */
+#define PAUSA_ENTRE_FALAS_DE_POSICAO 3.0    /* segundos entre duas falas de ultrapassagem (do começo de uma ao da outra) */
 static Sound falas[TOTAL_FALAS];
 static int falaCarregada[TOTAL_FALAS];
 static int ultimaFalaDeLider = -1;
@@ -93,6 +115,10 @@ static int ultimaFalaDePerda = -1;
 static double fimDaVoz = 0.0;               /* hora em que a fala atual acaba (mais a pausa) */
 static double horaDoUltimoGrito = -100.0;
 static double horaDaUltimaFalaDePonta = -100.0;
+static double horaDaUltimaFalaDePosicao = -100.0;
+static int ultimaFalaQueUltrapassa = -1;
+static int ultimaFalaDeUltrapassado = -1;
+static int ultimaFalaDeBater = -1;
 
 static Sound sonsDeBatida[TOTAL_SONS_DE_BATIDA];
 static int somDeBatidaCarregado[TOTAL_SONS_DE_BATIDA];
@@ -243,15 +269,38 @@ static void falar(Sound som, float volume, double agora) {
 }
 
 /*
+ * sortearFala
+ * Escolhe uma fala de um grupo, sem repetir a última daquele grupo.
+ * Recebe: a primeira fala do grupo, quantas são e onde está a última sorteada.
+ * Devolve: o número da fala (e a guarda como a última), ou -1 se nenhuma do grupo foi carregada.
+ */
+static int sortearFala(int primeira, int total, int *ultima) {
+    int carregadas = 0;
+    for (int i = 0; i < total; i++) {
+        carregadas += falaCarregada[primeira + i];
+    }
+    if (carregadas == 0) {
+        return -1;
+    }
+    int escolhida;
+    do {
+        escolhida = primeira + GetRandomValue(0, total - 1);
+    } while (!falaCarregada[escolhida] || (escolhida == *ultima && carregadas > 1));
+    *ultima = escolhida;
+    return escolhida;
+}
+
+/*
  * tocarSomDaBatida
- * O McQueen bateu. Batida forte faz ele gritar (a fala do grito); as outras tocam um dos sons de
- * batida, sorteado (nunca o mesmo duas vezes seguidas). Uma batida que dura vários quadros, como
- * um carro raspando no outro, toca um som só. Se ele está falando, a batida não toca: nunca
- * há uma fala em cima da outra.
- * Recebe: o volume da batida (0 a 1, de batidaDoMcQueen).
+ * O McQueen bateu. Se foi contra outro carro, ele fala uma das falas de "bati em alguém"; no
+ * muro, toca um dos sons de batida,
+ * sorteado (nunca o mesmo duas vezes seguidas). Uma batida que dura vários quadros, como um carro
+ * raspando no outro, toca um som só. Se ele está falando, a batida não toca: nunca há uma fala em
+ * cima da outra.
+ * Recebe: o volume da batida (0 a 1, de batidaDoMcQueen) e se foi contra outro carro.
  * Devolve: nada.
  */
-void tocarSomDaBatida(float volume) {
+void tocarSomDaBatida(float volume, int contraCarro) {
     double agora = GetTime();
     if (volume <= 0.0f || agora - horaDaUltimaBatida < PAUSA_ENTRE_BATIDAS || agora < fimDaVoz) {
         return;
@@ -259,11 +308,13 @@ void tocarSomDaBatida(float volume) {
     float forca = fminf(volume, 1.0f);
     float altura = VOLUME_BATIDA * (VOLUME_BATIDA_FRACA + (1.0f - VOLUME_BATIDA_FRACA) * forca);
 
-    if (forca >= BATIDA_FORTE && falaCarregada[FALA_GRITO] && agora - horaDoUltimoGrito >= PAUSA_ENTRE_GRITOS) {
-        horaDoUltimoGrito = agora;
-        horaDaUltimaBatida = agora;
-        falar(falas[FALA_GRITO], altura, agora);
-        return;
+    if (contraCarro) {
+        int fala = sortearFala(FALA_BATE_1, TOTAL_FALAS_BATE, &ultimaFalaDeBater);
+        if (fala >= 0) {
+            horaDaUltimaBatida = agora;
+            falar(falas[fala], altura, agora);
+            return;
+        }
     }
 
     int carregados = 0;
@@ -280,6 +331,23 @@ void tocarSomDaBatida(float volume) {
     ultimaBatida = escolhido;
     horaDaUltimaBatida = agora;
     falar(sonsDeBatida[escolhido], altura, agora);
+}
+
+/*
+ * tocarGritoDeRodada
+ * O McQueen começou a rodar: ele grita (a fala do grito). Só vale para a rodada DELE; um carro que
+ * gira por causa de uma batida do McQueen não faz o grito. Se ele já está falando, não toca: nunca
+ * há uma fala em cima da outra.
+ * Recebe: o volume do grito (0 a 1, de rodadaDoMcQueen).
+ * Devolve: nada.
+ */
+void tocarGritoDeRodada(float volume) {
+    double agora = GetTime();
+    if (volume <= 0.0f || !falaCarregada[FALA_GRITO] || agora < fimDaVoz || agora - horaDoUltimoGrito < PAUSA_ENTRE_GRITOS) {
+        return;
+    }
+    horaDoUltimoGrito = agora;
+    falar(falas[FALA_GRITO], VOLUME_BATIDA * fminf(volume, 1.0f), agora);
 }
 
 /*
@@ -310,6 +378,29 @@ void tocarFalaDeLideranca(int comecou) {
     *ultima = escolhida;
     horaDaUltimaFalaDePonta = agora;
     falar(falas[escolhida], VOLUME_BATIDA, agora);
+}
+
+/*
+ * tocarFalaDeUltrapassagem
+ * O McQueen ultrapassou alguém ou foi ultrapassado (em qualquer posição): fala uma das falas do
+ * caso, sorteada (não repete a última do mesmo tipo). Só fala se ele não estiver falando nada:
+ * uma ultrapassagem que chega no meio de outra fala, ou vários carros o passando em seguida, não
+ * geram fala nova, para nunca haver uma em cima da outra.
+ * Recebe: 1 se ele ultrapassou alguém, 0 se foi ultrapassado.
+ * Devolve: nada.
+ */
+void tocarFalaDeUltrapassagem(int ultrapassou) {
+    double agora = GetTime();
+    if (agora < fimDaVoz || agora - horaDaUltimaFalaDePosicao < PAUSA_ENTRE_FALAS_DE_POSICAO) {
+        return;
+    }
+    int fala = ultrapassou ? sortearFala(FALA_ULTRAPASSA_1, TOTAL_FALAS_ULTRAPASSA, &ultimaFalaQueUltrapassa)
+                           : sortearFala(FALA_ULTRAPASSADO_1, TOTAL_FALAS_ULTRAPASSADO, &ultimaFalaDeUltrapassado);
+    if (fala < 0) {
+        return;
+    }
+    horaDaUltimaFalaDePosicao = agora;
+    falar(falas[fala], VOLUME_BATIDA, agora);
 }
 
 /*

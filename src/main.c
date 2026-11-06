@@ -266,10 +266,18 @@ int main(int argc, char *argv[]) {
 
         /* O McQueen bateu em alguma coisa (carro ou muro), assumiu ou perdeu a liderança: ele reage */
         if (tela == TELA_CORRIDA && !pausada) {
-            tocarSomDaBatida(batidaDoMcQueen(&corrida));
+            tocarGritoDeRodada(rodadaDoMcQueen(&corrida));   /* antes da batida: quando ele roda, o grito vale mais */
+            int batidaContraCarro = 0;
+            float batida = batidaDoMcQueen(&corrida, &batidaContraCarro);
+            tocarSomDaBatida(batida, batidaContraCarro);
             int lideranca = mudancaDeLiderancaDoMcQueen(&corrida, tempoQuadro);
             if (lideranca != 0) {
                 tocarFalaDeLideranca(lideranca > 0);
+            }
+            /* Ultrapassou ou foi ultrapassado em qualquer posição (depois da fala de liderança, que vale mais) */
+            int posicao = mudancaDePosicaoDoMcQueen(&corrida, tempoQuadro);
+            if (posicao != 0) {
+                tocarFalaDeUltrapassagem(posicao > 0);
             }
         }
 
