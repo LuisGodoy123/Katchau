@@ -18,6 +18,7 @@
 
 void desenharVisaoDoJogador(Corrida *corrida);
 void desenharCorridaVistaDe(Corrida *corrida, Camera3D camera);
+Camera3D cameraDaVisaoDoJogador(Corrida *corrida);
 int alternarDistanciaDaCamera(void);
 void congelarCena(int pausada);
 void definirOlhar(Olhar olhar);

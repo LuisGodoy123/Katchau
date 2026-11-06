@@ -34,6 +34,8 @@
 #include "visual.h"
 #include "audio.h"
 #include "efeitos.h"
+#include "apresentacao.h"
+#include "intro.h"
 #include "controle.h"
 
 /* Na vitória, o painel de chegada espera um pouco para o jogador ver o
@@ -91,13 +93,15 @@ static void registrarTelemetria(const Corrida *corrida, const Comandos *comandos
  * atualizarTelaDaCorrida
  * Um quadro da corrida: o jogador dirige, a IA dirige os rivais.
  * ESC (ou START) pausa: a corrida e os sons congelam e o jogador escolhe
- * entre continuar e voltar ao menu principal. O touchpad (ou C) troca a
+ * entre continuar e voltar ao menu principal. Antes da contagem passa a
+ * apresentação da largada (apresentacao.c). O touchpad (ou C) troca a
  * distância da câmera. Depois da chegada, ENTER (ou A) vai ao resultado.
  * Recebe: a corrida, o estado do menu (para a pausa), se a corrida está
  *         pausada (é alterado aqui) e o tempo do quadro.
  * Devolve: a próxima tela.
  */
-static Tela atualizarTelaDaCorrida(Corrida *corrida, EstadoMenu *menu, int *pausada, float tempoQuadro) {
+static Tela atualizarTelaDaCorrida(Corrida *corrida, EstadoMenu *menu, int *pausada, Apresentacao *apresentacao,
+                                   float tempoQuadro) {
     if (*pausada) {
         EscolhaDaPausa escolha = atualizarPausa(menu);
         if (escolha == PAUSA_CONTINUAR) {
@@ -115,6 +119,15 @@ static Tela atualizarTelaDaCorrida(Corrida *corrida, EstadoMenu *menu, int *paus
         *pausada = 1;
         abrirPausa(menu);
         pausarSonsDaCorrida(1);
+        return TELA_CORRIDA;
+    }
+
+    /* A apresentação da largada: o jogo de câmeras passa com a corrida parada (a contagem só
+     * começa depois); ENTER (ou o botão de confirmar) pula */
+    if (apresentacaoAtiva(apresentacao)) {
+        int pular = IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER) || IsKeyPressed(KEY_SPACE) ||
+                    controleApertou(BOTAO_CONFIRMAR);
+        atualizarApresentacao(apresentacao, pular, tempoQuadro);
         return TELA_CORRIDA;
     }
 
@@ -198,14 +211,33 @@ int main(int argc, char *argv[]) {
     int venceuAntes = 0;   /* para soltar o confete uma vez só, no quadro da vitória */
     Olhar olhar = olharParaAFrente();
     int pausada = 0;       /* a corrida está na pausa (ESC) */
+    Apresentacao apresentacao = { 0 };   /* o jogo de câmeras antes da largada */
     EstadoDaVibracao estadoDaVibracao;
     iniciarEstadoDaVibracao(&estadoDaVibracao);
     iniciarVibracao();
+
+    /* O vídeo de abertura: passa só quando o jogo abre (não a cada corrida); qualquer botão pula */
+    int naIntro = iniciarIntro();
 
     /* Laço principal: roda uma vez por quadro até escolher SAIR ou fechar a janela */
     while (tela != TELA_SAIR && !WindowShouldClose()) {
         /* Tempo do último quadro, para a velocidade não depender do FPS */
         float tempoQuadro = GetFrameTime();
+
+        if (naIntro) {
+            naIntro = atualizarIntro(tempoQuadro);
+            if (!IsCursorHidden()) {
+                HideCursor();
+            }
+            BeginDrawing();
+            ClearBackground(BLACK);
+            desenharIntro();
+            EndDrawing();
+            if (!naIntro) {
+                encerrarIntro();
+            }
+            continue;
+        }
         atualizarControle();   /* acha o controle e lê o analógico, antes das telas perguntarem */
 
         /* ---- 1) Atualizar a tela atual e descobrir a próxima ---- */
@@ -227,7 +259,7 @@ int main(int argc, char *argv[]) {
                 proxima = atualizarComoJogar();
                 break;
             case TELA_CORRIDA:
-                proxima = atualizarTelaDaCorrida(&corrida, &menu, &pausada, tempoQuadro);
+                proxima = atualizarTelaDaCorrida(&corrida, &menu, &pausada, &apresentacao, tempoQuadro);
                 break;
             case TELA_RESULTADO: {
                 /* A corrida continua ao fundo até todos os rivais chegarem */
@@ -248,6 +280,7 @@ int main(int argc, char *argv[]) {
             olhar = olharParaAFrente();
             iniciarEstadoDaVibracao(&estadoDaVibracao);
             iniciarEfeitosDaCorrida();
+            iniciarApresentacao(&apresentacao);
         }
         tela = proxima;
 
@@ -301,7 +334,9 @@ int main(int argc, char *argv[]) {
         }
 
         /* A música toca nos menus e some quando a corrida começa */
-        atualizarAudio(tela == TELA_MENU || tela == TELA_GARAGEM || tela == TELA_PISTAS || tela == TELA_CONFIGURACOES || tela == TELA_COMO_JOGAR);
+        int apresentando = (tela == TELA_CORRIDA && apresentacaoAtiva(&apresentacao));
+        atualizarAudio(tela == TELA_MENU || tela == TELA_GARAGEM || tela == TELA_PISTAS || tela == TELA_CONFIGURACOES || tela == TELA_COMO_JOGAR
+                       || apresentando);   /* na apresentação da largada, a música segue de trilha */
 
         /* Sons da corrida:
          *  - antes do GO, o motor em marcha lenta (som provisório) e o "3... 2... 1... GO!",
@@ -313,9 +348,9 @@ int main(int argc, char *argv[]) {
          *    ela toca (o motor sai, mesmo com a IA levando o carro) */
         if (!pausada) {   /* na pausa, os sons da corrida ficam congelados (pausarSonsDaCorrida) */
             int naCorrida = (tela == TELA_CORRIDA);
-            int antesDoGo = (naCorrida && corrida.contagemRegressiva > 0.0f);
+            int antesDoGo = (naCorrida && !apresentando && corrida.contagemRegressiva > 0.0f);
             int depoisDoGo = (naCorrida && corrida.contagemRegressiva <= 0.0f);
-            int naContagem = (naCorrida && corrida.contagemRegressiva < NUMEROS_DA_CONTAGEM * SEGUNDOS_POR_NUMERO &&
+            int naContagem = (naCorrida && !apresentando && corrida.contagemRegressiva < NUMEROS_DA_CONTAGEM * SEGUNDOS_POR_NUMERO &&
                               (antesDoGo || corrida.tempoDeCorrida < DURACAO_GRITO_LARGADA));
             float segundosAteALinha = naCorrida ? segundosAteAVitoria(&corrida) : -1.0f;
             atualizarMusicaDaVitoria(segundosAteALinha, venceu);
@@ -377,6 +412,15 @@ int main(int argc, char *argv[]) {
                 terminarInterface();
                 break;
             case TELA_CORRIDA:
+                if (apresentando) {
+                    desenharApresentacao(&apresentacao, &corrida);
+                    if (pausada) {
+                        comecarInterface(1);
+                        desenharPausa(&menu);
+                        terminarInterface();
+                    }
+                    break;
+                }
                 desenharVisaoDoJogador(&corrida);
                 comecarInterface(0);
                 desenharHud(&corrida);

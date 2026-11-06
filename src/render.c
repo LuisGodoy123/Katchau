@@ -1005,6 +1005,19 @@ void desenharVisaoDoJogador(Corrida *corrida) {
 }
 
 /*
+ * cameraDaVisaoDoJogador
+ * A câmera que a corrida usa atrás do carro do jogador, sem mexer em nada (a apresentação da
+ * largada termina nela, para a troca para o jogo ser contínua).
+ * Recebe: a corrida.
+ * Devolve: a câmera.
+ */
+Camera3D cameraDaVisaoDoJogador(Corrida *corrida) {
+    Carro *jogador = &corrida->jogador;
+    DistanciaDaCamera distancia = distanciaParaOCarro(jogador, DISTANCIAS_DA_CAMERA[distanciaEscolhida]);
+    return montarCamera(jogador->posicao, jogador->deslocamentoLateral, olharParaAFrente(), distancia, NULL);
+}
+
+/*
  * desenharCorridaVistaDe
  * A corrida vista de uma câmera qualquer (para replays e para conferir cenas).
  * Recebe: a corrida e a câmera.
