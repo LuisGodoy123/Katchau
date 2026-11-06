@@ -445,6 +445,15 @@ saber em que segmento ele está e a quantos metros da linha. O carro e a câmera
 
 Para investigar como o carro se comporta, `KATCHAU_TELEMETRIA=1 ./katchau` grava cada quadro da corrida em `telemetria.csv`.
 
+### Marcas de pneu e sombras
+
+Quando o pneu escorrega (drift, derrapagem, arrancada patinando, rodada e freada forte em alta), cada roda deixa um
+rastro escuro no asfalto, que some aos poucos (`marcas.c`). Na grama não marca.
+
+De dia, o cenário faz sombra do sol: a cada quadro, o que fica num quadrado de 280 m em volta da câmera é desenhado
+visto do sol num mapa de profundidade, e o shader do cenário escurece o que estiver atrás de alguma coisa. À noite,
+na Copa Pistão, não há sombra do sol. Dá para desligar em Configurações, se o computador ficar lento.
+
 ### A onda da torcida
 
 Na Copa Pistão, quando o líder chega à metade da corrida, a torcida de carrinhos faz a onda: começando um pouco

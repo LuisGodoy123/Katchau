@@ -164,21 +164,59 @@
 #define PLANO_DE_PERTO        0.5f
 
 /* Descarta os pixels transparentes, em vez de misturar */
+/* As sombras do sol: o cenário visto do sol, guardado num mapa de profundidade. Quem estiver
+ * mais longe do sol do que o que o mapa guardou ali está na sombra de alguma coisa */
+#define GLSL_DA_SOMBRA \
+    "uniform mat4 luzVP; uniform sampler2D mapaDeSombra; uniform float sombraLigada;\n" \
+    "float naSombra(vec3 p) {\n" \
+    "    if (sombraLigada < 0.5) return 0.0;\n" \
+    "    vec3 n = normalize(cross(dFdx(p), dFdy(p)));\n" \
+    "    if (n.y < 0.0) n = -n;\n" \
+    "    float deFrente = dot(n, normalize(vec3(0.35, 0.8, 0.45)));\n" \
+    "    vec4 q = luzVP * vec4(p + n * 0.15, 1.0);\n" \
+    "    q.xyz = q.xyz / q.w * 0.5 + 0.5;\n" \
+    "    if (q.x <= 0.0 || q.x >= 1.0 || q.y <= 0.0 || q.y >= 1.0 || q.z >= 1.0) return 0.0;\n" \
+    "    float vies = 0.0008 + 0.0030 * (1.0 - clamp(deFrente, 0.0, 1.0));\n" \
+    "    vec2 passo = 1.0 / vec2(textureSize(mapaDeSombra, 0));\n" \
+    "    float s = 0.0;\n" \
+    "    for (int x = -1; x <= 1; x++) for (int y = -1; y <= 1; y++)\n" \
+    "        s += (q.z - vies > texture(mapaDeSombra, q.xy + vec2(x, y) * passo).r) ? 1.0 : 0.0;\n" \
+    "    float borda = min(min(q.x, 1.0 - q.x), min(q.y, 1.0 - q.y));\n" \
+    "    return s / 9.0 * smoothstep(0.0, 0.08, borda);\n" \
+    "}\n"
+#define FORCA_DA_SOMBRA "0.50"
+
 static const char *VERTICES_DO_SHADER =
     "#version 330\n"
     "in vec3 vertexPosition; in vec2 vertexTexCoord; in vec4 vertexColor;\n"
-    "uniform mat4 mvp;\n"
-    "out vec2 fragTexCoord; out vec4 fragColor;\n"
+    "uniform mat4 mvp; uniform mat4 matModel;\n"
+    "out vec2 fragTexCoord; out vec4 fragColor; out vec3 fragPos;\n"
     "void main() { fragTexCoord = vertexTexCoord; fragColor = vertexColor;\n"
+    "              fragPos = vec3(matModel * vec4(vertexPosition, 1.0));\n"
     "              gl_Position = mvp * vec4(vertexPosition, 1.0); }\n";
 static const char *PIXELS_DO_SHADER =
     "#version 330\n"
-    "in vec2 fragTexCoord; in vec4 fragColor;\n"
+    "in vec2 fragTexCoord; in vec4 fragColor; in vec3 fragPos;\n"
     "uniform sampler2D texture0; uniform vec4 colDiffuse;\n"
     "out vec4 finalColor;\n"
+    GLSL_DA_SOMBRA
     "void main() { vec4 cor = texture(texture0, fragTexCoord) * colDiffuse * fragColor;\n"
     "              if (cor.a < 0.5) discard;\n"
-    "              finalColor = vec4(cor.rgb, 1.0); }\n";
+    "              finalColor = vec4(cor.rgb * (1.0 - " FORCA_DA_SOMBRA " * naSombra(fragPos)), 1.0); }\n";
+
+/* Para o mapa de sombra: só a profundidade, furando o que for transparente (as folhas) */
+static const char *VERTICES_DA_PROFUNDIDADE =
+    "#version 330\n"
+    "in vec3 vertexPosition; in vec2 vertexTexCoord;\n"
+    "uniform mat4 mvp;\n"
+    "out vec2 fragTexCoord;\n"
+    "void main() { fragTexCoord = vertexTexCoord; gl_Position = mvp * vec4(vertexPosition, 1.0); }\n";
+static const char *PIXELS_DA_PROFUNDIDADE =
+    "#version 330\n"
+    "in vec2 fragTexCoord;\n"
+    "uniform sampler2D texture0; uniform vec4 colDiffuse;\n"
+    "out vec4 finalColor;\n"
+    "void main() { if (texture(texture0, fragTexCoord).a * colDiffuse.a < 0.5) discard; finalColor = vec4(1.0); }\n";
 
 /* As malhas geradas para Interlagos */
 typedef struct {
@@ -267,6 +305,18 @@ typedef struct {
 static Shader shader;
 static Shader shaderDosMapasDeDia;
 
+/* As sombras do sol */
+#define LADO_DO_MAPA_DE_SOMBRA 2048
+#define AREA_DA_SOMBRA        280.0f   /* metros: o quadrado em volta da câmera que tem sombra */
+#define ADIANTE_DA_SOMBRA     90.0f    /* metros: o meio do quadrado fica à frente da câmera */
+#define ALTURA_DO_SOL         500.0f   /* metros: de onde o sol "olha" */
+#define SLOT_DA_SOMBRA        15       /* a unidade de textura do mapa (as do material vão até 11) */
+static Shader shaderDaProfundidade;
+static RenderTexture2D mapaDeSombra;
+static int temMapaDeSombra = 0;
+static int sombraLigadaAgora = 0;
+static void carregarSombras(void);
+
 /* As pistas de dia vêm com as imagens sem luz nenhuma: aqui entra o mesmo sol de luzDoSol,
  * com a direção da superfície saindo das derivadas da posição */
 static const char *VERTICES_DOS_MAPAS_DE_DIA =
@@ -282,8 +332,10 @@ static const char *PIXELS_DOS_MAPAS_DE_DIA =
     "in vec2 fragTexCoord; in vec3 fragPos;\n"
     "uniform sampler2D texture0; uniform vec4 colDiffuse;\n"
     "out vec4 finalColor;\n"
+    GLSL_DA_SOMBRA
     "void main() { vec4 cor = texture(texture0, fragTexCoord) * colDiffuse;\n"
     "              if (cor.a < 0.5) discard;\n"
+    "              cor.rgb *= 1.0 - " FORCA_DA_SOMBRA " * naSombra(fragPos);\n"
     "              vec3 n = normalize(cross(dFdx(fragPos), dFdy(fragPos)));\n"
     "              if (n.y < 0.0) n = -n;\n"
     "              float luz = 0.58 + 0.30 * (n.y * 0.5 + 0.5) + 0.38 * max(dot(n, normalize(vec3(0.35, 0.8, 0.45))), 0.0);\n"
@@ -1702,6 +1754,7 @@ static void carregarMapaDeDia(Pista *pista, const char *arquivo, float escala, c
 void carregarMundo(Pista *pistas[]) {
     shader = LoadShaderFromMemory(VERTICES_DO_SHADER, PIXELS_DO_SHADER);
     shaderDosMapasDeDia = LoadShaderFromMemory(VERTICES_DOS_MAPAS_DE_DIA, PIXELS_DOS_MAPAS_DE_DIA);
+    carregarSombras();
     material = LoadMaterialDefault();
     material.shader = shader;
 
@@ -1782,6 +1835,11 @@ void descarregarMundo(void) {
     UnloadMaterial(material);
     UnloadShader(shader);
     UnloadShader(shaderDosMapasDeDia);
+    UnloadShader(shaderDaProfundidade);
+    if (temMapaDeSombra) {
+        rlUnloadTexture(mapaDeSombra.depth.id);
+        rlUnloadFramebuffer(mapaDeSombra.id);
+    }
     descarregarNoite();
 }
 
@@ -1801,12 +1859,136 @@ static void desenharMalha(Mesh malha, Texture2D textura, Matrix posicao) {
 }
 
 /*
+ * carregarSombras
+ * O mapa de sombra: um framebuffer só com profundidade.
+ * Recebe: nada.
+ * Devolve: nada.
+ */
+static void carregarSombras(void) {
+    shaderDaProfundidade = LoadShaderFromMemory(VERTICES_DA_PROFUNDIDADE, PIXELS_DA_PROFUNDIDADE);
+    mapaDeSombra.id = rlLoadFramebuffer();
+    mapaDeSombra.texture.width = LADO_DO_MAPA_DE_SOMBRA;
+    mapaDeSombra.texture.height = LADO_DO_MAPA_DE_SOMBRA;
+    mapaDeSombra.depth.id = rlLoadTextureDepth(LADO_DO_MAPA_DE_SOMBRA, LADO_DO_MAPA_DE_SOMBRA, false);
+    mapaDeSombra.depth.width = LADO_DO_MAPA_DE_SOMBRA;
+    mapaDeSombra.depth.height = LADO_DO_MAPA_DE_SOMBRA;
+    rlFramebufferAttach(mapaDeSombra.id, mapaDeSombra.depth.id, RL_ATTACHMENT_DEPTH, RL_ATTACHMENT_TEXTURE2D, 0);
+    temMapaDeSombra = rlFramebufferComplete(mapaDeSombra.id);
+    if (!temMapaDeSombra) {
+        TraceLog(LOG_WARNING, "MUNDO: sem mapa de sombra; o cenário fica sem sombras");
+    }
+    Shader recebem[2] = { shader, shaderDosMapasDeDia };
+    int slot = SLOT_DA_SOMBRA;
+    for (int i = 0; i < 2; i++) {
+        SetShaderValue(recebem[i], GetShaderLocation(recebem[i], "mapaDeSombra"), &slot, SHADER_UNIFORM_INT);
+    }
+}
+
+/*
+ * desenharQuemFazSombra
+ * O que faz sombra no chão: as estruturas, as árvores e os objetos de cada pista.
+ * Recebe: a pista.
+ * Devolve: nada.
+ */
+static void desenharQuemFazSombra(IdPista id) {
+    Texture2D semTextura = { 0 };
+    Matrix origem = MatrixIdentity();
+    Shader antes = material.shader;
+    material.shader = shaderDaProfundidade;
+    if (mapasDeDia[id].existe) {
+        MapaDeDia *mapa = &mapasDeDia[id];
+        Shader originais[256];
+        int total = mapa->modelo.materialCount < 256 ? mapa->modelo.materialCount : 256;
+        for (int i = 0; i < total; i++) {
+            originais[i] = mapa->modelo.materials[i].shader;
+            mapa->modelo.materials[i].shader = shaderDaProfundidade;
+        }
+        DrawModel(mapa->modelo, (Vector3){ 0.0f, 0.0f, 0.0f }, mapa->escala, WHITE);
+        for (int i = 0; i < total; i++) {
+            mapa->modelo.materials[i].shader = originais[i];
+        }
+        for (int i = mapa->primeiroLote; i < mapa->fimDosLotes; i++) {
+            desenharMalha(lotes[i].malha, lotes[i].textura, origem);
+        }
+    } else if (id == PISTA_INTERLAGOS) {
+        desenharMalha(interlagos.muro, semTextura, origem);
+        desenharMalha(interlagos.alambrado, estadio.materials[MATERIAL_DO_ALAMBRADO].maps[MATERIAL_MAP_ALBEDO].texture, origem);
+        desenharMalha(interlagos.estruturas, semTextura, origem);
+        desenharMalha(infra->objetos, semTextura, origem);
+        desenharMalha(infra->anuncios, semTextura, origem);
+        for (int i = 0; i < lotesDeInterlagos; i++) {
+            desenharMalha(lotes[i].malha, lotes[i].textura, origem);
+        }
+    }
+    material.shader = antes;
+}
+
+/*
+ * prepararSombras
+ * Desenha o cenário visto do sol, num quadrado em volta da câmera, e passa o resultado
+ * aos shaders do cenário. Chamar antes de BeginMode3D. À noite, e com a opção desligada,
+ * não há sombra do sol.
+ * Recebe: a pista, a câmera e se as sombras estão ligadas nas configurações.
+ * Devolve: nada.
+ */
+void prepararSombras(IdPista id, Camera3D camera, int ligadas) {
+    sombraLigadaAgora = ligadas && temMapaDeSombra && id != PISTA_COPA_PISTAO;
+    float ligada = sombraLigadaAgora ? 1.0f : 0.0f;
+    Shader recebem[2] = { shader, shaderDosMapasDeDia };
+    for (int i = 0; i < 2; i++) {
+        SetShaderValue(recebem[i], GetShaderLocation(recebem[i], "sombraLigada"), &ligada, SHADER_UNIFORM_FLOAT);
+    }
+    if (!sombraLigadaAgora) {
+        return;
+    }
+
+    /* O meio do quadrado: à frente da câmera, preso à grade do mapa (senão a borda das sombras treme) */
+    Vector3 frente = Vector3Subtract(camera.target, camera.position);
+    frente.y = 0.0f;
+    frente = Vector3Normalize(frente);
+    float passo = AREA_DA_SOMBRA / LADO_DO_MAPA_DE_SOMBRA * 4.0f;
+    Vector3 meio = { camera.position.x + frente.x * ADIANTE_DA_SOMBRA, camera.position.y, camera.position.z + frente.z * ADIANTE_DA_SOMBRA };
+    meio.x = roundf(meio.x / passo) * passo;
+    meio.z = roundf(meio.z / passo) * passo;
+    Vector3 sol = Vector3Normalize((Vector3){ 0.35f, 0.8f, 0.45f });
+    Camera3D luz = { 0 };
+    luz.position = Vector3Add(meio, Vector3Scale(sol, ALTURA_DO_SOL));
+    luz.target = meio;
+    luz.up = (Vector3){ 0.0f, 1.0f, 0.0f };
+    luz.fovy = AREA_DA_SOMBRA;
+    luz.projection = CAMERA_ORTHOGRAPHIC;
+
+    rlDrawRenderBatchActive();
+    BeginTextureMode(mapaDeSombra);
+    rlClearScreenBuffers();
+    rlSetClipPlanes(1.0, ALTURA_DO_SOL * 2.0);
+    BeginMode3D(luz);
+    Matrix vista = rlGetMatrixModelview();
+    Matrix projecao = rlGetMatrixProjection();
+    rlDisableBackfaceCulling();
+    desenharQuemFazSombra(id);
+    rlEnableBackfaceCulling();
+    EndMode3D();
+    EndTextureMode();
+
+    Matrix luzVP = MatrixMultiply(vista, projecao);
+    for (int i = 0; i < 2; i++) {
+        SetShaderValueMatrix(recebem[i], GetShaderLocation(recebem[i], "luzVP"), luzVP);
+    }
+}
+
+/*
  * desenharCenario
  * Desenha o cenário fixo da pista. Chamar entre BeginMode3D e EndMode3D.
  * Recebe: a pista e a posição da câmera (o céu e o fundo andam com ela).
  * Devolve: nada.
  */
 void desenharCenario(IdPista id, Vector3 camera) {
+    if (sombraLigadaAgora) {
+        rlActiveTextureSlot(SLOT_DA_SOMBRA);
+        rlEnableTexture(mapaDeSombra.depth.id);
+        rlActiveTextureSlot(0);
+    }
     Texture2D semTextura = { 0 };
     Matrix origem = MatrixIdentity();
     Matrix naCamera = MatrixTranslate(camera.x, camera.y, camera.z);

@@ -16,7 +16,7 @@ LOGICA = src/pista.c src/obstaculos.c src/carro.c src/ia.c \
          src/ordenacao.c src/corrida.c src/motor.c src/olhar.c src/pitstop.c src/vibracao.c src/configuracoes.c
 
 # Módulos que desenham na tela
-DESENHO = src/render.c src/mundo.c src/construcao.c src/paisagem.c src/infraestrutura.c src/carros3d.c src/fumaca.c src/noite.c src/hud.c src/menu.c src/visual.c src/audio.c src/efeitos.c src/controle.c
+DESENHO = src/render.c src/mundo.c src/construcao.c src/paisagem.c src/infraestrutura.c src/carros3d.c src/fumaca.c src/marcas.c src/noite.c src/hud.c src/menu.c src/visual.c src/audio.c src/efeitos.c src/controle.c
 
 FONTES = src/main.c $(LOGICA) $(DESENHO)
 OBJETOS = $(FONTES:src/%.c=build/%.o)

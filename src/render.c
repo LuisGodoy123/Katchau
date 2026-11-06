@@ -21,6 +21,8 @@
 #include "mundo.h"
 #include "carros3d.h"
 #include "fumaca.h"
+#include "marcas.h"
+#include "configuracoes.h"
 #include "noite.h"
 #include "raymath.h"
 
@@ -56,6 +58,9 @@
 #define TREPIDACAO_NA_GRAMA   0.06f    /* metros */
 
 /* ---------- Fumaça ---------- */
+#define INICIO_DA_MARCA       0.40f    /* derrapagem abaixo disso não marca o asfalto */
+#define MARCA_NO_DRIFT        0.15f
+#define KMH_DA_FREADA_QUE_MARCA 140.0f /* freando forte acima disso, as quatro rodas marcam de leve */
 #define INICIO_DA_FUMACA      0.55f    /* derrapagem abaixo disso não solta fumaça */
 #define ANGULO_DA_FUMACA_DO_DRIFT 4.0f   /* graus */
 #define ANGULO_DA_FUMACA_CHEIA 30.0f
@@ -421,6 +426,55 @@ static void soltarFumacaDoCarro(Camera3D camera, Carro *carro, float tempoQuadro
 }
 
 /*
+ * marcarPneus
+ * As marcas de pneu: as rodas de trás marcam no drift, na derrapagem, na arrancada e na
+ * rodada; as quatro marcam numa freada forte em alta. Na grama não marca.
+ * Recebe: o carro.
+ * Devolve: nada.
+ */
+static void marcarPneus(Carro *carro) {
+    float forca = 0.0f;
+    int todas = 0;
+    float kmh = carro->velocidade / UNIDADES_POR_METRO * 3.6f;
+    if (!estaForaDaPista(carro) && carro->velocidade > 0.0f && !carroNoPit(carro)) {
+        if (carro->rodando) {
+            forca = 1.0f;
+            todas = 1;
+        } else if (carro->forcaDoDrift > MARCA_NO_DRIFT) {
+            forca = 0.55f + 0.45f * fminf(fabsf(carro->anguloDeDrift) / ANGULO_DA_FUMACA_CHEIA, 1.0f);
+        } else if (carro->derrapagem > INICIO_DA_MARCA) {
+            forca = (carro->derrapagem - INICIO_DA_MARCA) / (1.0f - INICIO_DA_MARCA);
+        } else if (carro->ultimosComandos.acelerar && carro->velocidade < VELOCIDADE_DA_ARRANCADA * 0.7f) {
+            forca = 0.7f * (1.0f - carro->velocidade / (VELOCIDADE_DA_ARRANCADA * 0.7f));
+        } else if (carro->ultimosComandos.frear && kmh > KMH_DA_FREADA_QUE_MARCA) {
+            forca = 0.35f * fminf((kmh - KMH_DA_FREADA_QUE_MARCA) / 100.0f, 1.0f);
+            todas = 1;
+        }
+    }
+    if (forca <= 0.02f) {
+        for (int roda = 0; roda < 4; roda++) {
+            soltarRoda(carro->numero, roda);
+        }
+        return;
+    }
+    Matrix noMundo = matrizDoCarro(carro);
+    float meiaBitola = larguraDoCarro3D(carro->numero) * BITOLA / 2.0f;
+    float meioEntreEixos = comprimentoDoCarro3D(carro->numero) * ENTRE_EIXOS / 2.0f;
+    Vector3 centro = Vector3Transform((Vector3){ 0.0f, 0.0f, 0.0f }, noMundo);
+    Vector3 adiante = Vector3Subtract(Vector3Transform((Vector3){ 0.0f, 0.0f, 1.0f }, noMundo), centro);
+    for (int roda = 0; roda < 4; roda++) {
+        int deTras = (roda >= 2);
+        if (!deTras && !todas) {
+            soltarRoda(carro->numero, roda);
+            continue;
+        }
+        float lado = (roda % 2 == 0) ? 1.0f : -1.0f;
+        Vector3 ponto = Vector3Transform((Vector3){ lado * meiaBitola, 0.0f, deTras ? -meioEntreEixos : meioEntreEixos }, noMundo);
+        deixarMarca(carro->numero, roda, ponto, adiante, forca);
+    }
+}
+
+/*
  * congelarCena
  * Na pausa, os flashes e a torcida param junto com a corrida.
  * Recebe: 1 se o jogo está pausado.
@@ -477,6 +531,7 @@ static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
         atualizarNoite(cenaPausada ? 0.0f : GetFrameTime());
     }
     prepararLuzes(ehNoite);
+    prepararSombras(pista->id, camera, configuracoesAtuais()->sombras);
 
     prepararPlanosDaCamera();
     BeginMode3D(camera);
@@ -484,6 +539,7 @@ static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
     desenharCenario(pista->id, camera.position);
 
     if (corrida != NULL) {
+        desenharMarcas();
         for (int r = 0; r < TOTAL_RIVAIS; r++) {
             desenharCarroNoMundo(camera, &corrida->rivais[r]);
         }
@@ -568,15 +624,19 @@ void desenharVisaoDoJogador(Corrida *corrida) {
     relogioAnterior = corrida->tempoDeCorrida;
     if (passou < 0.0f) {
         limparFumaca();
+        limparMarcas();
         passou = 0.0f;
     }
     if (passou > 0.0f) {
         for (int r = 0; r < TOTAL_RIVAIS; r++) {
             soltarFumacaDoCarro(camera, &corrida->rivais[r], passou);
+            marcarPneus(&corrida->rivais[r]);
         }
         soltarFumacaDoCarro(camera, jogador, passou);
+        marcarPneus(jogador);
     }
     atualizarFumaca(passou);
+    atualizarMarcas(passou);
 
     desenharMundo3D(camera, corrida->pista, corrida);
 }
