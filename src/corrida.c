@@ -639,6 +639,23 @@ static void tratarBatida(Corrida *corrida, Carro *a, Carro *b, float tempoQuadro
     a->batidaNovaDeCarro = 1;
     b->batidaNovaDeCarro = 1;
 
+    /* O contato, para as faíscas e o som de lata: no meio dos dois carros, na altura do para-choque */
+    PontoNoMundo pa = pontoNoMundo(a->posicao, a->deslocamentoLateral);
+    PontoNoMundo pb = pontoNoMundo(b->posicao, b->deslocamentoLateral);
+    float deslize = (fabsf(a->velocidade - b->velocidade) + fabsf(a->velocidade + b->velocidade) * 0.5f * (deLado < naFrente ? 0.5f : 0.1f))
+                    / UNIDADES_POR_METRO;
+    Carro *dupla[2] = { a, b };
+    for (int k = 0; k < 2; k++) {
+        if (pancada >= dupla[k]->contato) {
+            dupla[k]->contato = pancada;
+            dupla[k]->contatoComCarro = 1;
+            dupla[k]->contatoX = (pa.x + pb.x) * 0.5f;
+            dupla[k]->contatoY = (pa.y + pb.y) * 0.5f + 0.4f;
+            dupla[k]->contatoZ = (pa.z + pb.z) * 0.5f;
+            dupla[k]->contatoDeslize = deslize;
+        }
+    }
+
     /* Só roda quem bate com o jogador: rodadas entre rivais só atrapalhariam a corrida
      * longe dos olhos dele, e fechariam a pista para todo mundo */
     int podeRodar = (a == &corrida->jogador || b == &corrida->jogador) && !carroNoPit(a) && !carroNoPit(b);
@@ -908,6 +925,14 @@ void atualizarCorrida(Corrida *corrida, Comandos comandosJogador, float tempoQua
         comandosJogador = atualizarIA(&corrida->jogador, corrida->pista);
         corrida->jogador.controladoPeloJogador = 0;   /* agora quem dirige é a IA */
         corrida->jogador.re = 0.0f;
+    }
+
+    /* O contato (faíscas e som de lata) vale só para este quadro: o muro e as batidas o preenchem */
+    for (int i = -1; i < TOTAL_RIVAIS; i++) {
+        Carro *carro = (i < 0) ? &corrida->jogador : &corrida->rivais[i];
+        carro->contato = 0.0f;
+        carro->contatoComCarro = 0;
+        carro->contatoDeslize = 0.0f;
     }
 
     /* 0) Vácuo, antes de mover: todos medem com os carros no mesmo lugar */

@@ -87,6 +87,11 @@ typedef struct {
     int batidaNovaDeCarro;         /* 1 se essa batida foi contra outro carro (0 = foi no muro) */
     int rodadaNova;                /* 1 quando ESTE carro começou a rodar e o som ainda não tocou (rodadaDoMcQueen consome) */
     int raspandoNoMuro;            /* 1 enquanto o carro está encostado no muro */
+    float contato;                 /* de 0 a 1: a força do contato NESTE quadro (com carro ou muro); 0 = sem contato.
+                                    * Para as faíscas e o som de lata: vale para todos os carros */
+    int contatoComCarro;           /* 1: o contato deste quadro foi com outro carro (0 = no muro) */
+    float contatoX, contatoY, contatoZ;   /* metros: onde, no mundo, as duas superfícies se tocam */
+    float contatoDeslize;          /* metros por segundo: quanto uma superfície escorrega na outra */
 
     /* ---- Rodada ---- */
     int rodando;                   /* 1 enquanto está rodando: o piloto não manda no carro */

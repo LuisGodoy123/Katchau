@@ -4183,6 +4183,38 @@ static void testarPelotao(void) {
     liberarPista(pista);
 }
 
+/* ---------- Contato das batidas (faíscas e som de lata) ---------- */
+static void testarContatoDasBatidas(void) {
+    printf("\n[Teste] Contato das batidas (para as faiscas e o som de lata)\n");
+    Pista *pista = criarPista();
+    Corrida corrida;
+    float quadro = 1.0f / 60.0f;
+    Carro *rival = &corrida.rivais[0];
+    ladoALado(&corrida, pista, rival, -8.0f, 0.0f, 0.0f, 9000.0f, 3000.0f);
+    Comandos reto = { 1, 0, 0, 0, 0.0f, 0, 0 };
+    int tocou = 0, comCarro = 0, osDois = 0, pertoDosCarros = 0;
+    for (int i = 0; i < 90 && !tocou; i++) {
+        atualizarCorrida(&corrida, reto, quadro);
+        if (corrida.jogador.contato > 0.0f) {
+            tocou = 1;
+            comCarro = corrida.jogador.contatoComCarro;
+            osDois = rival->contato > 0.0f && rival->contatoComCarro;
+            PontoNoMundo p = pontoNoMundo(corrida.jogador.posicao, corrida.jogador.deslocamentoLateral);
+            float dx = p.x - corrida.jogador.contatoX, dz = p.z - corrida.jogador.contatoZ;
+            pertoDosCarros = sqrtf(dx * dx + dz * dz) < 6.0f;
+        }
+    }
+    verificar(tocou && comCarro && osDois, "batida de carro: os dois carros registram o contato com carro");
+    verificar(pertoDosCarros, "o ponto do contato (das faiscas) fica entre os carros");
+    corrida.jogador.velocidade = 0.0f;
+    rival->distanciaPercorrida += 100.0f * UNIDADES_POR_METRO;
+    moverNaPista(&rival->posicao, 100.0f * UNIDADES_POR_METRO);
+    Comandos nada = { 0, 0, 0, 0, 0.0f, 0, 0 };
+    atualizarCorrida(&corrida, nada, quadro);
+    verificar(corrida.jogador.contato == 0.0f, "sem encostar em nada, o contato volta a zero no quadro seguinte");
+    liberarPista(pista);
+}
+
 int main(int argc, char *argv[]) {
     int modoDetalhado = (argc > 1 && strcmp(argv[1], "-v") == 0);
 
@@ -4204,6 +4236,7 @@ int main(int argc, char *argv[]) {
     testarBatidaDoMcQueen();
     testarLiderancaDoMcQueen();
     testarUltrapassagensDoMcQueen();
+    testarContatoDasBatidas();
     testarSetoresEIntervalos();
     testarMotor();
     testarVoltaDaVitoria();

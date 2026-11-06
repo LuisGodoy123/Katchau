@@ -6,6 +6,7 @@
  */
 
 #include <math.h>
+#include <stdlib.h>
 #include "raylib.h"
 #include "efeitos.h"
 #include "motor.h"
@@ -129,6 +130,190 @@ typedef struct {
 
 static EstadoDosEfeitos estado;
 
+/* ---------- Batidas de lata (todos os carros) ----------
+ * O "crash" de metal das batidas, como nos jogos de corrida: um tranco grave, o ruído da
+ * lata amassando, pedacinhos voando e o metal ressoando. Os sons são gerados aqui mesmo,
+ * em C, quando o jogo abre (não há arquivo): 4 variações de batida forte e 4 de batida leve. */
+#define VARIACOES_DE_LATA        4
+#define VOLUME_LATA              0.95f
+#define ALCANCE_DA_LATA          90.0f   /* metros: batidas de rivais mais longe que isso não são ouvidas */
+#define LATA_FORTE               0.55f   /* força do contato a partir da qual a batida é "forte" */
+#define PAUSA_ENTRE_LATAS        0.07    /* segundos: os dois carros de uma batida fazem um som só */
+#define TAXA_DA_LATA             44100
+
+static Sound latasFortes[VARIACOES_DE_LATA];
+static Sound latasLeves[VARIACOES_DE_LATA];
+static int latasProntas = 0;
+static int latasAntes[TOTAL_CARROS];   /* por número do carro: o contato já vinha do quadro anterior */
+static double horaDaUltimaLata = -10.0;
+static int ultimaLata = -1;
+
+/* Gerador de números do som (cada variação tem a sua semente: o som sai sempre igual) */
+static unsigned int sementeDaLata;
+static float aleatorioDaLata(void) {
+    sementeDaLata = sementeDaLata * 1664525u + 1013904223u;
+    return (float) ((sementeDaLata >> 8) & 0xFFFFFF) / (float) 0xFFFFFF;   /* 0 a 1 */
+}
+
+/* Um filtro de banda (biquad), para dar "cor" ao ruído */
+typedef struct { float b0, b1, b2, a1, a2, x1, x2, y1, y2; } FiltroDeBanda;
+
+static FiltroDeBanda filtroDeBanda(float centro, float q) {
+    float w0 = 2.0f * PI * centro / TAXA_DA_LATA;
+    float alfa = sinf(w0) / (2.0f * q);
+    float a0 = 1.0f + alfa;
+    FiltroDeBanda f = { alfa / a0, 0.0f, -alfa / a0, -2.0f * cosf(w0) / a0, (1.0f - alfa) / a0, 0, 0, 0, 0 };
+    return f;
+}
+
+static float filtrar(FiltroDeBanda *f, float x) {
+    float y = f->b0 * x + f->b1 * f->x1 + f->b2 * f->x2 - f->a1 * f->y1 - f->a2 * f->y2;
+    f->x2 = f->x1;
+    f->x1 = x;
+    f->y2 = f->y1;
+    f->y1 = y;
+    return y;
+}
+
+/*
+ * gerarBatidaDeLata
+ * Sintetiza o som de uma batida de carro: o tranco grave (o peso do carro), o ruído da lata
+ * amassando (duas bandas de ruído), os pedacinhos voando (estalos curtos) e o metal ressoando
+ * (tons sem harmonia que apagam devagar).
+ * Recebe: a semente (cada uma dá uma variação) e se é uma batida forte.
+ * Devolve: o som.
+ */
+static Sound gerarBatidaDeLata(unsigned int semente, int forte) {
+    sementeDaLata = semente * 2654435761u + 12345u;
+    float duracao = forte ? 0.95f : 0.5f;
+    int n = (int) (duracao * TAXA_DA_LATA);
+    float *x = calloc((size_t) n, sizeof(float));
+    short *dados = malloc(sizeof(short) * (size_t) n);
+    if (x == NULL || dados == NULL) {
+        free(x);
+        free(dados);
+        return (Sound){ 0 };
+    }
+
+    /* O tranco grave, que cai de tom */
+    float fase = 0.0f;
+    for (int i = 0; i < n; i++) {
+        float t = (float) i / TAXA_DA_LATA;
+        float freq = forte ? 50.0f + 55.0f * expf(-t / 0.05f) : 85.0f + 60.0f * expf(-t / 0.03f);
+        fase += 2.0f * PI * freq / TAXA_DA_LATA;
+        x[i] += (forte ? 1.0f : 0.55f) * sinf(fase) * expf(-t / (forte ? 0.11f : 0.06f));
+    }
+
+    /* A lata amassando: ruído em duas bandas, uma média e uma aguda */
+    FiltroDeBanda media = filtroDeBanda(forte ? 1500.0f : 2100.0f, 0.8f);
+    FiltroDeBanda aguda = filtroDeBanda(4800.0f, 1.1f);
+    for (int i = 0; i < n; i++) {
+        float t = (float) i / TAXA_DA_LATA;
+        float ruido = aleatorioDaLata() * 2.0f - 1.0f;
+        float ataque = 1.0f - expf(-t / 0.0015f);
+        x[i] += 2.2f * filtrar(&media, ruido) * ataque * expf(-t / (forte ? 0.09f : 0.05f));
+        x[i] += 1.4f * filtrar(&aguda, ruido) * ataque * expf(-t / 0.025f);
+    }
+
+    /* Os pedacinhos voando: estalos curtos espalhados logo depois da batida */
+    int estalos = forte ? 26 : 10;
+    for (int k = 0; k < estalos; k++) {
+        float quando = aleatorioDaLata() * (forte ? 0.38f : 0.18f);
+        int inicio = (int) (quando * TAXA_DA_LATA);
+        float forca = (0.25f + 0.5f * aleatorioDaLata()) * (1.0f - quando / 0.45f);
+        int tamanho = (int) (0.004f * TAXA_DA_LATA);
+        FiltroDeBanda clique = filtroDeBanda(2500.0f + 4000.0f * aleatorioDaLata(), 2.0f);
+        for (int j = 0; j < tamanho && inicio + j < n; j++) {
+            float ruido = aleatorioDaLata() * 2.0f - 1.0f;
+            x[inicio + j] += 2.0f * forca * filtrar(&clique, ruido) * expf(-(float) j / (0.0012f * TAXA_DA_LATA));
+        }
+    }
+
+    /* O metal ressoando: tons fora de harmonia, que apagam devagar */
+    static const float TONS[5] = { 410.0f, 970.0f, 1560.0f, 2390.0f, 3420.0f };
+    for (int k = 0; k < 5; k++) {
+        float freq = TONS[k] * (0.92f + 0.16f * aleatorioDaLata());
+        float peso = 0.10f + 0.12f * aleatorioDaLata();
+        float apaga = (forte ? 0.18f : 0.10f) + 0.20f * aleatorioDaLata();
+        float inicioDaFase = 2.0f * PI * aleatorioDaLata();
+        for (int i = 0; i < n; i++) {
+            float t = (float) i / TAXA_DA_LATA;
+            x[i] += peso * sinf(2.0f * PI * freq * t + inicioDaFase) * expf(-t / apaga) * (1.0f - expf(-t / 0.003f));
+        }
+    }
+
+    /* Corta os picos de leve (a "sujeira" de batida) e acerta o volume */
+    float maior = 1e-6f;
+    for (int i = 0; i < n; i++) {
+        maior = fmaxf(maior, fabsf(x[i]));
+    }
+    for (int i = 0; i < n; i++) {
+        float t = (float) i / TAXA_DA_LATA;
+        float fim = fminf(1.0f, (duracao - t) / 0.02f);   /* apaga no finalzinho, sem estalo */
+        float y = tanhf(1.6f * x[i] / maior) / tanhf(1.6f) * 0.9f * fim;
+        dados[i] = (short) (y * 32767.0f);
+    }
+    free(x);
+
+    Wave onda = { (unsigned int) n, TAXA_DA_LATA, 16, 1, dados };
+    Sound som = LoadSoundFromWave(onda);
+    free(dados);
+    return som;
+}
+
+/*
+ * tocarBatidasDeLata
+ * No começo de cada contato (carro com carro ou carro no muro), de qualquer carro perto do
+ * jogador, toca uma batida de lata: forte ou leve pela força, mais baixa quanto mais longe.
+ * Os dois carros de uma mesma batida fazem um som só.
+ * Recebe: a corrida e se a corrida está andando.
+ * Devolve: nada.
+ */
+static void tocarBatidasDeLata(Corrida *corrida, int ativo) {
+    if (!latasProntas) {
+        return;
+    }
+    float melhorVolume = 0.0f, forcaDaMelhor = 0.0f;
+    for (int i = -1; i < TOTAL_RIVAIS; i++) {
+        Carro *carro = (i < 0) ? &corrida->jogador : &corrida->rivais[i];
+        int numero = carro->numero;
+        if (numero < 0 || numero >= TOTAL_CARROS) {
+            continue;
+        }
+        int temContato = ativo && carro->contato > 0.0f;
+        if (temContato && !latasAntes[numero]) {
+            float perto = 1.0f;
+            if (i >= 0) {
+                float metros = fabsf(carro->distanciaPercorrida - corrida->jogador.distanciaPercorrida) / UNIDADES_POR_METRO;
+                perto = fminf(fmaxf(1.0f - metros / ALCANCE_DA_LATA, 0.0f), 1.0f);
+                perto *= perto;
+            }
+            float volume = perto * (0.35f + 0.65f * fminf(fmaxf(carro->contato, 0.0f), 1.0f));
+            if (volume > melhorVolume) {
+                melhorVolume = volume;
+                forcaDaMelhor = carro->contato;
+            }
+        }
+        latasAntes[numero] = temContato;
+    }
+
+    double agora = GetTime();
+    if (melhorVolume < 0.02f || agora - horaDaUltimaLata < PAUSA_ENTRE_LATAS) {
+        return;
+    }
+    int variacao;
+    do {
+        variacao = GetRandomValue(0, VARIACOES_DE_LATA - 1);
+    } while (variacao == ultimaLata);
+    ultimaLata = variacao;
+    Sound som = (forcaDaMelhor >= LATA_FORTE) ? latasFortes[variacao] : latasLeves[variacao];
+    SetSoundVolume(som, VOLUME_LATA * melhorVolume);
+    SetSoundPitch(som, 0.9f + 0.2f * (float) GetRandomValue(0, 100) / 100.0f);
+    StopSound(som);
+    PlaySound(som);
+    horaDaUltimaLata = agora;
+}
+
 /* ==================================================================
  * Utilidades
  * ================================================================== */
@@ -230,6 +415,14 @@ static void tocarCurto(int som, float volume, float tom) {
  * Devolve: nada.
  */
 void carregarEfeitos(void) {
+    for (int v = 0; v < VARIACOES_DE_LATA; v++) {
+        latasFortes[v] = gerarBatidaDeLata(100u + (unsigned int) v, 1);
+        latasLeves[v] = gerarBatidaDeLata(200u + (unsigned int) v, 0);
+    }
+    latasProntas = 1;
+    for (int v = 0; v < VARIACOES_DE_LATA; v++) {
+        latasProntas = latasProntas && IsSoundValid(latasFortes[v]) && IsSoundValid(latasLeves[v]);
+    }
     for (int i = 0; i < FAIXAS_ACELERANDO; i++) {
         carregarFaixa(&acelerando[i]);
     }
@@ -274,6 +467,15 @@ void carregarEfeitos(void) {
  * Devolve: nada.
  */
 void descarregarEfeitos(void) {
+    for (int v = 0; v < VARIACOES_DE_LATA; v++) {
+        if (IsSoundValid(latasFortes[v])) {
+            UnloadSound(latasFortes[v]);
+        }
+        if (IsSoundValid(latasLeves[v])) {
+            UnloadSound(latasLeves[v]);
+        }
+    }
+    latasProntas = 0;
     for (int i = 0; i < FAIXAS_ACELERANDO; i++) {
         descarregarFaixa(&acelerando[i]);
     }
@@ -597,7 +799,8 @@ static void atualizarLoopsDoJogador(Corrida *corrida, int ativo, float tempo) {
     atualizarLoop(&loops[LOOP_GRAMA], fora ? VOLUME_GRAMA * powf(f, 0.7f) : 0.0f, 0.7f + 0.7f * f, tempo);
 
     /* O muro */
-    int raspando = ativo && jogador->raspandoNoMuro && f > 0.03f;
+    int raspando = ativo && f > 0.03f && (jogador->raspandoNoMuro ||
+                                         (jogador->contatoComCarro && jogador->contatoDeslize > 1.5f));
     atualizarLoop(&loops[LOOP_MURO], raspando ? VOLUME_MURO * powf(f, 0.6f) : 0.0f, 0.8f + 0.4f * f, tempo);
 
     /* O nitro queimando */
@@ -703,6 +906,7 @@ void atualizarEfeitosDaCorrida(Corrida *corrida, int ativo, float tempoQuadro) {
     atualizarMotorDoJogador(ativo, jogador, tempoQuadro);
     atualizarMotoresDosRivais(corrida, ativo, tempoQuadro);
     atualizarLoopsDoJogador(corrida, ativo, tempoQuadro);
+    tocarBatidasDeLata(corrida, ativo);
 
     if (!estado.pronto || !ativo) {
         sincronizarEstado(jogador);   /* sem som: só acompanha, para ouvir apenas o que mudar depois */

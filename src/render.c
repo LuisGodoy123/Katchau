@@ -21,6 +21,7 @@
 #include "mundo.h"
 #include "carros3d.h"
 #include "fumaca.h"
+#include "faiscas.h"
 #include "marcas.h"
 #include "torcida3d.h"
 #include "telao.h"
@@ -769,6 +770,7 @@ static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
         }
         if (!desenhandoOTelao) {
             desenharFumaca3D(camera);
+            desenharFaiscas(camera);
         }
         comecarChamas();
         for (int r = 0; r < TOTAL_RIVAIS; r++) {
@@ -790,6 +792,9 @@ static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
         BeginMode3D(camera);
         desenharTelasQueBrilham(pista->id);
         if (corrida != NULL) {
+            rlDisableBackfaceCulling();
+            desenharFaiscas(camera);   /* as faíscas também brilham (o halo nasce delas) */
+            rlEnableBackfaceCulling();
             comecarChamas();
             for (int r = 0; r < TOTAL_RIVAIS; r++) {
                 desenharChamasDoCarro(camera, &corrida->rivais[r]);
@@ -988,6 +993,7 @@ void desenharVisaoDoJogador(Corrida *corrida) {
     if (passou < 0.0f) {
         limparFumaca();
         limparMarcas();
+        limparFaiscas();
         passou = 0.0f;
     }
     if (passou > 0.0f) {
@@ -997,8 +1003,10 @@ void desenharVisaoDoJogador(Corrida *corrida) {
         }
         soltarFumacaDoCarro(camera, jogador, passou);
         marcarPneus(jogador);
+        soltarFaiscasDaCorrida(corrida, passou);
     }
     atualizarFumaca(passou);
+    atualizarFaiscas(passou);
     atualizarMarcas(passou);
 
     desenharMundo3D(camera, corrida->pista, corrida);

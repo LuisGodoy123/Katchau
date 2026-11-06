@@ -225,6 +225,10 @@ Carro criarCarro(const char *nome, int numero, Segmento *largada, float deslocam
     carro.forcaDoDrift = 0.0f;
     carro.pancada = 0.0f;
     carro.batidaNova = 0.0f;
+    carro.contato = 0.0f;
+    carro.contatoComCarro = 0;
+    carro.contatoX = carro.contatoY = carro.contatoZ = 0.0f;
+    carro.contatoDeslize = 0.0f;
     carro.batidaNovaDeCarro = 0;
     carro.rodadaNova = 0;
     carro.raspandoNoMuro = 0;
@@ -544,6 +548,23 @@ float volanteDaFolgaDaCurva(const Carro *carro) {
  * Devolve: nada.
  */
 static void encostarNoLimite(Carro *carro, float lado, float tempoQuadro) {
+    /* O contato com o muro: na lateral do carro, do lado do muro, na altura do para-choque */
+    float metrosPorLargura = larguraDoLado(carro->posicao.segmento, carro->deslocamentoLateral);
+    float noMuro = carro->deslocamentoLateral + lado * (carro->largura * 0.5f) / fmaxf(metrosPorLargura, 0.1f);
+    PontoNoMundo ponto = pontoNoMundo(carro->posicao, noMuro);
+    float proporcao = carro->velocidade / carro->velocidadeMaxima;
+    if (proporcao > 0.03f) {
+        float forca = fminf(0.25f + proporcao, 1.0f);
+        if (forca > carro->contato) {
+            carro->contato = forca;
+            carro->contatoComCarro = 0;
+            carro->contatoX = ponto.x;
+            carro->contatoY = ponto.y + 0.35f;
+            carro->contatoZ = ponto.z;
+            carro->contatoDeslize = carro->velocidade / UNIDADES_POR_METRO;
+        }
+    }
+
     carro->velocidade = fmaxf(carro->velocidade - PERDA_NO_MURO * tempoQuadro, 0.0f);
     carro->raspandoNoMuro = 1;
     if (carro->direcaoLivre && carro->desvioDoRumo * lado > 0.0f && carro->volante * lado < -VOLANTE_PARA_SAIR_DO_LIMITE) {
