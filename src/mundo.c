@@ -1388,6 +1388,16 @@ static void plantarArvoreDoJardim(Vector3 pe) {
     colocarModelo((ModeloDeObjeto) (MODELO_ARVORE_1 + variacao), pe, sortearObjeto(0.0f, 2.0f * PI), sortearObjeto(MENOR_ARVORE, MAIOR_ARVORE));
 }
 
+/* As árvores da beira da pista esperam os telões escolherem o lugar (veja construirObjetos) */
+#define MAXIMO_DE_ARVORES_ADIADAS 4096
+typedef struct {
+    Vector3 pe;
+    float giro, tamanho;
+    int variacao;
+} ArvoreAdiada;
+static ArvoreAdiada arvoresAdiadas[MAXIMO_DE_ARVORES_ADIADAS];
+static int totalDeArvoresAdiadas = 0;
+
 /*
  * construirObjetos
  * Anda pela lista de objetos de cada segmento, põe uma cópia do modelo de
@@ -1413,8 +1423,10 @@ static void construirObjetos(Pista *pista) {
                         break;
                     }
                     int variacao = (int) sortearObjeto(0.0f, 2.999f);
-                    colocarModelo((ModeloDeObjeto) (MODELO_ARVORE_1 + variacao), pe, sortearObjeto(0.0f, 2.0f * PI),
-                                  sortearObjeto(MENOR_ARVORE, MAIOR_ARVORE));
+                    float giro = sortearObjeto(0.0f, 2.0f * PI), tamanho = sortearObjeto(MENOR_ARVORE, MAIOR_ARVORE);
+                    if (totalDeArvoresAdiadas < MAXIMO_DE_ARVORES_ADIADAS) {
+                        arvoresAdiadas[totalDeArvoresAdiadas++] = (ArvoreAdiada){ pe, giro, tamanho, variacao };
+                    }
                     break;
                 }
                 case OBJETO_PNEUS:
@@ -1442,6 +1454,15 @@ static void construirObjetos(Pista *pista) {
 
     construirArquibancadas(pista);
     infra = construirInfraestrutura(pista, alturaNaGrade, plantarArvoreDoJardim, colocarNoCenario);
+
+    /* As árvores da beira da pista entram depois dos telões: onde fica um, não nasce árvore */
+    for (int i = 0; i < totalDeArvoresAdiadas; i++) {
+        ArvoreAdiada *a = &arvoresAdiadas[i];
+        if (!naAreaDeUmTelao(a->pe.x, a->pe.z)) {
+            colocarModelo((ModeloDeObjeto) (MODELO_ARVORE_1 + a->variacao), a->pe, a->giro, a->tamanho);
+        }
+    }
+    totalDeArvoresAdiadas = 0;
 
     fecharTodosOsLotes();
 

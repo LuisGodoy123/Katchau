@@ -48,4 +48,7 @@ typedef struct {
 const MalhasDaInfraestrutura *construirInfraestrutura(Pista *pista, AlturaDaGrade altura, PlantarArvore plantar, ColocarNoCenario colocar);
 void descarregarInfraestrutura(void);
 
+int naAreaDeUmTelao(float x, float z);
+int teloesDeInterlagos(Vector3 *pes, float *giros, int maximo);
+
 #endif

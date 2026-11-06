@@ -380,16 +380,142 @@ static int passarela(float metros) {
     return 1;
 }
 
+static void ocupar(Vector3 p, float raio);
+static int ocupado(Vector3 p);
+static void marcarOQueExiste(int comArvores);
+
+/* Os telões de Interlagos, pensados para a plateia: cada um fica do outro lado da pista,
+ * virado para o meio das arquibancadas que ele atende. Os da reta dos boxes ficam em cima do
+ * prédio dos boxes; os outros, no primeiro lugar livre da beira da pista para fora. */
+typedef struct {
+    float metros;        /* onde fica, ao longo da pista */
+    float olharDe, olharAte;   /* o trecho das arquibancadas para onde ele olha (metros) */
+    float tamanho;
+    int noTelhado;       /* 1: em cima do prédio dos boxes */
+} TelaoPlanejado;
+
+static const TelaoPlanejado TELOES[] = {
+    { -200.0f, 3740.0f - 4312.0f, 4280.0f - 4312.0f, 1.25f, 1 },   /* telhado dos boxes: arquibancadas A e B */
+    {   95.0f,   24.0f,  270.0f, 1.25f, 1 },                      /* telhado dos boxes: camarote e M */
+    {  470.0f,  341.0f,  607.0f, 1.0f, 0 },                       /* S do Senna e Curva do Sol: D e H */
+    {  740.0f,  636.0f,  833.0f, 1.0f, 0 },                       /* saída da Curva do Sol: N e R */
+    {  980.0f,  857.0f, 1080.0f, 1.0f, 0 },                       /* começo da Reta Oposta: G */
+    { 1190.0f, 1080.0f, 1299.0f, 1.0f, 0 },                       /* fim da Reta Oposta: G */
+    { 1400.0f, 1330.0f, 1463.0f, 1.0f, 0 },                       /* S e V, na Descida do Lago */
+};
+#define TOTAL_DE_TELOES        (int) (sizeof(TELOES) / sizeof(TELOES[0]))
+#define MAXIMO_DE_TELOES       16
+static Vector4 areasDosTeloes[MAXIMO_DE_TELOES];   /* x, z e o raio de cada um */
+static int totalDeAreasDosTeloes = 0;
+static float alturasDosTeloes[MAXIMO_DE_TELOES];
+
 /*
- * construirTelao
- * O telão, de frente para a reta dos boxes, depois do fim da arquibancada M.
+ * teloesDeInterlagos
+ * Recebe: onde guardar o pé (x, y, z) e o giro de cada telão para a plateia, e quantos cabem.
+ * Devolve: quantos são.
+ */
+int teloesDeInterlagos(Vector3 *pes, float *giros, int maximo) {
+    int n = 0;
+    for (int i = 0; i < totalDeAreasDosTeloes && n < maximo; i++, n++) {
+        pes[n] = (Vector3){ areasDosTeloes[i].x, alturasDosTeloes[i], areasDosTeloes[i].y };
+        giros[n] = areasDosTeloes[i].w;
+    }
+    return n;
+}
+
+/*
+ * naAreaDeUmTelao
+ * Recebe: um ponto do chão.
+ * Devolve: 1 se ali fica um telão (uma árvore ali não é plantada).
+ */
+int naAreaDeUmTelao(float x, float z) {
+    for (int i = 0; i < totalDeAreasDosTeloes; i++) {
+        if (hypotf(x - areasDosTeloes[i].x, z - areasDosTeloes[i].y) < areasDosTeloes[i].z) {
+            return 1;
+        }
+    }
+    return 0;
+}
+#define ALTURA_DO_TELHADO      15.2f   /* metros: o topo do prédio dos boxes */
+#define NO_TELHADO             22.0f   /* metros do pit lane para dentro do prédio */
+#define MEIA_LARGURA_DO_TELAO  12.5f   /* metros, com as caixas de som */
+#define MEIO_FUNDO_DO_TELAO    3.0f
+#define LONGE_DA_PISTA_MINIMO  14.0f   /* metros além da beira da pista onde a procura começa */
+#define LONGE_DA_PISTA_MAXIMO  120.0f
+
+/*
+ * paraOndeOlha
+ * Recebe: o telão.
+ * Devolve: o meio das arquibancadas que ele atende, no mundo.
+ */
+static Vector3 paraOndeOlha(const TelaoPlanejado *t) {
+    float meio = (t->olharDe + t->olharAte) / 2.0f;
+    return pontoNaPista(fmodf(meio + metrosDaVolta, metrosDaVolta), (46.0f + 8.0f) / largura, NULL);
+}
+
+/*
+ * cabeAli
+ * Recebe: o pé do telão, o giro e o tamanho.
+ * Devolve: 1 se nada (pista, pit, prédios, árvores, arquibancadas) ocupa o lugar dele.
+ */
+static int cabeAli(Vector3 pe, float giro, float tamanho) {
+    Vector3 frente = { sinf(giro), 0.0f, cosf(giro) }, lado = { cosf(giro), 0.0f, -sinf(giro) };
+    for (float a = -MEIA_LARGURA_DO_TELAO; a <= MEIA_LARGURA_DO_TELAO + 0.01f; a += MEIA_LARGURA_DO_TELAO / 2.0f) {
+        for (float b = -MEIO_FUNDO_DO_TELAO; b <= MEIO_FUNDO_DO_TELAO + 0.01f; b += MEIO_FUNDO_DO_TELAO) {
+            Vector3 p = { pe.x + (lado.x * a + frente.x * b) * tamanho, 0.0f, pe.z + (lado.z * a + frente.z * b) * tamanho };
+            if (ocupado(p) || !livre(p, 4.0f) || dentroDoLago(p.x, p.z)) {
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
+/*
+ * construirTeloes
+ * Põe os telões planejados e o da reta dos boxes (de frente para quem chega no S do Senna).
  * Recebe: nada.
  * Devolve: nada.
  */
-static void construirTelao(void) {
+static void construirTeloes(void) {
     float rumo;
     Vector3 pe = pontoNaPista(METROS_DO_TELAO, LATERAL_DO_TELAO, &rumo);
     colocar(CENARIO_TELAO, pe, -rumo, 1.0f);
+    ocupar(pe, 14.0f);
+
+    totalDeAreasDosTeloes = 0;
+    marcarOQueExiste(0);
+    int postos = 0;
+    for (int i = 0; i < TOTAL_DE_TELOES; i++) {
+        const TelaoPlanejado *t = &TELOES[i];
+        float metros = fmodf(t->metros + metrosDaVolta, metrosDaVolta);
+        Vector3 alvo = paraOndeOlha(t);
+        int achou = 0;
+        if (t->noTelhado) {
+            pe = pontoNaPista(metros, -1.0f - (LARGURA_DO_PIT_LANE + NO_TELHADO) / largura, NULL);
+            pe.y += ALTURA_DO_TELHADO;
+            achou = 1;
+        } else {
+            for (float d = LONGE_DA_PISTA_MINIMO; d <= LONGE_DA_PISTA_MAXIMO && !achou; d += 3.0f) {
+                pe = noChao(pontoNaPista(metros, -1.0f - d / largura, NULL));
+                float giro = atan2f(alvo.x - pe.x, alvo.z - pe.z);
+                achou = cabeAli(pe, giro, t->tamanho);
+            }
+        }
+        if (!achou) {
+            TraceLog(LOG_WARNING, "INFRA: sem lugar para o telao em %.0f m", t->metros);
+            continue;
+        }
+        float giro = atan2f(alvo.x - pe.x, alvo.z - pe.z);   /* a tela (+z do modelo) para as arquibancadas */
+        colocar(CENARIO_TELAO, pe, giro, t->tamanho);
+        ocupar(pe, MEIA_LARGURA_DO_TELAO * t->tamanho + 4.0f);
+        if (totalDeAreasDosTeloes < MAXIMO_DE_TELOES) {
+            areasDosTeloes[totalDeAreasDosTeloes++] = (Vector4){ pe.x, pe.z, MEIA_LARGURA_DO_TELAO * t->tamanho + 6.0f, giro };
+            alturasDosTeloes[totalDeAreasDosTeloes - 1] = pe.y;
+        }
+        postos++;
+    }
+    TraceLog(LOG_INFO, "INFRA: %d telões para a plateia", postos + 1);
 }
 
 /*
@@ -480,7 +606,7 @@ static int ocupado(Vector3 p) {
  * Recebe: nada.
  * Devolve: nada.
  */
-static void marcarOQueExiste(void) {
+static void marcarOQueExiste(int comArvores) {
     int total;
     const Arquibancada *tabela = arquibancadasDaPista(&total);
     for (int q = 0; q < total; q++) {
@@ -509,6 +635,9 @@ static void marcarOQueExiste(void) {
     do {
         PosicaoNaPista lugar = { s, 0.0f };
         for (Obstaculo *o = s->obstaculos; o != NULL; o = o->proximo) {
+            if (o->tipo == OBJETO_ARVORE && !comArvores) {
+                continue;   /* os telões escolhem o lugar antes: as árvores saem de onde eles ficarem */
+            }
             PontoNoMundo p = pontoNoMundo(lugar, o->deslocamentoLateral);
             ocupar((Vector3){ p.x, p.y, p.z }, 6.0f);
         }
@@ -524,7 +653,7 @@ static void marcarOQueExiste(void) {
  * Devolve: nada.
  */
 static void construirJardins(void) {
-    marcarOQueExiste();
+    marcarOQueExiste(1);
     int plantadas = 0;
     for (int tentativa = 0; tentativa < 40000 && plantadas < TOTAL_DE_JARDINS; tentativa++) {
         float x = sortear(-1500.0f, 900.0f), z = sortear(-1300.0f, 1700.0f);
@@ -598,7 +727,7 @@ const MalhasDaInfraestrutura *construirInfraestrutura(Pista *pista, AlturaDaGrad
     construirGuardRail();
     construirAnunciosFixos();
     construirPostosETorres();
-    construirTelao();
+    construirTeloes();
     construirPaddock();
     construirJardins();
     static const float PASSARELAS[] = { 3300.0f, 3250.0f, 3350.0f, 1960.0f, 1920.0f, 2000.0f };
