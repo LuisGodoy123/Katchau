@@ -26,6 +26,7 @@
 
 /* ---------- Câmera ---------- */
 #define GIRO_DAS_RODAS_DO_GUIDO 18.0f   /* radianos por segundo */
+#define ADIANTE_DA_ONDA        0.6f     /* radianos: a onda começa um pouco à frente do jogador */
 #define CAMERA_NA_FUGA         0.75f    /* quanto do ângulo de fuga do carro a câmera acompanha */
 #define NUMERO_DO_GUIDO        7        /* na tabela FICHAS */
 #define ALTURA_NA_TROCA        0.10f    /* metros: o macaco levanta o carro */
@@ -439,6 +440,28 @@ void definirOlhar(Olhar olhar) {
 }
 
 /*
+ * puxarOndaDaTorcida
+ * Na metade da corrida, quando o líder chega lá, a torcida da Copa Pistão faz a onda com
+ * os faróis. Ela começa um pouco à frente do jogador, para ele ver a onda vir e dar a volta.
+ * Recebe: a corrida.
+ * Devolve: nada.
+ */
+static void puxarOndaDaTorcida(const Corrida *corrida) {
+    static float relogioAnterior = 0.0f;
+    static int jaFez = 0;
+    if (corrida->tempoDeCorrida < relogioAnterior) {
+        jaFez = 0;   /* corrida nova */
+    }
+    relogioAnterior = corrida->tempoDeCorrida;
+    int metade = (corrida->totalVoltas + 1) / 2;
+    if (!jaFez && corrida->classificacao[0] != NULL && corrida->classificacao[0]->voltas >= metade) {
+        jaFez = 1;
+        PontoNoMundo jogador = pontoNoMundo(corrida->jogador.posicao, corrida->jogador.deslocamentoLateral);
+        comecarOndaDaTorcida(anguloNoEstadio(jogador.x, jogador.z) + ADIANTE_DA_ONDA);
+    }
+}
+
+/*
  * desenharMundo3D
  * O cenário e os carros, vistos pela câmera.
  * Recebe: a câmera, a pista e a corrida (NULL nos menus: sem carros).
@@ -446,6 +469,9 @@ void definirOlhar(Olhar olhar) {
  */
 static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
     int ehNoite = (pista->id == PISTA_COPA_PISTAO);
+    if (ehNoite && corrida != NULL) {
+        puxarOndaDaTorcida(corrida);
+    }
     animarTorcida(cenaPausada ? 0.0f : GetFrameTime());
     if (ehNoite) {
         atualizarNoite(cenaPausada ? 0.0f : GetFrameTime());

@@ -39,6 +39,8 @@ Shader shaderDaTorcida(void);
 Texture2D texturaDoCeuNoturno(void);
 void prepararLuzes(int ehNoite);
 void animarTorcida(float tempoQuadro);
+void comecarOndaDaTorcida(float angulo);
+float anguloNoEstadio(float x, float z);
 void atualizarNoite(float tempoQuadro);
 void desenharBrilhos(Camera3D camera);
 

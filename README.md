@@ -445,7 +445,17 @@ saber em que segmento ele está e a quantos metros da linha. O carro e a câmera
 
 Para investigar como o carro se comporta, `KATCHAU_TELEMETRIA=1 ./katchau` grava cada quadro da corrida em `telemetria.csv`.
 
+### A onda da torcida
+
+Na Copa Pistão, quando o líder chega à metade da corrida, a torcida de carrinhos faz a onda: começando um pouco
+à frente do jogador, os carros de cada setor acendem os faróis e disparam as câmeras, um setor depois do outro,
+até dar a volta inteira no estádio (7 s). Tudo no shader da torcida (`noite.c`), pelo ângulo em volta do centro.
+
 ### Oval e Splat
+
+O Splat tem muito mais ruas do que a corrida usa. A rota escolhida (2,1 km) sai da reta dos boxes, passa por cima
+da ponte, vira no cruzamento para o laço de cima, volta por baixo da ponte, desce pelos esses e fecha pela reta;
+ficaram de fora o grampo do lado oeste e as esquinas mais fechadas. A curva mais fechada tem 30 m de raio.
 
 Duas pistas de dia que vêm prontas em um modelo 3D (`recursos/modelos/oval.glb` e `splat.glb`). O traçado e
 os lugares da torcida (`oval.h`, `splat.h`) foram medidos nos modelos, e a arquibancada recebe uma figura em
