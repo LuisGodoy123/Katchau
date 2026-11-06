@@ -71,29 +71,27 @@ typedef struct {
 } PecaDeRoda;
 
 /* Cada modelo, na ordem de FICHAS (corrida.c). O comprimento está
- * na ficha; "deitado" marca o modelo com a frente em +x, e "deRe" o que vem de costas
- * (a frente em -z, como o Wingo). */
+ * na ficha; "deitado" marca o modelo com a frente em +x. */
 typedef struct {
     const char *arquivo;
     int deitado;
-    int deRe;
 } ModeloDoCarro;
 
 static const ModeloDoCarro MODELOS[TOTAL_CARROS] = {
-    { "mcqueen.glb", 0, 0 },
-    { "the_king.glb", 0, 0 },
-    { "doc_hudson.glb", 0, 0 },
-    { "francesco.glb", 0, 0 },
-    { "sally.glb", 0, 0 },
-    { "ramone.glb", 0, 0 },
-    { "luigi.glb", 0, 0 },
-    { "guido.glb", 0, 0 },
-    { "mater.glb", 0, 0 },
-    { "sarge.glb", 0, 0 },
-    { "fillmore.glb", 0, 0 },
-    { "finn.glb", 1, 0 },
-    { "wingo.glb", 0, 1 },
-    { "snot_rod.glb", 0, 0 },
+    { "mcqueen.glb", 0 },
+    { "the_king.glb", 0 },
+    { "doc_hudson.glb", 0 },
+    { "francesco.glb", 0 },
+    { "sally.glb", 0 },
+    { "ramone.glb", 0 },
+    { "luigi.glb", 0 },
+    { "guido.glb", 0 },
+    { "mater.glb", 0 },
+    { "sarge.glb", 0 },
+    { "fillmore.glb", 0 },
+    { "finn.glb", 1 },
+    { "wingo.glb", 0 },
+    { "snot_rod.glb", 0 },
 };
 
 static const char *VERTICES_DO_SHADER =
@@ -895,8 +893,7 @@ static void normalizarModelo(int numero) {
 
     Matrix centralizar = MatrixTranslate(-(caixa.min.x + caixa.max.x) / 2.0f, -caixa.min.y,
                                          -(caixa.min.z + caixa.max.z) / 2.0f);
-    Matrix girar = deitado ? MatrixRotateY(-90.0f * DEG2RAD)
-                 : MODELOS[numero].deRe ? MatrixRotateY(180.0f * DEG2RAD) : MatrixIdentity();
+    Matrix girar = deitado ? MatrixRotateY(-90.0f * DEG2RAD) : MatrixIdentity();
     ajuste[numero] = MatrixMultiply(MatrixMultiply(centralizar, girar), MatrixScale(escala, escala, escala));
     larguras[numero] = (deitado ? dz : dx) * escala;
 }
