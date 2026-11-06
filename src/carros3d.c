@@ -139,6 +139,18 @@ static RodaDoCarro rodas[TOTAL_CARROS][MAXIMO_DE_RODAS];
 static int totalDeRodas[TOTAL_CARROS];
 static PecaDeRoda pecas[TOTAL_CARROS][MAXIMO_DE_PECAS_RODA * MAXIMO_DE_RODAS];
 static int totalDePecas[TOTAL_CARROS];
+/* Os garfos do Guido (os doGuido dele) vêm num modelo à parte, nos mesmos eixos: assim sobem e inclinam */
+#define ARQUIVO_DOS_GARFOS    "guido_garfos.glb"
+#define CARRO_COM_GARFOS      7          /* o Guido, na ordem de FICHAS */
+static Model garfos;
+static int temGarfos = 0;
+static Matrix poseDosGarfos;             /* no carro normalizado; vale só para o próximo desenho */
+static int temPoseDosGarfos = 0;
+static Vector3 pontaDosGarfosNormal;     /* o meio das pás, em cima, no carro normalizado */
+static int rodaEscondida = -1;           /* a roda que não está no carro no próximo desenho */
+static Matrix corpoInclinado;            /* a suspensão: só o corpo inclina, as rodas não */
+static int temCorpoInclinado = 0;
+
 static int rodaEmTroca = -1;          /* a roda que está sendo trocada no próximo carro desenhado (-1 = nenhuma) */
 static float andamentoDaTroca = 0.0f;
 static float ladosDaSombra[TOTAL_CARROS];
@@ -194,6 +206,9 @@ static void desenharRodas(int numero, Model modelo, Matrix noMundo, float angulo
         RodaDoCarro *roda = &rodas[numero][peca->roda];
         if (peca->roda == rodaEmTroca) {
             desenharPecaTrocando(peca, roda, modelo, noMundo, anguloDasRodas);
+            continue;
+        }
+        if (peca->roda == rodaEscondida) {
             continue;
         }
         Matrix giro = MatrixRotateX(anguloDasRodas);
@@ -345,6 +360,82 @@ static void prepararSombra(int numero) {
 }
 
 /*
+ * esconderRodaNoProximoDesenho
+ * Recebe: a roda que está fora do carro (na troca), no próximo desenho.
+ * Devolve: nada.
+ */
+void esconderRodaNoProximoDesenho(int roda) {
+    rodaEscondida = roda;
+}
+
+/*
+ * inclinarCorpoNoProximoDesenho
+ * A suspensão: o corpo do carro gira em volta de um ponto na altura dos eixos, e as rodas
+ * ficam no chão.
+ * Recebe: a rolagem (radianos, positivo: o teto vai para a esquerda do carro) e a arfagem
+ *         (radianos, positivo: o bico desce).
+ * Devolve: nada.
+ */
+void inclinarCorpoNoProximoDesenho(int numero, float rolagem, float arfagem) {
+    float eixo = (totalDeRodas[numero] > 0) ? rodas[numero][0].centro.y : 0.3f;
+    corpoInclinado = MatrixMultiply(MatrixMultiply(MatrixMultiply(MatrixTranslate(0.0f, -eixo, 0.0f), MatrixRotateX(arfagem)),
+                                                   MatrixRotateZ(-rolagem)),
+                                    MatrixTranslate(0.0f, eixo, 0.0f));
+    temCorpoInclinado = 1;
+}
+
+/*
+ * moverGarfosNoProximoDesenho
+ * Os doGuido do Guido: os garfos sobem e inclinam para trás, girando em volta da base deles.
+ * Recebe: quanto sobem (metros) e quanto inclinam para trás (radianos).
+ * Devolve: nada.
+ */
+void moverGarfosNoProximoDesenho(float subida, float inclinacao) {
+    Vector3 base = { 0.0f, pontaDosGarfosNormal.y, pontaDosGarfosNormal.z - 0.35f };
+    poseDosGarfos = MatrixMultiply(MatrixMultiply(MatrixMultiply(MatrixTranslate(0.0f, -base.y, -base.z), MatrixRotateX(-inclinacao)),
+                                                  MatrixTranslate(0.0f, base.y, base.z)),
+                                   MatrixTranslate(0.0f, subida, 0.0f));
+    temPoseDosGarfos = 1;
+}
+
+/*
+ * pontaDosGarfos
+ * Recebe: nada.
+ * Devolve: o meio das pás dos garfos do Guido, em cima, no carro normalizado, parados.
+ */
+Vector3 pontaDosGarfos(void) {
+    return pontaDosGarfosNormal;
+}
+
+/*
+ * raioDaRoda
+ * Recebe: o carro e a roda.
+ * Devolve: o raio dela, em metros.
+ */
+float raioDaRoda(int numero, int roda) {
+    return (roda >= 0 && roda < totalDeRodas[numero]) ? rodas[numero][roda].raio : 0.3f;
+}
+
+/*
+ * desenharRodaSolta
+ * Uma roda fora do carro (no garfo do Guido ou no chão).
+ * Recebe: o carro, a roda e onde ela fica no mundo (a origem é o centro dela; o eixo, o x).
+ * Devolve: nada.
+ */
+void desenharRodaSolta(int numero, int roda, Matrix noMundo) {
+    Model modelo = modelos[numero];
+    for (int i = 0; i < totalDePecas[numero]; i++) {
+        PecaDeRoda *peca = &pecas[numero][i];
+        if (peca->roda != roda) {
+            continue;
+        }
+        Material material = modelo.materials[peca->material];
+        material.shader = shaderOpaco;
+        DrawMesh(peca->malha, material, noMundo);
+    }
+}
+
+/*
  * desenharCarro3D
  * Desenha um carro em qualquer lugar do mundo. Chamar dentro de BeginMode3D.
  * Recebe: o número do carro e a matriz que leva o carro normalizado (centro
@@ -355,19 +446,35 @@ void desenharCarro3D(int numero, Matrix noMundo, float anguloDasRodas, float vol
     rlDrawRenderBatchActive();   /* o que já estava na fila sai antes de mudar a profundidade */
 
     Model modelo = modelos[numero];
-    modelo.transform = MatrixMultiply(ajuste[numero], noMundo);
+    Matrix corpo = temCorpoInclinado ? MatrixMultiply(ajuste[numero], corpoInclinado) : ajuste[numero];
+    modelo.transform = MatrixMultiply(corpo, noMundo);
+    Model doGuido = garfos;
+    int comGarfos = (numero == CARRO_COM_GARFOS && temGarfos);
+    if (comGarfos) {
+        Matrix pose = temPoseDosGarfos ? MatrixMultiply(ajuste[numero], poseDosGarfos) : ajuste[numero];
+        doGuido.transform = MatrixMultiply(pose, noMundo);
+    }
 
     desenharComShader(modelo, shaderOpaco);
+    if (comGarfos) {
+        desenharComShader(doGuido, shaderOpaco);
+    }
     desenharRodas(numero, modelo, noMundo, anguloDasRodas, volante);
 
     BeginBlendMode(BLEND_ALPHA);
     rlDisableDepthMask();
     desenharComShader(modelo, shaderTranslucido);
+    if (comGarfos) {
+        desenharComShader(doGuido, shaderTranslucido);
+    }
     desenharRodas(numero, modelo, noMundo, anguloDasRodas, volante);
     rlDrawRenderBatchActive();
     rlEnableDepthMask();
     EndBlendMode();
     rodaEmTroca = -1;
+    rodaEscondida = -1;
+    temPoseDosGarfos = 0;
+    temCorpoInclinado = 0;
 }
 
 /*
@@ -397,6 +504,12 @@ float comprimentoDoCarro3D(int numero) {
  */
 static void normalizarModelo(int numero) {
     BoundingBox caixa = GetModelBoundingBox(modelos[numero]);
+    if (numero == CARRO_COM_GARFOS && temGarfos) {
+        /* o Guido mede com os garfos, como o modelo inteiro vinha */
+        BoundingBox dosGarfos = GetModelBoundingBox(garfos);
+        caixa.min = Vector3Min(caixa.min, dosGarfos.min);
+        caixa.max = Vector3Max(caixa.max, dosGarfos.max);
+    }
     float dx = caixa.max.x - caixa.min.x;
     float dz = caixa.max.z - caixa.min.z;
     int deitado = MODELOS[numero].deitado;
@@ -898,7 +1011,18 @@ void carregarCarros3D(void) {
     for (int numero = 0; numero < TOTAL_CARROS; numero++) {
         modelos[numero] = LoadModel(TextFormat("%s%s", PASTA_DOS_MODELOS, MODELOS[numero].arquivo));
         prepararTexturas(modelos[numero]);
+        if (numero == CARRO_COM_GARFOS && FileExists(TextFormat("%s%s", PASTA_DOS_MODELOS, ARQUIVO_DOS_GARFOS))) {
+            garfos = LoadModel(TextFormat("%s%s", PASTA_DOS_MODELOS, ARQUIVO_DOS_GARFOS));
+            prepararTexturas(garfos);
+            temGarfos = 1;
+        }
         normalizarModelo(numero);
+        if (numero == CARRO_COM_GARFOS && temGarfos) {
+            /* a ponta das pás: o meio delas, em cima, no carro normalizado */
+            BoundingBox g = GetModelBoundingBox(garfos);
+            Vector3 a = Vector3Transform(g.min, ajuste[numero]), b = Vector3Transform(g.max, ajuste[numero]);
+            pontaDosGarfosNormal = (Vector3){ 0.0f, fminf(a.y, b.y) + 0.05f, fmaxf(a.z, b.z) - 0.25f };
+        }
         prepararSombra(numero);
         BoundingBox caixa = GetModelBoundingBox(modelos[numero]);
         float escala = fichaDoCarro(numero)->comprimento / fmaxf(caixa.max.x - caixa.min.x, caixa.max.z - caixa.min.z);
@@ -923,6 +1047,10 @@ void descarregarCarros3D(void) {
             modelos[numero].materials[i].shader.id = rlGetShaderIdDefault();
         }
         UnloadModel(modelos[numero]);
+        if (numero == CARRO_COM_GARFOS && temGarfos) {
+            UnloadModel(garfos);
+            temGarfos = 0;
+        }
         for (int i = 0; i < totalDePecas[numero]; i++) {
             UnloadMesh(pecas[numero][i].malha);
         }

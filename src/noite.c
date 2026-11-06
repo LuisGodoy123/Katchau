@@ -74,6 +74,9 @@ static const char *PIXELS_DA_TORCIDA =
     "#version 330\n"
     "in vec2 fragTexCoord; in vec4 fragColor; in vec3 fragPos;\n"
     "uniform float tempo;\n"
+    "uniform vec4 escondida;\n"   /* xyz: a câmera; w: até onde a torcida 3D cobre a pintada (0 = nada) */
+    "uniform vec3 onda;\n"     /* x, y: o centro do estádio; z: a força da onda (0 = parada) */
+    "uniform float frenteDaOnda;\n"   /* radianos: onde a frente da onda está, em volta do estádio */
     "out vec4 finalColor;\n"
     GLSL_DA_LUZ_DA_NOITE
     "float sorteio(vec2 c) { return fract(sin(dot(c, vec2(127.1, 311.7))) * 43758.5453); }\n"
@@ -98,19 +101,37 @@ static const char *PIXELS_DA_TORCIDA =
     "    cor = mix(cor, vec3(dot(cor, vec3(0.3, 0.6, 0.1))), 0.28) * (0.62 + 0.5 * sorteio(grupo + 7.0));\n"
     "    cor *= 1.0 + 0.14 * sin(tempo * 3.5 + sorteio(grupo) * 40.0);\n"
     "    float perto = 1.0 - smoothstep(0.15, 0.7, pixel);\n"
+    "    if (escondida.w > 0.0) {\n"   /* onde há carrinhos 3D, sobra só o assento vazio */
+    "        float some = 1.0 - smoothstep(escondida.w - 30.0, escondida.w - 8.0, distance(fragPos, escondida.xyz));\n"
+    "        if (fragColor.a < 0.999 && some > 0.5) discard;\n"   /* as figuras em pé do Oval e do Splat */
+    "        if (some > 0.99) { vec3 nn = normalize(cross(dFdx(fragPos), dFdy(fragPos)));\n"
+    "            finalColor = vec4(vec3(0.16, 0.17, 0.20) * (luzDaNoite(fragPos, nn) * 0.72 + vec3(0.08, 0.09, 0.12)), 1.0); return; }\n"
+    "        cor = mix(cor, vec3(0.16, 0.17, 0.20), some); perto *= 1.0 - some;\n"
+    "    }\n"
+    /* A onda: atrás da frente dela, os carros acendem os faróis; cada lugar tem um tiquinho de atraso */
+    "    float acende = 0.0;\n"
+    "    if (onda.z > 0.0 && noite > 0.5) {\n"
+    "        float angulo = atan(fragPos.z - onda.y, fragPos.x - onda.x);\n"
+    "        float atras = mod(frenteDaOnda - angulo - 0.06 * sorteio(grupo + 3.0) + 12.5663706, 6.2831853);\n"
+    "        acende = onda.z * smoothstep(0.0, 0.05, atras) * (1.0 - smoothstep(0.10, 0.55, atras));\n"
+    "    }\n"
+    "    vec3 farois = vec3(0.0);\n"
     "    if (perto > 0.0) {\n"
     "        vec2 l = fract(lugares);\n"
     "        float corpo = smoothstep(0.08, 0.16, l.x) * smoothstep(0.92, 0.84, l.x) * smoothstep(0.10, 0.18, l.y) * smoothstep(0.86, 0.72, l.y);\n"
     "        float vidro = step(0.26, l.x) * step(l.x, 0.74) * step(0.30, l.y) * step(l.y, 0.50);\n"
     "        vec3 carro = mix(cor, vec3(0.05, 0.07, 0.10), vidro * 0.85) * (1.15 - 0.45 * l.y);\n"
     "        cor = mix(cor, mix(vec3(noite > 0.5 ? 0.03 : 0.30), carro, corpo), perto);\n"
+    "        float farol = max(1.0 - length((l - vec2(0.27, 0.80)) / 0.11), 0.0) + max(1.0 - length((l - vec2(0.73, 0.80)) / 0.11), 0.0);\n"
+    "        farois = vec3(1.0, 0.93, 0.70) * clamp(farol * 2.2, 0.0, 1.0) * corpo * perto;\n"
     "    }\n"
     "    float corredor = abs(fract(fragTexCoord.x) - 0.5);\n"
     "    cor = mix(vec3(0.16, 0.17, 0.20), cor, smoothstep(0.015, 0.04, corredor));\n"
     "    vec3 n = normalize(cross(dFdx(fragPos), dFdy(fragPos)));\n"
     "    if (noite < 0.5) cor = mix(cor, vec3(dot(cor, vec3(0.3, 0.6, 0.1))), 0.30) + vec3(0.03);\n"   /* de dia, o sol lava as cores */
     "    vec3 luz = (noite > 0.5) ? luzDaNoite(fragPos, n) * 0.72 + vec3(0.08, 0.09, 0.12) : vec3(0.85);\n"
-    "    finalColor = vec4(cor * luz * fragColor.rgb, 1.0);\n"
+    "    vec3 aceso = farois * 2.0 + vec3(1.0, 0.92, 0.72) * (0.12 * (1.0 - perto) + 0.06 * perto);\n"   /* de longe, o setor inteiro clareia */
+    "    finalColor = vec4(cor * luz * fragColor.rgb * (1.0 + 0.15 * acende) + aceso * acende, 1.0);\n"
     "}\n";
 
 /* Um flash aceso */
@@ -148,6 +169,39 @@ static Flash flashes[MAXIMO_DE_FLASHES];
 static int proximoFlash = 0;
 static float flashesParaSoltar = 0.0f;
 static float tempoDaTorcida = 0.0f;
+
+/* A onda da torcida: os carros acendem os faróis um setor depois do outro, dando a volta no estádio */
+#define SEGUNDOS_DA_ONDA      7.0f     /* uma volta completa */
+#define SUBIDA_DA_ONDA        0.08f    /* da volta: o tanto que ela leva para ganhar força, e para sumir */
+static float andamentoDaOnda = -1.0f;   /* de 0 a 1 pela volta; -1 = parada */
+static float inicioDaOnda = 0.0f;       /* radianos: onde ela começou */
+static int locOnda, locFrenteDaOnda, locEscondida;
+static Vector3 cameraDaTorcida3D;
+static float raioDaTorcida3D = 0.0f;
+static float flashesDaOnda = 0.0f, faroisDaOnda = 0.0f;
+#define FLASHES_NA_ONDA       150.0f   /* por segundo, a mais, na faixa da onda: poucos, quem manda são os faróis */
+
+/* Os faróis da onda: cada carrinho da arquibancada acende um par de faróis quando a onda passa */
+#define MAXIMO_DE_FAROIS      2600
+#define FILEIRAS_POR_SEGUNDO  260.0f   /* cada fileira: alguns carrinhos lado a lado */
+#define CARROS_POR_FILEIRA    5
+#define PASSO_DA_FILEIRA      2.7f     /* vãos de farol entre um carrinho e o próximo */
+#define VIDA_DO_FAROL         0.9f     /* segundos acesos */
+#define ACENDENDO             0.12f    /* segundos para acender (e para apagar) */
+#define VAO_ENTRE_FAROIS      2.4f     /* metros entre os dois faróis de um carrinho */
+#define VAO_PELA_DISTANCIA    0.022f   /* de longe o vão cresce, para o par continuar sendo um par */
+#define COR_DO_FAROL          (Color){ 255, 236, 170, 255 }
+#define COR_DO_HALO_DO_FAROL  (Color){ 255, 205, 120, 255 }
+typedef struct {
+    Vector3 lugar;     /* o meio do carrinho */
+    Vector3 lado;      /* ao longo da fileira, para separar os dois faróis */
+    float noFileira;   /* o lugar do carrinho na fileira, em carrinhos a partir do meio */
+    float idade;
+} Farol;
+static Farol farois[MAXIMO_DE_FAROIS];
+static int proximoFarol = 0;
+#define TENTATIVAS_NA_ONDA    12
+#define LARGURA_DOS_FLASHES_NA_ONDA 0.45f   /* radianos atrás da frente */
 
 /*
  * gerarBrilho
@@ -306,14 +360,22 @@ static void prepararAssentos(Mesh malha) {
 /*
  * soltarFlash
  * Acende um flash num lugar sorteado dos assentos.
- * Recebe: nada.
+ * Recebe: se ele tem que cair na faixa da onda, e onde está a frente dela (radianos).
  * Devolve: nada.
  */
-static void soltarFlash(void) {
+static void soltarFlash(int naOnda, float frente) {
     if (totalDeVirados == 0) {
         return;
     }
     int t = triangulosVirados[GetRandomValue(0, totalDeVirados - 1)];
+    for (int tentativa = 0; naOnda && tentativa < TENTATIVAS_NA_ONDA; tentativa++) {
+        Vector3 v = verticeDoAssento(indicesDosAssentos[t * 3]);
+        float atras = fmodf(frente - atan2f(v.z, v.x - CENTRO_DO_OVAL_X) + 4.0f * PI, 2.0f * PI);
+        if (atras < LARGURA_DOS_FLASHES_NA_ONDA) {
+            break;
+        }
+        t = triangulosVirados[GetRandomValue(0, totalDeVirados - 1)];
+    }
     float u = GetRandomValue(0, 1000) / 1000.0f, v = GetRandomValue(0, 1000) / 1000.0f;
     if (u + v > 1.0f) {   /* mantém o ponto dentro do triângulo */
         u = 1.0f - u;
@@ -335,6 +397,49 @@ static void soltarFlash(void) {
 }
 
 /*
+ * acenderFarol
+ * Uma fileira de carrinhos na faixa da onda acende os faróis: sorteia um lugar dos assentos
+ * logo atrás da frente dela e guarda os pares, lado a lado ao longo da fileira.
+ * Recebe: onde está a frente da onda (radianos).
+ * Devolve: nada.
+ */
+static void acenderFarol(float frente) {
+    if (totalDeVirados == 0) {
+        return;
+    }
+    int t = triangulosVirados[GetRandomValue(0, totalDeVirados - 1)];
+    for (int tentativa = 0; tentativa < TENTATIVAS_NA_ONDA; tentativa++) {
+        Vector3 v = verticeDoAssento(indicesDosAssentos[t * 3]);
+        float atras = fmodf(frente - atan2f(v.z, v.x - CENTRO_DO_OVAL_X) + 4.0f * PI, 2.0f * PI);
+        if (atras < LARGURA_DOS_FLASHES_NA_ONDA) {
+            break;
+        }
+        t = triangulosVirados[GetRandomValue(0, totalDeVirados - 1)];
+    }
+    float u = GetRandomValue(0, 1000) / 1000.0f, v = GetRandomValue(0, 1000) / 1000.0f;
+    if (u + v > 1.0f) {
+        u = 1.0f - u;
+        v = 1.0f - v;
+    }
+    Vector3 a = verticeDoAssento(indicesDosAssentos[t * 3]);
+    Vector3 b = verticeDoAssento(indicesDosAssentos[t * 3 + 1]);
+    Vector3 c = verticeDoAssento(indicesDosAssentos[t * 3 + 2]);
+    Vector3 ponto = Vector3Add(a, Vector3Add(Vector3Scale(Vector3Subtract(b, a), u), Vector3Scale(Vector3Subtract(c, a), v)));
+    ponto = Vector3Add(ponto, Vector3Scale(normalDoTriangulo(t), 0.02f));
+
+    Vector3 paraOCentro = Vector3Normalize((Vector3){ CENTRO_DO_OVAL_X - ponto.x, 0.0f, -ponto.z });
+    float atraso = -0.05f * GetRandomValue(0, 1000) / 1000.0f;   /* nem todos ao mesmo tempo */
+    for (int k = 0; k < CARROS_POR_FILEIRA; k++) {
+        Farol *farol = &farois[proximoFarol];
+        proximoFarol = (proximoFarol + 1) % MAXIMO_DE_FAROIS;
+        farol->lugar = Vector3Scale(ponto, escalaDoEstadio);
+        farol->lado = (Vector3){ -paraOCentro.z, 0.0f, paraOCentro.x };
+        farol->noFileira = k - (CARROS_POR_FILEIRA - 1) / 2.0f;
+        farol->idade = atraso - 0.03f * k;
+    }
+}
+
+/*
  * carregarNoite
  * Prepara os shaders, as imagens e os lugares dos flashes e dos refletores.
  * Recebe: o modelo do estádio, o material dos assentos e a escala dele.
@@ -345,6 +450,9 @@ void carregarNoite(Model estadio, int materialDosAssentos, float escala) {
     shaderDoCenario = LoadShaderFromMemory(VERTICES_DO_SHADER, PIXELS_DO_CENARIO);
     shaderDeTorcida = LoadShaderFromMemory(VERTICES_DO_SHADER, PIXELS_DA_TORCIDA);
     locTempo = GetShaderLocation(shaderDeTorcida, "tempo");
+    locOnda = GetShaderLocation(shaderDeTorcida, "onda");
+    locEscondida = GetShaderLocation(shaderDeTorcida, "escondida");
+    locFrenteDaOnda = GetShaderLocation(shaderDeTorcida, "frenteDaOnda");
     registrarShaderIluminado(shaderDoCenario);
     registrarShaderIluminado(shaderDeTorcida);
 
@@ -360,6 +468,9 @@ void carregarNoite(Model estadio, int materialDosAssentos, float escala) {
     }
     for (int i = 0; i < MAXIMO_DE_FLASHES; i++) {
         flashes[i].vida = 0.0f;
+    }
+    for (int i = 0; i < MAXIMO_DE_FAROIS; i++) {
+        farois[i].idade = VIDA_DO_FAROL;   /* todos apagados */
     }
 }
 
@@ -438,6 +549,69 @@ void prepararLuzes(int ehNoite) {
         }
     }
     SetShaderValue(shaderDeTorcida, locTempo, &tempoDaTorcida, SHADER_UNIFORM_FLOAT);
+
+    /* A onda só existe à noite, no estádio */
+    float forca = 0.0f, frente = 0.0f;
+    if (ehNoite && andamentoDaOnda >= 0.0f) {
+        float a = andamentoDaOnda;
+        forca = fminf(fminf(a / SUBIDA_DA_ONDA, (1.0f - a) / SUBIDA_DA_ONDA), 1.0f);
+        frente = inicioDaOnda + a * 2.0f * PI;
+    }
+    Vector3 onda = { CENTRO_DO_OVAL_X * escalaDoEstadio, 0.0f, forca };
+    SetShaderValue(shaderDeTorcida, locOnda, &onda, SHADER_UNIFORM_VEC3);
+    SetShaderValue(shaderDeTorcida, locFrenteDaOnda, &frente, SHADER_UNIFORM_FLOAT);
+}
+
+/*
+ * esconderTorcidaPintada
+ * Onde a torcida 3D está, a pintada vira assento vazio (e os faróis de mentira somem).
+ * Recebe: a câmera e o raio da torcida 3D (0 = não há).
+ * Devolve: nada.
+ */
+void esconderTorcidaPintada(Vector3 camera, float raio) {
+    cameraDaTorcida3D = camera;
+    raioDaTorcida3D = raio;
+    Vector4 escondida = { camera.x, camera.y, camera.z, raio };
+    SetShaderValue(shaderDeTorcida, locEscondida, &escondida, SHADER_UNIFORM_VEC4);
+}
+
+/*
+ * estadoDaOnda
+ * Recebe: onde guardar a força da onda (0 = parada), a frente dela (radianos) e o x do centro.
+ * Devolve: nada.
+ */
+void estadoDaOnda(float *forca, float *frente, float *centroX) {
+    *forca = 0.0f;
+    *frente = 0.0f;
+    if (andamentoDaOnda >= 0.0f) {
+        float a = andamentoDaOnda;
+        *forca = fminf(fminf(a / SUBIDA_DA_ONDA, (1.0f - a) / SUBIDA_DA_ONDA), 1.0f);
+        *frente = inicioDaOnda + a * 2.0f * PI;
+    }
+    *centroX = CENTRO_DO_OVAL_X * escalaDoEstadio;
+}
+
+/*
+ * comecarOndaDaTorcida
+ * A torcida faz a onda: começa no lado dado e dá uma volta inteira no estádio.
+ * Recebe: o ângulo, em volta do centro do estádio, de onde ela começa (radianos).
+ * Devolve: nada.
+ */
+void comecarOndaDaTorcida(float angulo) {
+    for (int i = 0; i < MAXIMO_DE_FAROIS; i++) {
+        farois[i].idade = VIDA_DO_FAROL;
+    }
+    andamentoDaOnda = 0.0f;
+    inicioDaOnda = angulo;
+}
+
+/*
+ * anguloNoEstadio
+ * Recebe: um ponto do mundo.
+ * Devolve: o ângulo dele em volta do centro do estádio, como a onda mede (radianos).
+ */
+float anguloNoEstadio(float x, float z) {
+    return atan2f(z, x - CENTRO_DO_OVAL_X * escalaDoEstadio);
 }
 
 /*
@@ -448,6 +622,12 @@ void prepararLuzes(int ehNoite) {
  */
 void animarTorcida(float tempoQuadro) {
     tempoDaTorcida += tempoQuadro;
+    if (andamentoDaOnda >= 0.0f) {
+        andamentoDaOnda += tempoQuadro / SEGUNDOS_DA_ONDA;
+        if (andamentoDaOnda >= 1.0f) {
+            andamentoDaOnda = -1.0f;
+        }
+    }
 }
 
 /*
@@ -460,10 +640,28 @@ void atualizarNoite(float tempoQuadro) {
     for (int i = 0; i < MAXIMO_DE_FLASHES; i++) {
         flashes[i].idade += tempoQuadro;
     }
-    flashesParaSoltar += FLASHES_POR_SEGUNDO * tempoQuadro;
+    flashesParaSoltar += FLASHES_POR_SEGUNDO * tempoQuadro * ((andamentoDaOnda >= 0.0f) ? 0.35f : 1.0f);
     while (flashesParaSoltar >= 1.0f) {
-        soltarFlash();
+        soltarFlash(0, 0.0f);
         flashesParaSoltar -= 1.0f;
+    }
+    for (int i = 0; i < MAXIMO_DE_FAROIS; i++) {
+        farois[i].idade += tempoQuadro;
+    }
+    /* Passando a onda, os carrinhos acendem os faróis, e alguns disparam as câmeras */
+    if (andamentoDaOnda >= 0.0f && andamentoDaOnda < 1.0f - SUBIDA_DA_ONDA) {
+        faroisDaOnda += FILEIRAS_POR_SEGUNDO * tempoQuadro;
+        while (faroisDaOnda >= 1.0f) {
+            acenderFarol(inicioDaOnda + andamentoDaOnda * 2.0f * PI);
+            faroisDaOnda -= 1.0f;
+        }
+    }
+    if (andamentoDaOnda >= 0.0f) {
+        flashesDaOnda += FLASHES_NA_ONDA * tempoQuadro;
+        while (flashesDaOnda >= 1.0f) {
+            soltarFlash(1, inicioDaOnda + andamentoDaOnda * 2.0f * PI);
+            flashesDaOnda -= 1.0f;
+        }
     }
 }
 
@@ -497,6 +695,25 @@ void desenharBrilhos(Camera3D camera) {
         Vector3 centro = Vector3Add(refletores[i], Vector3Scale(paraACamera, NA_FRENTE_DO_REFLETOR));
         desenharImagemNoAr(camera, imagemDoBrilho, centro, fmaxf(MENOR_HALO, distancia * HALO_DO_REFLETOR), COR_DO_HALO);
         desenharImagemNoAr(camera, imagemDoBrilho, centro, fmaxf(MENOR_MIOLO, distancia * MIOLO_DO_REFLETOR), COR_DO_MIOLO);
+    }
+    for (int i = 0; i < MAXIMO_DE_FAROIS; i++) {
+        Farol *farol = &farois[i];
+        if (farol->idade >= VIDA_DO_FAROL || farol->idade < 0.0f) {
+            continue;
+        }
+        float forca = fminf(fminf(farol->idade / ACENDENDO, (VIDA_DO_FAROL - farol->idade) / ACENDENDO), 1.0f);
+        float distancia = Vector3Distance(farol->lugar, camera.position);
+        if (raioDaTorcida3D > 0.0f && Vector3Distance(farol->lugar, cameraDaTorcida3D) < raioDaTorcida3D) {
+            continue;   /* ali os carrinhos 3D acendem os faróis deles */
+        }
+        float vao = fmaxf(VAO_ENTRE_FAROIS, distancia * VAO_PELA_DISTANCIA);
+        Vector3 carrinho = Vector3Add(farol->lugar, Vector3Scale(farol->lado, farol->noFileira * vao * PASSO_DA_FILEIRA));
+        for (int lado = -1; lado <= 1; lado += 2) {
+            Vector3 luz = Vector3Add(carrinho, Vector3Scale(farol->lado, lado * vao / 2.0f));
+            desenharImagemNoAr(camera, imagemDoBrilho, luz, vao * 1.3f, Fade(COR_DO_HALO_DO_FAROL, forca * 0.22f));
+            desenharImagemNoAr(camera, imagemDoBrilho, luz, vao * 0.55f, Fade(COR_DO_FAROL, forca));
+            desenharImagemNoAr(camera, imagemDoBrilho, luz, vao * 0.30f, Fade(WHITE, forca));   /* o miolo, estourado */
+        }
     }
     for (int i = 0; i < MAXIMO_DE_FLASHES; i++) {
         Flash *flash = &flashes[i];

@@ -19,10 +19,16 @@
 #define TOTAL_DIRECOES 4
 
 /* O touchpad do PlayStation não é um botão "padrão" da raylib (que só conhece os 15 do
- * controle de Xbox): lemos o botão cru da GLFW, que a raylib já traz embutida. No
- * DualShock 4 e no DualSense (USB ou Bluetooth) o touchpad é o botão 13. */
+ * controle de Xbox). No macOS ele vem do sistema de controles da Apple (vibrar_mac.m),
+ * porque a raylib do Homebrew não deixa ler a GLFW. Nos outros sistemas lemos o botão
+ * cru da GLFW, que a raylib traz embutida: no DualShock 4 e no DualSense (USB ou
+ * Bluetooth) o touchpad é o botão 13. */
+#ifdef __APPLE__
+#include "vibrar.h"
+#else
 extern const unsigned char *glfwGetJoystickButtons(int jid, int *count);
 #define BOTAO_CRU_DO_TOUCHPAD 13
+#endif
 
 static int ehDualSense(void);
 
@@ -65,9 +71,13 @@ void atualizarControle(void) {
 
     int touchpad = 0;
     if (ehDualSense()) {   /* nos outros controles o botão 13 é outra coisa */
+#ifdef __APPLE__
+        touchpad = touchpadDoControleApertado();
+#else
         int total = 0;
         const unsigned char *botoes = glfwGetJoystickButtons(controle, &total);
         touchpad = botoes != NULL && total > BOTAO_CRU_DO_TOUCHPAD && botoes[BOTAO_CRU_DO_TOUCHPAD];
+#endif
     }
     acabouDeApertarOTouchpad = touchpad && !touchpadApertado;
     touchpadApertado = touchpad;

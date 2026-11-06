@@ -15,8 +15,8 @@
 #include "pista.h"
 #include "carro.h"
 
-#define SEGUNDOS_PARA_A_RODA   0.20f   /* o Guido indo de uma roda para a outra */
-#define SEGUNDOS_POR_RODA      0.55f   /* trocando uma roda */
+#define SEGUNDOS_PARA_A_RODA   0.22f   /* o Guido indo de uma roda para a outra */
+#define SEGUNDOS_POR_RODA      0.62f   /* trocando uma roda: arranca a velha, a nova cai e ele encaixa */
 #define CANTOS_DO_CARRO        4       /* frente esquerda, trás esquerda, trás direita, frente direita */
 #define DURACAO_DA_TROCA       ((CANTOS_DO_CARRO + 1) * SEGUNDOS_PARA_A_RODA + CANTOS_DO_CARRO * SEGUNDOS_POR_RODA)
 #define METROS_DA_VAGA_AO_PREDIO 4.5f  /* o carro para com o centro a essa distância do prédio */
@@ -31,15 +31,26 @@ typedef struct {
     float olha;        /* radianos: para onde a frente dele aponta (0 = frente do carro, positivo = esquerda) */
 } LugarDoGuido;
 
+/* A coreografia, como no filme: o Guido chega com os quatro pneus novos nos garfos, joga
+ * os quatro para cima e, enquanto eles caem, arranca cada velho; cada novo cai na sua roda
+ * quando ele chega nela. Em frações da troca de cada roda: */
+#define ARRANCOU        0.30f    /* o pneu velho saiu do cubo, voando */
+#define ENCAIXOU        0.70f    /* o novo, caindo do alto, encaixou no cubo */
+#define PUXADA          0.45f    /* metros que o Guido recua arrancando */
+#define LANCOU          0.14f    /* segundos: os garfos jogam os quatro pneus para cima */
+
 int carroNoPit(const Carro *carro);
 float metrosNaVolta(const Carro *carro);
 float metroDaVagaDoCarro(const Pista *pista, int numero);
 int dentroDoLimiteDoPit(const Pista *pista, float metros);
+float linhaNoPit(const Pista *pista, const Carro *carro, int saindo, float metrosPorSegundoAgora);
 void lugarDaVaga(Pista *pista, const Carro *carro, PosicaoNaPista *lugar, float *lateral);
 int querEntrarNoPit(const Pista *pista, const Carro *carro);
 void entrarNoPit(Carro *carro);
 int atualizarCarroNoPit(Carro *carro, Pista *pista, float tempoQuadro);
 int faseDaTroca(const Carro *carro, int *canto, float *andamento);
+LugarDoGuido poseDoGuido(const Carro *carro, float meiaLargura, float meioComprimento, float zDaFrente, float zDeTras);
+float entradaDoGuidoNoCarro(LugarDoGuido guido, float meiaLargura, float meioComprimento);
 LugarDoGuido lugarDoGuido(const Carro *carro, float meiaLargura, float meioComprimento, float zDaFrente, float zDeTras);
 
 #endif

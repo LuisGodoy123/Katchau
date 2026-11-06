@@ -184,6 +184,7 @@ void iniciarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador, NivelDaC
     corrida->posicaoFinal = 0;
 
     corrida->jogador = criarCarroDaFicha(FICHAS[carroDoJogador], carroDoJogador, pista);
+    corrida->jogador.controladoPeloJogador = 1;
     colocarNoGrid(&corrida->jogador, LUGAR_DO_JOGADOR);
     corrida->jogador.duracaoDaTroca = DURACAO_DA_TROCA;
     corrida->jogador.voltaDoPit = temParada ? (ficha->voltas + 1) / 2 : 0;   /* se a IA dirigir */
@@ -809,6 +810,8 @@ void atualizarCorrida(Corrida *corrida, Comandos comandosJogador, float tempoQua
     olharEmVolta(corrida);
     if (corrida->terminou) {
         comandosJogador = atualizarIA(&corrida->jogador, corrida->pista);
+        corrida->jogador.controladoPeloJogador = 0;   /* agora quem dirige é a IA */
+        corrida->jogador.re = 0.0f;
     }
 
     /* 0) Vácuo, antes de mover: todos medem com os carros no mesmo lugar */

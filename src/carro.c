@@ -67,6 +67,25 @@
 #define ACELERACAO_DE_CURVA_NO_PNEU 18.0f  /* ...mais isto vezes a aderência */
 #define AGARRE_NO_DRIFT           0.6f     /* de lado, o bico gira mais depressa */
 #define PERDA_NO_LIMITE_DO_PNEU   600.0f   /* o que a velocidade cai por segundo, no limite do pneu */
+/* A suspensão: uma mola com amortecedor em cada eixo do corpo, só no desenho */
+#define ROLAGEM_POR_G             7.0f     /* graus de rolagem por g, nas curvas leves (depois satura) */
+#define ARFAGEM_POR_G             4.0f     /* graus de arfagem por g, nas acelerações leves */
+#define MAIOR_ROLAGEM             6.0f     /* um carro de rua passa de 4 graus; aqui um pouco mais, arcade */
+#define MAIOR_ARFAGEM             3.5f
+#define ROLAGEM_DO_VOLANTE        1.2f     /* graus: o corpo já começa a deitar quando você vira o volante */
+#define VELOCIDADE_DO_VOLANTE     30.0f    /* m/s: a partir daqui o volante pesa inteiro */
+#define MOLA_DA_SUSPENSAO         150.0f   /* por segundo ao quadrado: responde rápido */
+#define AMORTECEDOR               13.0f    /* por segundo: bem abaixo do crítico, balança uma vez e assenta */
+#define GRAVIDADE                 9.8f
+/* A ré: parado, segurando o freio, engata; o freio vira acelerador para trás */
+#define SEGUNDOS_PARA_ENGATAR_A_RE 0.35f
+#define MAXIMA_DE_RE              1800.0f  /* unidades por segundo: 45 km/h */
+#define ACELERACAO_DE_RE          1500.0f
+#define FREIO_DA_RE               3000.0f  /* acelerando, a ré para logo */
+#define ATRITO_DA_RE              500.0f
+#define RAIO_DA_RE                5.5f     /* metros: o raio da curva com o volante todo, de ré */
+#define MAIOR_RUMO_DE_RE          80.0f    /* graus: dá para virar o carro quase de lado */
+#define ALINHANDO_DEPOIS_DA_RE    0.5f     /* segundos: andando para a frente, o bico volta a seguir a pista */
 #define PASSOS_PROCURANDO_NA_LINHA 200     /* segmentos: procurando onde o carro está */
 #define FOLGA_DA_CONTA_NO_LIMITE  0.01f    /* metros */
 #define VOLANTE_PARA_SAIR_DO_LIMITE 0.1f
@@ -146,6 +165,15 @@ Carro criarCarro(const char *nome, int numero, Segmento *largada, float deslocam
     carro.direcaoLivre = 0;
     carro.desvioDoRumo = 0.0f;
     carro.temRumoNoMundo = 0;
+    carro.rolagem = 0.0f;
+    carro.rapidezDaRolagem = 0.0f;
+    carro.arfagem = 0.0f;
+    carro.rapidezDaArfagem = 0.0f;
+    carro.temSuspensao = 0;
+    carro.re = 0.0f;
+    carro.rumoDeRe = 0.0f;
+    carro.paradoFreando = 0.0f;
+    carro.controladoPeloJogador = 0;
     carro.rumoNoMundo = 0.0f;
     carro.estadoDoPit = PIT_FORA;
     carro.voltaDoPit = 0;
@@ -842,6 +870,141 @@ static int andarNoMundo(Carro *carro, float tempoQuadro) {
 }
 
 /*
+ * atualizarSuspensao
+ * A suspensão, só para o desenho: a aceleração de lado (rapidez de giro vezes velocidade)
+ * pede rolagem para fora da curva, e a de frente pede arfagem (freando, o bico desce).
+ * Cada uma é uma mola com amortecedor: o corpo chega lá com um pequeno balanço.
+ * Recebe: o carro e o tempo do quadro.
+ * Devolve: nada.
+ */
+void atualizarSuspensao(Carro *carro, float tempoQuadro) {
+    if (tempoQuadro <= 0.0f) {
+        return;
+    }
+    PontoNoMundo aqui = pontoNoMundo(carro->posicao, carro->deslocamentoLateral);
+    float rumo = (carro->direcaoLivre && carro->temRumoNoMundo) ? carro->rumoNoMundo
+                                                                : aqui.rumo + carro->anguloDeFuga + carro->anguloDeDrift;
+    if (!carro->temSuspensao) {
+        carro->rumoAnterior = rumo;
+        carro->velocidadeAnterior = carro->velocidade;
+        carro->temSuspensao = 1;
+        return;
+    }
+    float giro = rumo - carro->rumoAnterior;
+    giro -= 360.0f * roundf(giro / 360.0f);
+    float metrosPorSegundo = carro->velocidade / UNIDADES_POR_METRO;
+    float deLado = metrosPorSegundo * giro * 0.0174533f / tempoQuadro;   /* para a direita, positivo */
+    float deFrente = (carro->velocidade - carro->velocidadeAnterior) / UNIDADES_POR_METRO / tempoQuadro;
+    carro->rumoAnterior = rumo;
+    carro->velocidadeAnterior = carro->velocidade;
+
+    /* Curvas leves já mexem bem o corpo, e as fortes saturam suave no máximo (tanh) */
+    float alvoDaRolagem = MAIOR_ROLAGEM * tanhf(deLado / GRAVIDADE * ROLAGEM_POR_G / MAIOR_ROLAGEM);
+    alvoDaRolagem += ROLAGEM_DO_VOLANTE * carro->volante * fminf(metrosPorSegundo / VELOCIDADE_DO_VOLANTE, 1.0f);
+    alvoDaRolagem = limitar(alvoDaRolagem, -MAIOR_ROLAGEM, MAIOR_ROLAGEM);
+    float alvoDaArfagem = MAIOR_ARFAGEM * tanhf(deFrente / GRAVIDADE * ARFAGEM_POR_G / MAIOR_ARFAGEM);
+    float passo = fminf(tempoQuadro, 1.0f / 30.0f);
+    carro->rapidezDaRolagem += (MOLA_DA_SUSPENSAO * (alvoDaRolagem - carro->rolagem) - AMORTECEDOR * carro->rapidezDaRolagem) * passo;
+    carro->rolagem += carro->rapidezDaRolagem * passo;
+    carro->rapidezDaArfagem += (MOLA_DA_SUSPENSAO * (alvoDaArfagem - carro->arfagem) - AMORTECEDOR * carro->rapidezDaArfagem) * passo;
+    carro->arfagem += carro->rapidezDaArfagem * passo;
+    carro->rolagem = limitar(carro->rolagem, -MAIOR_ROLAGEM, MAIOR_ROLAGEM);
+    carro->arfagem = limitar(carro->arfagem, -MAIOR_ARFAGEM, MAIOR_ARFAGEM);
+}
+
+/*
+ * controlarRe
+ * A ré do jogador: parado, segurando o freio por um instante, engata; aí o freio acelera
+ * para trás e o acelerador freia. Parou a ré e soltou o freio, volta a andar para a frente.
+ * Recebe: o carro, os comandos e o tempo do quadro.
+ * Devolve: 1 se o carro está de ré neste quadro.
+ */
+static int controlarRe(Carro *carro, Comandos comandos, float tempoQuadro) {
+    if (!carro->controladoPeloJogador || carro->rodando) {
+        carro->re = 0.0f;
+        carro->paradoFreando = 0.0f;
+        return 0;
+    }
+    if (carro->re <= 0.0f) {
+        int parado = carro->velocidade <= 1.0f;
+        carro->paradoFreando = (parado && comandos.frear && !comandos.acelerar) ? carro->paradoFreando + tempoQuadro : 0.0f;
+        if (carro->paradoFreando < SEGUNDOS_PARA_ENGATAR_A_RE) {
+            return 0;
+        }
+    }
+    if (comandos.acelerar) {
+        carro->re -= FREIO_DA_RE * tempoQuadro;
+    } else if (comandos.frear) {
+        carro->re += ACELERACAO_DE_RE * tempoQuadro;
+    } else {
+        carro->re -= ATRITO_DA_RE * tempoQuadro;
+    }
+    carro->re = limitar(carro->re, 0.0f, MAXIMA_DE_RE);
+    carro->velocidade = 0.0f;
+    if (carro->re <= 0.0f && !comandos.frear) {
+        carro->paradoFreando = 0.0f;   /* desengatou */
+        return 0;
+    }
+    return 1;
+}
+
+/*
+ * andarDeRe
+ * Anda para trás. Na direção livre, o bico gira para o lado contrário do volante (como de
+ * ré num carro de verdade); na guiada, o carro vai de lado para onde o volante manda.
+ * Recebe: o carro, os comandos e o tempo do quadro.
+ * Devolve: quantas voltas ganhou (de ré, nunca atravessa a linha de chegada).
+ */
+static int andarDeRe(Carro *carro, Comandos comandos, float tempoQuadro) {
+    carro->ultimosComandos = comandos;
+    carro->nitroLigado = 0;
+    carro->forcaDoDrift = 0.0f;
+    carro->anguloDeDrift = 0.0f;
+    carro->derrapagem = 0.0f;
+    atualizarMotor(&carro->motor, carro->re / carro->velocidadeMaxima, comandos.frear, 0, 0, tempoQuadro);
+    atualizarVolante(carro, comandos, tempoQuadro);
+    float metrosPorSegundo = carro->re / UNIDADES_POR_METRO;
+    float lateralAntes = carro->deslocamentoLateral * larguraDoLado(carro->posicao.segmento, carro->deslocamentoLateral);
+    int voltas = 0;
+    if (carro->direcaoLivre) {
+        /* andarNoMundo com a velocidade negativa: vai para trás e o rumo gira ao contrário */
+        carro->velocidade = -carro->re;
+        if (carro->posicao.segmento->ehLinhaDeChegada && carro->posicao.distanciaNoSegmento < carro->re * tempoQuadro) {
+            carro->velocidade = 0.0f;
+        }
+        voltas = andarNoMundo(carro, tempoQuadro);
+        carro->velocidade = 0.0f;
+    } else {
+        /* O bico gira ao contrário do volante, e o carro anda para trás para onde a traseira aponta */
+        Segmento *aqui = carro->posicao.segmento;
+        carro->rumoDeRe -= carro->volante * metrosPorSegundo / RAIO_DA_RE * 57.2958f * tempoQuadro;
+        carro->rumoDeRe = limitar(carro->rumoDeRe, -MAIOR_RUMO_DE_RE, MAIOR_RUMO_DE_RE);
+        float rumo = carro->rumoDeRe * 0.0174533f;
+        float deLado = -metrosPorSegundo * sinf(rumo);
+        carro->deslocamentoLateral += deLado / larguraDoLado(aqui, carro->deslocamentoLateral) * tempoQuadro;
+        float distancia = -carro->re * cosf(rumo) * tempoQuadro;
+        if (aqui->ehLinhaDeChegada && carro->posicao.distanciaNoSegmento + distancia < 0.0f) {
+            distancia = -carro->posicao.distanciaNoSegmento;
+        }
+        carro->distanciaPercorrida += distancia;
+        Segmento *segmentoAntes = carro->posicao.segmento;
+        voltas = moverNaPista(&carro->posicao, distancia);
+        if (carro->posicao.segmento != segmentoAntes) {
+            carro->deslocamentoLateral *= larguraDoLado(segmentoAntes, carro->deslocamentoLateral)
+                                          / larguraDoLado(carro->posicao.segmento, carro->deslocamentoLateral);
+        }
+        aplicarLimites(carro, tempoQuadro);
+    }
+    carro->anguloDasRodas = fmodf(carro->anguloDasRodas - rapidezDasRodas(carro->re, 0) * tempoQuadro + 2.0f * 3.14159265f,
+                                  2.0f * 3.14159265f);
+    float lateralDepois = carro->deslocamentoLateral * larguraDoLado(carro->posicao.segmento, carro->deslocamentoLateral);
+    carro->velocidadeDeLado = (tempoQuadro > 0.0f) ? (lateralDepois - lateralAntes) / tempoQuadro : 0.0f;
+    carro->voltas += voltas;
+    atualizarSuspensao(carro, tempoQuadro);
+    return voltas;
+}
+
+/*
  * atualizarCarro
  * Avança o carro um quadro: motor (marcha), velocidade, volante, lateral e depois anda
  * pela lista da pista com moverNaPista().
@@ -854,6 +1017,10 @@ int atualizarCarro(Carro *carro, Comandos comandos, float tempoQuadro) {
         comandos = nenhumComando;
     }
     atualizarRodada(carro, tempoQuadro);
+    if (controlarRe(carro, comandos, tempoQuadro)) {
+        return andarDeRe(carro, comandos, tempoQuadro);
+    }
+    carro->rumoDeRe *= expf(-tempoQuadro / ALINHANDO_DEPOIS_DA_RE);
     float lateralAntes = carro->deslocamentoLateral * larguraDoLado(carro->posicao.segmento, carro->deslocamentoLateral);
 
     carro->ultimosComandos = comandos;
@@ -873,6 +1040,7 @@ int atualizarCarro(Carro *carro, Comandos comandos, float tempoQuadro) {
         float lateralDepoisLivre = carro->deslocamentoLateral * larguraDoLado(carro->posicao.segmento, carro->deslocamentoLateral);
         carro->velocidadeDeLado = (tempoQuadro > 0.0f) ? (lateralDepoisLivre - lateralAntesLivre) / tempoQuadro : 0.0f;
         carro->voltas += cruzouLivre;
+        atualizarSuspensao(carro, tempoQuadro);
         return cruzouLivre;
     }
     atualizarLateral(carro, comandos, tempoQuadro);
@@ -902,6 +1070,7 @@ int atualizarCarro(Carro *carro, Comandos comandos, float tempoQuadro) {
                                       / larguraDoLado(carro->posicao.segmento, carro->deslocamentoLateral);
     }
     carro->voltas += voltasGanhas;
+    atualizarSuspensao(carro, tempoQuadro);
     return voltasGanhas;
 }
 
@@ -912,7 +1081,7 @@ int atualizarCarro(Carro *carro, Comandos comandos, float tempoQuadro) {
  * Devolve: a velocidade em km/h, arredondada.
  */
 int velocidadeEmKmh(Carro *carro) {
-    return converterParaKmh(carro->velocidade);
+    return converterParaKmh(carro->re > 0.0f ? carro->re : carro->velocidade);
 }
 
 /*

@@ -1291,6 +1291,7 @@ enum {
     LINHA_ZONA_MORTA,
     LINHA_VOLANTE,
     LINHA_DIRECAO_GUIADA,
+    LINHA_SOMBRAS,
     LINHA_CAMERA_X,
     LINHA_CAMERA_Y,
     LINHA_PADRAO,
@@ -1302,7 +1303,7 @@ enum {
 #define ALTURA_LINHA_COMANDO  29.0f
 #define Y_TITULO_CONTROLE     294.0f
 #define Y_OPCOES_CONTROLE     316.0f
-#define ALTURA_LINHA_OPCAO    26.0f
+#define ALTURA_LINHA_OPCAO    24.0f
 #define X_LINHAS_CONFIG       24.0f
 #define LARGURA_LINHAS_CONFIG 752.0f
 #define X_COLUNAS_COMANDO     212.0f
@@ -1383,6 +1384,9 @@ static void mudarOpcao(EstadoMenu *menu, int linha, int sentido) {
             break;
         case LINHA_DIRECAO_GUIADA:
             config->direcaoGuiada = !config->direcaoGuiada;
+            break;
+        case LINHA_SOMBRAS:
+            config->sombras = !config->sombras;
             break;
         case LINHA_CAMERA_X:
             config->inverterCameraX = !config->inverterCameraX;
@@ -1650,6 +1654,7 @@ void desenharConfiguracoes(EstadoMenu *menu) {
     desenharLinhaDeOpcao(menu, LINHA_ZONA_MORTA, "ZONA MORTA DO ANALÓGICO", TextFormat("%d%%", config->zonaMorta), 0);
     desenharLinhaDeOpcao(menu, LINHA_VOLANTE, "RESPOSTA DO VOLANTE NO ANALÓGICO", VOLANTES[config->respostaDoVolante], 0);
     desenharLinhaDeOpcao(menu, LINHA_DIRECAO_GUIADA, "DIREÇÃO GUIADA", config->direcaoGuiada ? "LIGADA" : "DESLIGADA", 0);
+    desenharLinhaDeOpcao(menu, LINHA_SOMBRAS, "SOMBRAS DO CENÁRIO", config->sombras ? "LIGADAS" : "DESLIGADAS", 0);
     desenharLinhaDeOpcao(menu, LINHA_CAMERA_X, "INVERTER A CÂMERA NA HORIZONTAL", config->inverterCameraX ? "SIM" : "NÃO", 0);
     desenharLinhaDeOpcao(menu, LINHA_CAMERA_Y, "INVERTER A CÂMERA NA VERTICAL", config->inverterCameraY ? "SIM" : "NÃO", 0);
     desenharLinhaDeOpcao(menu, LINHA_PADRAO, "VOLTAR TUDO AO PADRÃO", (menu->confirmarPadrao > 0.0f) ? "APERTE DE NOVO" : "", 0);

@@ -282,3 +282,26 @@ void encerrarVibracao(void) {
         observadorLigou = observadorDesligou = nil;
     }
 }
+
+/*
+ * touchpadDoControleApertado
+ * A raylib não conhece o touchpad, e a do Homebrew não deixa ler o botão cru da GLFW: no
+ * macOS ele vem do sistema de controles da Apple, como a vibração.
+ * Recebe: nada.
+ * Devolve: 1 se o touchpad de um controle de PlayStation está apertado.
+ */
+int touchpadDoControleApertado(void) {
+    for (GCController *controle in [GCController controllers]) {
+        GCExtendedGamepad *gamepad = controle.extendedGamepad;
+        if ([gamepad isKindOfClass:[GCDualSenseGamepad class]]) {
+            if (((GCDualSenseGamepad *) gamepad).touchpadButton.pressed) {
+                return 1;
+            }
+        } else if ([gamepad isKindOfClass:[GCDualShockGamepad class]]) {
+            if (((GCDualShockGamepad *) gamepad).touchpadButton.pressed) {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
