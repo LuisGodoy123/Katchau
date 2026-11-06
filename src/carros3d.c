@@ -12,6 +12,8 @@
 
 #include <math.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
 #include "carros3d.h"
 #include "raymath.h"
 #include "rlgl.h"
@@ -69,27 +71,29 @@ typedef struct {
 } PecaDeRoda;
 
 /* Cada modelo, na ordem de FICHAS (corrida.c). O comprimento está
- * na ficha; "deitado" marca o modelo com a frente em +x. */
+ * na ficha; "deitado" marca o modelo com a frente em +x, e "deRe" o que vem de costas
+ * (a frente em -z, como o Wingo). */
 typedef struct {
     const char *arquivo;
     int deitado;
+    int deRe;
 } ModeloDoCarro;
 
 static const ModeloDoCarro MODELOS[TOTAL_CARROS] = {
-    { "mcqueen.glb", 0 },
-    { "the_king.glb", 0 },
-    { "doc_hudson.glb", 0 },
-    { "francesco.glb", 0 },
-    { "sally.glb", 0 },
-    { "ramone.glb", 0 },
-    { "luigi.glb", 0 },
-    { "guido.glb", 0 },
-    { "mater.glb", 0 },
-    { "sarge.glb", 0 },
-    { "fillmore.glb", 0 },
-    { "finn.glb", 1 },
-    { "wingo.glb", 0 },
-    { "snot_rod.glb", 0 },
+    { "mcqueen.glb", 0, 0 },
+    { "the_king.glb", 0, 0 },
+    { "doc_hudson.glb", 0, 0 },
+    { "francesco.glb", 0, 0 },
+    { "sally.glb", 0, 0 },
+    { "ramone.glb", 0, 0 },
+    { "luigi.glb", 0, 0 },
+    { "guido.glb", 0, 0 },
+    { "mater.glb", 0, 0 },
+    { "sarge.glb", 0, 0 },
+    { "fillmore.glb", 0, 0 },
+    { "finn.glb", 1, 0 },
+    { "wingo.glb", 0, 1 },
+    { "snot_rod.glb", 0, 0 },
 };
 
 static const char *VERTICES_DO_SHADER =
@@ -111,15 +115,17 @@ static const char *VERTICES_DO_SHADER =
     "void main() { if ((texture(texture0, fragTexCoord) * colDiffuse).a < 0.5) discard;\n" \
     "              finalColor = vec4(0.0, 0.0, 0.0, " OPACIDADE "); }\n"
 
-/* Luz de um sol alto mais o céu, para os carros terem volume. Os dois shaders
- * só mudam no corte: um desenha só o opaco, o outro só o translúcido. */
-#define PIXELS_DO_SHADER(CORTE, SAIDA) \
+/* Luz de um sol alto mais o céu, para os carros terem volume. Os shaders
+ * só mudam no corte (um desenha só o opaco, o outro só o translúcido) e na
+ * leitura da cor (a dos olhos junta três texturas, veja OLHOS_DO_SHADER). */
+#define PIXELS_DO_SHADER_LENDO(DECLARACOES, LEITURA, CORTE, SAIDA) \
     "#version 330\n" \
     "in vec2 fragTexCoord; in vec4 fragColor; in vec3 fragNormal; in vec3 fragPos;\n" \
-    "uniform sampler2D texture0; uniform vec4 colDiffuse; uniform vec3 olho;\n" \
+    "uniform sampler2D texture0; uniform vec4 colDiffuse; uniform vec3 olho; uniform float reflexoDaPintura;\n" \
+    DECLARACOES \
     "out vec4 finalColor;\n" \
     GLSL_DA_LUZ_DA_NOITE \
-    "void main() { vec4 cor = texture(texture0, fragTexCoord) * colDiffuse * fragColor;\n" \
+    "void main() { vec4 cor = " LEITURA " * colDiffuse * fragColor;\n" \
     "              " CORTE "\n" \
     "              vec3 n = normalize(fragNormal);\n" \
     "              if (!gl_FrontFacing) n = -n;\n" \
@@ -132,10 +138,161 @@ static const char *VERTICES_DO_SHADER =
     "              float lataria = smoothstep(0.12, 0.38, max(cor.r, max(cor.g, cor.b)));\n" \
     "              vec3 ceu = (noite > 0.5) ? mix(vec3(0.03, 0.04, 0.08), vec3(0.20, 0.26, 0.42), clamp(r.y, 0.0, 1.0))\n" \
     "                                       : mix(vec3(0.50, 0.52, 0.52), vec3(0.62, 0.80, 1.00), clamp(r.y * 1.5, 0.0, 1.0));\n" \
-    "              float reflexo = lataria * (0.08 + 0.50 * fresnel);\n" \
+    "              float reflexo = lataria * (0.08 + 0.50 * fresnel) * reflexoDaPintura;\n" \
     "              float estrela = (noite > 0.5) ? 0.0 : pow(max(dot(r, normalize(vec3(0.35, 0.8, 0.45))), 0.0), 60.0) * lataria;\n" \
     "              vec3 base = mix(cor.rgb * comLuz, ceu, reflexo) + vec3(1.0, 0.97, 0.9) * estrela * 0.9;\n" \
     "              finalColor = vec4(base, " SAIDA "); }\n"
+#define PIXELS_DO_SHADER(CORTE, SAIDA) \
+    PIXELS_DO_SHADER_LENDO("", "texture(texture0, fragTexCoord)", CORTE, SAIDA)
+
+/* ---------- Olhos ----------
+ * Os olhos de cada carro são uma textura (o para-brisa) com o branco, as íris e a pálpebra.
+ * Ela já vem separada em três (recursos/modelos/carros/olhos/, feitas a partir dela): o
+ * fundo sem as íris (texture0), só as íris (texture1) e onde é branco do olho (texture2).
+ * O shader desliza as íris pelo "desvio" e só as mostra onde é branco: assim elas olham
+ * para o lado da curva e somem por baixo da pálpebra. Na sombra, a íris escurece junto. */
+#define PASTA_DOS_OLHOS       PASTA_DOS_MODELOS "olhos/"
+#define CURVA_DO_OLHAR        0.55f     /* < 1: um pouco de volante já vira bem os olhos */
+#define SOBE_O_OLHAR          0.45f     /* quanto a íris sobe ou desce, em raios dela */
+/* A cara em cada estado: o fechamento da pálpebra (0 normal, 1 fechada, < 0 arregalada),
+ * a inclinação (> 0 o canto de dentro desce: determinado; < 0 sobe: preocupado), o arco
+ * (> 0 o meio abre mais que os cantos) e o tamanho da íris */
+#define CACA_FECHA            0.35f     /* "modo caça", em alta velocidade */
+#define CACA_INCLINA          0.35f
+#define CACA_IRIS             1.04f
+#define SUSTO_FECHA          -0.40f     /* rodando, ou depois de uma batida forte */
+#define SUSTO_INCLINA        -0.30f
+#define SUSTO_ARCO            0.35f
+#define SUSTO_IRIS            0.78f
+#define SUSTO_OLHA_PARA_CIMA  0.35f
+#define SUSTO_TREME           0.10f     /* a íris treme de lado (em frações do quanto ela anda) */
+#define SUSTO_PASSA           0.80f     /* segundos para o susto passar */
+/* As molas: cada parte da cara vai até o alvo como uma mola (frequência em Hz e
+ * amortecimento: abaixo de 1, passa um pouco do ponto e volta). É isso que dá vida: o olho
+ * chega no canto, passa um tico e assenta, em vez de deslizar em linha reta. */
+#define MOLA_DO_OLHAR         3.2f, 0.55f
+#define MOLA_DA_PALPEBRA      2.2f, 0.75f
+#define MOLA_DA_INCLINACAO    2.0f, 0.80f
+#define MOLA_DO_ARCO          2.0f, 0.60f
+#define MOLA_DA_IRIS          4.0f, 0.50f
+#define PASSO_DAS_MOLAS       (1.0f / 240.0f)
+/* As piscadas: de tempos em tempos (às vezes duas seguidas), e uma no começo do susto */
+#define PISCA_DE_TEMPOS       2.2f      /* segundos, no mínimo... */
+#define PISCA_ATE             5.5f      /* ...e no máximo */
+#define DURACAO_DA_PISCADA    0.17f
+#define PISCADA_DUPLA         0.20f     /* a chance de piscar duas vezes */
+/* Olhadelas: com o volante parado, o olhar não fica congelado; muda um pouco de vez em quando */
+#define OLHADELA_DE_TEMPOS    0.5f
+#define OLHADELA_ATE          1.8f
+#define OLHADELA_DE_LADO      0.22f
+#define OLHADELA_DE_ALTURA    0.15f
+
+/* O shader dos olhos.
+ * A íris: desliza pelo "desvio", escala em volta do meio dela e só aparece onde é branco
+ *   do olho (a máscara); na sombra, escurece junto.
+ * A pálpebra: cada coluna da textura sabe onde fica a borda da pálpebra e onde termina o
+ *   branco do outro lado (texture3, medido ao carregar). Cada coluna fecha um tanto (a forma:
+ *   fechamento, inclinação e arco, por olho): o desenho da pálpebra (com a borda e a sombra)
+ *   anda inteiro até a nova borda, e o branco que sobra se espreme até o outro lado, que fica
+ *   parado (o cílio da Sally não sai do lugar). As leituras usam as derivadas da coordenada
+ *   original, senão o mipmap pisca na emenda. */
+#define OLHOS_DO_SHADER \
+    "uniform sampler2D texture1; uniform sampler2D texture2; uniform sampler2D texture3;\n" \
+    "uniform vec2 desvio; uniform vec4 meiosDasIris; uniform float tamanhoDaIris; uniform vec4 formaDaPalpebra;\n" \
+    "float fechamentoDoOlho(float u, float meio, float outro) {\n" \
+    "    float x = clamp((u - meio) / max(abs(outro - meio) * 0.5, 0.02) * sign(outro - meio), -1.3, 1.3);\n" \
+    "    return formaDaPalpebra.x + 0.5 * formaDaPalpebra.y * x - 0.45 * formaDaPalpebra.z * (1.0 - x * x);\n" \
+    "}\n" \
+    "vec2 comPalpebra(vec2 uv) {\n" \
+    "    vec3 borda = texture(texture3, vec2(uv.x, 0.5)).rgb;\n" \
+    "    float d = borda.x - borda.y;\n" \
+    "    if (borda.z < 0.5 || abs(d) < 0.002) return uv;\n" \
+    "    float c1 = meiosDasIris.x, c2 = meiosDasIris.z;\n" \
+    "    float t = smoothstep(-0.15, 0.15, (uv.x - 0.5 * (c1 + c2)) / max(abs(c2 - c1), 0.02) * sign(c2 - c1));\n" \
+    "    float f = mix(fechamentoDoOlho(uv.x, c1, c2), fechamentoDoOlho(uv.x, c2, c1), t);\n" \
+    "    float s = (uv.y - borda.y) / d;\n" \
+    "    float e = 1.0 - f;\n" \
+    "    float v = uv.y;\n" \
+    "    if (s >= e) {\n" \
+    "        /* a pálpebra anda inteira; o que passar do fim da textura repete o fundo dela */\n" \
+    "        float fundoDaPalpebra = (d > 0.0) ? 0.97 - borda.x : borda.x - 0.03;\n" \
+    "        float dentro = uv.y - (borda.y + e * d);\n" \
+    "        v = borda.x + sign(dentro) * min(abs(dentro), max(fundoDaPalpebra, 0.0));\n" \
+    "    }\n" \
+    "    else if (s >= 0.0) v = borda.y + s / max(e, 0.001) * d;\n" \
+    "    return vec2(uv.x, clamp(v, 0.002, 0.998));\n" \
+    "}\n" \
+    "vec4 corDosOlhos(vec2 uv) {\n" \
+    "    vec2 dx = dFdx(uv), dy = dFdy(uv);\n" \
+    "    /* a textura se repete: há modelo com a coordenada fora de 0 a 1 (a do Wingo vai de -1 a 0) */\n" \
+    "    uv = fract(uv);\n" \
+    "    vec2 p = comPalpebra(uv);\n" \
+    "    vec4 fundo = textureGrad(texture0, p, dx, dy);\n" \
+    "    vec2 q = uv - desvio;\n" \
+    "    bool primeira = distance(q, meiosDasIris.xy) < distance(q, meiosDasIris.zw);\n" \
+    "    vec2 meio = primeira ? meiosDasIris.xy : meiosDasIris.zw;\n" \
+    "    vec2 outro = primeira ? meiosDasIris.zw : meiosDasIris.xy;\n" \
+    "    vec2 amostra = meio + (q - meio) / tamanhoDaIris;\n" \
+    "    vec4 iris = textureGrad(texture1, amostra, dx / tamanhoDaIris, dy / tamanhoDaIris);\n" \
+    "    if (distance(amostra, outro) < distance(amostra, meio)) iris.a = 0.0; /* só a deste olho */\n" \
+    "    float a = iris.a * textureGrad(texture2, p, dx, dy).r;\n" \
+    "    float sombra = clamp(max(fundo.r, max(fundo.g, fundo.b)) / 0.97, 0.0, 1.0);\n" \
+    "    return vec4(mix(fundo.rgb, iris.rgb * sombra, a), 1.0);\n" \
+    "}\n"
+
+typedef struct {
+    int tem;           /* 1 se o carro tem os olhos preparados */
+    int material;      /* o material dos olhos, no modelo da raylib */
+    float anda;        /* quanto a íris anda de lado com o volante todo (fração da textura) */
+    float lado;        /* +1 ou -1: para que lado da textura (u) fica a direita do carro */
+    float ladoDeCima;  /* +1 ou -1: para que lado da textura (v) fica o alto do carro */
+    float ladoDaPalpebra;   /* +1 embaixo do olho na textura, -1 em cima, 0 sem pálpebra */
+    float linha;            /* a altura do meio do olho, na textura */
+    float raio;             /* o raio da íris na altura, na textura */
+    Vector4 meios;          /* o meio de cada íris (u, v, u, v) */
+} OlhosDoCarro;
+
+/* Uma mola: a posição e a velocidade */
+typedef struct {
+    float x, v;
+} Mola;
+
+/* A cara de um carro, viva: as molas, as piscadas e as olhadelas */
+typedef struct {
+    Mola olharX, olharY, fechar, inclinar, arco, iris;
+    float alvoAperto, alvoSusto;   /* o pedido para o próximo desenho */
+    float susto;                   /* o susto de agora (passa devagar) */
+    float piscada;                 /* segundos desde o começo da piscada (< 0: sem piscada) */
+    float proximaPiscada;          /* segundos até a próxima */
+    float proximaOlhadela;         /* segundos até mudar a olhadela */
+    float olhadelaX, olhadelaY;
+    unsigned int sorteio;          /* para os sorteios do carro (não mexe no rand() do jogo) */
+    double hora;                   /* do último desenho (para saber quanto tempo passou) */
+} CaraDoCarro;
+
+static OlhosDoCarro olhos[TOTAL_CARROS];
+static CaraDoCarro caras[TOTAL_CARROS];
+static float reflexos[TOTAL_CARROS];    /* quanto o céu se reflete na pintura de cada carro */
+static Shader shaderDosOlhos;
+static int locDoDesvio, locDosMeios, locDoTamanho, locDaForma;
+static int locsDoReflexo[3];   /* reflexoDaPintura no opaco, no translúcido e no dos olhos */
+
+/* ---------- Cores ----------
+ * Um acerto na pintura de um carro, ao carregar: a cor (só nos pixels perto do tom
+ * escolhido) e quanto ela reflete o céu. Numa cor clara, o reflexo azulado apaga a cor: o
+ * Luigi saía quase cinza na tela (o capô, azulado), e no filme ele é amarelo-manteiga. */
+typedef struct {
+    const char *arquivo;
+    int materiais[4];            /* os materiais da pintura, no .glb (-1 sobra) */
+    float tomDe, largura;        /* graus: o tom a mexer e até quantos graus dele */
+    float girar;                 /* graus a somar no tom */
+    float saturacao, brilho;     /* multiplicam */
+    float reflexo;               /* quanto o céu se reflete na pintura (1 = como nos outros carros) */
+} AcertoDeCor;
+
+static const AcertoDeCor ACERTOS_DE_COR[] = {
+    { "luigi.glb", { 2, 3, -1, -1 }, 49.0f, 14.0f, -4.0f, 1.05f, 1.22f, 0.35f },
+};
 
 static Model modelos[TOTAL_CARROS];
 static Matrix ajuste[TOTAL_CARROS];     /* do modelo como veio para o modelo normalizado */
@@ -169,12 +326,13 @@ static float ladosDaSombra[TOTAL_CARROS];
 
 /*
  * desenharComShader
- * Recebe: o modelo (já com a matriz certa) e o shader da passada.
+ * Recebe: o modelo (já com a matriz certa), o shader da passada e o material dos olhos, que
+ *         usa o shader dos olhos (-1 = nenhum).
  * Devolve: nada.
  */
-static void desenharComShader(Model modelo, Shader shader) {
+static void desenharComShader(Model modelo, Shader shader, int materialDosOlhos) {
     for (int i = 0; i < modelo.materialCount; i++) {
-        modelo.materials[i].shader = shader;
+        modelo.materials[i].shader = (i == materialDosOlhos) ? shaderDosOlhos : shader;
     }
     DrawModel(modelo, (Vector3){ 0.0f, 0.0f, 0.0f }, 1.0f, WHITE);
 }
@@ -397,7 +555,7 @@ static void prepararSombra(int numero) {
     rlDisableBackfaceCulling();
     Model modelo = modelos[numero];
     modelo.transform = ajuste[numero];
-    desenharComShader(modelo, shaderDaSombra);
+    desenharComShader(modelo, shaderDaSombra, -1);
     rlEnableBackfaceCulling();
     EndMode3D();
     EndTextureMode();
@@ -431,6 +589,7 @@ float alturaDoCarro3D(int numero) {
 void definirOlhoDosCarros(Vector3 olho) {
     SetShaderValue(shaderOpaco, GetShaderLocation(shaderOpaco, "olho"), &olho, SHADER_UNIFORM_VEC3);
     SetShaderValue(shaderTranslucido, GetShaderLocation(shaderTranslucido, "olho"), &olho, SHADER_UNIFORM_VEC3);
+    SetShaderValue(shaderDosOlhos, GetShaderLocation(shaderDosOlhos, "olho"), &olho, SHADER_UNIFORM_VEC3);
 }
 
 /*
@@ -510,6 +669,142 @@ void desenharRodaSolta(int numero, int roda, Matrix noMundo) {
 }
 
 /*
+ * expressaoNoProximoDesenho
+ * A cara do carro no próximo desenho: o quanto ele aperta os olhos (o "modo caça", em alta
+ * velocidade) e o quanto está assustado (rodando, batendo). A cara vai até lá com as molas.
+ * Sem chamar, o carro volta à cara normal.
+ * Recebe: o carro, o aperto e o susto (de 0 a 1).
+ * Devolve: nada.
+ */
+void expressaoNoProximoDesenho(int numero, float aperto, float susto) {
+    caras[numero].alvoAperto = fmaxf(0.0f, fminf(1.0f, aperto));
+    caras[numero].alvoSusto = fmaxf(0.0f, fminf(1.0f, susto));
+}
+
+/*
+ * sortear
+ * Recebe: a cara (que guarda o sorteio dela), e o menor e o maior valor.
+ * Devolve: um valor entre os dois.
+ */
+static float sortear(CaraDoCarro *cara, float menor, float maior) {
+    cara->sorteio = cara->sorteio * 1664525u + 1013904223u;
+    return menor + (maior - menor) * (float) (cara->sorteio >> 8) / 16777216.0f;
+}
+
+/*
+ * molar
+ * Leva a mola em direção ao alvo, em passos pequenos (assim não explode com um quadro lento).
+ * Recebe: a mola, o alvo, a frequência (Hz), o amortecimento (1: chega sem passar do ponto)
+ *         e o tempo que passou.
+ * Devolve: nada.
+ */
+static void molar(Mola *mola, float alvo, float frequencia, float amortecimento, float tempo) {
+    float w = 2.0f * PI * frequencia;
+    for (float resta = tempo; resta > 0.0f; resta -= PASSO_DAS_MOLAS) {
+        float h = fminf(resta, PASSO_DAS_MOLAS);
+        mola->v += (w * w * (alvo - mola->x) - 2.0f * amortecimento * w * mola->v) * h;
+        mola->x += mola->v * h;
+    }
+}
+
+/*
+ * fechamentoDaPiscada
+ * Recebe: os segundos desde o começo da piscada.
+ * Devolve: o quanto ela fecha o olho (0 a 1): fecha rápido e abre um pouco mais devagar.
+ */
+static float fechamentoDaPiscada(float t) {
+    if (t < 0.0f || t > DURACAO_DA_PISCADA) {
+        return 0.0f;
+    }
+    float fecha = DURACAO_DA_PISCADA * 0.4f;
+    float k = (t < fecha) ? t / fecha : 1.0f - (t - fecha) / (DURACAO_DA_PISCADA - fecha);
+    return k * k * (3.0f - 2.0f * k);
+}
+
+/*
+ * animarOlhos
+ * Um passo da cara do carro: os alvos de cada parte (o volante, o aperto, o susto, as
+ * olhadelas), as molas até eles, e as piscadas.
+ * Recebe: o carro, o volante (-1 a +1) e o tempo que passou.
+ * Devolve: nada.
+ */
+static void animarOlhos(int numero, float volante, float tempo) {
+    CaraDoCarro *c = &caras[numero];
+    float comecouSusto = (c->alvoSusto > 0.5f && c->susto < 0.5f);
+    c->susto = fmaxf(c->alvoSusto, c->susto - tempo / SUSTO_PASSA);
+    float s = c->susto;
+    float a = c->alvoAperto * (1.0f - s);
+    c->alvoAperto = 0.0f;
+    c->alvoSusto = 0.0f;
+
+    /* As piscadas: de tempos em tempos, menos no "modo caça" (concentrado), e no susto */
+    c->proximaPiscada -= tempo;
+    if (c->piscada >= 0.0f) {
+        c->piscada += tempo;
+        if (c->piscada > DURACAO_DA_PISCADA) {
+            c->piscada = -1.0f;
+        }
+    }
+    if (comecouSusto || (c->proximaPiscada <= 0.0f && c->piscada < 0.0f)) {
+        c->piscada = 0.0f;
+        int dupla = sortear(c, 0.0f, 1.0f) < PISCADA_DUPLA;
+        c->proximaPiscada = dupla ? DURACAO_DA_PISCADA + 0.08f
+                                  : sortear(c, PISCA_DE_TEMPOS, PISCA_ATE) * (1.0f + 0.8f * a);
+    }
+
+    /* As olhadelas: com o volante parado, o olhar muda um pouco de vez em quando */
+    c->proximaOlhadela -= tempo;
+    if (c->proximaOlhadela <= 0.0f) {
+        c->olhadelaX = sortear(c, -OLHADELA_DE_LADO, OLHADELA_DE_LADO);
+        c->olhadelaY = sortear(c, -OLHADELA_DE_ALTURA, OLHADELA_DE_ALTURA);
+        c->proximaOlhadela = sortear(c, OLHADELA_DE_TEMPOS, OLHADELA_ATE);
+    }
+    float v = fmaxf(-1.0f, fminf(1.0f, volante));
+    float olhar = copysignf(powf(fabsf(v), CURVA_DO_OLHAR), v);
+    float solto = (1.0f - fabsf(olhar)) * (1.0f - a * 0.7f);   /* concentrado, olha menos em volta */
+    float tremor = s * SUSTO_TREME * sinf((float) c->hora * 47.0f + (float) numero * 1.7f);
+
+    molar(&c->olharX, olhar * (1.0f - 0.3f * s) + c->olhadelaX * solto + tremor, MOLA_DO_OLHAR, tempo);
+    molar(&c->olharY, SUSTO_OLHA_PARA_CIMA * s + c->olhadelaY * solto, MOLA_DO_OLHAR, tempo);
+    molar(&c->fechar, CACA_FECHA * a + SUSTO_FECHA * s, MOLA_DA_PALPEBRA, tempo);
+    molar(&c->inclinar, CACA_INCLINA * a + SUSTO_INCLINA * s, MOLA_DA_INCLINACAO, tempo);
+    molar(&c->arco, SUSTO_ARCO * s, MOLA_DO_ARCO, tempo);
+    molar(&c->iris, 1.0f + (CACA_IRIS - 1.0f) * a + (SUSTO_IRIS - 1.0f) * s, MOLA_DA_IRIS, tempo);
+}
+
+/*
+ * prepararOlhos
+ * Anda a cara do carro e passa ela para o shader dos olhos: para onde as íris olham, o
+ * tamanho delas e a forma da pálpebra (com a piscada por cima).
+ * Recebe: o carro e o volante (-1 a +1).
+ * Devolve: nada.
+ */
+static void prepararOlhos(int numero, float volante) {
+    OlhosDoCarro *o = &olhos[numero];
+    CaraDoCarro *c = &caras[numero];
+    double agora = GetTime();
+    if (c->hora <= 0.0) {   /* a primeira vez: começa parado, com sorteios só deste carro */
+        c->sorteio = 2654435761u * (unsigned int) (numero + 1);
+        c->iris.x = 1.0f;
+        c->piscada = -1.0f;
+        c->proximaPiscada = sortear(c, 0.5f, PISCA_ATE);
+    }
+    float tempo = (c->hora > 0.0) ? (float) fmin(0.1, agora - c->hora) : 0.0f;
+    c->hora = agora;
+    animarOlhos(numero, volante, tempo);
+
+    float piscada = fechamentoDaPiscada(c->piscada);
+    Vector4 forma = { c->fechar.x + (1.08f - c->fechar.x) * piscada, c->inclinar.x * (1.0f - piscada),
+                      c->arco.x * (1.0f - piscada), 0.0f };
+    Vector2 desvio = { o->lado * o->anda * c->olharX.x, o->ladoDeCima * o->raio * SOBE_O_OLHAR * c->olharY.x };
+    float tamanho = fmaxf(0.5f, c->iris.x);
+    SetShaderValue(shaderDosOlhos, locDoDesvio, &desvio, SHADER_UNIFORM_VEC2);
+    SetShaderValue(shaderDosOlhos, locDosMeios, &o->meios, SHADER_UNIFORM_VEC4);
+    SetShaderValue(shaderDosOlhos, locDoTamanho, &tamanho, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(shaderDosOlhos, locDaForma, &forma, SHADER_UNIFORM_VEC4);
+}
+
+/*
  * desenharCarro3D
  * Desenha um carro em qualquer lugar do mundo. Chamar dentro de BeginMode3D.
  * Recebe: o número do carro e a matriz que leva o carro normalizado (centro
@@ -529,11 +824,20 @@ void desenharCarro3D(int numero, Matrix noMundo, float anguloDasRodas, float vol
         doGuido.transform = MatrixMultiply(pose, noMundo);
     }
 
-    desenharComShader(modelo, shaderOpaco);
+    int materialDosOlhos = -1;
+    if (olhos[numero].tem) {
+        prepararOlhos(numero, volante);
+        materialDosOlhos = olhos[numero].material;
+    }
+    SetShaderValue(shaderOpaco, locsDoReflexo[0], &reflexos[numero], SHADER_UNIFORM_FLOAT);
+    SetShaderValue(shaderDosOlhos, locsDoReflexo[2], &reflexos[numero], SHADER_UNIFORM_FLOAT);
+    desenharComShader(modelo, shaderOpaco, materialDosOlhos);
     if (comGarfos) {
-        desenharComShader(doGuido, shaderOpaco);
+        desenharComShader(doGuido, shaderOpaco, -1);
     }
     desenharRodas(numero, modelo, noMundo, anguloDasRodas, volante, 0);
+    float normal = 1.0f;   /* o shaderOpaco também desenha outras coisas, como a roda solta */
+    SetShaderValue(shaderOpaco, locsDoReflexo[0], &normal, SHADER_UNIFORM_FLOAT);
 
     BeginBlendMode(BLEND_ALPHA);
     rlDisableDepthMask();
@@ -591,7 +895,8 @@ static void normalizarModelo(int numero) {
 
     Matrix centralizar = MatrixTranslate(-(caixa.min.x + caixa.max.x) / 2.0f, -caixa.min.y,
                                          -(caixa.min.z + caixa.max.z) / 2.0f);
-    Matrix girar = deitado ? MatrixRotateY(-90.0f * DEG2RAD) : MatrixIdentity();
+    Matrix girar = deitado ? MatrixRotateY(-90.0f * DEG2RAD)
+                 : MODELOS[numero].deRe ? MatrixRotateY(180.0f * DEG2RAD) : MatrixIdentity();
     ajuste[numero] = MatrixMultiply(MatrixMultiply(centralizar, girar), MatrixScale(escala, escala, escala));
     larguras[numero] = (deitado ? dz : dx) * escala;
 }
@@ -1112,6 +1417,253 @@ int bordaDaMiniatura(int numero) {
 }
 
 /*
+ * trocarTextura
+ * Põe outra textura num mapa do material, devolvendo a que estava lá (se não for a padrão
+ * da raylib nem a mesma que outro mapa do material ainda usa).
+ * Recebe: o material, o mapa e a textura nova.
+ * Devolve: nada.
+ */
+static void trocarTextura(Material *material, int mapa, Texture2D nova) {
+    Texture2D velha = material->maps[mapa].texture;
+    material->maps[mapa].texture = nova;
+    if (velha.id == 0 || velha.id == rlGetTextureIdDefault()) {
+        return;
+    }
+    for (int m = 0; m <= MATERIAL_MAP_BRDF; m++) {   /* os mapas que a raylib conhece */
+        if (material->maps[m].texture.id == velha.id) {
+            return;
+        }
+    }
+    UnloadTexture(velha);
+}
+
+/*
+ * acertarCores
+ * Aplica os ACERTOS_DE_COR do carro (se tiver) em todas as texturas dele. Só mexe nos
+ * pixels perto do tom escolhido, e cada vez menos quanto mais longe dele.
+ * Recebe: o número do carro (o modelo já carregado).
+ * Devolve: nada.
+ */
+static void acertarCores(int numero) {
+    reflexos[numero] = 1.0f;
+    for (int a = 0; a < (int) (sizeof(ACERTOS_DE_COR) / sizeof(ACERTOS_DE_COR[0])); a++) {
+        const AcertoDeCor *acerto = &ACERTOS_DE_COR[a];
+        if (strcmp(acerto->arquivo, MODELOS[numero].arquivo) != 0) {
+            continue;
+        }
+        reflexos[numero] = acerto->reflexo;
+        for (int k = 0; k < 4 && acerto->materiais[k] >= 0; k++) {
+            int m = acerto->materiais[k] + 1;   /* a raylib põe um material padrão antes dos do .glb */
+            if (m >= modelos[numero].materialCount) {
+                continue;
+            }
+            Texture2D textura = modelos[numero].materials[m].maps[MATERIAL_MAP_ALBEDO].texture;
+            if (textura.id == 0 || textura.id == rlGetTextureIdDefault()) {
+                continue;
+            }
+            Image imagem = LoadImageFromTexture(textura);
+            Color *pixels = LoadImageColors(imagem);
+            int mexeu = 0;
+            for (int i = 0; i < imagem.width * imagem.height; i++) {
+                Vector3 hsv = ColorToHSV(pixels[i]);   /* tom em graus, saturação e brilho de 0 a 1 */
+                float distancia = fabsf(fmodf(hsv.x - acerto->tomDe + 540.0f, 360.0f) - 180.0f);
+                if (distancia >= acerto->largura || hsv.y < 0.15f) {
+                    continue;
+                }
+                float peso = 1.0f - distancia / acerto->largura;
+                peso = peso * peso * (3.0f - 2.0f * peso) * fminf(1.0f, (hsv.y - 0.15f) / 0.10f);
+                float tom = hsv.x + acerto->girar * peso;
+                float saturacao = fminf(1.0f, hsv.y * (1.0f + (acerto->saturacao - 1.0f) * peso));
+                float brilho = fminf(1.0f, hsv.z * (1.0f + (acerto->brilho - 1.0f) * peso));
+                Color nova = ColorFromHSV(fmodf(tom + 360.0f, 360.0f), saturacao, brilho);
+                nova.a = pixels[i].a;
+                pixels[i] = nova;
+                mexeu = 1;
+            }
+            if (mexeu) {
+                Image acertada = { pixels, imagem.width, imagem.height, 1, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
+                trocarTextura(&modelos[numero].materials[m], MATERIAL_MAP_ALBEDO, LoadTextureFromImage(acertada));
+            }
+            UnloadImageColors(pixels);
+            UnloadImage(imagem);
+        }
+    }
+}
+
+/*
+ * medirBordasDaPalpebra
+ * Para cada coluna da textura dos olhos, o maior trecho de branco do olho (na máscara): de um
+ * lado ele acaba na pálpebra, do outro no fim do olho. O shader usa isso para fechar a pálpebra
+ * coluna por coluna (veja OLHOS_DO_SHADER).
+ * Recebe: a máscara (o arquivo) e de que lado está a pálpebra (+1 embaixo na textura, -1 em
+ *         cima, 0 nenhum).
+ * Devolve: uma textura de uma linha: em cada coluna, a altura da borda da pálpebra, a do fim
+ *          do olho e 1 se a coluna tem olho (0 se não).
+ */
+static Texture2D medirBordasDaPalpebra(const char *mascara, int ladoDaPalpebra) {
+    Image imagem = LoadImage(mascara);
+    ImageFormat(&imagem, PIXELFORMAT_UNCOMPRESSED_GRAYSCALE);
+    const unsigned char *pixels = (const unsigned char *) imagem.data;
+    int largura = imagem.width, altura = imagem.height;
+    float *bordas = (float *) MemAlloc(sizeof(float) * 3 * largura);
+    for (int x = 0; x < largura; x++) {
+        int melhorInicio = 0, melhorTamanho = 0, inicio = -1;
+        for (int y = 0; y <= altura; y++) {
+            int branco = (y < altura) && pixels[y * largura + x] >= 128;
+            if (branco && inicio < 0) {
+                inicio = y;
+            } else if (!branco && inicio >= 0) {
+                if (y - inicio > melhorTamanho) {
+                    melhorInicio = inicio;
+                    melhorTamanho = y - inicio;
+                }
+                inicio = -1;
+            }
+        }
+        float de = (float) melhorInicio / altura, ate = (float) (melhorInicio + melhorTamanho) / altura;
+        int temOlho = ladoDaPalpebra != 0 && melhorTamanho >= 3;
+        bordas[x * 3 + 0] = (ladoDaPalpebra > 0) ? ate : de;   /* a borda da pálpebra */
+        bordas[x * 3 + 1] = (ladoDaPalpebra > 0) ? de : ate;   /* o fim do olho, do outro lado */
+        bordas[x * 3 + 2] = temOlho ? 1.0f : 0.0f;
+    }
+    Image linha = { bordas, largura, 1, 1, PIXELFORMAT_UNCOMPRESSED_R32G32B32 };
+    Texture2D textura = LoadTextureFromImage(linha);
+    SetTextureFilter(textura, TEXTURE_FILTER_BILINEAR);
+    SetTextureWrap(textura, TEXTURE_WRAP_CLAMP);
+    MemFree(bordas);
+    UnloadImage(imagem);
+    return textura;
+}
+
+/*
+ * carregarOlhos
+ * Procura o carro na tabela dos olhos (recursos/modelos/carros/olhos/olhos.txt) e troca
+ * a textura dos olhos dele pelas três camadas: o fundo, as íris e a máscara do branco.
+ * Sem a tabela ou sem as imagens, o carro fica com os olhos parados, como vieram.
+ * Recebe: o número do carro e o texto da tabela (NULL se não há).
+ * Devolve: nada.
+ */
+static void carregarOlhos(int numero, const char *tabela) {
+    olhos[numero].tem = 0;
+    if (tabela == NULL) {
+        return;
+    }
+    char nome[64];
+    strncpy(nome, GetFileNameWithoutExt(MODELOS[numero].arquivo), sizeof(nome) - 1);
+    nome[sizeof(nome) - 1] = '\0';
+    int material = -1;
+    OlhosDoCarro achados = { 0 };
+    for (const char *linha = tabela; *linha != '\0'; ) {
+        char carro[64];
+        int noGlb, ladoDaPalpebra;
+        OlhosDoCarro lidos = { 0 };
+        if (*linha != '#'
+            && sscanf(linha, "%63s %d %f %d %f %f %f %f %f %f", carro, &noGlb, &lidos.anda, &ladoDaPalpebra,
+                      &lidos.linha, &lidos.raio, &lidos.meios.x, &lidos.meios.y, &lidos.meios.z, &lidos.meios.w) == 10
+            && strcmp(carro, nome) == 0) {
+            material = noGlb + 1;   /* a raylib põe um material padrão antes dos do .glb */
+            lidos.ladoDaPalpebra = (float) ladoDaPalpebra;
+            achados = lidos;
+            break;
+        }
+        const char *fim = strchr(linha, '\n');
+        if (fim == NULL) {
+            break;
+        }
+        linha = fim + 1;
+    }
+    Model *modelo = &modelos[numero];
+    if (material < 1 || material >= modelo->materialCount) {
+        return;
+    }
+    static const char *CAMADAS[3] = { "fundo", "iris", "mascara" };
+    char caminhos[3][256];
+    for (int i = 0; i < 3; i++) {
+        snprintf(caminhos[i], sizeof(caminhos[i]), "%s%s_%s.png", PASTA_DOS_OLHOS, nome, CAMADAS[i]);
+        if (!FileExists(caminhos[i])) {
+            TraceLog(LOG_WARNING, "CARRO: falta %s, os olhos de %s ficam parados", caminhos[i], nome);
+            return;
+        }
+    }
+    Texture2D original = modelo->materials[material].maps[MATERIAL_MAP_ALBEDO].texture;
+    Texture2D camadas[3];
+    for (int i = 0; i < 3; i++) {
+        camadas[i] = LoadTexture(caminhos[i]);
+    }
+    if (camadas[0].width != original.width || camadas[0].height != original.height) {
+        TraceLog(LOG_WARNING, "CARRO: os olhos de %s nao batem com a textura do modelo (%dx%d e %dx%d)",
+                 nome, camadas[0].width, camadas[0].height, original.width, original.height);
+        for (int i = 0; i < 3; i++) {
+            UnloadTexture(camadas[i]);
+        }
+        return;
+    }
+    /* o fundo ganha mipmaps em prepararTexturas, como as outras texturas de cor */
+    for (int i = 1; i < 3; i++) {
+        GenTextureMipmaps(&camadas[i]);
+        SetTextureFilter(camadas[i], TEXTURE_FILTER_TRILINEAR);
+    }
+    Material *olho = &modelo->materials[material];
+    trocarTextura(olho, MATERIAL_MAP_ALBEDO, camadas[0]);
+    trocarTextura(olho, MATERIAL_MAP_METALNESS, camadas[1]);   /* o texture1 do shader */
+    trocarTextura(olho, MATERIAL_MAP_NORMAL, camadas[2]);      /* o texture2 */
+    trocarTextura(olho, MATERIAL_MAP_ROUGHNESS, medirBordasDaPalpebra(caminhos[2], (int) achados.ladoDaPalpebra));   /* o texture3 */
+    achados.tem = 1;
+    achados.material = material;
+    olhos[numero] = achados;   /* o lado é medido depois, com o carro normalizado */
+}
+
+/*
+ * medirLadoDosOlhos
+ * Para que lado da textura dos olhos fica a direita do carro: compara, nos vértices da
+ * peça dos olhos, a coordenada da textura com a posição de lado no carro normalizado
+ * (frente em +z e y para cima: a direita do carro é o -x).
+ * Recebe: o número do carro (já normalizado).
+ * Devolve: nada.
+ */
+static void medirLadoDosOlhos(int numero) {
+    /* (e o mesmo na altura: para que lado da textura fica o alto do carro) */
+    if (!olhos[numero].tem) {
+        return;
+    }
+    Model modelo = modelos[numero];
+    double somaX = 0.0, somaU = 0.0, somaXU = 0.0, somaXX = 0.0;
+    double somaY = 0.0, somaV = 0.0, somaYV = 0.0;
+    long total = 0;
+    for (int i = 0; i < modelo.meshCount; i++) {
+        Mesh malha = modelo.meshes[i];
+        if (modelo.meshMaterial[i] != olhos[numero].material || malha.texcoords == NULL) {
+            continue;
+        }
+        for (int v = 0; v < malha.vertexCount; v++) {
+            double x = verticeNormalizado(malha, v, ajuste[numero]).x;
+            double u = malha.texcoords[v * 2];
+            double y = verticeNormalizado(malha, v, ajuste[numero]).y;
+            double altura = malha.texcoords[v * 2 + 1];
+            somaY += y;
+            somaV += altura;
+            somaYV += y * altura;
+            somaX += x;
+            somaU += u;
+            somaXU += x * u;
+            somaXX += x * x;
+            total++;
+        }
+    }
+    double variacao = (total > 0) ? somaXX - somaX * somaX / total : 0.0;
+    double junto = (total > 0) ? somaXU - somaX * somaU / total : 0.0;
+    if (total < 3 || variacao <= 0.0 || fabs(junto) < 1e-9) {
+        olhos[numero].tem = 0;
+        TraceLog(LOG_WARNING, "CARRO: nao deu para medir os olhos de %s", MODELOS[numero].arquivo);
+        return;
+    }
+    olhos[numero].lado = (junto > 0.0) ? -1.0f : 1.0f;   /* andar para -x é andar para a direita */
+    olhos[numero].ladoDeCima = (somaYV - somaY * somaV / total > 0.0) ? 1.0f : -1.0f;
+    TraceLog(LOG_INFO, "CARRO: olhos de %s no material %d, a direita fica no %s da textura",
+             MODELOS[numero].arquivo, olhos[numero].material, (olhos[numero].lado < 0.0f) ? "u menor" : "u maior");
+}
+
+/*
  * carregarCarros3D
  * Carrega os modelos e prepara as miniaturas. Chamar depois de criar a janela.
  * Recebe: nada.
@@ -1122,12 +1674,30 @@ void carregarCarros3D(void) {
     const char *pixelsTranslucido = PIXELS_DO_SHADER("if (cor.a >= 0.9 || cor.a < 0.02) discard;", "cor.a");
     shaderOpaco = LoadShaderFromMemory(VERTICES_DO_SHADER, pixelsOpaco);
     shaderTranslucido = LoadShaderFromMemory(VERTICES_DO_SHADER, pixelsTranslucido);
+    shaderDosOlhos = LoadShaderFromMemory(VERTICES_DO_SHADER,
+                                          PIXELS_DO_SHADER_LENDO(OLHOS_DO_SHADER, "corDosOlhos(fragTexCoord)", "", "1.0"));
+    locDoDesvio = GetShaderLocation(shaderDosOlhos, "desvio");
+    locDosMeios = GetShaderLocation(shaderDosOlhos, "meiosDasIris");
+    locDoTamanho = GetShaderLocation(shaderDosOlhos, "tamanhoDaIris");
+    locDaForma = GetShaderLocation(shaderDosOlhos, "formaDaPalpebra");
+    /* a raylib só liga sozinha texture0 a texture2; a texture3 (as bordas) é o mapa de rugosidade */
+    shaderDosOlhos.locs[SHADER_LOC_MAP_ROUGHNESS] = GetShaderLocation(shaderDosOlhos, "texture3");
     registrarShaderIluminado(shaderOpaco);
     registrarShaderIluminado(shaderTranslucido);
+    registrarShaderIluminado(shaderDosOlhos);
+    Shader comReflexo[3] = { shaderOpaco, shaderTranslucido, shaderDosOlhos };
+    float reflexoNormal = 1.0f;   /* sem isto o uniform começa em 0: nenhum carro refletiria */
+    for (int i = 0; i < 3; i++) {
+        locsDoReflexo[i] = GetShaderLocation(comReflexo[i], "reflexoDaPintura");
+        SetShaderValue(comReflexo[i], locsDoReflexo[i], &reflexoNormal, SHADER_UNIFORM_FLOAT);
+    }
+    char *tabelaDosOlhos = FileExists(PASTA_DOS_OLHOS "olhos.txt") ? LoadFileText(PASTA_DOS_OLHOS "olhos.txt") : NULL;
     shaderDaSombra = LoadShaderFromMemory(VERTICES_DO_SHADER, PIXELS_DA_SOMBRA_TEXTO("0.82"));
 
     for (int numero = 0; numero < TOTAL_CARROS; numero++) {
         modelos[numero] = LoadModel(TextFormat("%s%s", PASTA_DOS_MODELOS, MODELOS[numero].arquivo));
+        acertarCores(numero);
+        carregarOlhos(numero, tabelaDosOlhos);
         prepararTexturas(modelos[numero]);
         translucidos[numero] = medirTranslucidos(modelos[numero]);
         int quantos = 0;
@@ -1142,6 +1712,7 @@ void carregarCarros3D(void) {
             temGarfos = 1;
         }
         normalizarModelo(numero);
+        medirLadoDosOlhos(numero);
         if (numero == CARRO_COM_GARFOS && temGarfos) {
             /* a ponta das pás: o meio delas, em cima, no carro normalizado */
             BoundingBox g = GetModelBoundingBox(garfos);
@@ -1156,6 +1727,9 @@ void carregarCarros3D(void) {
         separarRodas(numero);
         TraceLog(LOG_INFO, "CARRO: %s tem %d rodas, em %d pecas", fichaDoCarro(numero)->nome, totalDeRodas[numero], totalDePecas[numero]);
         prepararMiniatura(numero);
+    }
+    if (tabelaDosOlhos != NULL) {
+        UnloadFileText(tabelaDosOlhos);
     }
 }
 
@@ -1188,5 +1762,6 @@ void descarregarCarros3D(void) {
     }
     UnloadShader(shaderOpaco);
     UnloadShader(shaderTranslucido);
+    UnloadShader(shaderDosOlhos);
     UnloadShader(shaderDaSombra);
 }

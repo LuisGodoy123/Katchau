@@ -35,6 +35,7 @@
 #define CAMERA_NA_FUGA         0.75f    /* quanto do ângulo de fuga do carro a câmera acompanha */
 #define NUMERO_DO_GUIDO        7        /* na tabela FICHAS */
 #define ALTURA_NA_TROCA        0.10f    /* metros: o macaco levanta o carro */
+#define APERTA_A_PARTIR_DE     0.70f    /* fração da velocidade máxima: dali para cima, o carro aperta os olhos */
 #define CAMERA_DA_TROCA_LADO   4.6f     /* a câmera da troca: à direita do carro, na frente e no alto */
 #define CAMERA_DA_TROCA_FRENTE 5.2f
 #define CAMERA_DA_TROCA_ALTURA 2.8f
@@ -325,6 +326,15 @@ static void desenharCarroNoMundo(Camera3D camera, Carro *carro) {
         }
     }
     inclinarCorpoNoProximoDesenho(carro->numero, carro->rolagem * DEG2RAD, -carro->arfagem * DEG2RAD);
+    /* A cara: perto da velocidade máxima (ou no nitro) ele aperta os olhos, no "modo caça";
+     * rodando ou depois de uma batida forte, arregala */
+    float rapidez = (carro->velocidadeMaxima > 0.0f) ? carro->velocidade / carro->velocidadeMaxima : 0.0f;
+    float aperto = (rapidez - APERTA_A_PARTIR_DE) / (1.0f - APERTA_A_PARTIR_DE);
+    if (carro->nitroLigado && rapidez > 0.4f) {
+        aperto = fmaxf(aperto, 1.0f);
+    }
+    float susto = carro->rodando ? 1.0f : (carro->pancada - 0.3f) / 0.4f;
+    expressaoNoProximoDesenho(carro->numero, aperto, susto);
     desenharCarro3D(carro->numero, matrizDoCarro(carro), carro->anguloDasRodas, carro->volante);
 }
 

@@ -25,6 +25,9 @@ float comprimentoDoCarro3D(int numero);
 float alturaDoCarro3D(int numero);
 #define PONTOS_DA_SOMBRA  7   /* a malha da sombra tem tantos pontos em cada lado */
 void desenharSombraNoChao(int numero, const Vector3 *grade);
+/* A cara do carro no próximo desenho: aperto (0 a 1, os olhos apertados em alta velocidade)
+ * e susto (0 a 1, os olhos arregalados ao rodar). Ela muda aos poucos. */
+void expressaoNoProximoDesenho(int numero, float aperto, float susto);
 void comecarSombrasNoChao(void);
 void terminarSombrasNoChao(void);
 float ladoDaSombra(int numero);

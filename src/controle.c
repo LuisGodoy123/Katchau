@@ -22,10 +22,13 @@
  * controle de Xbox). No macOS ele vem do sistema de controles da Apple (vibrar_mac.m),
  * porque a raylib do Homebrew não deixa ler a GLFW. Nos outros sistemas lemos o botão
  * cru da GLFW, que a raylib traz embutida: no DualShock 4 e no DualSense (USB ou
- * Bluetooth) o touchpad é o botão 13. */
+ * Bluetooth) o touchpad é o botão 13. A exceção é o Windows: a raylib do instalador
+ * não deixa a GLFW visível (o link falha com "undefined reference to
+ * glfwGetJoystickButtons"), então lá o touchpad fica sem leitura e a câmera continua
+ * no botão CRIAR/BACK. */
 #ifdef __APPLE__
 #include "vibrar.h"
-#else
+#elif !defined(_WIN32)
 extern const unsigned char *glfwGetJoystickButtons(int jid, int *count);
 #define BOTAO_CRU_DO_TOUCHPAD 13
 #endif
@@ -73,7 +76,7 @@ void atualizarControle(void) {
     if (ehDualSense()) {   /* nos outros controles o botão 13 é outra coisa */
 #ifdef __APPLE__
         touchpad = touchpadDoControleApertado();
-#else
+#elif !defined(_WIN32)
         int total = 0;
         const unsigned char *botoes = glfwGetJoystickButtons(controle, &total);
         touchpad = botoes != NULL && total > BOTAO_CRU_DO_TOUCHPAD && botoes[BOTAO_CRU_DO_TOUCHPAD];
