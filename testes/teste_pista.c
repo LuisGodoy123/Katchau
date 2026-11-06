@@ -4135,6 +4135,52 @@ static void testarSaidaDoPitNaMaoDoJogador(void) {
     }
 }
 
+/*
+ * testarPelotao
+ * O rubber banding: com o jogador parado na largada, os rivais que abrem muito perdem um pouco de
+ * motor (mais no fácil, menos no difícil); um rival muito atrás ganha um pouco; perto do jogador,
+ * nada muda. E é pouco: nunca mais que 5%.
+ */
+static void testarPelotao(void) {
+    printf("\n42) O pelotao espera e corre atras\n");
+    static Corrida corrida;
+    Pista *pista = criarPistaPorId(PISTA_INTERLAGOS);
+    float noFacil = 0.0f, noDificil = 0.0f;
+    for (int nivel = NIVEL_FACIL; nivel <= NIVEL_DIFICIL; nivel += 2) {
+        iniciarCorrida(&corrida, pista, 0, (NivelDaCorrida) nivel);
+        corrida.contagemRegressiva = 0.0f;
+        Comandos parado = { 0 };
+        for (int q = 0; q < 60 * 60; q++) {
+            atualizarCorrida(&corrida, parado, 1.0f / 60.0f);
+        }
+        float menor = 1.0f;
+        for (int r = 0; r < TOTAL_RIVAIS; r++) {
+            menor = fminf(menor, corrida.rivais[r].ritmoDoPelotao);
+        }
+        printf("     %s: com o jogador parado, o ritmo dos rivais desce ate %.3f\n", fichaDoNivel((NivelDaCorrida) nivel)->nome, menor);
+        if (nivel == NIVEL_FACIL) noFacil = menor; else noDificil = menor;
+    }
+    verificar(noFacil < 0.97f && noFacil >= 0.949f, "no facil, quem foge do jogador espera ate 5%");
+    verificar(noDificil > noFacil && noDificil < 1.0f, "no dificil a espera e menor");
+
+    /* Um rival muito atrás corre um pouco mais; um perto do jogador, não muda */
+    iniciarCorrida(&corrida, pista, 0, NIVEL_MEDIO);
+    corrida.contagemRegressiva = 0.0f;
+    corrida.jogador.distanciaPercorrida += 900.0f * UNIDADES_POR_METRO;
+    Comandos nada = { 0 };
+    for (int q = 0; q < 60 * 5; q++) {
+        corrida.jogador.distanciaPercorrida += 0.0f;
+        atualizarCorrida(&corrida, nada, 1.0f / 60.0f);
+    }
+    float maior = 0.0f;
+    for (int r = 0; r < TOTAL_RIVAIS; r++) {
+        maior = fmaxf(maior, corrida.rivais[r].ritmoDoPelotao);
+    }
+    printf("     rivais 900 m atras do jogador: ritmo ate %.3f\n", maior);
+    verificar(maior > 1.0f && maior <= 1.04f, "quem ficou muito para tras ganha um pouco, ate 4%");
+    liberarPista(pista);
+}
+
 int main(int argc, char *argv[]) {
     int modoDetalhado = (argc > 1 && strcmp(argv[1], "-v") == 0);
 
@@ -4180,6 +4226,7 @@ int main(int argc, char *argv[]) {
     testarSuspensao();
     testarRe();
     testarSaidaDoPitNaMaoDoJogador();
+    testarPelotao();
     testarGiroDasRodas();
     testarColisaoEEquilibrio();
     testarCameraLivre();

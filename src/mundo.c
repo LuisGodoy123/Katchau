@@ -298,6 +298,7 @@ static const char *ARQUIVOS_DOS_OBJETOS[TOTAL_MODELOS_DE_OBJETO] = {
 typedef struct {
     Mesh malha;
     Texture2D textura;
+    int brilha;      /* 1: a tela de um telão, que emite luz */
 } LoteDeObjetos;
 
 /* Um lote ainda sendo montado */
@@ -314,15 +315,18 @@ static Shader shaderDosMapasDeDia;
 
 /* As sombras do sol */
 #define LADO_DO_MAPA_DE_SOMBRA 2048
-#define AREA_DA_SOMBRA        280.0f   /* metros: o quadrado em volta da câmera que tem sombra */
+#define AREA_DA_SOMBRA        330.0f   /* metros: o quadrado em volta da câmera que tem sombra */
 #define ADIANTE_DA_SOMBRA     90.0f    /* metros: o meio do quadrado fica à frente da câmera */
 #define ALTURA_DO_SOL         500.0f   /* metros: de onde o sol "olha" */
+#define COR_DA_TELA_NO_HALO   (Color){ 215, 215, 215, 255 }   /* as telas brilham, mas menos que um refletor */
+#define REFAZER_A_SOMBRA      25.0f   /* metros que a câmera anda até o mapa de sombra ser refeito */
 #define SLOT_DA_SOMBRA        15       /* a unidade de textura do mapa (as do material vão até 11) */
 static Shader shaderDaProfundidade;
 static RenderTexture2D mapaDeSombra;
 static int temMapaDeSombra = 0;
 static int sombraLigadaAgora = 0;
 static void carregarSombras(void);
+static void desenharLote(int i, Matrix origem);
 
 /* As pistas de dia vêm com as imagens sem luz nenhuma: aqui entra o mesmo sol de luzDoSol,
  * com a direção da superfície saindo das derivadas da posição */
@@ -722,6 +726,7 @@ static void fecharLote(LoteAberto *aberto, Texture2D textura) {
     UploadMesh(&malha, false);
     lotes[totalDeLotes].malha = malha;
     lotes[totalDeLotes].textura = textura;
+    lotes[totalDeLotes].brilha = 0;
     totalDeLotes++;
     *aberto = (LoteAberto){ 0 };
 }
@@ -1826,6 +1831,7 @@ static void ligarTeloesDoCenario(void) {
             for (int i = 0; i < totalDeLotes; i++) {
                 if (lotes[i].textura.id == tela.id) {
                     lotes[i].textura = transmissao;
+                    lotes[i].brilha = 1;
                     trocados++;
                 }
             }
@@ -1953,6 +1959,51 @@ static void desenharMalha(Mesh malha, Texture2D textura, Matrix posicao) {
 }
 
 /*
+ * desenharLote
+ * Recebe: o lote e a matriz.
+ * Devolve: nada (as telas dos telões vão sem luz: elas brilham sozinhas).
+ */
+static void desenharLote(int i, Matrix origem) {
+    if (lotes[i].brilha) {
+        Shader antes = material.shader;
+        material.shader = shaderDaTelaQueBrilha();
+        desenharMalha(lotes[i].malha, lotes[i].textura, origem);
+        material.shader = antes;
+        return;
+    }
+    desenharMalha(lotes[i].malha, lotes[i].textura, origem);
+}
+
+/*
+ * desenharTelasQueBrilham
+ * Só as telas dos telões, mais fracas, para o halo (veja posprocesso.c).
+ * Recebe: a pista.
+ * Devolve: nada.
+ */
+void desenharTelasQueBrilham(IdPista id) {
+    if (id == PISTA_COPA_PISTAO) {
+        desenharTelasDoEstadio();
+        return;
+    }
+    int primeiro = 0, fim = lotesDeInterlagos;
+    if (mapasDeDia[id].existe) {
+        primeiro = mapasDeDia[id].primeiroLote;
+        fim = mapasDeDia[id].fimDosLotes;
+    }
+    Shader antes = material.shader;
+    Color corAntes = material.maps[MATERIAL_MAP_ALBEDO].color;
+    material.shader = shaderDaTelaQueBrilha();
+    material.maps[MATERIAL_MAP_ALBEDO].color = COR_DA_TELA_NO_HALO;
+    for (int i = primeiro; i < fim; i++) {
+        if (lotes[i].brilha) {
+            desenharMalha(lotes[i].malha, lotes[i].textura, MatrixIdentity());
+        }
+    }
+    material.shader = antes;
+    material.maps[MATERIAL_MAP_ALBEDO].color = corAntes;
+}
+
+/*
  * carregarSombras
  * O mapa de sombra: um framebuffer só com profundidade.
  * Recebe: nada.
@@ -2002,7 +2053,7 @@ static void desenharQuemFazSombra(IdPista id) {
             mapa->modelo.materials[i].shader = originais[i];
         }
         for (int i = mapa->primeiroLote; i < mapa->fimDosLotes; i++) {
-            desenharMalha(lotes[i].malha, lotes[i].textura, origem);
+            desenharLote(i, origem);
         }
     } else if (id == PISTA_INTERLAGOS) {
         desenharMalha(interlagos.muro, semTextura, origem);
@@ -2011,7 +2062,7 @@ static void desenharQuemFazSombra(IdPista id) {
         desenharMalha(infra->objetos, semTextura, origem);
         desenharMalha(infra->anuncios, semTextura, origem);
         for (int i = 0; i < lotesDeInterlagos; i++) {
-            desenharMalha(lotes[i].malha, lotes[i].textura, origem);
+            desenharLote(i, origem);
         }
     }
     material.shader = antes;
@@ -2044,6 +2095,15 @@ void prepararSombras(IdPista id, Camera3D camera, int ligadas) {
     Vector3 meio = { camera.position.x + frente.x * ADIANTE_DA_SOMBRA, camera.position.y, camera.position.z + frente.z * ADIANTE_DA_SOMBRA };
     meio.x = roundf(meio.x / passo) * passo;
     meio.z = roundf(meio.z / passo) * passo;
+
+    /* O cenário não se mexe: o mapa só é refeito quando a câmera anda bastante (ou muda a pista) */
+    static Vector3 meioAnterior = { 1e9f, 0.0f, 1e9f };
+    static int pistaAnterior = -1;
+    if ((int) id == pistaAnterior && hypotf(meio.x - meioAnterior.x, meio.z - meioAnterior.z) < REFAZER_A_SOMBRA) {
+        return;   /* luzVP e o mapa continuam valendo */
+    }
+    meioAnterior = meio;
+    pistaAnterior = id;
     Vector3 sol = Vector3Normalize((Vector3){ 0.35f, 0.8f, 0.45f });
     Camera3D luz = { 0 };
     luz.position = Vector3Add(meio, Vector3Scale(sol, ALTURA_DO_SOL));
@@ -2093,7 +2153,7 @@ void desenharCenario(IdPista id, Vector3 camera) {
         material.shader = shaderDaNoite();
         desenharMalha(pinturaDoEstadio, semTextura, origem);
         for (int i = lotesDeInterlagos; i < fimDosLotesDoEstadio; i++) {
-            desenharMalha(lotes[i].malha, lotes[i].textura, origem);
+            desenharLote(i, origem);
         }
         material.shader = shader;
         return;
@@ -2106,7 +2166,7 @@ void desenharCenario(IdPista id, Vector3 camera) {
         DrawModel(mapa->modelo, (Vector3){ 0.0f, 0.0f, 0.0f }, mapa->escala, WHITE);
         desenharMalha(mapa->pintura, semTextura, origem);
         for (int i = mapa->primeiroLote; i < mapa->fimDosLotes; i++) {
-            desenharMalha(lotes[i].malha, lotes[i].textura, origem);
+            desenharLote(i, origem);
         }
         material.shader = shaderDaTorcida();
         desenharMalha(mapa->torcida, semTextura, origem);
@@ -2138,7 +2198,7 @@ void desenharCenario(IdPista id, Vector3 camera) {
     desenharMalha(interlagos.torcida, semTextura, origem);
     material.shader = shader;
     for (int i = 0; i < lotesDeInterlagos; i++) {
-        desenharMalha(lotes[i].malha, lotes[i].textura, origem);
+        desenharLote(i, origem);
     }
 }
 

@@ -1385,9 +1385,14 @@ static void mudarOpcao(EstadoMenu *menu, int linha, int sentido) {
         case LINHA_DIRECAO_GUIADA:
             config->direcaoGuiada = !config->direcaoGuiada;
             break;
-        case LINHA_SOMBRAS:
-            config->sombras = !config->sombras;
+        case LINHA_SOMBRAS: {
+            /* ALTO (sombras e efeitos) -> MÉDIO (só efeitos) -> BAIXO (nada) -> ALTO */
+            int nivel = config->sombras ? 2 : (config->efeitos ? 1 : 0);
+            nivel = (nivel + 2) % 3;
+            config->sombras = (nivel == 2);
+            config->efeitos = (nivel >= 1);
             break;
+        }
         case LINHA_CAMERA_X:
             config->inverterCameraX = !config->inverterCameraX;
             break;
@@ -1654,7 +1659,8 @@ void desenharConfiguracoes(EstadoMenu *menu) {
     desenharLinhaDeOpcao(menu, LINHA_ZONA_MORTA, "ZONA MORTA DO ANALÓGICO", TextFormat("%d%%", config->zonaMorta), 0);
     desenharLinhaDeOpcao(menu, LINHA_VOLANTE, "RESPOSTA DO VOLANTE NO ANALÓGICO", VOLANTES[config->respostaDoVolante], 0);
     desenharLinhaDeOpcao(menu, LINHA_DIRECAO_GUIADA, "DIREÇÃO GUIADA", config->direcaoGuiada ? "LIGADA" : "DESLIGADA", 0);
-    desenharLinhaDeOpcao(menu, LINHA_SOMBRAS, "SOMBRAS DO CENÁRIO", config->sombras ? "LIGADAS" : "DESLIGADAS", 0);
+    desenharLinhaDeOpcao(menu, LINHA_SOMBRAS, "GRÁFICOS (SOMBRAS E EFEITOS)",
+                         config->sombras ? "ALTO" : (config->efeitos ? "MÉDIO" : "BAIXO"), 0);
     desenharLinhaDeOpcao(menu, LINHA_CAMERA_X, "INVERTER A CÂMERA NA HORIZONTAL", config->inverterCameraX ? "SIM" : "NÃO", 0);
     desenharLinhaDeOpcao(menu, LINHA_CAMERA_Y, "INVERTER A CÂMERA NA VERTICAL", config->inverterCameraY ? "SIM" : "NÃO", 0);
     desenharLinhaDeOpcao(menu, LINHA_PADRAO, "VOLTAR TUDO AO PADRÃO", (menu->confirmarPadrao > 0.0f) ? "APERTE DE NOVO" : "", 0);

@@ -15,6 +15,7 @@
  */
 
 #include <stddef.h>
+#include <math.h>
 #include "ia.h"
 
 #define METROS_PARA_IR_AO_PIT 200.0f  /* quanto antes do pit lane ela já vai para o lado */
@@ -137,10 +138,14 @@ Comandos atualizarIA(Carro *carro, const Pista *pista) {
     /* 1) Velocidade: acelera abaixo da desejada (e, dentro da curva,
      *    abaixo do limite de quem acelera), freia bem acima dela. A habilidade
      *    diz quanto do limite do carro este piloto usa. */
-    float teto = carro->velocidadeMaxima * carro->habilidade;
-    float desejada = velocidadeDesejada(carro) * carro->habilidade;
+    float teto = carro->velocidadeMaxima * carro->habilidade * carro->ritmoDoPelotao;
+    /* O ritmo do pelotão mexe no motor (reta); nas curvas, para baixo, mas nunca acima do seguro */
+    float desejada = fminf(velocidadeDesejada(carro) * carro->habilidade * fminf(carro->ritmoDoPelotao, 1.0f), teto);
     float podeAcelerar = velocidadeSeguraAcelerando(carro, carro->posicao.segmento->curvatura);
-    int retaLivre = (desejada >= teto);
+    int retaLivre = (desejada >= teto * 0.999f);
+    if (retaLivre) {
+        desejada = teto;
+    }
     if (carro->velocidade < desejada && carro->velocidade < podeAcelerar) {
         comandos.acelerar = 1;
     } else if (!retaLivre && carro->velocidade > desejada * MARGEM_DE_FREIO) {

@@ -25,6 +25,8 @@ void limparFumaca(void);
 void soltarNuvem(Vector3 roda, Vector3 velocidadeDoCarro, float forca, TipoDeNuvem tipo);
 void atualizarFumaca(float tempoQuadro);
 void desenharFumaca3D(Camera3D camera);
+void comecarChamas(void);
+void terminarChamas(void);
 void desenharChamaDoNitro(Camera3D camera, Vector3 escape, Vector3 paraTras);
 
 #endif

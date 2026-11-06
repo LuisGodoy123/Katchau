@@ -98,6 +98,7 @@ typedef struct {
     /* ---- Freio de mão e drift ---- */
     int direcaoLivre;              /* 1: sem direção guiada, o carro anda no mundo e quem faz a curva é o volante */
     float desvioDoRumo;            /* graus: para onde o bico aponta em relação à linha da pista, sem a direção guiada */
+    float ritmoDoPelotao;              /* o rubber banding dos rivais: 1 = normal (veja corrida.c) */
     float re;                          /* unidades por segundo andando de ré (0 = não está de ré) */
     float rumoDeRe;                    /* graus que o bico girou dando ré (direção guiada) */
     float paradoFreando;               /* segundos parado com o freio apertado: passou do tempo, engata a ré */

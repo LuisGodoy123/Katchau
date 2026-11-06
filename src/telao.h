@@ -20,5 +20,7 @@ void comecarQuadroDoTelao(void);
 void terminarQuadroDoTelao(Corrida *corrida, const Carro *mostrado, const char *camera);
 void atualizarPlacar(Corrida *corrida);
 Texture2D texturaDoTelao(void);
+Shader shaderDaTelaQueBrilha(void);
+void desenharTelasDoEstadio(void);
 
 #endif

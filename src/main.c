@@ -22,6 +22,7 @@
 #include "carros3d.h"
 #include "fumaca.h"
 #include "marcas.h"
+#include "posprocesso.h"
 #include "carro.h"
 #include "corrida.h"
 #include "pitstop.h"
@@ -188,6 +189,7 @@ int main(int argc, char *argv[]) {
     carregarCarros3D();
     carregarFumaca();
     carregarMarcas();
+    carregarPosProcesso();
     Corrida corrida;
     EstadoMenu menu;
     iniciarMenu(&menu);
@@ -405,6 +407,7 @@ int main(int argc, char *argv[]) {
 
     descarregarFumaca();
     descarregarMarcas();
+    descarregarPosProcesso();
     descarregarCarros3D();
     encerrarVibracao();
     descarregarMundo();

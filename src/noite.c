@@ -724,6 +724,15 @@ void desenharBrilhos(Camera3D camera) {
         float distancia = Vector3Distance(flash->lugar, camera.position);
         float tamanho = flash->tamanho * distancia;
         desenharImagemNoAr(camera, imagemDoBrilho, flash->lugar, tamanho * HALO_DO_FLASH, Fade(COR_FLASH_AZUL, forca * 0.40f));
+    }
+    /* As estrelas depois de todos os halos: uma textura por vez */
+    for (int i = 0; i < MAXIMO_DE_FLASHES; i++) {
+        Flash *flash = &flashes[i];
+        if (flash->vida <= 0.0f || flash->idade >= flash->vida) {
+            continue;
+        }
+        float forca = 1.0f - flash->idade / flash->vida;
+        float tamanho = flash->tamanho * Vector3Distance(flash->lugar, camera.position);
         desenharImagemNoAr(camera, imagemDaEstrela, flash->lugar, tamanho, Fade(flash->cor, forca));
     }
 

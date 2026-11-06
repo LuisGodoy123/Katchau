@@ -33,6 +33,7 @@ typedef struct {
     float habilidadeDoUltimo;   /* e o último dos rivais */
     int temParada;              /* 1: parada obrigatória, onde a pista tem pit lane */
     int gastaPneu;              /* 1: os pneus gastam (precisa de pit lane para trocar) */
+    float pelotao;              /* de 0 a 1: o quanto os rivais esperam ou correm atrás do jogador */
 } FichaDoNivel;
 
 typedef struct {

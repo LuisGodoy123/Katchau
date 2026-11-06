@@ -14,12 +14,16 @@
  */
 
 #include <math.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include "raylib.h"
 #include "rlgl.h"
 #include "telao.h"
 #include "visual.h"
 #include "hud.h"
+#include "raymath.h"
+#include "pista.h"
+#define ESCALA_DO_ESTADIO ESCALA_COPA_PISTAO
 
 /* Os materiais do modelo (o índice do glTF mais 1: a raylib põe o material padrão na frente) */
 #define MATERIAL_DO_CUBO       12      /* Material.094: o logo da Piston Cup, no cubo do meio */
@@ -28,7 +32,7 @@
 #define ALTURA_DO_QUADRO       312     /* o cubo é mais largo que alto */
 #define LARGURA_DO_PLACAR      128
 #define ALTURA_DO_PLACAR       512
-#define QUADROS_POR_SEGUNDO    20.0f   /* a transmissão não precisa ser tão fluida quanto o jogo */
+#define QUADROS_POR_SEGUNDO    15.0f   /* a transmissão não precisa ser tão fluida quanto o jogo */
 #define LINHAS_NO_PLACAR       15
 #ifndef VIRAR
 #define VIRAR                  -1.0f   /* a RenderTexture guarda de baixo para cima; o modelo lê de cima para baixo */
@@ -38,6 +42,33 @@ static RenderTexture2D quadro, placar, bruto, rascunho;
 static Texture2D originais[2];
 static Model *modeloDoEstadio = NULL;
 static int carregado = 0;
+static Shader shaderDaTela;
+
+/* A tela de LED brilha sozinha: nem o sol nem a noite mudam a cor dela */
+static const char *PIXELS_DA_TELA =
+    "#version 330\n"
+    "in vec2 fragTexCoord; uniform sampler2D texture0; uniform vec4 colDiffuse;\n"
+    "out vec4 finalColor;\n"
+    "void main() {\n"
+    "    vec3 c = texture(texture0, fragTexCoord).rgb;\n"
+    "    float l = dot(c, vec3(0.2126, 0.7152, 0.0722));\n"
+    "    c = mix(vec3(l), c, 1.35);\n"                    /* cores vivas de LED */
+    "    c = (c - 0.5) * 1.25 + 0.5;\n"                   /* contraste */
+    "    c = c * 1.25 + 0.04;\n"                          /* acesa: nunca preta de verdade */
+    "    finalColor = vec4(clamp(c, 0.0, 1.0) * colDiffuse.rgb, 1.0);\n"
+    "}\n";
+
+/*
+ * shaderDaTelaQueBrilha
+ * Recebe: nada.
+ * Devolve: o shader das telas dos telões (sem luz: a tela emite).
+ */
+Shader shaderDaTelaQueBrilha(void) {
+    if (shaderDaTela.id == 0) {
+        shaderDaTela = LoadShaderFromMemory(NULL, PIXELS_DA_TELA);
+    }
+    return shaderDaTela;
+}
 static float desdeOUltimo = 1.0f;
 
 /*
@@ -66,6 +97,7 @@ void carregarTelao(Model *estadio) {
         originais[i] = *textura;
         *textura = alvos[i]->texture;
         estadio->materials[materiais[i]].maps[MATERIAL_MAP_ALBEDO].color = WHITE;
+        estadio->materials[materiais[i]].shader = shaderDaTelaQueBrilha();
     }
     carregado = 1;
 }
@@ -83,6 +115,13 @@ void descarregarTelao(void) {
     int materiais[2] = { MATERIAL_DO_CUBO, MATERIAL_DO_PLACAR };
     for (int i = 0; i < 2; i++) {
         modeloDoEstadio->materials[materiais[i]].maps[MATERIAL_MAP_ALBEDO].texture = originais[i];
+    }
+    for (int i = 0; i < 2; i++) {
+        modeloDoEstadio->materials[materiais[i]].shader.id = rlGetShaderIdDefault();   /* o modelo não descarrega o nosso */
+    }
+    if (shaderDaTela.id != 0) {
+        UnloadShader(shaderDaTela);
+        shaderDaTela.id = 0;
     }
     UnloadRenderTexture(quadro);
     UnloadRenderTexture(placar);
@@ -160,6 +199,27 @@ void terminarQuadroDoTelao(Corrida *corrida, const Carro *mostrado, const char *
     DrawTexturePro(bruto.texture, pedaco, (Rectangle){ 0, 0, LARGURA_DO_QUADRO, ALTURA_DO_QUADRO }, (Vector2){ 0 }, 0.0f, WHITE);
     EndTextureMode();
 
+}
+
+/*
+ * desenharTelasDoEstadio
+ * Só as telas do estádio (o cubo e o placar), mais fracas, para o halo.
+ * Recebe: nada. Devolve: nada.
+ */
+void desenharTelasDoEstadio(void) {
+    if (!carregado) {
+        return;
+    }
+    int materiais[2] = { MATERIAL_DO_CUBO, MATERIAL_DO_PLACAR };
+    for (int i = 0; i < modeloDoEstadio->meshCount; i++) {
+        int m = modeloDoEstadio->meshMaterial[i];
+        if (m != materiais[0] && m != materiais[1]) {
+            continue;
+        }
+        Material material = modeloDoEstadio->materials[m];
+        material.maps[MATERIAL_MAP_ALBEDO].color = (Color){ 215, 215, 215, 255 };
+        DrawMesh(modeloDoEstadio->meshes[i], material, MatrixMultiply(modeloDoEstadio->transform, MatrixScale(ESCALA_DO_ESTADIO, ESCALA_DO_ESTADIO, ESCALA_DO_ESTADIO)));
+    }
 }
 
 /*

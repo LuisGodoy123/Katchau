@@ -171,6 +171,7 @@ Carro criarCarro(const char *nome, int numero, Segmento *largada, float deslocam
     carro.rapidezDaArfagem = 0.0f;
     carro.temSuspensao = 0;
     carro.re = 0.0f;
+    carro.ritmoDoPelotao = 1.0f;
     carro.rumoDeRe = 0.0f;
     carro.paradoFreando = 0.0f;
     carro.controladoPeloJogador = 0;
@@ -334,7 +335,7 @@ static void atualizarVelocidade(Carro *carro, Comandos comandos, float tempoQuad
     if (comandos.freioDeMao) {
         carro->velocidade -= (FREIO_DE_MAO + perdaSemAcelerar(carro)) * tempoQuadro;
     } else if (comandos.acelerar || carro->nitroLigado) {
-        carro->velocidade += forcaDoMotor(carro->velocidade, maxima, carro->aceleracao, &carro->motor) * tempoQuadro;
+        carro->velocidade += forcaDoMotor(carro->velocidade, maxima, carro->aceleracao * carro->ritmoDoPelotao, &carro->motor) * tempoQuadro;
         if (carro->nitroLigado) {
             carro->velocidade += carro->aceleracao * FORCA_DO_NITRO * tempoQuadro;
         }
@@ -1159,7 +1160,7 @@ float velocidadeMaximaAgora(Carro *carro) {
     if (carro->nitroLigado) {
         ganho += GANHO_DO_NITRO;
     }
-    return carro->velocidadeMaxima * ganho;
+    return carro->velocidadeMaxima * ganho * carro->ritmoDoPelotao;
 }
 
 /*

@@ -82,9 +82,9 @@ static const FichaTecnica FICHAS[TOTAL_CARROS] = {
 
 /* Os níveis: o médio é o equilíbrio original; o fácil não tem pitstop, e só o difícil gasta os pneus */
 static const FichaDoNivel NIVEIS[TOTAL_NIVEIS] = {
-    { "FÁCIL",   3, 0.87f, 0.80f, 0, 0 },
-    { "MÉDIO",   5, 0.93f, 0.86f, 1, 0 },
-    { "DIFÍCIL", 8, 0.97f, 0.91f, 1, 1 },
+    { "FÁCIL",   3, 0.87f, 0.80f, 0, 0, 1.0f },
+    { "MÉDIO",   5, 0.93f, 0.86f, 1, 0, 0.7f },
+    { "DIFÍCIL", 8, 0.97f, 0.91f, 1, 1, 0.4f },
 };
 
 /*
@@ -780,6 +780,38 @@ static int moverCarro(Corrida *corrida, Carro *carro, Comandos comandos, float t
     return cruzou;
 }
 
+/* O rubber banding: quem abriu muito na frente do jogador rende um pouco menos, e quem ficou muito
+ * para trás rende um pouco mais, para a corrida continuar disputada. Pouco, para não parecer trapaça */
+#define FOLGA_NA_FRENTE         80.0f    /* metros à frente do jogador sem ajuste nenhum */
+#define FOLGA_ATRAS             60.0f    /* e atrás */
+#define METROS_ATE_O_AJUSTE_TODO 400.0f
+#define MAIOR_ESPERA            0.05f    /* até 5% a menos de motor, para quem está bem na frente */
+#define MAIOR_EMPURRAO          0.04f    /* até 4% a mais, para quem ficou bem para trás */
+#define MUDANCA_DO_RITMO        0.02f    /* por segundo: o ajuste chega aos poucos */
+
+/*
+ * ajustarPelotao
+ * Ajusta o ritmo de cada rival pela distância até o jogador: à frente demais, perde um pouco de
+ * motor; atrás demais, ganha. A força vem do nível. Depois da chegada do jogador, não há ajuste.
+ * Recebe: a corrida e o tempo do quadro.
+ * Devolve: nada.
+ */
+static void ajustarPelotao(Corrida *corrida, float tempoQuadro) {
+    float forca = corrida->terminou ? 0.0f : fichaDoNivel(corrida->nivel)->pelotao;
+    for (int i = 0; i < TOTAL_RIVAIS; i++) {
+        Carro *rival = &corrida->rivais[i];
+        float diferenca = (rival->distanciaPercorrida - corrida->jogador.distanciaPercorrida) / UNIDADES_POR_METRO;
+        float alvo = 1.0f;
+        if (diferenca > FOLGA_NA_FRENTE) {
+            alvo -= MAIOR_ESPERA * forca * fminf((diferenca - FOLGA_NA_FRENTE) / METROS_ATE_O_AJUSTE_TODO, 1.0f);
+        } else if (diferenca < -FOLGA_ATRAS) {
+            alvo += MAIOR_EMPURRAO * forca * fminf((-diferenca - FOLGA_ATRAS) / METROS_ATE_O_AJUSTE_TODO, 1.0f);
+        }
+        float passo = MUDANCA_DO_RITMO * tempoQuadro;
+        rival->ritmoDoPelotao += fmaxf(fminf(alvo - rival->ritmoDoPelotao, passo), -passo);
+    }
+}
+
 /*
  * atualizarCorrida
  * Avança a corrida um quadro:
@@ -824,7 +856,8 @@ void atualizarCorrida(Corrida *corrida, Comandos comandosJogador, float tempoQua
         registrarVolta(corrida, &corrida->jogador);
     }
 
-    /* 2) Rivais: a IA olha o carro logo à frente de cada um */
+    /* 2) Rivais: o pelotão se ajusta ao jogador, e a IA olha o carro logo à frente de cada um */
+    ajustarPelotao(corrida, tempoQuadro);
     for (int i = 0; i < TOTAL_RIVAIS; i++) {
         Carro *rival = &corrida->rivais[i];
         Comandos comandosIA = atualizarIA(rival, corrida->pista);

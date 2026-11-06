@@ -24,6 +24,7 @@
 #include "marcas.h"
 #include "torcida3d.h"
 #include "telao.h"
+#include "posprocesso.h"
 #include "configuracoes.h"
 #include "noite.h"
 #include "raymath.h"
@@ -298,13 +299,23 @@ static void desenharSombraDoCarro(Camera3D camera, Carro *carro) {
     desenharSombraNoChao(carro->numero, grade);
 }
 
+/*
+ * carroAVista
+ * Recebe: a câmera e o carro.
+ * Devolve: 1 se ele está perto e à frente da câmera (vale a pena desenhar).
+ */
+static int carroAVista(Camera3D camera, Carro *carro) {
+    PontoNoMundo ponto = pontoNoMundo(carro->posicao, carro->deslocamentoLateral);
+    float distancia = aFrenteDaCamera(camera, (Vector3){ ponto.x, ponto.y, ponto.z });
+    return distancia >= -6.0f && distancia <= DISTANCIA_DOS_RIVAIS;
+}
+
 static void desenharCarroNoMundo(Camera3D camera, Carro *carro) {
     PontoNoMundo ponto = pontoNoMundo(carro->posicao, carro->deslocamentoLateral);
     float distancia = aFrenteDaCamera(camera, (Vector3){ ponto.x, ponto.y, ponto.z });
     if (distancia < -6.0f || distancia > DISTANCIA_DOS_RIVAIS) {
         return;
     }
-    desenharSombraDoCarro(camera, carro);
     if (carro->estadoDoPit == PIT_TROCANDO && carro->duracaoDaTroca == DURACAO_DA_TROCA) {
         int canto;
         float andamento;
@@ -663,6 +674,32 @@ static void puxarOndaDaTorcida(const Corrida *corrida) {
 
 static int desenhandoOTelao = 0;   /* 1 enquanto a transmissão dos telões é desenhada */
 
+/* O desfoque de velocidade: começa perto da máxima e cresce no nitro */
+#define DESFOQUE_DESDE        0.70f    /* da velocidade máxima */
+#define DESFOQUE_NA_MAXIMA    0.45f
+#define DESFOQUE_NO_NITRO     0.40f
+
+/*
+ * desfoqueDeVelocidade
+ * Recebe: a corrida (pode ser NULL, no menu).
+ * Devolve: o desfoque das bordas, de 0 a 1.
+ */
+static float desfoqueDeVelocidade(Corrida *corrida) {
+    if (corrida == NULL || cenaPausada) {
+        return 0.0f;
+    }
+    Carro *j = &corrida->jogador;
+    if (j->estadoDoPit != PIT_FORA) {
+        return 0.0f;
+    }
+    float proporcao = j->velocidade / j->velocidadeMaxima;
+    float d = DESFOQUE_NA_MAXIMA * fminf(fmaxf((proporcao - DESFOQUE_DESDE) / (1.0f - DESFOQUE_DESDE), 0.0f), 1.3f);
+    if (j->nitroLigado) {
+        d += DESFOQUE_NO_NITRO;
+    }
+    return fminf(d, 1.0f);
+}
+
 /*
  * desenharMundo3D
  * O cenário e os carros, vistos pela câmera.
@@ -680,16 +717,39 @@ static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
     }
     prepararLuzes(ehNoite);
     prepararSombras(pista->id, camera, configuracoesAtuais()->sombras && !desenhandoOTelao);
-    prepararTorcida3D(pista->id, camera);
+    if (desenhandoOTelao) {
+        esconderTorcidaPintada(camera.position, 0.0f);   /* no telão a torcida pintada fica inteira */
+    } else {
+        prepararTorcida3D(pista->id, camera);
+    }
+    definirOlhoDosCarros(camera.position);
+    int comEfeitos = !desenhandoOTelao;   /* a cena sempre passa pela imagem: é mais rápido que direto na janela */
+    if (comEfeitos) {
+        comecarPosProcesso();
+    }
 
     prepararPlanosDaCamera();
     BeginMode3D(camera);
     rlDisableBackfaceCulling();
     desenharCenario(pista->id, camera.position);
-    desenharTorcida3D();
+    if (!desenhandoOTelao) {
+        desenharTorcida3D();   /* na tela pequena do telão a torcida pintada basta */
+    }
 
     if (corrida != NULL) {
-        desenharMarcas();
+        if (!desenhandoOTelao) {
+            desenharMarcas();
+        }
+        comecarSombrasNoChao();
+        for (int r = 0; r < TOTAL_RIVAIS; r++) {
+            if (carroAVista(camera, &corrida->rivais[r])) {
+                desenharSombraDoCarro(camera, &corrida->rivais[r]);
+            }
+        }
+        if (carroAVista(camera, &corrida->jogador)) {
+            desenharSombraDoCarro(camera, &corrida->jogador);
+        }
+        terminarSombrasNoChao();
         for (int r = 0; r < TOTAL_RIVAIS; r++) {
             desenharCarroNoMundo(camera, &corrida->rivais[r]);
         }
@@ -697,11 +757,15 @@ static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
         if (corrida->temParada) {
             desenharGuido(camera, pista, &corrida->jogador);
         }
-        desenharFumaca3D(camera);
+        if (!desenhandoOTelao) {
+            desenharFumaca3D(camera);
+        }
+        comecarChamas();
         for (int r = 0; r < TOTAL_RIVAIS; r++) {
             desenharChamasDoCarro(camera, &corrida->rivais[r]);
         }
         desenharChamasDoCarro(camera, &corrida->jogador);
+        terminarChamas();
     }
     if (ehNoite) {
         desenharBrilhos(camera);
@@ -709,6 +773,28 @@ static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
 
     rlEnableBackfaceCulling();
     EndMode3D();
+    if (comEfeitos && configuracoesAtuais()->efeitos) {
+        /* As luzes de novo, sozinhas: é delas que nasce o halo */
+        comecarLuzesDoPosProcesso();
+        prepararPlanosDaCamera();
+        BeginMode3D(camera);
+        desenharTelasQueBrilham(pista->id);
+        if (corrida != NULL) {
+            comecarChamas();
+            for (int r = 0; r < TOTAL_RIVAIS; r++) {
+                desenharChamasDoCarro(camera, &corrida->rivais[r]);
+            }
+            desenharChamasDoCarro(camera, &corrida->jogador);
+            terminarChamas();
+        }
+        if (ehNoite) {
+            desenharBrilhos(camera);
+        }
+        EndMode3D();
+    }
+    if (comEfeitos) {
+        terminarPosProcesso(pista->id, desfoqueDeVelocidade(corrida), configuracoesAtuais()->efeitos);
+    }
 }
 
 /*
@@ -817,6 +903,47 @@ static void atualizarTelao(Corrida *corrida) {
     terminarQuadroDoTelao(corrida, mostrado, tv->nome);
 }
 
+/* A câmera de cada carro: o McQueen é a medida; carro pequeno, câmera mais perto e baixa; carro
+ * grande, mais longe e alta. Em cima disso, ela respira com o pedal: acelerando se afasta um pouco,
+ * no nitro mais, freando chega perto */
+#define CARRO_DE_REFERENCIA    0         /* o McQueen */
+#define MENOR_FATOR_DA_CAMERA  0.72f
+#define MAIOR_FATOR_DA_CAMERA  1.32f
+#define AFASTA_ACELERANDO      0.04f
+#define AFASTA_NO_NITRO        0.13f
+#define CHEGA_FREANDO          0.07f
+#define RESPIRACAO_DA_CAMERA   2.5f      /* por segundo */
+
+/*
+ * distanciaParaOCarro
+ * Recebe: o carro e a distância escolhida (perto, médio ou longe), para o McQueen.
+ * Devolve: a distância e a altura para este carro, agora.
+ */
+static DistanciaDaCamera distanciaParaOCarro(const Carro *carro, DistanciaDaCamera base) {
+    static float respiracao = 0.0f;
+    float comprimento = comprimentoDoCarro3D(carro->numero) / comprimentoDoCarro3D(CARRO_DE_REFERENCIA);
+    float altura = alturaDoCarro3D(carro->numero) / alturaDoCarro3D(CARRO_DE_REFERENCIA);
+    comprimento = fminf(fmaxf(comprimento, MENOR_FATOR_DA_CAMERA), MAIOR_FATOR_DA_CAMERA);
+    altura = fminf(fmaxf(altura, MENOR_FATOR_DA_CAMERA), MAIOR_FATOR_DA_CAMERA);
+
+    float alvo = 0.0f;
+    if (carro->estadoDoPit == PIT_FORA && carro->re <= 0.0f) {
+        if (carro->nitroLigado) {
+            alvo = AFASTA_NO_NITRO;
+        } else if (carro->ultimosComandos.frear && carro->velocidade > 0.0f) {
+            alvo = -CHEGA_FREANDO;
+        } else if (carro->ultimosComandos.acelerar) {
+            alvo = AFASTA_ACELERANDO * fminf(carro->velocidade / carro->velocidadeMaxima * 1.5f, 1.0f);
+        }
+    }
+    respiracao += (alvo - respiracao) * fminf(RESPIRACAO_DA_CAMERA * GetFrameTime(), 1.0f);
+
+    DistanciaDaCamera d;
+    d.atras = base.atras * comprimento * (1.0f + respiracao);                       /* a distância segue o comprimento */
+    d.altura = base.altura * (0.6f * comprimento + 0.4f * altura) * (1.0f + 0.5f * respiracao);   /* a altura, os dois */
+    return d;
+}
+
 /*
  * desenharVisaoDoJogador
  * Desenha o que o jogador vê: o mundo pela câmera atrás do carro.
@@ -833,10 +960,10 @@ void desenharVisaoDoJogador(Corrida *corrida) {
         olhar.giro += jogador->anguloDeFuga * CAMERA_NA_FUGA;
     }
     /* A distância anda aos poucos até a escolhida (perto, médio ou longe) */
-    const DistanciaDaCamera *alvo = &DISTANCIAS_DA_CAMERA[distanciaEscolhida];
+    DistanciaDaCamera alvo = distanciaParaOCarro(jogador, DISTANCIAS_DA_CAMERA[distanciaEscolhida]);
     float passo = fminf(VELOCIDADE_DA_TROCA_DE_CAMERA * GetFrameTime(), 1.0f);
-    distanciaAtual.atras += (alvo->atras - distanciaAtual.atras) * passo;
-    distanciaAtual.altura += (alvo->altura - distanciaAtual.altura) * passo;
+    distanciaAtual.atras += (alvo.atras - distanciaAtual.atras) * passo;
+    distanciaAtual.altura += (alvo.altura - distanciaAtual.altura) * passo;
     Camera3D camera = montarCamera(jogador->posicao, jogador->deslocamentoLateral, olhar, distanciaAtual,
                                    comRumoReal ? &jogador->rumoNoMundo : NULL);
     if (jogador->estadoDoPit == PIT_TROCANDO) {

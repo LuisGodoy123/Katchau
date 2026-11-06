@@ -116,7 +116,7 @@ static const char *VERTICES_DO_SHADER =
 #define PIXELS_DO_SHADER(CORTE, SAIDA) \
     "#version 330\n" \
     "in vec2 fragTexCoord; in vec4 fragColor; in vec3 fragNormal; in vec3 fragPos;\n" \
-    "uniform sampler2D texture0; uniform vec4 colDiffuse;\n" \
+    "uniform sampler2D texture0; uniform vec4 colDiffuse; uniform vec3 olho;\n" \
     "out vec4 finalColor;\n" \
     GLSL_DA_LUZ_DA_NOITE \
     "void main() { vec4 cor = texture(texture0, fragTexCoord) * colDiffuse * fragColor;\n" \
@@ -126,7 +126,16 @@ static const char *VERTICES_DO_SHADER =
     "              float sol = max(dot(n, normalize(vec3(0.35, 0.8, 0.45))), 0.0);\n" \
     "              float luz = 0.62 + 0.28 * (n.y * 0.5 + 0.5) + 0.42 * sol;\n" \
     "              vec3 comLuz = (noite > 0.5) ? luzDaNoite(fragPos, n) * 1.1 : vec3(luz);\n" \
-    "              finalColor = vec4(cor.rgb * comLuz, " SAIDA "); }\n"
+    "              vec3 v = normalize(olho - fragPos);\n" \
+    "              vec3 r = reflect(-v, n);\n" \
+    "              float fresnel = pow(1.0 - max(dot(n, v), 0.0), 4.0);\n" \
+    "              float lataria = smoothstep(0.12, 0.38, max(cor.r, max(cor.g, cor.b)));\n" \
+    "              vec3 ceu = (noite > 0.5) ? mix(vec3(0.03, 0.04, 0.08), vec3(0.20, 0.26, 0.42), clamp(r.y, 0.0, 1.0))\n" \
+    "                                       : mix(vec3(0.50, 0.52, 0.52), vec3(0.62, 0.80, 1.00), clamp(r.y * 1.5, 0.0, 1.0));\n" \
+    "              float reflexo = lataria * (0.08 + 0.50 * fresnel);\n" \
+    "              float estrela = (noite > 0.5) ? 0.0 : pow(max(dot(r, normalize(vec3(0.35, 0.8, 0.45))), 0.0), 60.0) * lataria;\n" \
+    "              vec3 base = mix(cor.rgb * comLuz, ceu, reflexo) + vec3(1.0, 0.97, 0.9) * estrela * 0.9;\n" \
+    "              finalColor = vec4(base, " SAIDA "); }\n"
 
 static Model modelos[TOTAL_CARROS];
 static Matrix ajuste[TOTAL_CARROS];     /* do modelo como veio para o modelo normalizado */
@@ -151,6 +160,9 @@ static int rodaEscondida = -1;           /* a roda que não está no carro no pr
 static Matrix corpoInclinado;            /* a suspensão: só o corpo inclina, as rodas não */
 static int temCorpoInclinado = 0;
 
+static unsigned char *translucidos[TOTAL_CARROS];   /* por material: 1 se tem algo translúcido */
+static unsigned char *translucidosDosGarfos = NULL;
+static int blocoDeSombras = 0;   /* 1: entre comecarSombrasNoChao e terminarSombrasNoChao */
 static int rodaEmTroca = -1;          /* a roda que está sendo trocada no próximo carro desenhado (-1 = nenhuma) */
 static float andamentoDaTroca = 0.0f;
 static float ladosDaSombra[TOTAL_CARROS];
@@ -165,6 +177,23 @@ static void desenharComShader(Model modelo, Shader shader) {
         modelo.materials[i].shader = shader;
     }
     DrawModel(modelo, (Vector3){ 0.0f, 0.0f, 0.0f }, 1.0f, WHITE);
+}
+
+/*
+ * desenharSoTranslucidos
+ * A segunda passada: só as peças cujo material tem algo translúcido.
+ * Recebe: o modelo, o shader e os materiais translúcidos.
+ * Devolve: nada.
+ */
+static void desenharSoTranslucidos(Model modelo, Shader shader, const unsigned char *translucido) {
+    for (int i = 0; i < modelo.meshCount; i++) {
+        int m = modelo.meshMaterial[i];
+        if (translucido == NULL || translucido[m]) {
+            Material material = modelo.materials[m];
+            material.shader = shader;
+            DrawMesh(modelo.meshes[i], material, modelo.transform);
+        }
+    }
 }
 
 /*
@@ -200,9 +229,12 @@ static void desenharPecaTrocando(PecaDeRoda *peca, RodaDoCarro *roda, Model mode
  *         do carro no mundo, o ângulo das rodas e o volante.
  * Devolve: nada.
  */
-static void desenharRodas(int numero, Model modelo, Matrix noMundo, float anguloDasRodas, float volante) {
+static void desenharRodas(int numero, Model modelo, Matrix noMundo, float anguloDasRodas, float volante, int soTranslucidas) {
     for (int i = 0; i < totalDePecas[numero]; i++) {
         PecaDeRoda *peca = &pecas[numero][i];
+        if (soTranslucidas && translucidos[numero] != NULL && !translucidos[numero][peca->material]) {
+            continue;
+        }
         RodaDoCarro *roda = &rodas[numero][peca->roda];
         if (peca->roda == rodaEmTroca) {
             desenharPecaTrocando(peca, roda, modelo, noMundo, anguloDasRodas);
@@ -250,8 +282,10 @@ void desenharSombra(int numero, Matrix noMundo) {
  */
 void desenharSombraNoChao(int numero, const Vector3 *grade) {
     float passo = 1.0f / (PONTOS_DA_SOMBRA - 1);
-    BeginBlendMode(BLEND_ALPHA);
-    rlDisableDepthMask();
+    if (!blocoDeSombras) {
+        BeginBlendMode(BLEND_ALPHA);
+        rlDisableDepthMask();
+    }
     rlSetTexture(sombras[numero].id);
     rlBegin(RL_QUADS);
     rlColor4ub(255, 255, 255, 255);
@@ -268,9 +302,29 @@ void desenharSombraNoChao(int numero, const Vector3 *grade) {
     }
     rlEnd();
     rlSetTexture(0);
+    if (!blocoDeSombras) {
+        rlDrawRenderBatchActive();
+        rlEnableDepthMask();
+        EndBlendMode();
+    }
+}
+
+/*
+ * comecarSombrasNoChao / terminarSombrasNoChao
+ * As sombras de todos os carros vão juntas, num só bloco: sem esvaziar a fila a cada carro.
+ */
+void comecarSombrasNoChao(void) {
+    rlDrawRenderBatchActive();
+    BeginBlendMode(BLEND_ALPHA);
+    rlDisableDepthMask();
+    blocoDeSombras = 1;
+}
+
+void terminarSombrasNoChao(void) {
     rlDrawRenderBatchActive();
     rlEnableDepthMask();
     EndBlendMode();
+    blocoDeSombras = 0;
 }
 
 /*
@@ -366,6 +420,17 @@ static void prepararSombra(int numero) {
  */
 float alturaDoCarro3D(int numero) {
     return caixasDosCarros[numero].max.y;
+}
+
+/*
+ * definirOlhoDosCarros
+ * Onde está a câmera, para o reflexo na pintura.
+ * Recebe: a posição da câmera.
+ * Devolve: nada.
+ */
+void definirOlhoDosCarros(Vector3 olho) {
+    SetShaderValue(shaderOpaco, GetShaderLocation(shaderOpaco, "olho"), &olho, SHADER_UNIFORM_VEC3);
+    SetShaderValue(shaderTranslucido, GetShaderLocation(shaderTranslucido, "olho"), &olho, SHADER_UNIFORM_VEC3);
 }
 
 /*
@@ -468,15 +533,15 @@ void desenharCarro3D(int numero, Matrix noMundo, float anguloDasRodas, float vol
     if (comGarfos) {
         desenharComShader(doGuido, shaderOpaco);
     }
-    desenharRodas(numero, modelo, noMundo, anguloDasRodas, volante);
+    desenharRodas(numero, modelo, noMundo, anguloDasRodas, volante, 0);
 
     BeginBlendMode(BLEND_ALPHA);
     rlDisableDepthMask();
-    desenharComShader(modelo, shaderTranslucido);
+    desenharSoTranslucidos(modelo, shaderTranslucido, translucidos[numero]);
     if (comGarfos) {
-        desenharComShader(doGuido, shaderTranslucido);
+        desenharSoTranslucidos(doGuido, shaderTranslucido, translucidosDosGarfos);
     }
-    desenharRodas(numero, modelo, noMundo, anguloDasRodas, volante);
+    desenharRodas(numero, modelo, noMundo, anguloDasRodas, volante, 1);
     rlDrawRenderBatchActive();
     rlEnableDepthMask();
     EndBlendMode();
@@ -864,6 +929,49 @@ static void separarRodas(int numero) {
  * Recebe: o modelo.
  * Devolve: nada.
  */
+/*
+ * medirTranslucidos
+ * Quais materiais do modelo têm algo translúcido (vidro, faróis): só eles entram na segunda
+ * passada do desenho. Olha a cor do material, as cores dos vértices e os pixels da textura.
+ * Recebe: o modelo.
+ * Devolve: um vetor com 1 para cada material translúcido (MemFree para liberar).
+ */
+static unsigned char *medirTranslucidos(Model modelo) {
+    unsigned char *translucido = (unsigned char *) MemAlloc(modelo.materialCount);
+    for (int m = 0; m < modelo.materialCount; m++) {
+        MaterialMap mapa = modelo.materials[m].maps[MATERIAL_MAP_ALBEDO];
+        if (mapa.color.a < 230) {
+            translucido[m] = 1;
+            continue;
+        }
+        if (mapa.texture.id != 0 && mapa.texture.id != rlGetTextureIdDefault()) {
+            Image imagem = LoadImageFromTexture(mapa.texture);
+            Color *pixels = LoadImageColors(imagem);
+            for (int i = 0; i < imagem.width * imagem.height; i++) {
+                if (pixels[i].a > 5 && pixels[i].a < 230) {
+                    translucido[m] = 1;
+                    break;
+                }
+            }
+            UnloadImageColors(pixels);
+            UnloadImage(imagem);
+        }
+    }
+    for (int i = 0; i < modelo.meshCount; i++) {
+        Mesh malha = modelo.meshes[i];
+        if (malha.colors == NULL) {
+            continue;
+        }
+        for (int v = 0; v < malha.vertexCount; v++) {
+            if (malha.colors[v * 4 + 3] < 230) {
+                translucido[modelo.meshMaterial[i]] = 1;
+                break;
+            }
+        }
+    }
+    return translucido;
+}
+
 static void prepararTexturas(Model modelo) {
     for (int i = 0; i < modelo.materialCount; i++) {
         Texture2D *textura = &modelo.materials[i].maps[MATERIAL_MAP_ALBEDO].texture;
@@ -949,6 +1057,7 @@ static void prepararMiniatura(int numero) {
     camera.fovy = GRAUS_DA_FOTO;
     camera.projection = CAMERA_PERSPECTIVE;
 
+    definirOlhoDosCarros(camera.position);   /* o reflexo da pintura com a câmera da foto */
     miniaturas[numero] = LoadRenderTexture(LADO_DA_MINIATURA, LADO_DA_MINIATURA);
     BeginTextureMode(miniaturas[numero]);
     ClearBackground(BLANK);
@@ -1020,9 +1129,16 @@ void carregarCarros3D(void) {
     for (int numero = 0; numero < TOTAL_CARROS; numero++) {
         modelos[numero] = LoadModel(TextFormat("%s%s", PASTA_DOS_MODELOS, MODELOS[numero].arquivo));
         prepararTexturas(modelos[numero]);
+        translucidos[numero] = medirTranslucidos(modelos[numero]);
+        int quantos = 0;
+        for (int m = 0; m < modelos[numero].materialCount; m++) {
+            quantos += translucidos[numero][m];
+        }
+        TraceLog(LOG_INFO, "CARRO: %d de %d materiais com algo translucido", quantos, modelos[numero].materialCount);
         if (numero == CARRO_COM_GARFOS && FileExists(TextFormat("%s%s", PASTA_DOS_MODELOS, ARQUIVO_DOS_GARFOS))) {
             garfos = LoadModel(TextFormat("%s%s", PASTA_DOS_MODELOS, ARQUIVO_DOS_GARFOS));
             prepararTexturas(garfos);
+            translucidosDosGarfos = medirTranslucidos(garfos);
             temGarfos = 1;
         }
         normalizarModelo(numero);
@@ -1056,8 +1172,12 @@ void descarregarCarros3D(void) {
             modelos[numero].materials[i].shader.id = rlGetShaderIdDefault();
         }
         UnloadModel(modelos[numero]);
+        MemFree(translucidos[numero]);
+        translucidos[numero] = NULL;
         if (numero == CARRO_COM_GARFOS && temGarfos) {
             UnloadModel(garfos);
+            MemFree(translucidosDosGarfos);
+            translucidosDosGarfos = NULL;
             temGarfos = 0;
         }
         for (int i = 0; i < totalDePecas[numero]; i++) {

@@ -174,9 +174,11 @@ void soltarNuvem(Vector3 roda, Vector3 velocidadeDoCarro, float forca, TipoDeNuv
 void atualizarFumaca(float tempoQuadro) {
     float freio = expf(-FREIO_DO_AR * tempoQuadro);
     float freioNoDrift = expf(-FREIO_DO_AR_NO_DRIFT * tempoQuadro);
+    /* Uma imagem por vez: cada troca de textura é uma chamada de desenho a mais */
+    for (int qual = 0; qual < VARIACOES_DE_IMAGEM; qual++)
     for (int i = 0; i < MAXIMO_DE_NUVENS; i++) {
         Nuvem *nuvem = &nuvens[i];
-        if (nuvem->vida <= 0.0f) {
+        if (nuvem->vida <= 0.0f || nuvem->imagem != qual) {
             continue;
         }
         nuvem->idade += tempoQuadro;
@@ -243,9 +245,6 @@ void desenharFumaca3D(Camera3D camera) {
  * Devolve: nada.
  */
 void desenharChamaDoNitro(Camera3D camera, Vector3 escape, Vector3 paraTras) {
-    rlDrawRenderBatchActive();
-    BeginBlendMode(BLEND_ADDITIVE);
-    rlDisableDepthMask();
     float comprimento = COMPRIMENTO_DA_CHAMA * sortear(0.75f, 1.2f);
     for (int i = 0; i < PEDACOS_DA_CHAMA; i++) {
         float fase = (float) i / (PEDACOS_DA_CHAMA - 1);
@@ -254,14 +253,29 @@ void desenharChamaDoNitro(Camera3D camera, Vector3 escape, Vector3 paraTras) {
                            escape.z + paraTras.z * distancia };
         float tamanho = LARGURA_DA_CHAMA * (1.0f - 0.72f * fase) * sortear(0.85f, 1.15f);
         Color cor = ColorLerp(COR_DA_CHAMA_PERTO, COR_DA_CHAMA_LONGE, fase);
-        Texture2D imagem = imagens[GetRandomValue(0, VARIACOES_DE_IMAGEM - 1)];
+        /* Uma imagem só, girada a cada pedaço: varia sem trocar de textura (cada troca é uma chamada de desenho) */
+        Texture2D imagem = imagens[0];
         Rectangle origem = { 0.0f, 0.0f, (float) imagem.width, (float) imagem.height };
-        DrawBillboardRec(camera, imagem, origem, centro, (Vector2){ tamanho, tamanho }, Fade(cor, 1.0f - 0.55f * fase));
+        DrawBillboardPro(camera, imagem, origem, centro, (Vector3){ 0.0f, 1.0f, 0.0f }, (Vector2){ tamanho, tamanho },
+                         (Vector2){ tamanho / 2.0f, tamanho / 2.0f }, sortear(0.0f, 360.0f), Fade(cor, 1.0f - 0.55f * fase));
     }
     /* O miolo branco, bem na boca do escapamento */
     Texture2D imagem = imagens[0];
     Rectangle origem = { 0.0f, 0.0f, (float) imagem.width, (float) imagem.height };
     DrawBillboardRec(camera, imagem, origem, escape, (Vector2){ LARGURA_DA_CHAMA * 0.55f, LARGURA_DA_CHAMA * 0.55f }, WHITE);
+}
+
+/*
+ * comecarChamas / terminarChamas
+ * As chamas de todos os carros vão num bloco só, somando luz, sem escrever na profundidade.
+ */
+void comecarChamas(void) {
+    rlDrawRenderBatchActive();
+    BeginBlendMode(BLEND_ADDITIVE);
+    rlDisableDepthMask();
+}
+
+void terminarChamas(void) {
     rlDrawRenderBatchActive();
     rlEnableDepthMask();
     EndBlendMode();

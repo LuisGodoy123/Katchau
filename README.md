@@ -445,6 +445,14 @@ saber em que segmento ele está e a quantos metros da linha. O carro e a câmera
 
 Para investigar como o carro se comporta, `KATCHAU_TELEMETRIA=1 ./katchau` grava cada quadro da corrida em `telemetria.csv`.
 
+### Efeitos de tela
+
+A cena 3D é desenhada numa imagem e passa por um último shader (`posprocesso.c`): brilho em volta das luzes (os faróis,
+os refletores da Copa, o nitro e os telões), um tom de cor para cada pista (tarde quente em Interlagos, noite azulada
+na Copa), vinheta e, perto da velocidade máxima e no nitro, desfoque nas bordas. A pintura dos carros reflete o céu,
+mais forte nas bordas (`carros3d.c`), e as telas dos telões brilham sozinhas. Em Configurações, GRÁFICOS escolhe entre
+ALTO (sombras e efeitos), MÉDIO (só efeitos) e BAIXO.
+
 ### Telões e placar
 
 Na Copa Pistão, os telões (o cubo pendurado no meio e o telão do alto da arquibancada) passam a transmissão da

@@ -142,6 +142,7 @@ void terminarInterface(void) {
 #define COR_ROXO_HUD          (Color){ 165,  70, 220, 255 }
 
 /* ---------- Mini-mapa (canto inferior esquerdo) ---------- */
+#define PONTOS_DESENHADOS_NO_MAPA 400
 #define MAX_PONTOS_MAPA       8192   /* um ponto por segmento; Interlagos tem ~2.600 */
 #define TAMANHO_MAPA          150    /* lado do quadrado do mini-mapa, em pixels */
 #define MARGEM_MAPA           8      /* folga entre o traçado e a borda do quadrado */
@@ -273,13 +274,16 @@ static void desenharMiniMapa(Corrida *corrida) {
         calcularMapa(corrida->pista, x, y);
     }
 
-    /* Traçado: borda escura por baixo e a linha branca por cima */
-    for (int i = 0; i < totalPontosMapa; i++) {
-        DrawLineEx(pontosMapa[i], pontosMapa[(i + 1) % totalPontosMapa], ESPESSURA_TRACADO + 3.0f,
-                   Fade(COR_GRAFITE, 0.7f));
-    }
-    for (int i = 0; i < totalPontosMapa; i++) {
-        DrawLineEx(pontosMapa[i], pontosMapa[(i + 1) % totalPontosMapa], ESPESSURA_TRACADO, COR_TEXTO_CLARO);
+    /* Traçado: borda escura por baixo e a linha branca por cima. Um ponto por metro é demais para
+     * 150 pixels: o desenho pula de alguns em alguns (as posições dos carros usam todos) */
+    int passo = (totalPontosMapa > PONTOS_DESENHADOS_NO_MAPA) ? totalPontosMapa / PONTOS_DESENHADOS_NO_MAPA : 1;
+    for (int camada = 0; camada < 2; camada++) {
+        float grossura = (camada == 0) ? ESPESSURA_TRACADO + 3.0f : ESPESSURA_TRACADO;
+        Color cor = (camada == 0) ? Fade(COR_GRAFITE, 0.7f) : COR_TEXTO_CLARO;
+        for (int i = 0; i < totalPontosMapa; i += passo) {
+            int proximo = (i + passo < totalPontosMapa) ? i + passo : 0;
+            DrawLineEx(pontosMapa[i], pontosMapa[proximo], grossura, cor);
+        }
     }
 
     /* Linha de chegada: um tracinho atravessado no ponto da largada */
