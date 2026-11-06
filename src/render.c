@@ -23,6 +23,7 @@
 #include "fumaca.h"
 #include "marcas.h"
 #include "torcida3d.h"
+#include "telao.h"
 #include "configuracoes.h"
 #include "noite.h"
 #include "raymath.h"
@@ -660,6 +661,8 @@ static void puxarOndaDaTorcida(const Corrida *corrida) {
     }
 }
 
+static int desenhandoOTelao = 0;   /* 1 enquanto a transmissão dos telões é desenhada */
+
 /*
  * desenharMundo3D
  * O cenário e os carros, vistos pela câmera.
@@ -676,7 +679,7 @@ static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
         atualizarNoite(cenaPausada ? 0.0f : GetFrameTime());
     }
     prepararLuzes(ehNoite);
-    prepararSombras(pista->id, camera, configuracoesAtuais()->sombras);
+    prepararSombras(pista->id, camera, configuracoesAtuais()->sombras && !desenhandoOTelao);
     prepararTorcida3D(pista->id, camera);
 
     prepararPlanosDaCamera();
@@ -739,6 +742,81 @@ int alternarDistanciaDaCamera(void) {
     return distanciaEscolhida;
 }
 
+/* A transmissão dos telões: a cada tomada muda o carro e a câmera */
+#define SEGUNDOS_POR_TOMADA    6.0f
+#define TOTAL_DE_CAMERAS       5
+
+typedef struct {
+    const char *nome;
+    Vector3 de, para;    /* no carro: x para a esquerda, y para cima, z para a frente */
+} CameraDeTV;
+
+static const CameraDeTV CAMERAS_DE_TV[TOTAL_DE_CAMERAS] = {
+    { "CAMERA DE PERSEGUICAO", { 0.0f, 2.4f, -7.5f }, { 0.0f, 0.9f, 6.0f } },
+    { "CAMERA ON-BOARD",       { 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 20.0f } },   /* em cima do teto: veja atualizarTelao */
+    { "CAMERA LATERAL",        { 5.5f, 0.9f, 1.0f }, { 0.0f, 0.6f, 0.4f } },
+    { "HELICOPTERO",           { 6.0f, 26.0f, -26.0f }, { 0.0f, 0.0f, 10.0f } },
+    { "CAMERA FRONTAL",        { 0.4f, 0.8f, 8.0f }, { 0.0f, 0.7f, 0.0f } },
+};
+
+/*
+ * carroDaTomada
+ * Quem aparece na tomada: o jogador, o líder, quem está logo à frente do jogador e um do meio
+ * do pelotão, nessa ordem.
+ * Recebe: a corrida e o número da tomada.
+ * Devolve: o carro.
+ */
+static Carro *carroDaTomada(Corrida *corrida, int tomada) {
+    int posicaoDoJogador = 0;
+    for (int i = 0; i < TOTAL_CARROS; i++) {
+        if (corrida->classificacao[i] == &corrida->jogador) {
+            posicaoDoJogador = i;
+        }
+    }
+    switch (tomada % 4) {
+        case 0: return &corrida->jogador;
+        case 1: return corrida->classificacao[(posicaoDoJogador == 0) ? 1 : 0];
+        case 2: return corrida->classificacao[(posicaoDoJogador > 0) ? posicaoDoJogador - 1 : 1];
+        default: return corrida->classificacao[(tomada * 5 + 3) % TOTAL_CARROS];
+    }
+}
+
+/*
+ * atualizarTelao
+ * Desenha mais um quadro da transmissão (umas 20 vezes por segundo): a corrida vista de uma
+ * câmera de TV presa a um carro. As tomadas trocam de carro e de câmera a cada poucos segundos.
+ * Recebe: a corrida.
+ * Devolve: nada.
+ */
+static void atualizarTelao(Corrida *corrida) {
+    atualizarPlacar(corrida);
+    if (!telaoPrecisaDeQuadro(GetFrameTime())) {
+        return;
+    }
+    int tomada = (int) (GetTime() / SEGUNDOS_POR_TOMADA);
+    Carro *mostrado = carroDaTomada(corrida, tomada);
+    const CameraDeTV *tv = &CAMERAS_DE_TV[(tomada * 3) % TOTAL_DE_CAMERAS];
+    Matrix noMundo = matrizDoCarro(mostrado);
+    float escala = comprimentoDoCarro3D(mostrado->numero) / 4.2f;   /* carro pequeno, câmera mais perto */
+    Camera3D camera = { 0 };
+    Vector3 de = Vector3Scale(tv->de, escala), para = Vector3Scale(tv->para, escala);
+    if (tv == &CAMERAS_DE_TV[1]) {
+        float teto = alturaDoCarro3D(mostrado->numero);
+        de = (Vector3){ 0.0f, teto + 0.35f, comprimentoDoCarro3D(mostrado->numero) * 0.05f };
+        para = (Vector3){ 0.0f, teto * 0.8f, 20.0f };
+    }
+    camera.position = Vector3Transform(de, noMundo);
+    camera.target = Vector3Transform(para, noMundo);
+    camera.up = (Vector3){ 0.0f, 1.0f, 0.0f };
+    camera.fovy = (tv == &CAMERAS_DE_TV[3]) ? 38.0f : 55.0f;
+    camera.projection = CAMERA_PERSPECTIVE;
+    comecarQuadroDoTelao();
+    desenhandoOTelao = 1;   /* a transmissão dispensa as sombras: é pequena, e o mapa de sombra é caro */
+    desenharMundo3D(camera, corrida->pista, corrida);
+    desenhandoOTelao = 0;
+    terminarQuadroDoTelao(corrida, mostrado, tv->nome);
+}
+
 /*
  * desenharVisaoDoJogador
  * Desenha o que o jogador vê: o mundo pela câmera atrás do carro.
@@ -747,6 +825,7 @@ int alternarDistanciaDaCamera(void) {
  */
 void desenharVisaoDoJogador(Corrida *corrida) {
     Carro *jogador = &corrida->jogador;
+    atualizarTelao(corrida);   /* os telões de todas as pistas passam a transmissão */
     /* A câmera acompanha o carro, não a pista: sem volante na curva, ela também não vira sozinha */
     Olhar olhar = olharDoJogador;
     int comRumoReal = jogador->direcaoLivre && jogador->temRumoNoMundo && jogador->estadoDoPit == PIT_FORA;

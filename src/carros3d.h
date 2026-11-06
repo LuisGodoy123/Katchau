@@ -22,6 +22,7 @@ void carregarCarros3D(void);
 void descarregarCarros3D(void);
 float larguraDoCarro3D(int numero);
 float comprimentoDoCarro3D(int numero);
+float alturaDoCarro3D(int numero);
 #define PONTOS_DA_SOMBRA  7   /* a malha da sombra tem tantos pontos em cada lado */
 void desenharSombraNoChao(int numero, const Vector3 *grade);
 float ladoDaSombra(int numero);

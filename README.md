@@ -445,6 +445,19 @@ saber em que segmento ele está e a quantos metros da linha. O carro e a câmera
 
 Para investigar como o carro se comporta, `KATCHAU_TELEMETRIA=1 ./katchau` grava cada quadro da corrida em `telemetria.csv`.
 
+### Telões e placar
+
+Na Copa Pistão, os telões (o cubo pendurado no meio e o telão do alto da arquibancada) passam a transmissão da
+corrida, umas 20 vezes por segundo: a cada 6 s a câmera troca de carro (o jogador, o líder, quem está logo à frente
+dele, alguém do pelotão) e de ângulo (perseguição, on-board no teto, lateral, helicóptero, frontal), com as legendas
+de TV. O placar da torre e do telão do alto mostra a volta do líder e os quinze primeiros. As imagens do modelo são
+trocadas por RenderTextures (`telao.c`); a câmera de TV fica em `render.c`.
+
+Nas outras pistas, o telão é uma estrutura 3D (`objetos/telao.glb` e `telao_katchau.glb`, gerados por
+`build/exp/gerar_telao3d.py`): duas torres de treliça com sapatas, o gabinete com a tela, a passarela de manutenção,
+as caixas de som e o letreiro KATCHAU com lâmpadas. A tela traz uma imagem de espera só dela; ao carregar, o jogo troca
+essa imagem pela transmissão (`ligarTeloesDoCenario` em `mundo.c`). A transmissão é desenhada sem as sombras do sol.
+
 ### Torcida 3D
 
 Em todas as pistas, os lugares das arquibancadas perto da câmera ganham carrinhos de verdade (`torcida3d.c`): o

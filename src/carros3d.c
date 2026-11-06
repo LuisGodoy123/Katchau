@@ -360,6 +360,15 @@ static void prepararSombra(int numero) {
 }
 
 /*
+ * alturaDoCarro3D
+ * Recebe: o número do carro.
+ * Devolve: a altura do teto, em metros.
+ */
+float alturaDoCarro3D(int numero) {
+    return caixasDosCarros[numero].max.y;
+}
+
+/*
  * esconderRodaNoProximoDesenho
  * Recebe: a roda que está fora do carro (na troca), no próximo desenho.
  * Devolve: nada.

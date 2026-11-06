@@ -385,7 +385,7 @@ void prepararTorcida3D(int pista, Camera3D camera) {
     }
     conjuntoDoQuadro = c;
     cameraDoQuadro = camera.position;
-    tempo += GetFrameTime();
+    tempo = (float) GetTime();   /* o telão também desenha a torcida: o relógio não pode andar duas vezes */
 
     /* Cada linha da grade perto da câmera: as células de cada linha estão juntas na lista, então
      * as que ficam dentro do raio (e não atrás da câmera) viram um trecho só */

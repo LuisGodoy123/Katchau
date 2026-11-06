@@ -13,6 +13,7 @@
 #include <math.h>
 #include "mundo.h"
 #include "torcida3d.h"
+#include "telao.h"
 #include "tracado.h"
 #include "oval.h"
 #include "splat.h"
@@ -807,6 +808,9 @@ static void colocarModelo(ModeloDeObjeto qual, Vector3 pe, float giro, float tam
  * Recebe: nada.
  * Devolve: nada.
  */
+#define LARGURA_DA_TELA_DE_ESPERA 320   /* a imagem da tela dos telões (gerar_telao3d.py) */
+#define ALTURA_DA_TELA_DE_ESPERA  192
+
 static void carregarModelosDosObjetos(void) {
     for (int i = 0; i < TOTAL_MODELOS_DE_OBJETO; i++) {
         modelosDosObjetos[i] = LoadModel(TextFormat("%s%s", PASTA_DOS_OBJETOS, ARQUIVOS_DOS_OBJETOS[i]));
@@ -1653,6 +1657,7 @@ static void carregarEstadio(Pista *pista) {
     montarEquipeAoArLivre(pista);
     fecharTodosOsLotes();
     fimDosLotesDoEstadio = totalDeLotes;
+    carregarTelao(&estadio);
 }
 
 /*
@@ -1778,6 +1783,37 @@ static void carregarMapaDeDia(Pista *pista, const char *arquivo, float escala, c
 }
 
 /*
+ * ligarTeloesDoCenario
+ * Os telões das pistas (telao.glb e telao_katchau.glb) têm uma imagem de espera na tela, só
+ * deles: onde ela estiver nos lotes, entra a transmissão ao vivo (telao.c).
+ * Recebe: nada.
+ * Devolve: nada.
+ */
+static void ligarTeloesDoCenario(void) {
+    Texture2D transmissao = texturaDoTelao();
+    if (transmissao.id == 0) {
+        return;
+    }
+    int trocados = 0;
+    for (int q = 0; q < TOTAL_MODELOS_DE_OBJETO; q++) {
+        Model *modelo = &modelosDosObjetos[q];
+        for (int m = 0; m < modelo->materialCount; m++) {
+            Texture2D tela = modelo->materials[m].maps[MATERIAL_MAP_ALBEDO].texture;
+            if (tela.width != LARGURA_DA_TELA_DE_ESPERA || tela.height != ALTURA_DA_TELA_DE_ESPERA) {
+                continue;
+            }
+            for (int i = 0; i < totalDeLotes; i++) {
+                if (lotes[i].textura.id == tela.id) {
+                    lotes[i].textura = transmissao;
+                    trocados++;
+                }
+            }
+        }
+    }
+    TraceLog(LOG_INFO, "MUNDO: %d lotes de tela de telao ligados a transmissao", trocados);
+}
+
+/*
  * carregarMundo
  * Prepara o cenário das pistas. Chamar uma vez, depois de criar a janela.
  * Recebe: as pistas, na ordem de IdPista.
@@ -1810,6 +1846,7 @@ void carregarMundo(Pista *pistas[]) {
     carregarMapaDeDia(pistas[PISTA_SPLAT], ARQUIVO_DO_SPLAT, ESCALA_SPLAT, TORCIDA_SPLAT, TOTAL_TORCIDA_SPLAT, FIGURA_DO_SPLAT,
                       CENARIO_SPLAT, TOTAL_CENARIO_SPLAT);
     iniciarTorcida3D();
+    ligarTeloesDoCenario();
 }
 
 /*
@@ -1824,6 +1861,7 @@ void descarregarMundo(void) {
         estadio.materials[i].shader.id = rlGetShaderIdDefault();
     }
     descarregarTorcida3D();
+    descarregarTelao();
     UnloadModel(estadio);
     for (int i = 0; i < TOTAL_PISTAS; i++) {
         if (mapasDeDia[i].existe) {

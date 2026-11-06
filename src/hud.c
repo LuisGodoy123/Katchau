@@ -343,6 +343,15 @@ static const Color CORES_DAS_EQUIPES[TOTAL_CARROS] = {
 };
 
 /*
+ * codigoDoCarro
+ * Recebe: o número do carro.
+ * Devolve: o código de três letras dele (MCQ, KNG...).
+ */
+const char *codigoDoCarro(int numero) {
+    return CODIGOS[numero % TOTAL_CARROS];
+}
+
+/*
  * desenharEtiqueta
  * Uma etiqueta pequena do lado de fora da torre (volta mais rápida, boxes).
  * Recebe: onde, o texto, a cor do fundo e a do texto.
