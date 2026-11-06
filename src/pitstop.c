@@ -28,6 +28,9 @@
 #define BORDA_DEPOIS_DA_SAIDA 0.9f      /* larguras da pista: um pouco para dentro do asfalto */
 #define SEGUNDOS_VOLTANDO_A_PISTA 0.5f
 #define PARADO_NA_VAGA        0.05f     /* metros: chegou */
+#define PASSOU_DA_VAGA        3.0f      /* metros: entrou rápido demais e passou da vaga. Sem dar ré, segue
+                                         * direto pelo pit lane sem trocar (e deve a parada ainda); parado
+                                         * ali, travaria a fila de todo mundo atrás */
 #define FAIXA_RAPIDA          4.5f      /* metros do muro até o centro do carro, andando no pit lane */
 #define RAPIDEZ_DE_LADO       17.0f     /* metros por segundo, no máximo */
 #define RAPIDEZ_NO_CAMINHO    24.0f     /* onde a estrada do pit dobra de verdade */
@@ -297,6 +300,9 @@ int atualizarCarroNoPit(Carro *carro, Pista *pista, float tempoQuadro) {
         /* Freia a tempo de chegar à linha já no limite */
         float ateALinha = (linhaDoLimite - noPit) * UNIDADES_POR_METRO;
         alvo = fminf(alvo, sqrtf(LIMITE_DO_PIT * LIMITE_DO_PIT + 2.0f * FREIO_NO_PIT * ateALinha));
+    }
+    if (carro->estadoDoPit == PIT_CHEGANDO && noPit - vaga > PASSOU_DA_VAGA) {
+        carro->estadoDoPit = PIT_SAINDO;
     }
     if (carro->estadoDoPit == PIT_CHEGANDO) {
         float falta = fmaxf(vaga - noPit, 0.0f) * UNIDADES_POR_METRO;

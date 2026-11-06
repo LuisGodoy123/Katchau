@@ -41,6 +41,7 @@
 #define VISAO_PARA_TRAS_NO_PIT    22.0f     /* metros: quem sai da vaga não entra na frente de quem vem */
 #define FOLGA_DE_FAIXA_NO_PIT     0.4f      /* metros de lado: mais que isso, passa ao lado */
 #define ALCANCE_DA_VISAO          60.0f     /* metros à frente */
+#define ALCANCE_PARA_TRAS         30.0f     /* metros atrás: quem vem perto assim pode ser bloqueado */
 #define DISTANCIA_AO_LADO         1.5f      /* metros de folga: mais perto que isso, o lado está ocupado */
 
 /* ---------- Dificuldade ---------- */
@@ -80,11 +81,13 @@ static const FichaTecnica FICHAS[TOTAL_CARROS] = {
     { "Snot Rod", "motorzao, dificil de segurar", 12100.0f, 2500.0f, 0.485f, 4.6f, 2.53f },
 };
 
-/* Os níveis: o médio é o equilíbrio original; o fácil não tem pitstop, e só o difícil gasta os pneus */
+/* Os níveis: o fácil não tem pitstop, e só o difícil gasta os pneus. Quanto mais difícil, mais os
+ * rivais defendem a posição e revidam uma ultrapassagem, e mais constante é o ritmo deles.
+ *              nome      voltas pole   último  pit pneu pelotão defesa revide variação */
 static const FichaDoNivel NIVEIS[TOTAL_NIVEIS] = {
-    { "FÁCIL",   3, 0.87f, 0.80f, 0, 0, 1.0f },
-    { "MÉDIO",   5, 0.93f, 0.86f, 1, 0, 0.7f },
-    { "DIFÍCIL", 8, 0.97f, 0.91f, 1, 1, 0.4f },
+    { "FÁCIL",   3, 0.78f, 0.70f, 0, 0, 1.0f, 0.00f, 0.00f, 0.020f },
+    { "MÉDIO",   5, 0.90f, 0.83f, 1, 0, 0.7f, 0.40f, 0.65f, 0.012f },
+    { "DIFÍCIL", 8, 0.94f, 0.88f, 1, 1, 0.5f, 0.75f, 1.00f, 0.006f },
 };
 
 /*
@@ -165,6 +168,8 @@ static Carro criarCarroDaFicha(FichaTecnica ficha, int numero, Pista *pista) {
  * Devolve: nada.
  */
 void iniciarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador, NivelDaCorrida nivel) {
+    static unsigned int corridasIniciadas = 0;   /* cada corrida sorteia ritmos diferentes */
+    corridasIniciadas++;
     const FichaDoNivel *ficha = fichaDoNivel(nivel);
     int temParada = ficha->temParada && pista->temPit;
     int gastaPneu = ficha->gastaPneu && temParada;   /* sem boxes, não haveria como trocar */
@@ -205,6 +210,10 @@ void iniciarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador, NivelDaC
         corrida->rivais[rival].habilidade = ficha->habilidadeDaPole
             - (ficha->habilidadeDaPole - ficha->habilidadeDoUltimo) * rival / (TOTAL_RIVAIS - 1);
         corrida->rivais[rival].voltasDaProva = ficha->voltas;
+        corrida->rivais[rival].defesa = ficha->defesa;
+        corrida->rivais[rival].vontadeDeRevide = ficha->revide;
+        corrida->rivais[rival].variacao = ficha->variacao;
+        corrida->rivais[rival].sorteio = 2654435761u * (unsigned int) (rival + 1) + 40503u * corridasIniciadas;
         corrida->rivais[rival].gastaPneu = gastaPneu;
         /* Cada um para numa volta, para os boxes não lotarem; na troca, eles são mais lentos que o Guido */
         corrida->rivais[rival].voltaDoPit = temParada ? 2 + rival * 5 % (ficha->voltas - 2) : 0;
@@ -663,7 +672,8 @@ static void verificarBatidas(Corrida *corrida, float tempoQuadro) {
 /*
  * olharEmVolta
  * Preenche o que cada carro enxerga para a IA decidir: quem está à frente na
- * mesma linha, e se há alguém encostado em cada lado.
+ * mesma linha, quem está mais perto à frente e atrás em qualquer linha, e se há
+ * alguém encostado em cada lado.
  * Recebe: a corrida.
  * Devolve: nada.
  */
@@ -674,6 +684,8 @@ static void olharEmVolta(Corrida *corrida) {
         carro->ocupadoEsquerda = 0;
         carro->ocupadoDireita = 0;
         carro->vemAlguemAtras = 0;
+        carro->distanciaAtras = -1.0f;
+        carro->distanciaDoDaFrente = -1.0f;
         float meio, meiaLargura;
         meiasMedidasDoCarro(carro, &meio, &meiaLargura);
 
@@ -704,6 +716,21 @@ static void olharEmVolta(Corrida *corrida) {
             int mesmaFaixa = vaoDeLado < DISTANCIA_AO_LADO;
             if (carroNoPit(carro) && carroNoPit(outro) && outro->velocidade <= 0.0f) {
                 mesmaFaixa = vaoDeLado < FOLGA_DE_FAIXA_NO_PIT;
+            }
+            /* Em qualquer linha: o mais perto à frente (para o vácuo) e atrás (para a defesa) */
+            if (!carroNoPit(carro) && !carroNoPit(outro)) {
+                if (d > 0.0f && vaoNaFrente < ALCANCE_DA_VISAO
+                    && (carro->distanciaDoDaFrente < 0.0f || vaoNaFrente < carro->distanciaDoDaFrente)) {
+                    carro->distanciaDoDaFrente = fmaxf(vaoNaFrente, 0.0f);
+                    carro->velocidadeDoDaFrente = outro->velocidade;
+                    carro->lateralDoDaFrente = lateralEmMetros(outro);
+                }
+                if (d < 0.0f && vaoNaFrente < ALCANCE_PARA_TRAS
+                    && (carro->distanciaAtras < 0.0f || vaoNaFrente < carro->distanciaAtras)) {
+                    carro->distanciaAtras = fmaxf(vaoNaFrente, 0.0f);
+                    carro->velocidadeAtras = outro->velocidade;
+                    carro->lateralAtras = lateralEmMetros(outro);
+                }
             }
             if (d > 0.0f && mesmaFaixa && vaoNaFrente < ALCANCE_DA_VISAO
                 && (carro->distanciaAFrente < 0.0f || vaoNaFrente < carro->distanciaAFrente)) {
@@ -780,35 +807,72 @@ static int moverCarro(Corrida *corrida, Carro *carro, Comandos comandos, float t
     return cruzou;
 }
 
-/* O rubber banding: quem abriu muito na frente do jogador rende um pouco menos, e quem ficou muito
- * para trás rende um pouco mais, para a corrida continuar disputada. Pouco, para não parecer trapaça */
+/* O pelotão: quem abriu muito na frente do jogador alivia um pouco o motor (só para baixo: nunca
+ * anda mais que o carro dele), e quem ficou muito para trás se esforça mais, pilotando mais perto
+ * do limite do próprio carro (freia mais tarde, contorna mais rápido). Sem motor a mais: dá para
+ * ver o carro forçando, não acelerando do nada. A força vem do nível */
 #define FOLGA_NA_FRENTE         80.0f    /* metros à frente do jogador sem ajuste nenhum */
 #define FOLGA_ATRAS             60.0f    /* e atrás */
 #define METROS_ATE_O_AJUSTE_TODO 400.0f
-#define MAIOR_ESPERA            0.05f    /* até 5% a menos de motor, para quem está bem na frente */
-#define MAIOR_EMPURRAO          0.04f    /* até 4% a mais, para quem ficou bem para trás */
+#define MAIOR_ESPERA            0.04f    /* até 4% a menos de motor, para quem está bem na frente */
+#define MAIOR_ESFORCO           0.06f    /* até 6% mais perto do limite, para quem ficou bem para trás */
 #define MUDANCA_DO_RITMO        0.02f    /* por segundo: o ajuste chega aos poucos */
+#define MUDANCA_DO_ESFORCO      0.05f    /* por segundo */
+/* O revide: só quem o jogador acabou de passar reage. Por alguns segundos ele força mais, freia mais
+ * tarde (ia.c) e usa o nitro para tentar a posição de volta */
+#define PERTO_PARA_REVIDAR      25.0f    /* metros: passado de perto assim, revida */
+#define SEGUNDOS_DE_REVIDE      7.0f
+#define ESFORCO_NO_REVIDE       0.05f
 
 /*
  * ajustarPelotao
- * Ajusta o ritmo de cada rival pela distância até o jogador: à frente demais, perde um pouco de
- * motor; atrás demais, ganha. A força vem do nível. Depois da chegada do jogador, não há ajuste.
+ * O esforço e o motor de cada rival: o pelotão (a distância até o jogador) e o revide (quem o
+ * jogador acabou de passar). Depois da chegada do jogador, ninguém se ajusta.
  * Recebe: a corrida e o tempo do quadro.
  * Devolve: nada.
  */
 static void ajustarPelotao(Corrida *corrida, float tempoQuadro) {
-    float forca = corrida->terminou ? 0.0f : fichaDoNivel(corrida->nivel)->pelotao;
+    const FichaDoNivel *ficha = fichaDoNivel(corrida->nivel);
+    float forca = corrida->terminou ? 0.0f : ficha->pelotao;
     for (int i = 0; i < TOTAL_RIVAIS; i++) {
         Carro *rival = &corrida->rivais[i];
         float diferenca = (rival->distanciaPercorrida - corrida->jogador.distanciaPercorrida) / UNIDADES_POR_METRO;
-        float alvo = 1.0f;
+
+        /* O revide: estava na frente, o jogador passou, e de perto */
+        int aFrente = diferenca > 0.0f;
+        if (rival->aFrenteDoJogador && !aFrente && diferenca > -PERTO_PARA_REVIDAR && !corrida->terminou
+            && !carroNoPit(rival) && !carroNoPit(&corrida->jogador)) {
+            rival->revide = SEGUNDOS_DE_REVIDE * rival->vontadeDeRevide;
+        }
+        rival->aFrenteDoJogador = aFrente;
+        rival->revide = fmaxf(0.0f, rival->revide - tempoQuadro);
+        if (aFrente) {
+            rival->revide = 0.0f;   /* conseguiu: volta ao normal */
+        }
+
+        /* O relógio da defesa (ia.c): segurando a linha, e depois esperando para defender de novo */
+        if (rival->defendendo > 0.0f) {
+            rival->defendendo -= tempoQuadro;
+            if (rival->defendendo <= 0.0f) {
+                rival->defendendo = -ESPERA_PARA_DEFENDER;
+            }
+        } else if (rival->defendendo < 0.0f) {
+            rival->defendendo = fminf(0.0f, rival->defendendo + tempoQuadro);
+        }
+
+        float ritmo = 1.0f, esforco = 0.0f;
         if (diferenca > FOLGA_NA_FRENTE) {
-            alvo -= MAIOR_ESPERA * forca * fminf((diferenca - FOLGA_NA_FRENTE) / METROS_ATE_O_AJUSTE_TODO, 1.0f);
+            ritmo -= MAIOR_ESPERA * forca * fminf((diferenca - FOLGA_NA_FRENTE) / METROS_ATE_O_AJUSTE_TODO, 1.0f);
         } else if (diferenca < -FOLGA_ATRAS) {
-            alvo += MAIOR_EMPURRAO * forca * fminf((-diferenca - FOLGA_ATRAS) / METROS_ATE_O_AJUSTE_TODO, 1.0f);
+            esforco += MAIOR_ESFORCO * forca * fminf((-diferenca - FOLGA_ATRAS) / METROS_ATE_O_AJUSTE_TODO, 1.0f);
+        }
+        if (rival->revide > 0.0f) {
+            esforco = fmaxf(esforco, ESFORCO_NO_REVIDE * rival->vontadeDeRevide);
         }
         float passo = MUDANCA_DO_RITMO * tempoQuadro;
-        rival->ritmoDoPelotao += fmaxf(fminf(alvo - rival->ritmoDoPelotao, passo), -passo);
+        rival->ritmoDoPelotao += fmaxf(fminf(ritmo - rival->ritmoDoPelotao, passo), -passo);
+        passo = MUDANCA_DO_ESFORCO * tempoQuadro;
+        rival->esforco += fmaxf(fminf(esforco - rival->esforco, passo), -passo);
     }
 }
 

@@ -143,6 +143,25 @@ typedef struct {
     Comandos ultimosComandos;      /* o que o piloto fez no último quadro (lanternas de freio) */
     float linhaAlvo;               /* só para a IA: em que ponto da largura ela quer andar, em metros */
 
+    /* ---- O jeito de correr da IA (corrida.c e ia.c) ---- */
+    float esforco;                 /* o quanto se esforça agora além da habilidade (atrás do pelotão, no revide) */
+    float revide;                  /* segundos que faltam do revide: foi ultrapassado e quer a posição de volta */
+    float vontadeDeRevide;         /* de 0 a 1, do nível: a força do revide */
+    float defesa;                  /* de 0 a 1, do nível: a chance de fechar a porta para quem vem atrás */
+    float defendendo;              /* > 0: segundos segurando a linha da defesa; < 0: espera para defender de novo */
+    float linhaDaDefesa;           /* metros: a linha que está segurando */
+    float variacao;                /* do nível: o quanto o ritmo muda de uma volta para a outra */
+    float ritmoDaVolta;            /* o desta volta, somado à habilidade */
+    int voltaDoRitmo;              /* a volta em que o ritmo foi sorteado */
+    unsigned int sorteio;          /* os sorteios deste piloto (não mexe no rand() do resto do jogo) */
+    int aFrenteDoJogador;          /* 1 se estava à frente do jogador no quadro anterior (para o revide) */
+    float distanciaAtras;          /* metros até quem vem logo atrás, em qualquer linha (negativo = ninguém) */
+    float velocidadeAtras;         /* a velocidade dele */
+    float lateralAtras;            /* metros: onde ele está na largura */
+    float distanciaDoDaFrente;     /* metros até o carro logo à frente, em qualquer linha (negativo = ninguém) */
+    float velocidadeDoDaFrente;    /* a velocidade dele */
+    float lateralDoDaFrente;       /* metros: onde ele está na largura */
+
     /* ---- Setores: a volta em 3 partes, para o painel da volta no HUD ---- */
     int setorAtual;                              /* 0, 1 ou 2 */
     float inicioDoSetor;                         /* momento da corrida em que o setor atual começou */

@@ -2,6 +2,7 @@
 #   make          compila o jogo (gera ./katchau)
 #   make run      compila e roda o jogo
 #   make testes   compila e roda os testes de terminal (sem raylib)
+#   make simulacao  corre muitas provas sem gráficos e mede a competitividade de cada nível
 #   make testar-vibracao  toca cada vibração no controle, para sentir (macOS)
 #   make memoria  roda os testes no valgrind (Linux/WSL)
 #   make zip      gera katchau.zip para a entrega (sem executável)
@@ -81,6 +82,13 @@ testes: build/teste_pista
 
 build/teste_pista: testes/teste_pista.c $(LOGICA) $(wildcard src/*.h) | build
 	$(CC) $(CFLAGS) testes/teste_pista.c $(LOGICA) -o $@ -lm
+
+# Corre muitas provas sem gráficos e mede o quanto cada dificuldade é competitiva
+simulacao: build/simular_dificuldade
+	./build/simular_dificuldade
+
+build/simular_dificuldade: testes/simular_dificuldade.c $(LOGICA) $(wildcard src/*.h) | build
+	$(CC) $(CFLAGS) -O2 testes/simular_dificuldade.c $(LOGICA) -o $@ -lm
 
 # Para sentir cada vibração no controle (macOS), sem abrir o jogo
 testar-vibracao: build/teste_vibracao
