@@ -255,7 +255,7 @@ static void desenharCarroNoMapa(Vector2 ponto, int posicao, Color fundo, Color n
     DrawCircleV(ponto, RAIO_CARRO_MAPA, fundo);
     const char *texto = TextFormat("%d", posicao);
     float largura = larguraDoTexto(FONTE_FORTE, texto, 11.0f);
-    escrever(FONTE_FORTE, texto, ponto.x - largura / 2.0f, ponto.y - 7.5f, 11.0f, numero);
+    escrever(FONTE_FORTE, texto, ponto.x - largura / 2.0f, noMeio(FONTE_FORTE, 11.0f, ponto.y), 11.0f, numero);
 }
 
 /*
@@ -374,7 +374,7 @@ Color corDoCarro(int numero) {
 static void desenharEtiqueta(float x, float y, const char *texto, Color fundo, Color letra) {
     float largura = larguraDoTexto(FONTE_FORTE, texto, 9.5f) + 8.0f;
     caixaArredondada((Rectangle){ x, y + 2.0f, largura, ALTURA_LINHA_TORRE - 4.0f }, RAIO_PEQUENO, fundo);
-    escrever(FONTE_FORTE, texto, x + 4.0f, y + 1.5f, 9.5f, letra);
+    escrever(FONTE_FORTE, texto, x + 4.0f, noMeio(FONTE_FORTE, 9.5f, y + ALTURA_LINHA_TORRE / 2.0f), 9.5f, letra);
 }
 
 /*
@@ -420,9 +420,11 @@ static void desenharPainelDePosicoes(Corrida *corrida) {
     const char *total = TextFormat("/%d", corrida->totalVoltas);
     float l1 = larguraDoTexto(FONTE_TEXTO, "VOLTA ", 11.0f), l2 = larguraDoTexto(FONTE_FORTE, numero, 14.0f);
     float l3 = larguraDoTexto(FONTE_TEXTO, total, 11.0f), xVolta = meio - (l1 + l2 + l3) / 2.0f;
-    escrever(FONTE_TEXTO, "VOLTA ", xVolta, y + 2.0f, 11.0f, Fade(COR_TEXTO_CLARO, 0.8f));
-    escrever(FONTE_FORTE, numero, xVolta + l1, y - 0.5f, 14.0f, COR_TEXTO_CLARO);
-    escrever(FONTE_TEXTO, total, xVolta + l1 + l2, y + 2.0f, 11.0f, Fade(COR_TEXTO_CLARO, 0.8f));
+    /* Tamanhos diferentes na mesma linha: todos na mesma linha de base, com o número grande no meio */
+    float base = noMeio(FONTE_FORTE, 14.0f, y + ALTURA_VOLTA_TORRE / 2.0f) + 14.0f * 0.72f;
+    escrever(FONTE_TEXTO, "VOLTA ", xVolta, base - 11.0f * 0.72f, 11.0f, Fade(COR_TEXTO_CLARO, 0.8f));
+    escrever(FONTE_FORTE, numero, xVolta + l1, base - 14.0f * 0.72f, 14.0f, COR_TEXTO_CLARO);
+    escrever(FONTE_TEXTO, total, xVolta + l1 + l2, base - 11.0f * 0.72f, 11.0f, Fade(COR_TEXTO_CLARO, 0.8f));
     y += ALTURA_VOLTA_TORRE;
 
     for (int i = 0; i < TOTAL_CARROS; i++) {
@@ -438,18 +440,19 @@ static void desenharPainelDePosicoes(Corrida *corrida) {
         if (i == 0) {
             caixaArredondada((Rectangle){ x + 2.0f, y + 1.0f, 16.0f, ALTURA_LINHA_TORRE - 2.0f }, raioDeDentro(RAIO_PEQUENO, 2.0f), COR_VERMELHO);
         }
-        escreverCentralizado(FONTE_FORTE, TextFormat("%d", i + 1), x + 10.0f, y + 0.5f, LETRA_TORRE,
+        float yLetra = noMeio(FONTE_FORTE, LETRA_TORRE, y + ALTURA_LINHA_TORRE / 2.0f);   /* no meio da linha */
+        escreverCentralizado(FONTE_FORTE, TextFormat("%d", i + 1), x + 10.0f, yLetra, LETRA_TORRE,
                              (i == 0) ? COR_TEXTO_CLARO : letra);
         DrawRectangleRec((Rectangle){ x + 22.0f, y + 3.0f, 3.0f, ALTURA_LINHA_TORRE - 6.0f }, CORES_DAS_EQUIPES[n]);
 
         if (ehJogador) {
             /* O jogador: o nome inteiro, e a barra fala por ele */
-            escrever(FONTE_FORTE, TextFormat("%s", carro->nome), x + 30.0f, y + 0.5f, LETRA_TORRE, letra);
+            escrever(FONTE_FORTE, TextFormat("%s", carro->nome), x + 30.0f, yLetra, LETRA_TORRE, letra);
         } else {
-            escrever(FONTE_FORTE, CODIGOS[n], x + 30.0f, y + 0.5f, LETRA_TORRE, letra);
+            escrever(FONTE_FORTE, CODIGOS[n], x + 30.0f, yLetra, LETRA_TORRE, letra);
             const char *intervalo = (i == 0) ? "Intervalo"
                                              : TextFormat("+%.3f", fabsf(intervaloEmSegundos(carro, corrida->classificacao[i - 1])));
-            escreverADireita(FONTE_TEXTO, intervalo, x + LARGURA_TORRE - 9.0f, y + 0.5f, LETRA_TORRE,
+            escreverADireita(FONTE_TEXTO, intervalo, x + LARGURA_TORRE - 9.0f, yLetra, LETRA_TORRE,
                              (i == 0) ? Fade(COR_TEXTO_CLARO, 0.75f) : letra);
             DrawRectangleRec((Rectangle){ x + LARGURA_TORRE - 4.0f, y + 4.0f, 1.0f, ALTURA_LINHA_TORRE - 8.0f },
                              Fade(COR_TEXTO_CLARO, 0.5f));
@@ -500,10 +503,10 @@ static void desenharPainelDaVolta(Corrida *corrida) {
     char texto[32];
     caixaArredondada((Rectangle){ x, y, largura, 70.0f }, raioDoTamanho(largura, 70.0f), COR_DA_TORRE);
 
-    escrever(FONTE_TEXTO, "SUA VOLTA", x + 8.0f, y + 4.0f, 11.0f, Fade(COR_TEXTO_CLARO, 0.75f));
+    escrever(FONTE_TEXTO, "SUA VOLTA", x + 8.0f, noMeio(FONTE_TEXTO, 11.0f, y + 10.0f), 11.0f, Fade(COR_TEXTO_CLARO, 0.75f));
     if (jogador->temDiferenca) {
         int ganhando = jogador->diferenca <= 0.0f;
-        escreverADireita(FONTE_FORTE, TextFormat("%+.3f", jogador->diferenca), x + largura - 8.0f, y + 3.5f, 12.0f,
+        escreverADireita(FONTE_FORTE, TextFormat("%+.3f", jogador->diferenca), x + largura - 8.0f, noMeio(FONTE_FORTE, 12.0f, y + 10.0f), 12.0f,
                          ganhando ? COR_VERDE_HUD : COR_VERMELHO);
     }
     float atual = 0.0f;
@@ -513,9 +516,9 @@ static void desenharPainelDaVolta(Corrida *corrida) {
     escrever(FONTE_TITULO, textoDoTempo(atual, texto, sizeof(texto)), x + 8.0f, y + 16.0f, 22.0f, COR_TEXTO_CLARO);
     if (jogador->melhorVolta > 0.0f) {
         Color corDaMelhor = (jogador->melhorVolta == corrida->voltaMaisRapida) ? COR_ROXO_HUD : Fade(COR_TEXTO_CLARO, 0.75f);
-        escrever(FONTE_TEXTO, "MELHOR", x + 8.0f, y + 41.0f, 11.0f, Fade(COR_TEXTO_CLARO, 0.75f));
-        escreverADireita(FONTE_FORTE, textoDoTempo(jogador->melhorVolta, texto, sizeof(texto)), x + largura - 8.0f, y + 41.0f,
-                         11.5f, corDaMelhor);
+        escrever(FONTE_TEXTO, "MELHOR", x + 8.0f, noMeio(FONTE_TEXTO, 11.0f, y + 47.0f), 11.0f, Fade(COR_TEXTO_CLARO, 0.75f));
+        escreverADireita(FONTE_FORTE, textoDoTempo(jogador->melhorVolta, texto, sizeof(texto)), x + largura - 8.0f,
+                         noMeio(FONTE_FORTE, 11.5f, y + 47.0f), 11.5f, corDaMelhor);
     }
 
     /* Setores: três barras finas */
@@ -593,7 +596,7 @@ static void desenharContaGiros(Vector2 centro, float raio, float giro) {
                    deMil ? 2.0f : 1.0f, cor);
         if (deMil) {
             Vector2 ponto = pontoNoMostrador(centro, raio - 15.0f, fracao);
-            escreverCentralizado(FONTE_TEXTO, TextFormat("%d", t / 2), ponto.x, ponto.y - 7.0f, 13.0f,
+            escreverCentralizado(FONTE_TEXTO, TextFormat("%d", t / 2), ponto.x, noMeio(FONTE_TEXTO, 13.0f, ponto.y), 13.0f,
                                  Fade(COR_TEXTO_CLARO, 0.8f));
         }
     }
@@ -632,7 +635,7 @@ static void desenharMarcha(Vector2 centro, const Motor *motor, int largou, int d
 
     const char *texto = deRe ? "R" : (largou ? TextFormat("%d", motor->marcha + 1) : "N");
     float tamanho = 19.0f * (1.0f + 0.2f * pulo);
-    escreverCentralizado(FONTE_TITULO, texto, centro.x + 1.0f, centro.y - tamanho * 0.55f, tamanho, numero);
+    escreverCentralizado(FONTE_TITULO, texto, centro.x + 1.0f, noMeio(FONTE_TITULO, tamanho, centro.y), tamanho, numero);
 }
 
 /*
@@ -908,13 +911,13 @@ void desenharFimDeCorrida(Corrida *corrida) {
     if (corrida->desclassificado) {
         titulo = "DESCLASSIFICADO";
     }
-    escreverCentralizado(FONTE_TITULO, titulo, centro, faixa.y + 8.0f, 40.0f, COR_TEXTO_CLARO);
+    escreverCentralizado(FONTE_TITULO, titulo, centro, noMeio(FONTE_TITULO, 40.0f, faixa.y + (alturaDoTitulo - 8.0f) / 2.0f), 40.0f, COR_TEXTO_CLARO);   /* no meio, acima do quadriculado */
     float cursor = faixa.y + alturaDoTitulo + 24.0f;
 
     /* Tempo total */
     formatarTempo(jogador->tempoDeChegada, tempo, sizeof(tempo));
-    escrever(FONTE_FORTE, "TEMPO TOTAL", x + folga, cursor + 12.0f, 14.0f, COR_TEXTO_FRACO);
-    escreverADireita(FONTE_TITULO, tempo, x + largura - folga, cursor, 32.0f, COR_AMARELO);
+    escrever(FONTE_FORTE, "TEMPO TOTAL", x + folga, noMeio(FONTE_FORTE, 14.0f, cursor + 16.0f), 14.0f, COR_TEXTO_FRACO);
+    escreverADireita(FONTE_TITULO, tempo, x + largura - folga, noMeio(FONTE_TITULO, 32.0f, cursor + 16.0f), 32.0f, COR_AMARELO);
     cursor += 40.0f;
     if (corrida->desclassificado) {
         escrever(FONTE_FORTE, "VOCÊ NÃO FEZ A PARADA OBRIGATÓRIA", x + folga, cursor, 12.0f, COR_AMARELO);
@@ -935,13 +938,14 @@ void desenharFimDeCorrida(Corrida *corrida) {
     for (int i = 0; i < corrida->totalVoltas; i++) {
         int ehMelhor = (i == melhorVolta);
         DrawRectangleRec((Rectangle){ x + folga, cursor, largura - 2.0f * folga, 1.0f }, Fade(COR_TEXTO_CLARO, 0.10f));
-        escrever(FONTE_FORTE, TextFormat("VOLTA %d", i + 1), x + folga, cursor + 8.0f, 16.0f, COR_TEXTO_FRACO);
+        float meioDaLinha = cursor + linhaDaVolta / 2.0f;
+        escrever(FONTE_FORTE, TextFormat("VOLTA %d", i + 1), x + folga, noMeio(FONTE_FORTE, 16.0f, meioDaLinha), 16.0f, COR_TEXTO_FRACO);
         if (ehMelhor) {
-            caixaArredondada((Rectangle){ x + folga + 80.0f, cursor + 8.0f, 64.0f, 16.0f }, RAIO_PEQUENO, COR_ROXO_HUD);
-            escreverCentralizado(FONTE_FORTE, "MELHOR", x + folga + 112.0f, cursor + 8.0f, 12.0f, COR_TEXTO_CLARO);
+            caixaArredondada((Rectangle){ x + folga + 80.0f, meioDaLinha - 8.0f, 64.0f, 16.0f }, RAIO_PEQUENO, COR_ROXO_HUD);
+            escreverCentralizado(FONTE_FORTE, "MELHOR", x + folga + 112.0f, noMeio(FONTE_FORTE, 12.0f, meioDaLinha), 12.0f, COR_TEXTO_CLARO);
         }
         formatarTempo(jogador->temposDeVolta[i], tempo, sizeof(tempo));
-        escreverADireita(FONTE_FORTE, tempo, x + largura - folga, cursor + 8.0f, 16.0f, ehMelhor ? COR_ROXO_HUD : COR_TEXTO_CLARO);
+        escreverADireita(FONTE_FORTE, tempo, x + largura - folga, noMeio(FONTE_FORTE, 16.0f, meioDaLinha), 16.0f, ehMelhor ? COR_ROXO_HUD : COR_TEXTO_CLARO);
         cursor += linhaDaVolta;
     }
     DrawRectangleRec((Rectangle){ x + folga, cursor, largura - 2.0f * folga, 1.0f }, Fade(COR_TEXTO_CLARO, 0.10f));
@@ -951,5 +955,5 @@ void desenharFimDeCorrida(Corrida *corrida) {
     float larguraDica = larguraDaTecla(tecla) + 8.0f + larguraDoTexto(FONTE_FORTE, "VER O RESULTADO", 14.0f);
     float xDica = roundf((centro - larguraDica / 2.0f) / 4.0f) * 4.0f;
     xDica += desenharTecla(xDica, cursor - 2.0f, tecla) + 8.0f;
-    escrever(FONTE_FORTE, "VER O RESULTADO", xDica, cursor, 14.0f, COR_TEXTO_FRACO);
+    escrever(FONTE_FORTE, "VER O RESULTADO", xDica, noMeio(FONTE_FORTE, 14.0f, meioDaTecla(cursor - 2.0f)), 14.0f, COR_TEXTO_FRACO);
 }

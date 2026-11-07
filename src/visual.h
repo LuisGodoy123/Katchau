@@ -44,6 +44,8 @@ Font fonteDoJogo(TipoFonte fonte);
 float larguraDoTexto(TipoFonte fonte, const char *texto, float tamanho);
 void escrever(TipoFonte fonte, const char *texto, float x, float y, float tamanho, Color cor);
 void escreverSemSombra(TipoFonte fonte, const char *texto, float x, float y, float tamanho, Color cor);
+float noMeio(TipoFonte fonte, float tamanho, float centroY);
+float meioDaTecla(float y);
 void escreverCentralizado(TipoFonte fonte, const char *texto, float centroX, float y, float tamanho, Color cor);
 void escreverADireita(TipoFonte fonte, const char *texto, float direita, float y, float tamanho, Color cor);
 

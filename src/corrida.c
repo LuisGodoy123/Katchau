@@ -196,6 +196,8 @@ void iniciarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador, NivelDaC
     corrida->jogador.voltasDaProva = ficha->voltas;
     corrida->jogador.gastaPneu = gastaPneu;
     corrida->jogador.pitFeito = !temParada;
+    /* Sem direção guiada em nenhuma pista: o carro tem rumo próprio e quem faz a curva é o volante.
+     * (A guiada só existe para os testes automáticos, que dirigem o carro com comandos simples.) */
     corrida->jogador.direcaoLivre = pista->semDirecaoGuiada || !configuracoesAtuais()->direcaoGuiada;
     corrida->classificacao[0] = &corrida->jogador;
 

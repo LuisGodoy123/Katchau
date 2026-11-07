@@ -4025,13 +4025,13 @@ static float voltaComVolante(Pista *pista, int numero, int soSetas, int *raspand
 static void testarDirecaoGuiada(void) {
     printf("\n36) A direcao guiada\n");
     Configuracoes guardada = *configuracoesAtuais();
-    verificar(guardada.direcaoGuiada == 1, "ela vem ligada");
     Configuracoes saida, entrada;
     configuracoesPadrao(&saida);
+    verificar(saida.direcaoGuiada == 0, "no jogo ela nao existe: vem desligada");
     configuracoesPadrao(&entrada);
-    saida.direcaoGuiada = 0;
+    saida.direcaoGuiada = 1;
     verificar(salvarConfiguracoes(&saida, "build/config_teste.txt") && carregarConfiguracoes(&entrada, "build/config_teste.txt")
-              && entrada.direcaoGuiada == 0, "a escolha fica salva");
+              && entrada.direcaoGuiada == 0, "nem um arquivo de configuracoes a liga");
     remove("build/config_teste.txt");
 
     /* Só o jogador: os rivais continuam iguais, e quando a IA assume o carro dele, depois da chegada, ela usa a guiada */
@@ -4051,7 +4051,7 @@ static void testarDirecaoGuiada(void) {
     verificar(corrida.jogador.direcaoLivre == 0, "depois da chegada a IA dirige normalmente");
     configuracoesAtuais()->direcaoGuiada = 1;
     iniciarCorrida(&corrida, umaPista, 0, NIVEL_FACIL);
-    verificar(corrida.jogador.direcaoLivre == 0, "ligada, tudo como antes");
+    verificar(corrida.jogador.direcaoLivre == 0, "ligada (so nos testes), tudo como antes");
     liberarPista(umaPista);
 
     /* No Splat ela não existe: nem com a opção ligada, e os rivais continuam com a deles */
@@ -4483,6 +4483,8 @@ int main(int argc, char *argv[]) {
     int modoDetalhado = (argc > 1 && strcmp(argv[1], "-v") == 0);
 
     printf("=== Teste da pista (lista circular duplamente encadeada) ===\n");
+    /* Os testes que dirigem o carro do jogador com comandos simples usam a direção guiada (no jogo ela não existe) */
+    configuracoesAtuais()->direcaoGuiada = 1;
     testarPistaVazia();
     testarInserirERemover();
     testarAutodromo(modoDetalhado);

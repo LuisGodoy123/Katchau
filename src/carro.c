@@ -40,6 +40,7 @@
 #define VELOCIDADE_MAXIMA_GRAMA 3000.0f  /* na grama o carro não passa disso */
 #define VELOCIDADE_DE_VIRADA       2.0f  /* larguras de pista por segundo, na velocidade máxima */
 #define GIRO_DO_VOLANTE            6.0f  /* com a seta apertada, o volante vai de 0 a 1 em ~0,17 s */
+#define CALMA_DO_VOLANTE_RAPIDO    0.45f /* na máxima, sem a guiada, o volante gira 45% mais devagar */
 #define RETORNO_DO_VOLANTE         8.0f  /* sem seta, o volante volta ao centro em ~0,12 s */
 #define FORCA_CENTRIFUGA           6.0f  /* intensidade do empurrão para fora nas curvas */
 #define FORCA_DA_ARRANCADA         0.55f /* a aceleração parado é 55% da "aceleracao" da ficha (era 75%: rápido demais)... */
@@ -62,11 +63,12 @@
 #define FORCA_DO_NITRO             0.90f /* soma isso vezes a "aceleracao" da ficha */
 #define COMPRIMENTO_PADRAO         4.4f  /* metros: quem cria o carro à mão recebe este tamanho */
 #define LARGURA_PADRAO             2.0f
-#define RAIO_MINIMO_DA_DIRECAO    12.0f    /* metros: a curva mais fechada que o volante todo faz, devagar, sem a direção guiada */
-#define ACELERACAO_DE_CURVA_BASE  34.0f    /* m/s²: sem a guiada, o que o pneu segura na curva é isto... */
+#define RAIO_MINIMO_DA_DIRECAO    9.0f     /* metros: a curva mais fechada que o volante todo faz, devagar, sem a direção guiada */
+#define ACELERACAO_DE_CURVA_BASE  56.0f    /* m/s²: sem a guiada, o que o pneu segura na curva é isto... */
 #define ACELERACAO_DE_CURVA_NO_PNEU 18.0f  /* ...mais isto vezes a aderência */
 #define AGARRE_NO_DRIFT           0.6f     /* de lado, o bico gira mais depressa */
-#define PERDA_NO_LIMITE_DO_PNEU   600.0f   /* o que a velocidade cai por segundo, no limite do pneu */
+#define PERDA_NO_LIMITE_DO_PNEU   250.0f   /* o que a velocidade cai por segundo, no limite do pneu: o pneu arrasta, não freia */
+#define INICIO_DA_DERRAPAGEM_LIVRE 0.85f   /* sem a guiada, o pneu só começa a arrastar perto do limite */
 /* A suspensão: uma mola com amortecedor em cada eixo do corpo, só no desenho */
 #define ROLAGEM_POR_G             7.0f     /* graus de rolagem por g, nas curvas leves (depois satura) */
 #define ARFAGEM_POR_G             4.0f     /* graus de arfagem por g, nas acelerações leves */
@@ -451,6 +453,11 @@ static void atualizarVolante(Carro *carro, Comandos comandos, float tempoQuadro)
     /* Voltando: o alvo está mais perto do centro ou do outro lado */
     int voltando = fabsf(alvo) < fabsf(carro->volante) || alvo * carro->volante < 0.0f;
     float rapidez = voltando ? RETORNO_DO_VOLANTE : GIRO_DO_VOLANTE;
+    if (!voltando && carro->direcaoLivre) {
+        /* Rápido, o volante gira um pouco mais devagar: dá para corrigir com toques curtos na seta */
+        float proporcao = fminf(fmaxf(carro->velocidade / carro->velocidadeMaxima, 0.0f), 1.0f);
+        rapidez *= 1.0f - CALMA_DO_VOLANTE_RAPIDO * proporcao;
+    }
     carro->volante = aproximar(carro->volante, alvo, rapidez * tempoQuadro);
 }
 
@@ -899,8 +906,9 @@ static int andarNoMundo(Carro *carro, float tempoQuadro) {
 
     /* Levando o pneu ao limite, ele canta e o carro perde um pouco de velocidade */
     float uso = fabsf(carro->volante) * maximo * metrosPorSegundo / agarra;
-    carro->derrapagem = fmaxf(limitar((uso - INICIO_DA_DERRAPAGEM) / (1.0f - INICIO_DA_DERRAPAGEM), 0.0f, 1.0f), carro->forcaDoDrift);
-    float gastaNaCurva = PERDA_NO_LIMITE_DO_PNEU * limitar((uso - INICIO_DA_DERRAPAGEM) / (1.0f - INICIO_DA_DERRAPAGEM), 0.0f, 1.0f);
+    float noLimite = limitar((uso - INICIO_DA_DERRAPAGEM_LIVRE) / (1.0f - INICIO_DA_DERRAPAGEM_LIVRE), 0.0f, 1.0f);
+    carro->derrapagem = fmaxf(noLimite, carro->forcaDoDrift);
+    float gastaNaCurva = PERDA_NO_LIMITE_DO_PNEU * noLimite;
     carro->velocidade = fmaxf(carro->velocidade - gastaNaCurva * (1.0f - carro->forcaDoDrift) * tempoQuadro, 0.0f);
 
     /* Anda para onde aponta. De lado, o drift e as batidas somam o seu pedaço */

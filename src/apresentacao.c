@@ -276,12 +276,11 @@ static const float DURACAO_DA_TOMADA_DA_VITORIA[TOMADAS_DA_VITORIA] = { 4.8f, 4.
 /*
  * cameraDaVitoria
  * As quatro câmeras da festa, uma depois da outra e de novo (cada vez do outro lado da pista):
- *   0) TV na pista    parada ao lado da pista, bem à frente: o carro vem de longe, passa por ela e se afasta;
- *   1) perseguição    alta, atrás do carro, olhando para a frente e para o céu;
- *   2) lateral        acompanha o carro à frente dele, do lado, com o céu em cima;
- *   3) grua           parada, alta e mais longe, abrindo a festa inteira.
- * As paradas ficam presas ao ponto da pista que o carro tinha no começo da tomada. Todas olham um
- * pouco acima do carro, para o céu dos fogos.
+ *   0) de frente      baixa, à frente do carro, afastando devagar;
+ *   1) perseguição    atrás e um pouco acima, com a pista e o céu adiante;
+ *   2) lateral        anda junto, à frente e ao lado do carro, abrindo devagar;
+ *   3) grua           gira devagar em volta do carro, subindo.
+ * Em todas o carro fica no terço de baixo, com tamanho parecido, e o cenário e o céu dos fogos em cima.
  * Recebe: a corrida, os segundos desde que o jogador cruzou a linha, onde guardar se houve corte
  *         neste quadro e quanto a imagem está escura (0 a 1, perto dos cortes).
  * Devolve: a câmera.
@@ -289,7 +288,6 @@ static const float DURACAO_DA_TOMADA_DA_VITORIA[TOMADAS_DA_VITORIA] = { 4.8f, 4.
 Camera3D cameraDaVitoria(Corrida *corrida, float segundosDesdeAChegada, int *cortou, float *escuro) {
     static int tomadaAnterior = -1, cicloAnterior = -1;
     static float tempoAnterior = 0.0f;
-    static PosicaoNaPista ancora;
 
     float ciclo = 0.0f;
     for (int i = 0; i < TOMADAS_DA_VITORIA; i++) {
@@ -315,8 +313,6 @@ Camera3D cameraDaVitoria(Corrida *corrida, float segundosDesdeAChegada, int *cor
     float lado = (voltas % 2 == 0) ? 1.0f : -1.0f;   /* a cada ciclo, o outro lado da pista */
     int tomadaNova = (tomada != tomadaAnterior || voltas != cicloAnterior);
     if (tomadaNova) {
-        float adiante = (tomada == 0) ? 140.0f : 210.0f;
-        ancora = naPista(jogador->posicao, adiante);
         tomadaAnterior = tomada;
         cicloAnterior = voltas;
     }
@@ -333,29 +329,33 @@ Camera3D cameraDaVitoria(Corrida *corrida, float segundosDesdeAChegada, int *cor
     frenteDaPista(jogador->posicao, &fx, &fz, &rx, &rz);
     Vector3 carro = centroDoCarro(jogador, 0.5f);
     Vector3 frente = { fx, 0.0f, fz }, direita = { rx, 0.0f, rz };
+    float e = suavizar(noCiclo / duracao);
 
     switch (tomada) {
-        case 0: {   /* TV na pista */
-            Vector3 posicao = pontoAoLado(ancora, 11.0f * lado, 2.4f);
-            float distancia = Vector3Distance(posicao, carro);
-            Vector3 alvo = { carro.x, carro.y + 2.5f + distancia * 0.20f, carro.z };
-            return novaCamera(posicao, alvo, 44.0f);
+        case 0: {   /* de frente: baixa, anda à frente do carro e vai se afastando devagar */
+            float adiante = misturar(8.0f, 13.0f, e);
+            Vector3 posicao = Vector3Add(Vector3Add(carro, Vector3Scale(frente, adiante)), Vector3Add(Vector3Scale(direita, 2.5f * lado), (Vector3){ 0.0f, 1.0f, 0.0f }));
+            Vector3 alvo = Vector3Add(carro, (Vector3){ 0.0f, 1.5f, 0.0f });
+            return novaCamera(posicao, alvo, 46.0f);
         }
-        case 1: {   /* perseguição alta */
-            Vector3 posicao = Vector3Add(Vector3Add(carro, Vector3Scale(frente, -26.0f)), Vector3Add(Vector3Scale(direita, 5.5f * lado), (Vector3){ 0.0f, 9.0f, 0.0f }));
-            Vector3 alvo = Vector3Add(Vector3Add(carro, Vector3Scale(frente, 45.0f)), (Vector3){ 0.0f, 22.0f, 0.0f });
-            return novaCamera(posicao, alvo, 68.0f);
-        }
-        case 2: {   /* lateral, à frente do carro */
-            Vector3 posicao = Vector3Add(Vector3Add(carro, Vector3Scale(frente, 26.0f)), Vector3Add(Vector3Scale(direita, 9.5f * lado), (Vector3){ 0.0f, 1.8f, 0.0f }));
-            Vector3 alvo = Vector3Add(carro, (Vector3){ 0.0f, 11.0f, 0.0f });
-            return novaCamera(posicao, alvo, 56.0f);
-        }
-        default: {  /* grua */
-            Vector3 posicao = pontoAoLado(ancora, -24.0f * lado, 17.0f);
-            float distancia = Vector3Distance(posicao, carro);
-            Vector3 alvo = { carro.x, carro.y + 8.0f + distancia * 0.20f, carro.z };
+        case 1: {   /* perseguição: atrás e um pouco acima, o carro embaixo e a pista e o céu adiante */
+            Vector3 posicao = Vector3Add(Vector3Add(carro, Vector3Scale(frente, -11.0f)), Vector3Add(Vector3Scale(direita, 2.5f * lado), (Vector3){ 0.0f, 3.2f, 0.0f }));
+            Vector3 alvo = Vector3Add(Vector3Add(carro, Vector3Scale(frente, 18.0f)), (Vector3){ 0.0f, 3.4f, 0.0f });
             return novaCamera(posicao, alvo, 52.0f);
+        }
+        case 2: {   /* lateral: anda junto, à frente e ao lado, abrindo devagar */
+            float adiante = misturar(7.0f, 10.0f, e);
+            Vector3 posicao = Vector3Add(Vector3Add(carro, Vector3Scale(frente, adiante)), Vector3Add(Vector3Scale(direita, 6.0f * lado), (Vector3){ 0.0f, 1.3f, 0.0f }));
+            Vector3 alvo = Vector3Add(carro, (Vector3){ 0.0f, 1.9f, 0.0f });
+            return novaCamera(posicao, alvo, 50.0f);
+        }
+        default: {  /* grua: gira devagar em volta do carro, subindo, com a festa atrás */
+            float angulo = (misturar(-35.0f, 35.0f, e) + (lado > 0.0f ? 0.0f : 180.0f)) * DEG2RAD;
+            float raio = misturar(14.0f, 18.0f, e);
+            Vector3 volta = Vector3Add(Vector3Scale(frente, cosf(angulo) * raio), Vector3Scale(direita, sinf(angulo) * raio));
+            Vector3 posicao = Vector3Add(Vector3Add(carro, volta), (Vector3){ 0.0f, misturar(4.0f, 7.0f, e), 0.0f });
+            Vector3 alvo = Vector3Add(carro, (Vector3){ 0.0f, 2.6f, 0.0f });
+            return novaCamera(posicao, alvo, 50.0f);
         }
     }
 }
@@ -454,15 +454,15 @@ static void desenharLetreiroGrande(const char *chapeu, const char *titulo, const
     if (chapeu != NULL) {
         float lc = larguraDoTexto(FONTE_FORTE, chapeu, 15.0f) + 26.0f;
         desenharParalelogramo(x + 10.0f, y - 24.0f, lc, 22.0f, 7.0f, Fade(COR_AMARELO, entrou));
-        escrever(FONTE_FORTE, chapeu, x + 23.0f, y - 23.0f, 15.0f, Fade(COR_GRAFITE, entrou));
+        escrever(FONTE_FORTE, chapeu, x + 23.0f, noMeio(FONTE_FORTE, 15.0f, y - 13.0f), 15.0f, Fade(COR_GRAFITE, entrou));
     }
     desenharParalelogramo(x, y, largura, 58.0f, 14.0f, Fade(COR_VERMELHO, entrou));
     desenharParalelogramo(x, y, largura, 29.0f, 7.0f, Fade(WHITE, 0.10f * entrou));
     desenharParalelogramo(x - 12.0f, y, 7.0f, 58.0f, 14.0f, Fade(COR_AMARELO, entrou));
-    escrever(FONTE_TITULO, titulo, x + 24.0f, y + 4.0f, tamanho, Fade(COR_TEXTO_CLARO, alfa.a / 255.0f));
+    escrever(FONTE_TITULO, titulo, x + 24.0f, noMeio(FONTE_TITULO, tamanho, y + 29.0f), tamanho, Fade(COR_TEXTO_CLARO, alfa.a / 255.0f));
     if (linha != NULL) {
         desenharParalelogramo(x + 6.0f, y + 62.0f, largura - 30.0f, 26.0f, 8.0f, Fade(COR_PAINEL, 0.92f * entrou));
-        escrever(FONTE_FORTE, linha, x + 24.0f, y + 64.0f, 18.0f, Fade(COR_CROMO, entrou));
+        escrever(FONTE_FORTE, linha, x + 24.0f, noMeio(FONTE_FORTE, 18.0f, y + 75.0f), 18.0f, Fade(COR_CROMO, entrou));
     }
 }
 
@@ -484,12 +484,12 @@ static void desenharPlacaDoPiloto(const Carro *carro, int lugar, int ehJogador, 
     caixaArredondada(placa, raio, Fade(ehJogador ? COR_VERMELHO : COR_GRAFITE, 0.92f * naTela));
     caixaArredondada((Rectangle){ x + folga, y + folga, larguraDoLugar - folga, altura - 2.0f * folga }, raioDeDentro(raio, folga),
                      Fade(lugar <= 3 ? COR_AMARELO : COR_TEXTO_CLARO, naTela));
-    escreverCentralizado(FONTE_TITULO, TextFormat("%dº", lugar), x + folga + (larguraDoLugar - folga) / 2.0f, y + 10.0f, 24.0f,
+    escreverCentralizado(FONTE_TITULO, TextFormat("%dº", lugar), x + folga + (larguraDoLugar - folga) / 2.0f, noMeio(FONTE_TITULO, 24.0f, y + altura / 2.0f), 24.0f,
                          Fade(COR_GRAFITE, naTela));
-    escrever(FONTE_TITULO, carro->nome, x + larguraDoLugar + 16.0f, y + 6.0f, tamanho, Fade(COR_TEXTO_CLARO, naTela));
+    escrever(FONTE_TITULO, carro->nome, x + larguraDoLugar + 16.0f, noMeio(FONTE_TITULO, tamanho, y + altura / 2.0f), tamanho, Fade(COR_TEXTO_CLARO, naTela));
     if (ehJogador) {
         caixaArredondada((Rectangle){ x, y - 24.0f, 56.0f, 16.0f }, RAIO_PEQUENO, Fade(COR_AMARELO, naTela));
-        escreverCentralizado(FONTE_FORTE, "VOCÊ", x + 28.0f, y - 24.0f, 12.0f, Fade(COR_GRAFITE, naTela));
+        escreverCentralizado(FONTE_FORTE, "VOCÊ", x + 28.0f, noMeio(FONTE_FORTE, 12.0f, y - 16.0f), 12.0f, Fade(COR_GRAFITE, naTela));
     }
 }
 
@@ -546,7 +546,7 @@ static void desenharSeloAoVivo(float topoY, float entrou) {
     desenharParalelogramo(x, y, 170.0f, 26.0f, 8.0f, Fade(COR_PAINEL, 0.9f * entrou));
     float pisca = (fmodf((float) GetTime(), 1.0f) < 0.6f) ? 1.0f : 0.25f;
     DrawCircle((int) (x + 22.0f), (int) (y + 13.0f), 6.0f, Fade(COR_VERMELHO, pisca * entrou));
-    escrever(FONTE_FORTE, "AO VIVO  |  KATCHAU", x + 36.0f, y + 3.0f, 16.0f, Fade(COR_TEXTO_CLARO, entrou));
+    escrever(FONTE_FORTE, "AO VIVO  |  KATCHAU", x + 36.0f, noMeio(FONTE_FORTE, 16.0f, y + 13.0f), 16.0f, Fade(COR_TEXTO_CLARO, entrou));
 }
 
 /* A dica para pular, no canto de baixo à direita */
@@ -559,7 +559,7 @@ static void desenharDicaDePular(float baseY, float entrou) {
         return;
     }
     x += desenharTecla(x, y, tecla) + 8.0f;
-    escrever(FONTE_FORTE, "PULAR", x, y + 2.0f, 16.0f, Fade(COR_TEXTO_FRACO, entrou));
+    escrever(FONTE_FORTE, "PULAR", x, noMeio(FONTE_FORTE, 16.0f, meioDaTecla(y)), 16.0f, Fade(COR_TEXTO_FRACO, entrou));
 }
 
 /* ==================================================================
