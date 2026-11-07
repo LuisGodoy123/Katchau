@@ -35,6 +35,7 @@
 /* ---------- Câmera ---------- */
 #define GIRO_DAS_RODAS_DO_GUIDO 18.0f   /* radianos por segundo */
 #define ADIANTE_DA_ONDA        0.6f     /* radianos: a onda começa um pouco à frente do jogador */
+#define ATRASO_DA_CAMERA_NO_RUMO 0.22f  /* segundos: o quanto a câmera demora para vir atrás do bico */
 #define CAMERA_NA_FUGA         0.75f    /* quanto do ângulo de fuga do carro a câmera acompanha */
 #define NUMERO_DO_GUIDO        7        /* na tabela FICHAS */
 #define ALTURA_NA_TROCA        0.10f    /* metros: o macaco levanta o carro */
@@ -983,8 +984,22 @@ void desenharVisaoDoJogador(Corrida *corrida) {
     float passo = fminf(VELOCIDADE_DA_TROCA_DE_CAMERA * GetFrameTime(), 1.0f);
     distanciaAtual.atras += (alvo.atras - distanciaAtual.atras) * passo;
     distanciaAtual.altura += (alvo.altura - distanciaAtual.altura) * passo;
+    /* Sem a guiada, a câmera segue o rumo do carro com um pequeno atraso: virando, a gente vê o
+     * carro girar na tela antes de a câmera vir atrás (presa ao bico, quem parecia girar era o mundo) */
+    static float rumoDaCamera = 0.0f;
+    static int cameraComRumo = 0;
+    if (comRumoReal) {
+        float diferenca = jogador->rumoNoMundo - rumoDaCamera;
+        diferenca -= 360.0f * roundf(diferenca / 360.0f);
+        if (!cameraComRumo || fabsf(diferenca) > 120.0f) {
+            rumoDaCamera = jogador->rumoNoMundo;   /* começou agora (ou rodou): sem atraso */
+        } else {
+            rumoDaCamera += diferenca * (1.0f - expf(-GetFrameTime() / ATRASO_DA_CAMERA_NO_RUMO));
+        }
+    }
+    cameraComRumo = comRumoReal;
     Camera3D camera = montarCamera(jogador->posicao, jogador->deslocamentoLateral, olhar, distanciaAtual,
-                                   comRumoReal ? &jogador->rumoNoMundo : NULL);
+                                   comRumoReal ? &rumoDaCamera : NULL);
     if (jogador->estadoDoPit == PIT_TROCANDO) {
         camera = cameraDaTroca(camera, jogador);
     }

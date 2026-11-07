@@ -148,6 +148,27 @@ void escreverSemSombra(TipoFonte fonte, const char *texto, float x, float y, flo
     DrawTextEx(fontes[fonte], texto, (Vector2){ x, y }, tamanho, tamanho * ESPACO_ENTRE_LETRAS, cor);
 }
 
+/*
+ * noMeio
+ * Para centralizar um texto na vertical: o topo a passar para escrever() de modo que o meio das
+ * letras (das maiúsculas e dos números, medido em cada fonte) caia na altura pedida.
+ * Recebe: a fonte, o tamanho e a altura do meio (o centro da caixa onde o texto vai).
+ * Devolve: o y do topo.
+ */
+/*
+ * meioDaTecla
+ * Recebe: o topo de uma tecla desenhada com desenharTecla.
+ * Devolve: a altura do meio dela (para o texto ao lado ficar alinhado com a letra da tecla).
+ */
+float meioDaTecla(float y) {
+    return y + ALTURA_TECLA / 2.0f;
+}
+
+float noMeio(TipoFonte fonte, float tamanho, float centroY) {
+    float meioDasLetras = (fonte == FONTE_TITULO) ? 0.52f : 0.50f;   /* medidos: build/exp/medirFonte.c */
+    return centroY - tamanho * meioDasLetras;
+}
+
 void escreverCentralizado(TipoFonte fonte, const char *texto, float centroX, float y, float tamanho, Color cor) {
     escrever(fonte, texto, centroX - larguraDoTexto(fonte, texto, tamanho) / 2.0f, y, tamanho, cor);
 }
@@ -366,7 +387,7 @@ static float larguraDoIcone(const char *nome) {
  */
 static void letraNoCentro(const char *texto, Vector2 centro, float tamanho, Color cor) {
     float largura = larguraDoTexto(FONTE_FORTE, texto, tamanho);
-    DrawTextEx(fontes[FONTE_FORTE], texto, (Vector2){ centro.x - largura / 2.0f, centro.y - tamanho / 2.0f - 1.0f }, tamanho,
+    DrawTextEx(fontes[FONTE_FORTE], texto, (Vector2){ centro.x - largura / 2.0f, noMeio(FONTE_FORTE, tamanho, centro.y) }, tamanho,
                tamanho * ESPACO_ENTRE_LETRAS, cor);
 }
 
@@ -524,7 +545,7 @@ float desenharTecla(float x, float y, const char *tecla) {
         }
         DrawTriangle(a, b, c, COR_GRAFITE);
     } else {
-        Vector2 posicao = { x + 7.0f, y + (altura - tamanhoLetra) / 2.0f - 1.0f };
+        Vector2 posicao = { x + 7.0f, noMeio(FONTE_FORTE, tamanhoLetra, y + altura / 2.0f) };
         DrawTextEx(fontes[FONTE_FORTE], tecla, posicao, tamanhoLetra, tamanhoLetra * ESPACO_ENTRE_LETRAS,
                    COR_GRAFITE);
     }

@@ -157,7 +157,7 @@ static void desenharCabecalho(const char *titulo) {
     float tamanho = 26.0f;
     Rectangle caixa = { 28.0f, Y_CABECALHO - 6.0f, larguraDoTexto(FONTE_TITULO, titulo, tamanho) + 44.0f, 40.0f };
     caixaArredondada(caixa, raioDoTamanho(caixa.width, caixa.height), COR_VERMELHO);
-    escrever(FONTE_TITULO, titulo, caixa.x + 22.0f, caixa.y + (caixa.height - tamanho) / 2.0f - 2.0f, tamanho, WHITE);
+    escrever(FONTE_TITULO, titulo, caixa.x + 22.0f, noMeio(FONTE_TITULO, tamanho, caixa.y + caixa.height / 2.0f), tamanho, WHITE);
 }
 
 /*
@@ -170,7 +170,7 @@ static void desenharCabecalhoDeEvento(const char *etiqueta, const char *titulo) 
     float x = 40.0f;
     float larguraDaEtiqueta = larguraDoTexto(FONTE_FORTE, etiqueta, 14.0f) + 24.0f;
     caixaArredondada((Rectangle){ x, Y_CABECALHO - 6.0f, larguraDaEtiqueta, 22.0f }, RAIO_PEQUENO, COR_VERMELHO);
-    escrever(FONTE_FORTE, etiqueta, x + 12.0f, Y_CABECALHO - 4.0f, 14.0f, WHITE);
+    escrever(FONTE_FORTE, etiqueta, x + 12.0f, noMeio(FONTE_FORTE, 14.0f, Y_CABECALHO - 6.0f + 11.0f), 14.0f, WHITE);
     escrever(FONTE_TITULO, titulo, x - 1.0f, Y_CABECALHO + 18.0f, 36.0f, WHITE);
 }
 
@@ -544,7 +544,7 @@ static void desenharBotaoPadrao(const char *texto, float x, float y, float largu
         caixaArredondada((Rectangle){ x + 4.0f, y + 8.0f, 4.0f * suave, ALTURA_BOTAO_MENU - 16.0f }, raioDeDentro(raio, 4.0f), Fade(COR_VERMELHO, suave));
     }
     float tamanho = 22.0f + 1.5f * suave;
-    escrever(FONTE_TITULO, texto, x + 22.0f + 4.0f * suave, y + (ALTURA_BOTAO_MENU - tamanho) / 2.0f - 2.0f, tamanho,
+    escrever(FONTE_TITULO, texto, x + 22.0f + 4.0f * suave, noMeio(FONTE_TITULO, tamanho, y + ALTURA_BOTAO_MENU / 2.0f), tamanho,
              ColorLerp(COR_TEXTO_FRACO, WHITE, suave));
 }
 
@@ -577,7 +577,7 @@ static void desenharItemDoMenu(const char *texto, int item, float destaque) {
         contornoArredondado(pilula, raio, 2.0f, Fade(WHITE, suave));
     }
     float tamanho = principal ? 30.0f : 21.0f;
-    escrever(FONTE_TITULO, texto, X_MENU_PRINCIPAL + 14.0f, y + (altura - tamanho) / 2.0f - 3.0f, tamanho,
+    escrever(FONTE_TITULO, texto, X_MENU_PRINCIPAL + 14.0f, noMeio(FONTE_TITULO, tamanho, y + altura / 2.0f), tamanho,
              ColorLerp(Fade(WHITE, 0.88f), WHITE, suave));
 }
 
@@ -645,8 +645,8 @@ void desenharMenuPrincipal(EstadoMenu *menu) {
         float x = LARGURA_TELA + margemX() - larguraDaEtiqueta - 26.0f;
         caixaArredondada((Rectangle){ x, 24.0f, larguraDaEtiqueta, 32.0f }, RAIO_PEQUENO, Fade(COR_GRAFITE, 0.85f));
         caixaArredondada((Rectangle){ x + 8.0f, 32.0f, 4.0f, 16.0f }, raioDeDentro(RAIO_PEQUENO, 8.0f), COR_VERMELHO);
-        escrever(FONTE_FORTE, rotulo, x + 20.0f, 32.0f, 13.0f, COR_TEXTO_FRACO);
-        escrever(FONTE_TITULO, nome, x + 34.0f + larguraDoTexto(FONTE_FORTE, rotulo, 13.0f), 28.0f, 20.0f, WHITE);
+        escrever(FONTE_FORTE, rotulo, x + 20.0f, noMeio(FONTE_FORTE, 13.0f, 40.0f), 13.0f, COR_TEXTO_FRACO);
+        escrever(FONTE_TITULO, nome, x + 34.0f + larguraDoTexto(FONTE_FORTE, rotulo, 13.0f), noMeio(FONTE_TITULO, 20.0f, 40.0f), 20.0f, WHITE);
     }
 }
 
@@ -858,7 +858,7 @@ static void desenharBotaoVoltar(float destaque) {
     desenharParalelogramo(x, Y_VOLTAR, largura, ALTURA_VOLTAR, 9, ColorLerp(COR_GRAFITE, COR_AMARELO, suave));
     desenharContornoParalelogramo(x, Y_VOLTAR, largura, ALTURA_VOLTAR, 9, 1.5f,
                                   ColorLerp(Fade(COR_CROMO, 0.5f), COR_AMARELO, suave));
-    escreverCentralizado(FONTE_FORTE, "VOLTAR", x + 8 + largura / 2, Y_VOLTAR + 3, 18.0f,
+    escreverCentralizado(FONTE_FORTE, "VOLTAR", x + 8 + largura / 2, noMeio(FONTE_FORTE, 18.0f, Y_VOLTAR + ALTURA_VOLTAR / 2.0f), 18.0f,
                          ColorLerp(COR_TEXTO_CLARO, COR_GRAFITE, suave));
 
     /* Setinha para a esquerda, que se afasta e volta enquanto o mouse está em cima */
@@ -910,11 +910,11 @@ static void desenharCartaoDoCarro(EstadoMenu *menu, const FichaTecnica *ficha, i
     escrever(FONTE_TEXTO, ficha->descricao, X_FICHA, y + 32.0f, 12.0f, COR_TEXTO_FRACO);
     float xSelo = X_FICHA + LARGURA_FICHA - 48.0f;
     caixaArredondada((Rectangle){ xSelo, y, 48.0f, 48.0f }, raioDeDentro(RAIO_GRANDE, 16.0f), equipe);   /* 16 do cartão */
-    escreverCentralizado(FONTE_TITULO, TextFormat("%d", notaGeral(ficha)), xSelo + 24.0f, y + 2.0f, 28.0f, COR_TEXTO_CLARO);
-    escreverCentralizado(FONTE_FORTE, "GERAL", xSelo + 24.0f, y + 32.0f, 10.0f, Fade(COR_TEXTO_CLARO, 0.8f));
+    escreverCentralizado(FONTE_TITULO, TextFormat("%d", notaGeral(ficha)), xSelo + 24.0f, noMeio(FONTE_TITULO, 28.0f, y + 19.0f), 28.0f, COR_TEXTO_CLARO);
+    escreverCentralizado(FONTE_FORTE, "GERAL", xSelo + 24.0f, noMeio(FONTE_FORTE, 10.0f, y + 38.0f), 10.0f, Fade(COR_TEXTO_CLARO, 0.8f));
     if (numero == menu->carroEscolhido) {
         caixaArredondada((Rectangle){ X_FICHA, y + 52.0f, 64.0f, 16.0f }, raioDeDentro(RAIO_GRANDE, 16.0f), COR_AMARELO);
-        escreverCentralizado(FONTE_FORTE, "SEU CARRO", X_FICHA + 32.0f, y + 52.0f, 12.0f, COR_GRAFITE);
+        escreverCentralizado(FONTE_FORTE, "SEU CARRO", X_FICHA + 32.0f, noMeio(FONTE_FORTE, 12.0f, y + 60.0f), 12.0f, COR_GRAFITE);
     }
     y += 84.0f;
 
@@ -924,8 +924,8 @@ static void desenharCartaoDoCarro(EstadoMenu *menu, const FichaTecnica *ficha, i
     for (int atributo = 0; atributo < TOTAL_ATRIBUTOS; atributo++) {
         int ordenando = (atributo == (int) menu->criterio);
         Color corDaBarra = ordenando ? COR_AMARELO : equipe;
-        escrever(FONTE_FORTE, NOMES_CRITERIO[atributo], X_FICHA, y, 12.0f, ordenando ? COR_AMARELO : COR_TEXTO_FRACO);
-        escreverADireita(FONTE_FORTE, textoDoAtributo(ficha, (Atributo) atributo), X_FICHA + LARGURA_FICHA, y - 4.0f, 20.0f, COR_TEXTO_CLARO);
+        escrever(FONTE_FORTE, NOMES_CRITERIO[atributo], X_FICHA, noMeio(FONTE_FORTE, 12.0f, y + 6.0f), 12.0f, ordenando ? COR_AMARELO : COR_TEXTO_FRACO);
+        escreverADireita(FONTE_FORTE, textoDoAtributo(ficha, (Atributo) atributo), X_FICHA + LARGURA_FICHA, noMeio(FONTE_FORTE, 20.0f, y + 6.0f), 20.0f, COR_TEXTO_CLARO);
 
         int cheios = (int) (fracaoDoAtributo(ficha, (Atributo) atributo) * gomos + 0.5f);
         for (int g = 0; g < gomos; g++) {
@@ -969,8 +969,9 @@ void desenharGaragem(EstadoMenu *menu) {
     /* O seletor da ordem do carrossel, discreto, acima dele à direita */
     float suave = suavizar(menu->destaqueOrdem);
     caixaArredondada((Rectangle){ X_ORDEM, Y_ORDEM, LARGURA_ORDEM, ALTURA_ORDEM }, RAIO_PEQUENO, ColorLerp(Fade(COR_GRAFITE, 0.8f), COR_VERMELHO, suave));
-    escrever(FONTE_FORTE, "ORDEM", X_ORDEM + 8.0f, Y_ORDEM + 4.0f, 12.0f, COR_TEXTO_FRACO);
-    escreverADireita(FONTE_FORTE, NOMES_CRITERIO[menu->criterio], X_ORDEM + LARGURA_ORDEM - 8.0f, Y_ORDEM + 4.0f, 12.0f, COR_TEXTO_CLARO);
+    float meioDaOrdem = Y_ORDEM + ALTURA_ORDEM / 2.0f;
+    escrever(FONTE_FORTE, "ORDEM", X_ORDEM + 8.0f, noMeio(FONTE_FORTE, 12.0f, meioDaOrdem), 12.0f, COR_TEXTO_FRACO);
+    escreverADireita(FONTE_FORTE, NOMES_CRITERIO[menu->criterio], X_ORDEM + LARGURA_ORDEM - 8.0f, noMeio(FONTE_FORTE, 12.0f, meioDaOrdem), 12.0f, COR_TEXTO_CLARO);
 
     /* O carrossel: o marcado no meio, aceso, com a faixa vermelha; os outros somem para as bordas */
     for (int i = 0; i < TOTAL_CARROS; i++) {
@@ -1352,7 +1353,7 @@ static void desenharBotaoDeNivel(int nivel, float destaque, int comCursor) {
         contornoArredondado(r, raio, 2.5f, corDoCursor());
     }
     escreverCentralizado(FONTE_TITULO, fichaDoNivel((NivelDaCorrida) nivel)->nome, x + LARGURA_BOTAO_NIVEL / 2.0f,
-                         Y_BOTAO_NIVEL + (ALTURA_BOTAO_NIVEL - 24.0f) / 2.0f - 2.0f, 24.0f,
+                         noMeio(FONTE_TITULO, 24.0f, Y_BOTAO_NIVEL + ALTURA_BOTAO_NIVEL / 2.0f), 24.0f,
                          ColorLerp(COR_TEXTO_FRACO, WHITE, suave));
 }
 
@@ -1369,7 +1370,7 @@ static void desenharBotaoCorrer(int comCursor) {
     if (comCursor) {
         contornoArredondado(r, raio, 2.5f, corDoCursor());
     }
-    escreverCentralizado(FONTE_TITULO, "CORRER", X_BOTAO_CORRER + LARGURA_BOTAO_CORRER / 2.0f, Y_BOTAO_CORRER + 12.0f, 32.0f,
+    escreverCentralizado(FONTE_TITULO, "CORRER", X_BOTAO_CORRER + LARGURA_BOTAO_CORRER / 2.0f, noMeio(FONTE_TITULO, 32.0f, Y_BOTAO_CORRER + ALTURA_BOTAO_CORRER / 2.0f), 32.0f,
                          comCursor ? WHITE : Fade(WHITE, 0.78f));
 }
 
@@ -1444,7 +1445,6 @@ enum {
     LINHA_GATILHOS,
     LINHA_ZONA_MORTA,
     LINHA_VOLANTE,
-    LINHA_DIRECAO_GUIADA,
     LINHA_SOMBRAS,
     LINHA_CAMERA_X,
     LINHA_CAMERA_Y,
@@ -1535,9 +1535,6 @@ static void mudarOpcao(EstadoMenu *menu, int linha, int sentido) {
             break;
         case LINHA_VOLANTE:
             config->respostaDoVolante = (config->respostaDoVolante + sentido + TOTAL_VOLANTES) % TOTAL_VOLANTES;
-            break;
-        case LINHA_DIRECAO_GUIADA:
-            config->direcaoGuiada = !config->direcaoGuiada;
             break;
         case LINHA_SOMBRAS: {
             /* ALTO (sombras e efeitos) -> MÉDIO (só efeitos) -> BAIXO (nada) -> ALTO */
@@ -1746,7 +1743,7 @@ static void desenharLinhaDeComando(EstadoMenu *menu, int linha) {
     int marcada = (linha == menu->linhaConfig);
     float y = yDaLinhaConfig(linha);
     desenharFundoDaLinhaConfig(linha, marcada);
-    escrever(FONTE_FORTE, nomeDaAcao((AcaoDeCorrida) linha), X_LINHAS_CONFIG + 12.0f, y + 5.0f, 15.0f, marcada ? COR_TEXTO_CLARO : COR_CROMO);
+    escrever(FONTE_FORTE, nomeDaAcao((AcaoDeCorrida) linha), X_LINHAS_CONFIG + 12.0f, noMeio(FONTE_FORTE, 15.0f, y + (ALTURA_LINHA_COMANDO - 2.0f) / 2.0f), 15.0f, marcada ? COR_TEXTO_CLARO : COR_CROMO);
 
     for (int c = 0; c < TOTAL_COLUNAS; c++) {
         float x = X_COLUNAS_COMANDO + c * LARGURA_COLUNA_COMANDO;
@@ -1757,9 +1754,9 @@ static void desenharLinhaDeComando(EstadoMenu *menu, int linha) {
         }
         if (aqui && menu->esperandoComando) {
             const char *pedido = (c >= COLUNA_BOTAO_1) ? "APERTE UM BOTÃO" : "APERTE UMA TECLA";
-            escreverCentralizado(FONTE_FORTE, pedido, x + LARGURA_COLUNA_COMANDO / 2.0f, y + 6.0f, 12.0f, COR_AMARELO);
+            escreverCentralizado(FONTE_FORTE, pedido, x + LARGURA_COLUNA_COMANDO / 2.0f, noMeio(FONTE_FORTE, 12.0f, meioDaTecla(y + 2.0f)), 12.0f, COR_AMARELO);
         } else if (codigo == SEM_COMANDO) {
-            escreverCentralizado(FONTE_FORTE, "---", x + LARGURA_COLUNA_COMANDO / 2.0f, y + 5.0f, 15.0f, COR_TEXTO_FRACO);
+            escreverCentralizado(FONTE_FORTE, "---", x + LARGURA_COLUNA_COMANDO / 2.0f, noMeio(FONTE_FORTE, 15.0f, meioDaTecla(y + 2.0f)), 15.0f, COR_TEXTO_FRACO);
         } else {
             const char *nome = (c >= COLUNA_BOTAO_1) ? nomeDoBotao(codigo) : nomeDaTecla(codigo);
             desenharTecla(x + (LARGURA_COLUNA_COMANDO - larguraDaTecla(nome)) / 2.0f, y + 2.0f, nome);
@@ -1777,13 +1774,14 @@ static void desenharLinhaDeOpcao(EstadoMenu *menu, int linha, const char *nome, 
     float y = yDaLinhaConfig(linha);
     Color corDoTexto = apagada ? COR_TEXTO_FRACO : (marcada ? COR_TEXTO_CLARO : COR_CROMO);
     desenharFundoDaLinhaConfig(linha, marcada);
-    escrever(FONTE_FORTE, nome, X_LINHAS_CONFIG + 12.0f, y + 3.0f, 15.0f, corDoTexto);
+    float yTexto = noMeio(FONTE_FORTE, 15.0f, y + (ALTURA_LINHA_OPCAO - 2.0f) / 2.0f);   /* no meio do fundo da linha */
+    escrever(FONTE_FORTE, nome, X_LINHAS_CONFIG + 12.0f, yTexto, 15.0f, corDoTexto);
     if (linha != LINHA_PADRAO) {   /* as setas "< >" ficam sempre ao lado do valor; brancas na linha marcada */
         Color corDasSetas = marcada ? COR_TEXTO_CLARO : Fade(COR_TEXTO_CLARO, 0.45f);
-        escrever(FONTE_FORTE, "<", X_VALOR_OPCAO, y + 3.0f, 15.0f, corDasSetas);
-        escrever(FONTE_FORTE, ">", X_VALOR_OPCAO + 16.0f, y + 3.0f, 15.0f, corDasSetas);
+        escrever(FONTE_FORTE, "<", X_VALOR_OPCAO, yTexto, 15.0f, corDasSetas);
+        escrever(FONTE_FORTE, ">", X_VALOR_OPCAO + 16.0f, yTexto, 15.0f, corDasSetas);
     }
-    escrever(FONTE_FORTE, valor, X_VALOR_OPCAO + 44.0f, y + 3.0f, 15.0f, apagada ? COR_TEXTO_FRACO : COR_TEXTO_CLARO);
+    escrever(FONTE_FORTE, valor, X_VALOR_OPCAO + 44.0f, yTexto, 15.0f, apagada ? COR_TEXTO_FRACO : COR_TEXTO_CLARO);
 }
 
 /*
@@ -1816,7 +1814,6 @@ void desenharConfiguracoes(EstadoMenu *menu) {
     desenharLinhaDeOpcao(menu, LINHA_GATILHOS, "TREMOR NO ACELERADOR (DUALSENSE)", config->gatilhosAdaptativos ? "LIGADO" : "DESLIGADO", !vibra);
     desenharLinhaDeOpcao(menu, LINHA_ZONA_MORTA, "ZONA MORTA DO ANALÓGICO", TextFormat("%d%%", config->zonaMorta), 0);
     desenharLinhaDeOpcao(menu, LINHA_VOLANTE, "RESPOSTA DO VOLANTE NO ANALÓGICO", VOLANTES[config->respostaDoVolante], 0);
-    desenharLinhaDeOpcao(menu, LINHA_DIRECAO_GUIADA, "DIREÇÃO GUIADA", config->direcaoGuiada ? "LIGADA" : "DESLIGADA", 0);
     desenharLinhaDeOpcao(menu, LINHA_SOMBRAS, "GRÁFICOS (SOMBRAS E EFEITOS)",
                          config->sombras ? "ALTO" : (config->efeitos ? "MÉDIO" : "BAIXO"), 0);
     desenharLinhaDeOpcao(menu, LINHA_CAMERA_X, "INVERTER A CÂMERA NA HORIZONTAL", config->inverterCameraX ? "SIM" : "NÃO", 0);
@@ -1925,7 +1922,7 @@ void desenharComoJogar(void) {
             const char *fixas[] = { ligado ? nomeDoBotao(GAMEPAD_BUTTON_MIDDLE_RIGHT) : "ESC", ligado ? nomeNoControle("ENTER") : "ENTER", nomeNoControle("ANALOG D") };
             xTecla += desenharTecla(xTecla, y, fixas[i - 5]) + 5;
         }
-        escrever(FONTE_TITULO, acoes[i], x + 150, y - 2, 20.0f, COR_TEXTO_CLARO);
+        escrever(FONTE_TITULO, acoes[i], x + 150, noMeio(FONTE_TITULO, 20.0f, meioDaTecla(y)), 20.0f, COR_TEXTO_CLARO);
         if (i < 5) {
             DrawRectangleRec((Rectangle){ x + 20, y + 40, 312, 1 }, Fade(COR_CROMO, 0.15f));
         }
@@ -2113,33 +2110,34 @@ static void desenharLinhaDoResultado(Corrida *corrida, int posicao, float y) {
                               Fade(COR_GRAFITE, posicao % 2 == 0 ? 0.85f : 0.7f));
     }
 
+    float meio = y + ALTURA_LINHA_RESULTADO / 2.0f - 1.0f;   /* o meio do fundo da linha */
     Color podio = corDoPodio(posicao);
-    desenharParalelogramo(X_TABELA + 12, y + 5, 38, 20, 5, podio);
-    escreverCentralizado(FONTE_TITULO, TextFormat("%dº", posicao + 1), X_TABELA + 33, y + 4, 16.0f,
+    desenharParalelogramo(X_TABELA + 12, meio - 10.0f, 38, 20, 5, podio);
+    escreverCentralizado(FONTE_TITULO, TextFormat("%dº", posicao + 1), X_TABELA + 33, noMeio(FONTE_TITULO, 16.0f, meio), 16.0f,
                          posicao < 3 ? COR_GRAFITE : COR_CROMO);
 
-    escrever(FONTE_TITULO, carro->nome, X_COLUNA_PILOTO, y + 5, 18.0f, COR_TEXTO_CLARO);
+    escrever(FONTE_TITULO, carro->nome, X_COLUNA_PILOTO, noMeio(FONTE_TITULO, 18.0f, meio), 18.0f, COR_TEXTO_CLARO);
     if (ehJogador) {
         float x = X_COLUNA_PILOTO + larguraDoTexto(FONTE_TITULO, carro->nome, 18.0f) + 10;
-        desenharParalelogramo(x, y + 7, 42, 16, 4, COR_AMARELO);
-        escreverCentralizado(FONTE_FORTE, "VOCÊ", x + 23, y + 7, 12.0f, COR_GRAFITE);
+        desenharParalelogramo(x, meio - 8.0f, 42, 16, 4, COR_AMARELO);
+        escreverCentralizado(FONTE_FORTE, "VOCÊ", x + 23, noMeio(FONTE_FORTE, 12.0f, meio), 12.0f, COR_GRAFITE);
     }
 
     Color corTempo = ehJogador ? COR_TEXTO_CLARO : COR_CROMO;
     if (carro->voltas >= carro->voltasDaProva) {
         formatarTempo(carro->tempoDeChegada, tempo, sizeof(tempo));
-        escrever(FONTE_FORTE, tempo, X_COLUNA_TEMPO, y + 6, 16.0f, corTempo);
+        escrever(FONTE_FORTE, tempo, X_COLUNA_TEMPO, noMeio(FONTE_FORTE, 16.0f, meio), 16.0f, corTempo);
     } else {
         escrever(FONTE_FORTE, TextFormat("VOLTA %d/%d", voltaAtual(carro), carro->voltasDaProva),
-                 X_COLUNA_TEMPO, y + 6, 16.0f, COR_TEXTO_FRACO);
+                 X_COLUNA_TEMPO, noMeio(FONTE_FORTE, 16.0f, meio), 16.0f, COR_TEXTO_FRACO);
     }
 
     float melhor = melhorVolta(carro);
     if (melhor > 0.0f) {
         formatarTempo(melhor, tempo, sizeof(tempo));
-        escrever(FONTE_FORTE, tempo, X_COLUNA_MELHOR, y + 6, 16.0f, corTempo);
+        escrever(FONTE_FORTE, tempo, X_COLUNA_MELHOR, noMeio(FONTE_FORTE, 16.0f, meio), 16.0f, corTempo);
     } else {
-        escrever(FONTE_FORTE, "-", X_COLUNA_MELHOR, y + 6, 16.0f, COR_TEXTO_FRACO);
+        escrever(FONTE_FORTE, "-", X_COLUNA_MELHOR, noMeio(FONTE_FORTE, 16.0f, meio), 16.0f, COR_TEXTO_FRACO);
     }
 }
 

@@ -142,7 +142,7 @@ int controleApertou(BotaoDoControle botao) {
  * Devolve: a direção, de -1 a +1.
  */
 static float direcaoDoAnalogico(float x) {
-    static const float PRECISAO_NO_CENTRO[TOTAL_VOLANTES] = { 0.85f, 0.6f, 0.15f };   /* 0 = resposta reta; perto de 1 = bem mais fino no centro */
+    static const float PRECISAO_NO_CENTRO[TOTAL_VOLANTES] = { 0.7f, 0.35f, 0.1f };   /* 0 = resposta reta; perto de 1 = bem mais fino no centro */
     const Configuracoes *config = configuracoesAtuais();
     float zonaMorta = config->zonaMorta / 100.0f;
     float precisao = PRECISAO_NO_CENTRO[config->respostaDoVolante];
