@@ -27,6 +27,11 @@ typedef enum {
 
 void carregarAudio(void);
 void atualizarAudio(int musicaDoMenu);
+void comecarAbertura(void);
+void pularAbertura(void);
+float tempoDaAbertura(void);
+int musicaDoMenuTocando(void);
+float tempoDaMusicaDoMenu(void);
 void tocarSom(TipoSom som);
 void tocarSomDaBatida(float volume, int contraCarro);
 void tocarGritoDeRodada(float volume);

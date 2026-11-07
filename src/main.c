@@ -218,6 +218,9 @@ int main(int argc, char *argv[]) {
 
     /* O vídeo de abertura: passa só quando o jogo abre (não a cada corrida); qualquer botão pula */
     int naIntro = iniciarIntro();
+    if (!naIntro) {
+        comecarAbertura();   /* sem o vídeo, a abertura toca no menu mesmo assim */
+    }
 
     /* Laço principal: roda uma vez por quadro até escolher SAIR ou fechar a janela */
     while (tela != TELA_SAIR && !WindowShouldClose()) {
@@ -233,10 +236,7 @@ int main(int argc, char *argv[]) {
             ClearBackground(BLACK);
             desenharIntro();
             EndDrawing();
-            if (!naIntro) {
-                encerrarIntro();
-            }
-            continue;
+            continue;   /* quando acaba, a intro se dissolve por cima do menu (desenharSaidaDaIntro) */
         }
         atualizarControle();   /* acha o controle e lê o analógico, antes das telas perguntarem */
 
@@ -446,8 +446,10 @@ int main(int argc, char *argv[]) {
             default:
                 break;
         }
+        desenharSaidaDaIntro(tempoQuadro);   /* o fim do vídeo se dissolvendo no menu */
         EndDrawing();
     }
+    encerrarIntro();   /* se a janela fechou no meio da dissolução */
 
     descarregarFumaca();
     descarregarMarcas();

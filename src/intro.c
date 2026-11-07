@@ -1,7 +1,9 @@
 /*
  * intro.c
  * ------------------------------------------------------------------
- * O vídeo de abertura. Veja intro.h.
+ * O vídeo de abertura: a largada da Copa Pistão do filme Carros (0:28 a 1:21 do vídeo
+ * original). O som é a abertura (recursos/sons/abertura.mp3, em audio.c), que segue no menu.
+ * Veja intro.h.
  * ------------------------------------------------------------------
  */
 
@@ -14,6 +16,7 @@
 #include "intro.h"
 #include "hud.h"
 #include "visual.h"
+#include "audio.h"
 
 /* O stb_image (domínio público, o mesmo que vem com a raylib) só para abrir JPEG. Ele fica
  * "static" aqui dentro, para não brigar com a cópia que a própria raylib tem. */
@@ -29,10 +32,9 @@
 #include "externo/stb_image.h"
 
 #define ARQUIVO_DOS_QUADROS   "recursos/video/intro.mjpeg"
-#define ARQUIVO_DO_SOM        "recursos/video/intro.mp3"
 #define QUADROS_POR_SEGUNDO   30.0f
-#define VOLUME_DO_VIDEO       0.9f
-#define ESCURECER_NO_FIM      0.45f   /* segundos escurecendo quando o vídeo acaba ou é pulado */
+#define DURACAO_DA_DISSOLUCAO 1.1f    /* segundos: o vídeo se dissolve no menu */
+#define AVANCO_NA_DISSOLUCAO  0.06f   /* o quadro cresce um pouco enquanto some, como a câmera entrando */
 #define AVISO_DEPOIS_DE       0.8f    /* segundos até o aviso de pular aparecer */
 #define PEDACO_DA_LEITURA     (1 << 20)
 
@@ -44,11 +46,9 @@ static unsigned char *bufferDoQuadro = NULL;
 static long capacidadeDoBuffer = 0;
 static Texture2D textura = { 0 };
 static int quadroMostrado = -1;
-static Music som = { 0 };
-static int temSom = 0;
 static float relogio = 0.0f;          /* segundos de vídeo (sem som, conta pelo tempo do quadro) */
-static float saindo = 0.0f;           /* > 0: escurecendo para acabar */
 static int ativo = 0;
+static float dissolvendo = 0.0f;     /* > 0: o último quadro sumindo por cima do menu */
 
 /* ==================================================================
  * Ler o arquivo de quadros
@@ -169,17 +169,8 @@ int iniciarIntro(void) {
     SetTextureFilter(textura, TEXTURE_FILTER_BILINEAR);
     quadroMostrado = 0;
 
-    if (IsAudioDeviceReady() && FileExists(ARQUIVO_DO_SOM)) {
-        som = LoadMusicStream(ARQUIVO_DO_SOM);
-        temSom = IsMusicValid(som);
-        if (temSom) {
-            som.looping = false;
-            SetMusicVolume(som, VOLUME_DO_VIDEO);
-            PlayMusicStream(som);
-        }
-    }
+    comecarAbertura();   /* o som da intro é a abertura (audio.c), que continua no menu */
     relogio = 0.0f;
-    saindo = 0.0f;
     ativo = 1;
     return 1;
 }
@@ -219,24 +210,19 @@ int atualizarIntro(float tempoQuadro) {
     if (!ativo) {
         return 0;
     }
-    if (temSom) {
-        UpdateMusicStream(som);
-    }
+    atualizarAudio(1);   /* alimenta a abertura */
 
-    if (saindo > 0.0f) {
-        saindo -= tempoQuadro;
-        if (temSom) {
-            SetMusicVolume(som, VOLUME_DO_VIDEO * fmaxf(saindo / ESCURECER_NO_FIM, 0.0f));
-        }
-        return saindo > 0.0f;
-    }
-
-    relogio = temSom ? GetMusicTimePlayed(som) : relogio + tempoQuadro;
+    /* O relógio é o som da abertura (assim imagem e som nunca se separam); sem ela, o do quadro */
+    float tocado = tempoDaAbertura();
+    relogio = (tocado >= 0.0f) ? fmaxf(relogio, tocado) : relogio + tempoQuadro;
     int quadro = (int) (relogio * QUADROS_POR_SEGUNDO);
-    int somAcabou = temSom && !IsMusicStreamPlaying(som) && relogio > 1.0f;
-    if (quadro >= totalDeQuadros || somAcabou || apertouQualquerCoisa()) {
-        saindo = ESCURECER_NO_FIM;
-        return 1;
+    int pulou = apertouQualquerCoisa();
+    if (pulou) {
+        pularAbertura();   /* pulou: a Real Gone começa do zero (sem pular, a abertura segue no menu) */
+    }
+    if (quadro >= totalDeQuadros || pulou) {
+        dissolvendo = DURACAO_DA_DISSOLUCAO;   /* o último quadro some por cima do menu (desenharSaidaDaIntro) */
+        return 0;
     }
 
     if (quadro != quadroMostrado) {
@@ -251,6 +237,44 @@ int atualizarIntro(float tempoQuadro) {
         }
     }
     return 1;
+}
+
+/*
+ * desenharSaidaDaIntro
+ * Depois do vídeo, o último quadro vai sumindo por cima do menu (que já está desenhado embaixo)
+ * e crescendo um pouco, como a câmera entrando: sem passar pelo preto. Quando acaba, fecha a intro.
+ * Chamar no fim do quadro, por cima de tudo.
+ * Recebe: o tempo do quadro.
+ * Devolve: nada.
+ */
+void desenharSaidaDaIntro(float tempoQuadro) {
+    if (dissolvendo <= 0.0f) {
+        return;
+    }
+    if (textura.id != 0) {
+        float t = 1.0f - dissolvendo / DURACAO_DA_DISSOLUCAO;   /* 0 no começo, 1 no fim */
+        float suave = t * t * (3.0f - 2.0f * t);
+        float telaL = (float) GetScreenWidth(), telaA = (float) GetScreenHeight();
+        float escala = fminf(telaL / textura.width, telaA / textura.height) * (1.0f + AVANCO_NA_DISSOLUCAO * suave);
+        float largura = textura.width * escala, altura = textura.height * escala;
+        DrawTexturePro(textura, (Rectangle){ 0, 0, (float) textura.width, (float) textura.height },
+                       (Rectangle){ (telaL - largura) / 2.0f, (telaA - altura) / 2.0f, largura, altura },
+                       (Vector2){ 0, 0 }, 0.0f, Fade(WHITE, 1.0f - suave));
+    }
+    dissolvendo -= tempoQuadro;
+    if (dissolvendo <= 0.0f) {
+        dissolvendo = 0.0f;
+        encerrarIntro();
+    }
+}
+
+/*
+ * momentoDaIntro
+ * Recebe: nada.
+ * Devolve: quantos segundos de vídeo já passaram.
+ */
+float momentoDaIntro(void) {
+    return relogio;
 }
 
 /*
@@ -273,9 +297,6 @@ void desenharIntro(void) {
 
     comecarInterface(0);
     float alfa = Clamp((relogio - AVISO_DEPOIS_DE) / 0.5f, 0.0f, 1.0f) * (0.75f + 0.25f * sinf((float) GetTime() * 3.0f));
-    if (saindo > 0.0f) {
-        alfa = 0.0f;
-    }
     if (alfa > 0.0f) {
         const char *aviso = "APERTE QUALQUER BOTÃO PARA PULAR";
         float tamanho = 17.0f;
@@ -286,24 +307,16 @@ void desenharIntro(void) {
         desenharParalelogramo(x - 9.0f, y, 5.0f, 30.0f, 9.0f, Fade(COR_AMARELO, alfa));
         escrever(FONTE_FORTE, aviso, x + 18.0f, y + 4.0f, tamanho, Fade(COR_TEXTO_CLARO, alfa));
     }
-    if (saindo > 0.0f) {
-        DrawRectangle(0, 0, larguraVirtual(), alturaVirtual(), Fade(BLACK, 1.0f - saindo / ESCURECER_NO_FIM));
-    }
     terminarInterface();
 }
 
 /*
  * encerrarIntro
- * Fecha o vídeo e devolve a memória (a textura, o som e o arquivo).
+ * Fecha o vídeo e devolve a memória (a textura e o arquivo). A abertura continua tocando no menu.
  * Recebe: nada.
  * Devolve: nada.
  */
 void encerrarIntro(void) {
-    if (temSom) {
-        StopMusicStream(som);
-        UnloadMusicStream(som);
-        temSom = 0;
-    }
     if (textura.id != 0) {
         UnloadTexture(textura);
         textura = (Texture2D){ 0 };

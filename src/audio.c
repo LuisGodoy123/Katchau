@@ -10,7 +10,7 @@
 #include "audio.h"
 #include "efeitos.h"
 
-#define ARQUIVO_MUSICA_MENU   "recursos/sons/menu_theme.mp3"
+#define ARQUIVO_MUSICA_MENU   "recursos/sons/real_gone.mp3"   /* Real Gone: a mesma do vídeo de abertura */
 #define VOLUME_SONS           0.7f   /* volume dos efeitos (0 a 1) */
 #define VOLUME_MUSICA_MENU    0.6f   /* volume máximo da música (0 a 1) */
 #define VELOCIDADE_FADE       1.5f   /* 1/s: o fade leva ~0,7 s */
@@ -137,6 +137,23 @@ static int musicaCarregada = 0;
 static int iniciada = 0;     /* já foi dado o Play alguma vez */
 static int pausada = 0;      /* está pausada (volume zerado fora dos menus) */
 static float fade = 0.0f;    /* 0 (mudo) a 1 (volume máximo) */
+/* A abertura: o áudio montado para a intro, que segue no menu; quando acaba, entra a Real Gone
+ * (que fica repetindo), e soa como uma coisa só */
+#ifndef ARQUIVO_DA_ABERTURA
+#define ARQUIVO_DA_ABERTURA   "recursos/sons/abertura.mp3"
+#endif
+static Music abertura;
+static int temAbertura = 0;
+static int naAbertura = 0;   /* 1: a música do menu agora é a abertura */
+
+/*
+ * musicaAtual
+ * Recebe: nada.
+ * Devolve: a música do menu que está valendo agora (a abertura ou a Real Gone).
+ */
+static Music *musicaAtual(void) {
+    return naAbertura ? &abertura : &musicaMenu;
+}
 
 /*
  * carregarAudio
@@ -195,6 +212,13 @@ void carregarAudio(void) {
         musicaVitoria.looping = false;   /* toca do refrão até o fim e para */
     }
 
+    if (FileExists(ARQUIVO_DA_ABERTURA)) {
+        abertura = LoadMusicStream(ARQUIVO_DA_ABERTURA);
+        temAbertura = IsMusicValid(abertura);
+        if (temAbertura) {
+            abertura.looping = false;   /* toca uma vez: depois vem a Real Gone */
+        }
+    }
     if (!FileExists(ARQUIVO_MUSICA_MENU)) {
         return;
     }
@@ -206,6 +230,77 @@ void carregarAudio(void) {
 }
 
 /*
+ * comecarAbertura
+ * Começa a abertura, com volume cheio: ela é o som da intro e continua no menu.
+ * Recebe: nada.
+ * Devolve: nada.
+ */
+void comecarAbertura(void) {
+    if (!temAbertura) {
+        return;
+    }
+    PlayMusicStream(abertura);
+    naAbertura = 1;
+    iniciada = 1;
+    pausada = 0;
+    fade = 1.0f;
+    SetMusicVolume(abertura, fade * VOLUME_MUSICA_MENU);
+}
+
+/*
+ * pularAbertura
+ * Quem pulou a intro não ouve o resto da abertura: ela para e a Real Gone começa do zero.
+ * Recebe: nada.
+ * Devolve: nada.
+ */
+void pularAbertura(void) {
+    if (naAbertura) {
+        StopMusicStream(abertura);
+        naAbertura = 0;
+    }
+    if (!musicaCarregada) {
+        iniciada = 0;
+        return;
+    }
+    StopMusicStream(musicaMenu);
+    PlayMusicStream(musicaMenu);   /* do começo */
+    iniciada = 1;
+    pausada = 0;
+    fade = 1.0f;
+    SetMusicVolume(musicaMenu, fade * VOLUME_MUSICA_MENU);
+}
+
+/*
+ * tempoDaAbertura
+ * Recebe: nada.
+ * Devolve: em que ponto a abertura está, em segundos (-1 se ela não está tocando).
+ */
+float tempoDaAbertura(void) {
+    if (!naAbertura || !IsMusicStreamPlaying(abertura)) {
+        return -1.0f;
+    }
+    return GetMusicTimePlayed(abertura);
+}
+
+/*
+ * musicaDoMenuTocando
+ * Recebe: nada.
+ * Devolve: 1 se a música do menu já começou e não está pausada.
+ */
+int musicaDoMenuTocando(void) {
+    return (musicaCarregada || naAbertura) && iniciada && !pausada;
+}
+
+/*
+ * tempoDaMusicaDoMenu
+ * Recebe: nada.
+ * Devolve: em que ponto a música do menu está, em segundos (0 se não começou).
+ */
+float tempoDaMusicaDoMenu(void) {
+    return iniciada ? GetMusicTimePlayed(*musicaAtual()) : 0.0f;
+}
+
+/*
  * atualizarAudio
  * Chamar uma vez por quadro. Sobe o volume nos menus e desce fora deles;
  * quando chega a zero, pausa a música para retomá-la de onde parou.
@@ -213,7 +308,7 @@ void carregarAudio(void) {
  * Devolve: nada.
  */
 void atualizarAudio(int musicaDoMenu) {
-    if (!musicaCarregada) {
+    if (!musicaCarregada && !naAbertura) {
         return;
     }
 
@@ -221,23 +316,33 @@ void atualizarAudio(int musicaDoMenu) {
     if (musicaDoMenu) {
         fade = (fade + passo > 1.0f) ? 1.0f : fade + passo;
         if (!iniciada) {
-            PlayMusicStream(musicaMenu);
+            PlayMusicStream(*musicaAtual());
             iniciada = 1;
         } else if (pausada) {
-            ResumeMusicStream(musicaMenu);
+            ResumeMusicStream(*musicaAtual());
             pausada = 0;
         }
     } else {
         fade = (fade - passo < 0.0f) ? 0.0f : fade - passo;
         if (fade == 0.0f && iniciada && !pausada) {
-            PauseMusicStream(musicaMenu);
+            PauseMusicStream(*musicaAtual());
             pausada = 1;
         }
     }
 
-    SetMusicVolume(musicaMenu, fade * VOLUME_MUSICA_MENU);
+    SetMusicVolume(*musicaAtual(), fade * VOLUME_MUSICA_MENU);
     if (iniciada && !pausada) {
-        UpdateMusicStream(musicaMenu);   /* alimenta o som; precisa de uma chamada por quadro */
+        UpdateMusicStream(*musicaAtual());   /* alimenta o som; precisa de uma chamada por quadro */
+        if (naAbertura && !IsMusicStreamPlaying(abertura)) {
+            /* A abertura acabou: entra a Real Gone, do começo, e ela fica repetindo */
+            naAbertura = 0;
+            if (musicaCarregada) {
+                PlayMusicStream(musicaMenu);
+                SetMusicVolume(musicaMenu, fade * VOLUME_MUSICA_MENU);
+            } else {
+                iniciada = 0;
+            }
+        }
     }
 }
 
@@ -613,6 +718,11 @@ void descarregarAudio(void) {
     if (musicaCarregada) {
         UnloadMusicStream(musicaMenu);
         musicaCarregada = 0;
+    }
+    if (temAbertura) {
+        UnloadMusicStream(abertura);
+        temAbertura = 0;
+        naAbertura = 0;
     }
     CloseAudioDevice();
 }

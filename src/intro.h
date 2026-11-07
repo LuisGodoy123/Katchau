@@ -8,7 +8,7 @@
  * A raylib não toca vídeo, então o vídeo vem em dois arquivos:
  *   recursos/video/intro.mjpeg   os quadros, um JPEG atrás do outro
  *                                (Motion JPEG, a 30 quadros por segundo);
- *   recursos/video/intro.mp3     o som.
+ *   recursos/sons/abertura.mp3   o som (toca pelo audio.c e continua no menu).
  * O som é o relógio: cada quadro mostra a imagem do instante em que a
  * música está, então imagem e som nunca se separam. Os JPEGs são lidos
  * do disco um por vez (o arquivo é grande) e abertos com o stb_image.
@@ -29,5 +29,7 @@ int iniciarIntro(void);
 int atualizarIntro(float tempoQuadro);
 void desenharIntro(void);
 void encerrarIntro(void);
+void desenharSaidaDaIntro(float tempoQuadro);
+float momentoDaIntro(void);
 
 #endif
