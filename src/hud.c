@@ -328,7 +328,8 @@ static const char *textoDoTempo(float segundos, char *texto, int tamanho) {
 
 /* A torre de posições, no estilo das transmissões de F1: uma coluna escura, sem enfeite */
 #define LARGURA_TORRE         124.0f
-#define ALTURA_LOGO_TORRE     22.0f
+#define ALTURA_LOGO_TORRE     64.0f   /* a logo, com 8 de folga em cima */
+#define LARGURA_LOGO_TORRE    80.0f
 #define ALTURA_VOLTA_TORRE    16.0f
 #define ALTURA_LINHA_TORRE    14.5f
 #define LARGURA_DO_DESTAQUE   150.0f   /* a barra branca do jogador sai um pouco da coluna */
@@ -409,7 +410,9 @@ static void desenharPainelDePosicoes(Corrida *corrida) {
 
     /* O logo e a volta */
     float meio = x + LARGURA_TORRE / 2.0f;
-    escreverCentralizado(FONTE_TITULO, "KATCHAU", meio, y + 2.0f, 17.0f, COR_TEXTO_CLARO);
+    if (desenharLogoPreta(meio, y + 8.0f, LARGURA_LOGO_TORRE) <= 0.0f) {
+        escreverCentralizado(FONTE_TITULO, "KATCHAU", meio, y + 2.0f, 17.0f, COR_TEXTO_CLARO);   /* sem o arquivo */
+    }
     y += ALTURA_LOGO_TORRE;
     const char *volta = TextFormat("%d", voltaAtual(jogador));
     char numero[8];

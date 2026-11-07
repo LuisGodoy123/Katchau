@@ -379,6 +379,11 @@ int main(int argc, char *argv[]) {
 
         /* A música toca nos menus e some quando a corrida começa */
         int apresentando = (tela == TELA_CORRIDA && apresentacaoAtiva(&apresentacao));
+        if (apresentando) {
+            definirVolumeDaTrilha(volumeDaTrilhaNaApresentacao(&apresentacao));   /* some nos últimos segundos */
+        } else if (tela != TELA_CORRIDA) {
+            definirVolumeDaTrilha(1.0f);
+        }
         atualizarAudio(tela == TELA_ENTRADA || tela == TELA_MENU || tela == TELA_GARAGEM || tela == TELA_PISTAS || tela == TELA_CONFIGURACOES || tela == TELA_COMO_JOGAR
                        || apresentando);   /* na apresentação da largada, a música segue de trilha */
 

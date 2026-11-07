@@ -66,6 +66,7 @@ void desenharBarraDeBlocos(float x, float y, float largura, float altura, float 
 float larguraDaTecla(const char *tecla);
 float desenharTecla(float x, float y, const char *tecla);
 void desenharLogo(float centroX, float y, float largura);
+float desenharLogoPreta(float centroX, float y, float largura);
 void desenharBrilho(float centroX, float centroY, float raio, Color cor);
 
 /* ---------- Confete (a festa da vitória) ---------- */
