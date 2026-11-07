@@ -14,7 +14,7 @@ CFLAGS = -std=c99 -O2 -Wall -Wextra -g -Isrc
 
 # Módulos de lógica: não usam a raylib (regra 2 do roadmap)
 LOGICA = src/pista.c src/obstaculos.c src/carro.c src/ia.c \
-         src/ordenacao.c src/corrida.c src/motor.c src/motorgranular.c src/recordes.c src/olhar.c src/pitstop.c src/vibracao.c src/configuracoes.c
+         src/ordenacao.c src/corrida.c src/motor.c src/motorgranular.c src/recordes.c src/olhar.c src/pitstop.c src/vibracao.c src/configuracoes.c src/mjpeg.c
 
 # Módulos que desenham na tela
 DESENHO = src/render.c src/mundo.c src/construcao.c src/paisagem.c src/infraestrutura.c src/carros3d.c src/fumaca.c src/faiscas.c src/fogos.c src/marcas.c src/torcida3d.c src/telao.c src/posprocesso.c src/noite.c src/hud.c src/menu.c src/visual.c src/audio.c src/efeitos.c src/exibicao.c src/apresentacao.c src/intro.c src/videofundo.c src/controle.c
@@ -28,7 +28,7 @@ ifeq ($(OS),Windows_NT)
     # Windows com MinGW (raylib em C:/raylib/raylib/src, padrão do instalador)
     RAYLIB_DIR ?= C:/raylib/raylib/src
     CFLAGS  += -I$(RAYLIB_DIR)
-    LIBS     = -L$(RAYLIB_DIR) -lraylib -lopengl32 -lgdi32 -lwinmm
+    LIBS     = -L$(RAYLIB_DIR) -lraylib -lopengl32 -lgdi32 -lwinmm -lpthread
     EXE      = $(NOME).exe
 else
     SISTEMA := $(shell uname -s)
@@ -81,7 +81,7 @@ testes: build/teste_pista
 	./build/teste_pista
 
 build/teste_pista: testes/teste_pista.c $(LOGICA) $(wildcard src/*.h) | build
-	$(CC) $(CFLAGS) testes/teste_pista.c $(LOGICA) -o $@ -lm
+	$(CC) $(CFLAGS) testes/teste_pista.c $(LOGICA) -o $@ -lm -lpthread
 
 # Corre muitas provas sem gráficos e mede o quanto cada dificuldade é competitiva
 simulacao: build/simular_dificuldade

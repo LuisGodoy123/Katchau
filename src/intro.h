@@ -11,7 +11,10 @@
  *   recursos/sons/abertura.mp3   o som (toca pelo audio.c e continua no menu).
  * O som é o relógio: cada quadro mostra a imagem do instante em que a
  * música está, então imagem e som nunca se separam. Os JPEGs são lidos
- * do disco um por vez (o arquivo é grande) e abertos com o stb_image.
+ * do disco um por vez (o arquivo é grande) e abertos pelo mjpeg.c, que
+ * trabalha adiantado numa thread à parte: abrir um JPEG de 1920x1080
+ * custa mais do que um quadro inteiro de jogo, então fazer isso no meio
+ * do laço principal travava o vídeo.
  *
  * Para trocar o vídeo, gere os dois arquivos com o ffmpeg:
  *   ffmpeg -i video.mp4 -an -c:v mjpeg -q:v 6 -pix_fmt yuvj420p -f mjpeg intro.mjpeg

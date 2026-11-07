@@ -127,7 +127,16 @@ void resolucaoEfetiva(const Configuracoes *config, int larguraDoMonitor, int alt
         resolucaoDaTabela(config->resolucao, largura, altura);
         return;
     }
-    int alturaMaxima = (config->modoDeTela == MODO_JANELA) ? alturaDoMonitor * 85 / 100 : alturaDoMonitor;
+    /* Automática em tela cheia: o monitor inteiro. A tabela para em 1920x1080, e num monitor maior
+     * (telas HiDPI) escolher dela deixaria a tela cheia numa resolução menor que a do monitor; aí
+     * o aplicarTela() troca a janela sem bordas pela mudança de modo de vídeo, que não pega em
+     * toda máquina (em ARM64 com o OpenGL emulado, a janela fica no tamanho em que nasceu). */
+    if (config->modoDeTela != MODO_JANELA) {
+        *largura = larguraDoMonitor;
+        *altura = alturaDoMonitor;
+        return;
+    }
+    int alturaMaxima = alturaDoMonitor * 85 / 100;
     int escolhida = 1;   /* a menor serve quando nada cabe */
     for (int i = 1; i < TOTAL_RESOLUCOES; i++) {
         if (RESOLUCOES[i][0] <= larguraDoMonitor && RESOLUCOES[i][1] <= alturaMaxima) {

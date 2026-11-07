@@ -17,124 +17,19 @@
 #include "hud.h"
 #include "visual.h"
 #include "audio.h"
-
-/* O stb_image (domínio público, o mesmo que vem com a raylib) só para abrir JPEG. Ele fica
- * "static" aqui dentro, para não brigar com a cópia que a própria raylib tem. */
-#define STB_IMAGE_STATIC
-#define STB_IMAGE_IMPLEMENTATION
-#define STBI_ONLY_JPEG
-#define STBI_NO_STDIO
-#if defined(__GNUC__)   /* vale para o arquivo todo: o GCC avisa das funções que não usamos só no fim dele */
-#pragma GCC diagnostic ignored "-Wunused-function"
-#pragma GCC diagnostic ignored "-Wsign-compare"
-#pragma GCC diagnostic ignored "-Wunused-parameter"
-#endif
-#include "externo/stb_image.h"
+#include "mjpeg.h"
 
 #define ARQUIVO_DOS_QUADROS   "recursos/video/intro.mjpeg"
 #define QUADROS_POR_SEGUNDO   30.0f
 #define DURACAO_DA_DISSOLUCAO 1.1f    /* segundos: o vídeo se dissolve no menu */
 #define AVANCO_NA_DISSOLUCAO  0.06f   /* o quadro cresce um pouco enquanto some, como a câmera entrando */
 #define AVISO_DEPOIS_DE       0.8f    /* segundos até o aviso de pular aparecer */
-#define PEDACO_DA_LEITURA     (1 << 20)
 
-static FILE *arquivo = NULL;
-static long *inicioDoQuadro = NULL;   /* onde cada JPEG começa no arquivo */
-static int totalDeQuadros = 0;
-static long tamanhoDoArquivo = 0;
-static unsigned char *bufferDoQuadro = NULL;
-static long capacidadeDoBuffer = 0;
+static Mjpeg *quadros = NULL;         /* os JPEGs do vídeo, abertos numa thread à parte */
 static Texture2D textura = { 0 };
-static int quadroMostrado = -1;
 static float relogio = 0.0f;          /* segundos de vídeo (sem som, conta pelo tempo do quadro) */
 static int ativo = 0;
 static float dissolvendo = 0.0f;     /* > 0: o último quadro sumindo por cima do menu */
-
-/* ==================================================================
- * Ler o arquivo de quadros
- * ================================================================== */
-
-/*
- * indexarQuadros
- * Percorre o arquivo uma vez e anota onde começa cada JPEG (a marca FF D8 FF). Dentro dos dados
- * de um JPEG o byte FF nunca aparece seguido de D8, então a marca só aparece no começo de cada um.
- * Recebe: nada (usa o arquivo aberto).
- * Devolve: 1 se achou algum quadro.
- */
-static int indexarQuadros(void) {
-    unsigned char *pedaco = malloc(PEDACO_DA_LEITURA + 2);
-    if (pedaco == NULL) {
-        return 0;
-    }
-    int capacidade = 4096;
-    inicioDoQuadro = malloc(sizeof(long) * capacidade);
-    if (inicioDoQuadro == NULL) {
-        free(pedaco);
-        return 0;
-    }
-
-    long base = 0;
-    size_t sobra = 0;   /* bytes do fim do pedaço anterior, para achar a marca que ficou dividida */
-    for (;;) {
-        size_t lidos = fread(pedaco + sobra, 1, PEDACO_DA_LEITURA, arquivo);
-        size_t total = sobra + lidos;
-        if (total < 3) {
-            break;
-        }
-        for (size_t i = 0; i + 2 < total; i++) {
-            if (pedaco[i] == 0xFF && pedaco[i + 1] == 0xD8 && pedaco[i + 2] == 0xFF) {
-                if (totalDeQuadros == capacidade) {
-                    capacidade *= 2;
-                    long *maior = realloc(inicioDoQuadro, sizeof(long) * capacidade);
-                    if (maior == NULL) {
-                        free(pedaco);
-                        return totalDeQuadros > 0;
-                    }
-                    inicioDoQuadro = maior;
-                }
-                inicioDoQuadro[totalDeQuadros++] = base - (long) sobra + (long) i;
-            }
-        }
-        if (lidos == 0) {
-            break;
-        }
-        /* Os dois últimos bytes voltam para o começo: a marca pode estar dividida entre pedaços */
-        memmove(pedaco, pedaco + total - 2, 2);
-        base += (long) lidos;
-        sobra = 2;
-    }
-    free(pedaco);
-    tamanhoDoArquivo = base;
-    return totalDeQuadros > 0;
-}
-
-/*
- * abrirQuadro
- * Lê um JPEG do arquivo e o abre.
- * Recebe: o número do quadro e onde guardar a largura e a altura.
- * Devolve: os pixels em RGB (liberar com stbi_image_free), ou NULL.
- */
-static unsigned char *abrirQuadro(int quadro, int *largura, int *altura) {
-    long inicio = inicioDoQuadro[quadro];
-    long fim = (quadro + 1 < totalDeQuadros) ? inicioDoQuadro[quadro + 1] : tamanhoDoArquivo;
-    long tamanho = fim - inicio;
-    if (tamanho <= 0) {
-        return NULL;
-    }
-    if (tamanho > capacidadeDoBuffer) {
-        unsigned char *maior = realloc(bufferDoQuadro, tamanho);
-        if (maior == NULL) {
-            return NULL;
-        }
-        bufferDoQuadro = maior;
-        capacidadeDoBuffer = tamanho;
-    }
-    if (fseek(arquivo, inicio, SEEK_SET) != 0 || fread(bufferDoQuadro, 1, tamanho, arquivo) != (size_t) tamanho) {
-        return NULL;
-    }
-    int canais;
-    return stbi_load_from_memory(bufferDoQuadro, (int) tamanho, largura, altura, &canais, 3);
-}
 
 /* ==================================================================
  * Começar, andar e acabar
@@ -148,26 +43,23 @@ static unsigned char *abrirQuadro(int quadro, int *largura, int *altura) {
  * Devolve: 1 se o vídeo vai passar, 0 se não foi possível (aí o jogo segue direto para o menu).
  */
 int iniciarIntro(void) {
-    arquivo = fopen(ARQUIVO_DOS_QUADROS, "rb");
-    if (arquivo == NULL) {
-        return 0;
-    }
-    if (!indexarQuadros()) {
-        encerrarIntro();
+    quadros = abrirMjpeg(ARQUIVO_DOS_QUADROS, 0);   /* 0: sem loop, acaba no fim */
+    if (quadros == NULL) {
         return 0;
     }
 
+    /* O primeiro quadro é quem dá o tamanho da textura, então aqui vale esperar por ele */
+    esperarQuadroMjpeg(quadros);
     int largura, altura;
-    unsigned char *pixels = abrirQuadro(0, &largura, &altura);
+    unsigned char *pixels = pegarQuadroMjpeg(quadros, 0, &largura, &altura);
     if (pixels == NULL) {
         encerrarIntro();
         return 0;
     }
     Image imagem = { pixels, largura, altura, 1, PIXELFORMAT_UNCOMPRESSED_R8G8B8 };
     textura = LoadTextureFromImage(imagem);
-    stbi_image_free(pixels);
+    devolverQuadroMjpeg(quadros, pixels);
     SetTextureFilter(textura, TEXTURE_FILTER_BILINEAR);
-    quadroMostrado = 0;
 
     comecarAbertura();   /* o som da intro é a abertura (audio.c), que continua no menu */
     relogio = 0.0f;
@@ -220,21 +112,20 @@ int atualizarIntro(float tempoQuadro) {
     if (pulou) {
         pularAbertura();   /* pulou: a Real Gone começa do zero (sem pular, a abertura segue no menu) */
     }
-    if (quadro >= totalDeQuadros || pulou) {
+    if (quadro >= totalDeQuadrosMjpeg(quadros) || pulou) {
         dissolvendo = DURACAO_DA_DISSOLUCAO;   /* o último quadro some por cima do menu (desenharSaidaDaIntro) */
         return 0;
     }
 
-    if (quadro != quadroMostrado) {
-        int largura, altura;
-        unsigned char *pixels = abrirQuadro(quadro, &largura, &altura);
-        if (pixels != NULL) {
-            if (largura == textura.width && altura == textura.height) {
-                UpdateTexture(textura, pixels);
-            }
-            stbi_image_free(pixels);
-            quadroMostrado = quadro;
+    /* O quadro já vem aberto pela thread do mjpeg.c. Se ainda não está pronto, a tela repete o
+     * anterior: o relógio segue o som, então a imagem volta ao compasso no quadro seguinte. */
+    int largura, altura;
+    unsigned char *pixels = pegarQuadroMjpeg(quadros, quadro, &largura, &altura);
+    if (pixels != NULL) {
+        if (largura == textura.width && altura == textura.height) {
+            UpdateTexture(textura, pixels);
         }
+        devolverQuadroMjpeg(quadros, pixels);
     }
     return 1;
 }
@@ -321,15 +212,7 @@ void encerrarIntro(void) {
         UnloadTexture(textura);
         textura = (Texture2D){ 0 };
     }
-    if (arquivo != NULL) {
-        fclose(arquivo);
-        arquivo = NULL;
-    }
-    free(inicioDoQuadro);
-    inicioDoQuadro = NULL;
-    totalDeQuadros = 0;
-    free(bufferDoQuadro);
-    bufferDoQuadro = NULL;
-    capacidadeDoBuffer = 0;
+    fecharMjpeg(quadros);   /* para a thread e devolve os quadros que sobraram na fila */
+    quadros = NULL;
     ativo = 0;
 }
