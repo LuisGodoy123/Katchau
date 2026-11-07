@@ -54,4 +54,6 @@ int apresentacaoAtiva(const Apresentacao *apresentacao);
 void desenharApresentacao(const Apresentacao *apresentacao, Corrida *corrida);
 Camera3D cameraDaVitoria(Corrida *corrida, float segundosDesdeAChegada, int *cortou, float *escuro);
 
+float volumeDaTrilhaNaApresentacao(const Apresentacao *apresentacao);
+
 #endif

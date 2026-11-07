@@ -14,12 +14,13 @@
 #include "hud.h"
 #include "visual.h"
 #include "controle.h"
+#include "corrida.h"
 
 /* Quanto dura cada tomada, em segundos */
 static const float DURACAO_DA_TOMADA[TOTAL_TOMADAS] = {
     [TOMADA_PISTA] = 5.5f,
     [TOMADA_GRID] = 4.0f,
-    [TOMADA_PILOTOS] = 7.0f,
+    [TOMADA_PILOTOS] = 11.5f,   /* cerca de 1,5 s por fila do grid, sem parar */
     [TOMADA_JOGADOR] = 4.5f,
     [TOMADA_PRONTO] = 1.6f,
 };
@@ -28,6 +29,7 @@ static const float DURACAO_DA_TOMADA[TOTAL_TOMADAS] = {
 #define DURACAO_DO_PULO        0.45f   /* pulou: a tela escurece nesse tempo e a corrida começa */
 #define ALTURA_DA_TARJA        0.11f   /* as tarjas pretas de cinema, em fração da altura da tela */
 #define ENTRADA_DA_TARJA       0.7f    /* segundos para as tarjas entrarem */
+#define SAIDA_DA_TRILHA        3.0f    /* segundos finais em que a música vai sumindo */
 #define ENTRADA_DO_LETREIRO    0.5f    /* segundos para um letreiro deslizar para dentro */
 
 /* ---------- As câmeras ---------- */
@@ -45,7 +47,13 @@ static const float DURACAO_DA_TOMADA[TOTAL_TOMADAS] = {
 #define CAMINHADA_ALTURA       1.15f   /* a câmera que atravessa o grid, quase rente ao chão */
 #define CAMINHADA_OLHA         12.0f   /* metros adiante (para trás no grid) que ela olha */
 #define CAMINHADA_FOLGA        5.0f    /* começa essa distância à frente da pole e acaba essa atrás do último */
-#define NOME_PERTO             14.0f   /* metros: o carro mais perto que isso, à frente da câmera, tem o nome na tela */
+#define FILAS_DO_GRID          ((TOTAL_CARROS + 1) / 2)   /* os carros largam em duplas, lado a lado */
+#define DIANTE_DA_FILA         7.0f    /* metros: o menor recuo da câmera diante de uma dupla */
+#define FOLGA_DOS_LADOS        3.0f    /* metros além do centro de cada carro que precisam caber no quadro */
+#define METADE_DA_VISAO        0.55f   /* tangente da metade do ângulo de visão na horizontal, com margem */
+#define ALCANCE_DO_NOME        1.0f    /* da distância entre filas: o nome fica até a metade do caminho para a próxima */
+#define ATRASO_DO_NOME         1.3f    /* em filas: o nome segue a câmera, não chega antes dos carros */
+#define TROCA_DO_NOME          0.08f   /* e a troca de uma dupla para a outra é rápida, sem se sobrepor */
 #define ORBITA_RAIO_DE         6.8f
 #define ORBITA_RAIO_ATE        5.2f
 #define ORBITA_ALTURA_DE       1.9f
@@ -161,42 +169,70 @@ static Camera3D cameraDoGrid(const Corrida *corrida, float t) {
     return novaCamera(posicao, alvo, 50.0f);
 }
 
-/* 3) A câmera atravessa o grid entre as filas, da pole ao último, de frente para os carros */
+/* 3) A câmera atravessa o grid de fila em fila, de frente para os carros: anda até a dupla, para
+ * diante dela (os dois nomes na tela) e segue para a próxima */
+/*
+ * dianteDaDupla
+ * Quanto a câmera recua diante de uma dupla para os dois carros caberem inteiros: em pistas de
+ * grid largo (Interlagos) ela fica mais longe.
+ * Recebe: a corrida.
+ * Devolve: metros.
+ */
+static float dianteDaDupla(const Corrida *corrida) {
+    float maisLonge = 0.0f;
+    for (int i = 0; i < TOTAL_CARROS; i++) {
+        const Carro *c = corrida->classificacao[i];
+        float lado = fabsf(c->deslocamentoLateral * larguraDoLado(c->posicao.segmento, c->deslocamentoLateral));
+        maisLonge = fmaxf(maisLonge, lado);
+    }
+    return fmaxf(DIANTE_DA_FILA, (maisLonge + FOLGA_DOS_LADOS) / METADE_DA_VISAO);
+}
+
+static float metrosDaFila(const Corrida *corrida, int fila) {
+    const Carro *pole = poleDoGrid(corrida);
+    const Carro *primeiro = corrida->classificacao[2 * fila];
+    return (primeiro->distanciaPercorrida - pole->distanciaPercorrida) / UNIDADES_POR_METRO;
+}
+
 static float ondeEstaACaminhada(const Corrida *corrida, float t) {
-    float e = misturar(t, suavizar(t), 0.5f);   /* quase constante, com entrada e saída suaves */
-    return misturar(CAMINHADA_FOLGA, -metrosDoGrid(corrida) - CAMINHADA_FOLGA, e);
+    /* Velocidade quase constante, com uma entrada e uma saída suaves: a câmera nunca para */
+    float e = misturar(t, suavizar(t), 0.35f);
+    float de = CAMINHADA_FOLGA + dianteDaDupla(corrida);
+    /* termina com o nome da última dupla inteiro na tela (o nome segue a câmera com um atraso) */
+    float entreFilas = fabsf(metrosDaFila(corrida, 1) - metrosDaFila(corrida, 0));
+    float ate = metrosDaFila(corrida, FILAS_DO_GRID - 1) + dianteDaDupla(corrida) - (ATRASO_DO_NOME + 0.3f) * entreFilas;
+    return misturar(de, ate, e);
+}
+
+/*
+ * presencaDaFila
+ * O quanto o nome de uma dupla está na tela: cheio quando a câmera passa diante dela, sumindo
+ * na metade do caminho até a próxima, numa troca rápida (sem as duas na tela ao mesmo tempo).
+ * Recebe: a corrida, a fila, o andamento da tomada e onde guardar de que lado ela sai (+1 entrando, -1 saindo).
+ * Devolve: de 0 a 1.
+ */
+static float presencaDaFila(const Corrida *corrida, int fila, float t, float *lado) {
+    float onde = ondeEstaACaminhada(corrida, t);
+    float diante = metrosDaFila(corrida, fila) + dianteDaDupla(corrida);
+    float entreFilas = fabsf(metrosDaFila(corrida, 1) - metrosDaFila(corrida, 0));
+    if (entreFilas < 1.0f) {
+        entreFilas = 8.0f;
+    }
+    /* > 0: a câmera ainda vem chegando; < 0: já passou. O nome fica centrado um pouco depois do
+     * ponto diante da dupla, para só entrar quando os dois carros já estão no quadro */
+    float d = (onde - diante) / entreFilas + ATRASO_DO_NOME;
+    *lado = (d > 0.0f) ? 1.0f : -1.0f;
+    float meio = ALCANCE_DO_NOME / 2.0f;
+    /* termina de sumir exatamente no meio do caminho, onde a próxima começa a entrar: nunca as duas juntas */
+    return 1.0f - suavizar(Clamp((fabsf(d) - (meio - 2.0f * TROCA_DO_NOME)) / (2.0f * TROCA_DO_NOME), 0.0f, 1.0f));
 }
 
 static Camera3D cameraDosPilotos(const Corrida *corrida, float t) {
     PosicaoNaPista pole = poleDoGrid(corrida)->posicao;
     float onde = ondeEstaACaminhada(corrida, t);
-    Vector3 posicao = pontoAoLado(naPista(pole, onde), 0.0f, CAMINHADA_ALTURA);
-    Vector3 alvo = pontoAoLado(naPista(pole, onde - CAMINHADA_OLHA), 0.0f, 0.7f);
-    return novaCamera(posicao, alvo, 58.0f);
-}
-
-/*
- * carroDaCaminhada
- * O carro que a câmera da caminhada está passando (o mais perto à frente dela).
- * Recebe: a corrida, o andamento da tomada e onde guardar a posição dele no grid (1 = pole).
- * Devolve: o carro, ou NULL se nenhum está perto.
- */
-static const Carro *carroDaCaminhada(const Corrida *corrida, float t, int *lugar) {
-    float camera = ondeEstaACaminhada(corrida, t);
-    const Carro *pole = poleDoGrid(corrida);
-    const Carro *melhor = NULL;
-    float menor = NOME_PERTO;
-    for (int i = 0; i < TOTAL_CARROS; i++) {
-        const Carro *carro = corrida->classificacao[i];
-        float onde = (carro->distanciaPercorrida - pole->distanciaPercorrida) / UNIDADES_POR_METRO;
-        float distancia = camera - onde;   /* positiva: o carro está adiante da câmera (ela vai para trás) */
-        if (distancia > -1.5f && distancia < menor) {
-            menor = distancia;
-            melhor = carro;
-            *lugar = i + 1;
-        }
-    }
-    return melhor;
+    Vector3 posicao = pontoAoLado(naPista(pole, onde), 0.0f, CAMINHADA_ALTURA + 0.6f);
+    Vector3 alvo = pontoAoLado(naPista(pole, onde - fmaxf(CAMINHADA_OLHA, dianteDaDupla(corrida))), 0.0f, 0.5f);   /* mira a dupla */
+    return novaCamera(posicao, alvo, 62.0f);
 }
 
 /* 4) A câmera gira em volta do carro do jogador */
@@ -431,35 +467,76 @@ static void desenharLetreiroGrande(const char *chapeu, const char *titulo, const
 }
 
 /*
- * desenharPiloto
- * Na caminhada pelo grid: a posição de largada numa etiqueta amarela e o nome do carro.
- * Recebe: o carro, a posição dele no grid (1 = pole), se é o jogador e a base da tarja de baixo.
+ * desenharPlacaDoPiloto
+ * A placa de um piloto da dupla: a posição de largada e o nome, numa caixa arredondada; a do
+ * jogador fica vermelha, com a etiqueta VOCÊ em cima.
+ * Recebe: o carro, a posição (1 = pole), se é o jogador, o centro x, a base, quanto está na tela e o
+ *         lado (+1 entrando, de baixo; -1 saindo, para cima).
  * Devolve: nada.
  */
-static void desenharPiloto(const Carro *carro, int lugar, int ehJogador, float baseY) {
-    static const Carro *anterior = NULL;
-    static double desde = 0.0;
-    if (carro != anterior) {
-        anterior = carro;
-        desde = GetTime();
+static void desenharPlacaDoPiloto(const Carro *carro, int lugar, int ehJogador, float centroX, float baseY, float naTela, float lado) {
+    const float altura = 48.0f, tamanho = 32.0f, folga = 8.0f, larguraDoLugar = 56.0f;
+    float largura = larguraDoLugar + larguraDoTexto(FONTE_TITULO, carro->nome, tamanho) + 32.0f;
+    float x = roundf((centroX - largura / 2.0f) / 4.0f) * 4.0f;
+    float y = baseY - altura - 24.0f + lado * 16.0f * (1.0f - naTela);   /* entra de baixo, sai para cima */
+    Rectangle placa = { x, y, largura, altura };
+    float raio = raioDoTamanho(placa.width, placa.height);
+    caixaArredondada(placa, raio, Fade(ehJogador ? COR_VERMELHO : COR_GRAFITE, 0.92f * naTela));
+    caixaArredondada((Rectangle){ x + folga, y + folga, larguraDoLugar - folga, altura - 2.0f * folga }, raioDeDentro(raio, folga),
+                     Fade(lugar <= 3 ? COR_AMARELO : COR_TEXTO_CLARO, naTela));
+    escreverCentralizado(FONTE_TITULO, TextFormat("%dº", lugar), x + folga + (larguraDoLugar - folga) / 2.0f, y + 10.0f, 24.0f,
+                         Fade(COR_GRAFITE, naTela));
+    escrever(FONTE_TITULO, carro->nome, x + larguraDoLugar + 16.0f, y + 6.0f, tamanho, Fade(COR_TEXTO_CLARO, naTela));
+    if (ehJogador) {
+        caixaArredondada((Rectangle){ x, y - 24.0f, 56.0f, 16.0f }, RAIO_PEQUENO, Fade(COR_AMARELO, naTela));
+        escreverCentralizado(FONTE_FORTE, "VOCÊ", x + 28.0f, y - 24.0f, 12.0f, Fade(COR_GRAFITE, naTela));
     }
-    if (carro == NULL) {
+}
+
+/*
+ * desenharDupla
+ * Na caminhada pelo grid: os dois carros da fila, cada placa embaixo do seu lado da tela (o carro
+ * de dentro à esquerda, o de fora à direita, como a câmera os vê).
+ * Recebe: a corrida, a fila, quanto está na tela, de que lado ela entra ou sai e a base da tarja de baixo.
+ * Devolve: nada.
+ */
+static void desenharDupla(Corrida *corrida, int fila, float naTela, float lado, float baseY) {
+    if (naTela <= 0.0f) {
         return;
     }
-    float entrou = suavizar((float) (GetTime() - desde) / 0.25f);
-    float x = 40.0f - 30.0f * (1.0f - entrou);
-    float y = baseY - 92.0f;
-
-    desenharParalelogramo(x, y, 70.0f, 56.0f, 12.0f, Fade(COR_AMARELO, entrou));
-    escreverCentralizado(FONTE_TITULO, TextFormat("%dº", lugar), x + 38.0f, y + 6.0f, 38.0f, Fade(COR_GRAFITE, entrou));
-    float tamanho = 42.0f;
-    float largura = larguraDoTexto(FONTE_TITULO, carro->nome, tamanho) + 48.0f;
-    desenharParalelogramo(x + 78.0f, y, largura, 56.0f, 12.0f, Fade(ehJogador ? COR_VERMELHO : COR_PAINEL, 0.95f * entrou));
-    escrever(FONTE_TITULO, carro->nome, x + 100.0f, y + 6.0f, tamanho, Fade(COR_TEXTO_CLARO, entrou));
-    if (ehJogador) {
-        desenharParalelogramo(x + 82.0f, y - 22.0f, 64.0f, 20.0f, 6.0f, Fade(COR_AMARELO, entrou));
-        escreverCentralizado(FONTE_FORTE, "VOCÊ", x + 116.0f, y - 22.0f, 15.0f, Fade(COR_GRAFITE, entrou));
+    float meio = larguraVirtual() / 2.0f;
+    for (int qual = 0; qual < 2; qual++) {
+        int posicao = 2 * fila + qual;
+        if (posicao >= TOTAL_CARROS) {
+            break;
+        }
+        const Carro *carro = corrida->classificacao[posicao];
+        /* Quem está à esquerda da pista aparece à esquerda da tela (a câmera olha para trás no grid) */
+        int naEsquerda = carro->deslocamentoLateral > 0.0f;
+        float centroX = naEsquerda ? meio - larguraVirtual() * 0.22f : meio + larguraVirtual() * 0.22f;
+        desenharPlacaDoPiloto(carro, posicao + 1, carro == &corrida->jogador, centroX, baseY, naTela, lado);
     }
+}
+
+/*
+ * volumeDaTrilhaNaApresentacao
+ * A música do menu segue de trilha na apresentação e vai sumindo nos últimos segundos dela (ou
+ * no pulo), para não cortar de uma vez quando a corrida começa.
+ * Recebe: a apresentação.
+ * Devolve: o volume, de 0 a 1.
+ */
+float volumeDaTrilhaNaApresentacao(const Apresentacao *apresentacao) {
+    if (!apresentacao->ativa) {
+        return 0.0f;
+    }
+    if (apresentacao->pulando > 0.0f) {
+        return apresentacao->pulando / DURACAO_DO_PULO;
+    }
+    float falta = DURACAO_DA_TOMADA[apresentacao->tomada] - apresentacao->tempoNaTomada;
+    for (int t = apresentacao->tomada + 1; t < TOTAL_TOMADAS; t++) {
+        falta += DURACAO_DA_TOMADA[t];
+    }
+    return Clamp(falta / SAIDA_DA_TRILHA, 0.0f, 1.0f);
 }
 
 /* O selo de transmissão no canto de cima: "AO VIVO" com a bolinha piscando */
@@ -541,12 +618,13 @@ void desenharApresentacao(const Apresentacao *apresentacao, Corrida *corrida) {
                                    TextFormat("POLE POSITION: %s", poleDoGrid(corrida)->nome),
                                    entradaDoLetreiro(tempo, 0.5f, duracao), baseDosLetreiros);
             break;
-        case TOMADA_PILOTOS: {
-            int lugar = 0;
-            const Carro *carro = carroDaCaminhada(corrida, t, &lugar);
-            desenharPiloto(carro, lugar, carro == &corrida->jogador, baseDosLetreiros);
+        case TOMADA_PILOTOS:
+            for (int fila = 0; fila < FILAS_DO_GRID; fila++) {
+                float lado = 1.0f;
+                float naTela = presencaDaFila(corrida, fila, t, &lado);
+                desenharDupla(corrida, fila, naTela, lado, baseDosLetreiros);
+            }
             break;
-        }
         case TOMADA_JOGADOR: {
             int lugar = TOTAL_CARROS;
             for (int i = 0; i < TOTAL_CARROS; i++) {

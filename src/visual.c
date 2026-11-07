@@ -11,6 +11,7 @@
 
 #define PASTA_FONTES        "recursos/fontes/"
 #define ARQUIVO_LOGO        "recursos/texturas/logo/LogoKatchau.png"
+#define ARQUIVO_LOGO_PRETA  "recursos/texturas/logo/LogoPreta.png"
 
 /* As fontes são geradas grandes e reduzidas com mipmaps: os menus são
  * ampliados para a tela real (até ~2x num monitor Full HD) e assim as
@@ -43,6 +44,7 @@ static const char *ARQUIVOS_FONTE[TOTAL_FONTES] = {
 static Font fontes[TOTAL_FONTES];
 static int fonteCarregada[TOTAL_FONTES];
 static Texture2D texturaLogo;
+static Texture2D texturaLogoPreta;   /* a versão em preto e branco, para o HUD da corrida */
 
 /*
  * carregarVisual
@@ -70,6 +72,11 @@ void carregarVisual(void) {
     }
     UnloadCodepoints(codigos);
 
+    texturaLogoPreta = LoadTexture(ARQUIVO_LOGO_PRETA);
+    if (texturaLogoPreta.id != 0) {
+        GenTextureMipmaps(&texturaLogoPreta);
+        SetTextureFilter(texturaLogoPreta, TEXTURE_FILTER_TRILINEAR);
+    }
     texturaLogo = LoadTexture(ARQUIVO_LOGO);
     if (texturaLogo.id != 0) {
         GenTextureMipmaps(&texturaLogo);
@@ -91,6 +98,7 @@ void descarregarVisual(void) {
         }
     }
     UnloadTexture(texturaLogo);
+    UnloadTexture(texturaLogoPreta);
 }
 
 /* ==================================================================
@@ -521,6 +529,22 @@ float desenharTecla(float x, float y, const char *tecla) {
                    COR_GRAFITE);
     }
     return largura;
+}
+
+/*
+ * desenharLogoPreta
+ * A logo em preto e branco (a da torre de posições), na largura pedida.
+ * Recebe: o centro x, o topo e a largura.
+ * Devolve: a altura que ela ocupou (0 se o arquivo faltar).
+ */
+float desenharLogoPreta(float centroX, float y, float largura) {
+    if (texturaLogoPreta.id == 0) {
+        return 0.0f;
+    }
+    float altura = largura * texturaLogoPreta.height / texturaLogoPreta.width;
+    DrawTexturePro(texturaLogoPreta, (Rectangle){ 0, 0, (float) texturaLogoPreta.width, (float) texturaLogoPreta.height },
+                   (Rectangle){ centroX - largura / 2.0f, y, largura, altura }, (Vector2){ 0, 0 }, 0.0f, WHITE);
+    return altura;
 }
 
 /*

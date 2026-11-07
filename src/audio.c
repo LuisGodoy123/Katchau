@@ -137,6 +137,7 @@ static int musicaCarregada = 0;
 static int iniciada = 0;     /* já foi dado o Play alguma vez */
 static int pausada = 0;      /* está pausada (volume zerado fora dos menus) */
 static float fade = 0.0f;    /* 0 (mudo) a 1 (volume máximo) */
+static float volumeExtra = 1.0f;   /* a apresentação da largada vai abaixando a trilha */
 /* A abertura: o áudio montado para a intro, que segue no menu; quando acaba, entra a Real Gone
  * (que fica repetindo), e soa como uma coisa só */
 #ifndef ARQUIVO_DA_ABERTURA
@@ -301,6 +302,16 @@ float tempoDaMusicaDoMenu(void) {
 }
 
 /*
+ * definirVolumeDaTrilha
+ * Um volume a mais sobre a música do menu (a apresentação da largada a faz sumir aos poucos).
+ * Recebe: de 0 a 1.
+ * Devolve: nada.
+ */
+void definirVolumeDaTrilha(float volume) {
+    volumeExtra = fminf(fmaxf(volume, 0.0f), 1.0f);
+}
+
+/*
  * atualizarAudio
  * Chamar uma vez por quadro. Sobe o volume nos menus e desce fora deles;
  * quando chega a zero, pausa a música para retomá-la de onde parou.
@@ -330,7 +341,7 @@ void atualizarAudio(int musicaDoMenu) {
         }
     }
 
-    SetMusicVolume(*musicaAtual(), fade * VOLUME_MUSICA_MENU);
+    SetMusicVolume(*musicaAtual(), fade * volumeExtra * VOLUME_MUSICA_MENU);
     if (iniciada && !pausada) {
         UpdateMusicStream(*musicaAtual());   /* alimenta o som; precisa de uma chamada por quadro */
         if (naAbertura && !IsMusicStreamPlaying(abertura)) {
@@ -338,7 +349,7 @@ void atualizarAudio(int musicaDoMenu) {
             naAbertura = 0;
             if (musicaCarregada) {
                 PlayMusicStream(musicaMenu);
-                SetMusicVolume(musicaMenu, fade * VOLUME_MUSICA_MENU);
+                SetMusicVolume(musicaMenu, fade * volumeExtra * VOLUME_MUSICA_MENU);
             } else {
                 iniciada = 0;
             }
