@@ -35,7 +35,7 @@ typedef struct {
 enum { CORRIDA_MOTOR, CORRIDA_CONTAGEM, CORRIDA_MUSICA, TOTAL_SONS_CORRIDA };
 
 static SomDeCorrida somCorrida[TOTAL_SONS_CORRIDA] = {
-    [CORRIDA_MOTOR] = { .arquivo = "recursos/sons/nascar/nascar_largada.wav", .volumeMaximo = 0.8f },   /* o motor aquecendo */
+    [CORRIDA_MOTOR] = { .arquivo = "recursos/sons/efeitos/nitro_car.mp3", .volumeMaximo = 0.95f },   /* o motor aquecendo: o começo da gravação do motor */
     [CORRIDA_CONTAGEM] = { .arquivo = "recursos/sons/contagem_largada.mp3", .volumeMaximo = 1.0f },
     [CORRIDA_MUSICA] = { .arquivo = "recursos/sons/musica_corrida.mp3", .volumeMaximo = 0.5f,
                          .velocidadeFade = 1.0f, .repetir = 1 },

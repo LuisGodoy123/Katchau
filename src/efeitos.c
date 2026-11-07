@@ -10,6 +10,7 @@
 #include "raylib.h"
 #include "efeitos.h"
 #include "motor.h"
+#include "motorgranular.h"
 #include "pitstop.h"
 
 /* ---------- Volumes (0 a 1) e ajustes ---------- */
@@ -73,6 +74,155 @@ static int motorDoJogadorTocando = 0;
 static float entradaDoMotor = 0.0f;
 static int motorAtivoAntes = 0;
 
+/* ==================================================================
+ * O motor de todos os carros, a partir de nitro_car.mp3
+ * ================================================================== */
+
+/* O motor do carro do jogador e o dos rivais que soam perto é a gravação nitro_car.mp3, tocada pelo
+ * motorgranular.c: o tom segue a rotação de cada carro, cada marcha usa a sua arrancada da gravação e a troca de
+ * marcha faz o som cair e subir como no carro gravado. Cada carro que soa tem a sua voz (um motor granular e um
+ * fluxo de áudio de baixa latência); todas leem a mesma gravação. Se o arquivo faltar, o motor NASCAR de antes
+ * continua tocando. */
+#define ARQUIVO_DO_MOTOR           "recursos/sons/efeitos/nitro_car.mp3"
+#define VOLUME_DO_MOTOR_GRANULAR   1.15f   /* a gravação já sai no volume dela (RMS 0,2); isto dá um pouco de presença */
+#define NASCAR_SOB_O_MOTOR         0.0f    /* quanto do motor NASCAR (que tem outro tom) ainda toca junto nos carros */
+#define VOZES_GRANULARES           (1 + VOZES_DE_RIVAL)   /* a voz 0 é a do jogador; as outras, as dos rivais */
+
+typedef struct {
+    MotorGranular motor;
+    AudioStream fluxo;
+    int valida;      /* o fluxo abriu */
+    int tocando;
+} VozGranular;
+
+static float *gravacaoDoMotor = NULL;
+static int totalDaGravacao = 0;
+static VozGranular vozesGranulares[VOZES_GRANULARES];
+static int motorGranularPronto = 0;
+
+/*
+ * carregarMotorGranular
+ * Lê o mp3, deixa a gravação em mono a 44100 Hz e abre os fluxos de áudio de baixa latência por onde os motores
+ * saem (blocos de PASSO_DO_MOTOR amostras, ~23 ms).
+ */
+static void carregarMotorGranular(void) {
+    motorGranularPronto = 0;
+    if (!FileExists(ARQUIVO_DO_MOTOR)) {
+        TraceLog(LOG_WARNING, "MOTOR: %s nao existe: o motor NASCAR toca no lugar", ARQUIVO_DO_MOTOR);
+        return;
+    }
+    Wave onda = LoadWave(ARQUIVO_DO_MOTOR);
+    if (!IsWaveValid(onda) || onda.channels < 1 || onda.frameCount == 0) {
+        TraceLog(LOG_WARNING, "MOTOR: nao deu para ler %s", ARQUIVO_DO_MOTOR);
+        return;
+    }
+    float *amostras = LoadWaveSamples(onda);
+    int canais = (int) onda.channels, quadros = (int) onda.frameCount;
+    int destino = (int) ((long long) quadros * TAXA_DO_MOTOR_GRANULAR / (long long) onda.sampleRate);
+    gravacaoDoMotor = malloc(sizeof(float) * (size_t) (destino + 4));
+    if (amostras != NULL && gravacaoDoMotor != NULL) {
+        for (int i = 0; i < destino; i++) {
+            float onde = (float) i * (float) onda.sampleRate / (float) TAXA_DO_MOTOR_GRANULAR;   /* reamostra, se não for 44100 */
+            int q = (int) onde;
+            float f = onde - (float) q;
+            int q2 = (q + 1 < quadros) ? q + 1 : q;
+            float a = 0.0f, b = 0.0f;
+            for (int c = 0; c < canais; c++) {
+                a += amostras[q * canais + c];
+                b += amostras[q2 * canais + c];
+            }
+            gravacaoDoMotor[i] = (a * (1.0f - f) + b * f) / (float) canais;
+        }
+        totalDaGravacao = destino;
+        MotorGranular prova;
+        if (iniciarMotorGranular(&prova, gravacaoDoMotor, destino)) {
+            SetAudioStreamBufferSizeDefault(PASSO_DO_MOTOR);   /* blocos pequenos: o motor responde ao pedal sem demora */
+            for (int v = 0; v < VOZES_GRANULARES; v++) {
+                vozesGranulares[v].fluxo = LoadAudioStream(TAXA_DO_MOTOR_GRANULAR, 16, 1);
+                vozesGranulares[v].valida = IsAudioStreamValid(vozesGranulares[v].fluxo);
+                vozesGranulares[v].tocando = 0;
+            }
+            SetAudioStreamBufferSizeDefault(0);
+            motorGranularPronto = vozesGranulares[0].valida;
+        } else {
+            TraceLog(LOG_WARNING, "MOTOR: a gravacao e curta demais (%d amostras)", destino);
+        }
+    }
+    if (amostras != NULL) {
+        UnloadWaveSamples(amostras);
+    }
+    UnloadWave(onda);
+    if (!motorGranularPronto) {
+        free(gravacaoDoMotor);
+        gravacaoDoMotor = NULL;
+    } else {
+        TraceLog(LOG_INFO, "MOTOR: %s carregado (%.1f s); o motor dos carros e ele", ARQUIVO_DO_MOTOR, (float) totalDaGravacao / TAXA_DO_MOTOR_GRANULAR);
+    }
+}
+
+static void descarregarMotorGranular(void) {
+    for (int v = 0; v < VOZES_GRANULARES; v++) {
+        if (vozesGranulares[v].valida) {
+            StopAudioStream(vozesGranulares[v].fluxo);
+            UnloadAudioStream(vozesGranulares[v].fluxo);
+            vozesGranulares[v].valida = 0;
+        }
+        vozesGranulares[v].tocando = 0;
+    }
+    free(gravacaoDoMotor);
+    gravacaoDoMotor = NULL;
+    motorGranularPronto = 0;
+}
+
+static void ligarMotorGranular(int v) {
+    VozGranular *voz = &vozesGranulares[v];
+    if (motorGranularPronto && voz->valida && !voz->tocando) {
+        iniciarMotorGranular(&voz->motor, gravacaoDoMotor, totalDaGravacao);
+        PlayAudioStream(voz->fluxo);
+        voz->tocando = 1;
+    }
+}
+
+static void desligarMotorGranular(int v) {
+    VozGranular *voz = &vozesGranulares[v];
+    if (voz->tocando) {
+        StopAudioStream(voz->fluxo);
+        voz->tocando = 0;
+    }
+}
+
+static void desligarTodosOsMotoresGranulares(void) {
+    for (int v = 0; v < VOZES_GRANULARES; v++) {
+        desligarMotorGranular(v);
+    }
+}
+
+/*
+ * atualizarMotorGranular
+ * Diz a uma voz a marcha, a rotação, o volume e o lado de agora e enche os blocos de áudio que o fluxo dela já
+ * terminou de tocar.
+ * Recebe: a voz, a marcha, a rotação (0 a 1, pode passar de 1 com o Doppler), o volume (0 a 1) e o lado (0 a 1, 0,5 no meio).
+ */
+static void atualizarMotorGranular(int v, int marcha, float giro, float volume, float lado) {
+    VozGranular *voz = &vozesGranulares[v];
+    if (!voz->tocando) {
+        return;
+    }
+    definirMotorGranular(&voz->motor, marcha, giro, volume);
+    SetAudioStreamPan(voz->fluxo, lado);
+    for (int bloco = 0; bloco < 4 && IsAudioStreamProcessed(voz->fluxo); bloco++) {
+        float mono[PASSO_DO_MOTOR];
+        short pcm[PASSO_DO_MOTOR];
+        gerarMotorGranular(&voz->motor, mono, PASSO_DO_MOTOR);
+        for (int i = 0; i < PASSO_DO_MOTOR; i++) {
+            float x = mono[i] * VOLUME_DO_MOTOR_GRANULAR;
+            x = x > 1.0f ? 1.0f : (x < -1.0f ? -1.0f : x);
+            pcm[i] = (short) (x * 32767.0f);
+        }
+        UpdateAudioStream(voz->fluxo, pcm, PASSO_DO_MOTOR);
+    }
+}
+
 /* ---------- Loops por estado ---------- */
 enum { LOOP_VENTO, LOOP_PNEU, LOOP_GRAMA, LOOP_MURO, LOOP_NITRO, TOTAL_LOOPS };
 
@@ -126,7 +276,7 @@ typedef struct {
     EstadoDoPit pit;
     int cantoDaPistola;       /* a roda que a pistola está trocando (-1 = nenhuma) */
     double horaDoCambio;
-    int pneuEstourado;        /* o pneu do jogador já estava estourado no quadro anterior */
+    int pneuEstourado;        /* os pneus do jogador que já estavam estourados no quadro anterior (um bit para cada roda) */
 } EstadoDosEfeitos;
 
 static EstadoDosEfeitos estado;
@@ -501,7 +651,8 @@ static void tocarPneuEstourado(const Carro *jogador, int ativo) {
     }
     float f = fminf(jogador->velocidade / jogador->velocidadeMaxima, 1.0f);
     double agora = GetTime();
-    if (agora - horaDaBorracha < 1.0 / (3.0 + 8.0 * f)) {
+    int estourados = quantosPneusEstourados(jogador);
+    if (agora - horaDaBorracha < 1.0 / ((3.0 + 8.0 * f) * (1.0 + 0.35 * (estourados - 1)))) {   /* mais pneus no aro, mais batidas */
         return;
     }
     horaDaBorracha = agora;
@@ -611,6 +762,7 @@ static void tocarCurto(int som, float volume, float tom) {
  * Devolve: nada.
  */
 void carregarEfeitos(void) {
+    carregarMotorGranular();
     for (int v = 0; v < VARIACOES_DE_LATA; v++) {
         latasFortes[v] = gerarBatidaDeLata(100u + (unsigned int) v, 1);
         latasLeves[v] = gerarBatidaDeLata(200u + (unsigned int) v, 0);
@@ -672,6 +824,7 @@ void carregarEfeitos(void) {
  * Devolve: nada.
  */
 void descarregarEfeitos(void) {
+    descarregarMotorGranular();
     for (int v = 0; v < VARIACOES_DE_LATA; v++) {
         if (IsSoundValid(latasFortes[v])) {
             UnloadSound(latasFortes[v]);
@@ -739,6 +892,7 @@ void iniciarEfeitosDaCorrida(void) {
     motorDoJogadorTocando = 0;
     motorAtivoAntes = 0;
     entradaDoMotor = 0.0f;
+    desligarTodosOsMotoresGranulares();
     for (int v = 0; v < VOZES_DE_RIVAL; v++) {
         for (int f = 0; f < FAIXAS_DE_RIVAL; f++) {
             pararFaixa(&vozes[v].faixas[f]);
@@ -765,6 +919,11 @@ void iniciarEfeitosDaCorrida(void) {
  * Devolve: nada.
  */
 void pausarEfeitosDaCorrida(int pausar) {
+    for (int v = 0; v < VOZES_GRANULARES; v++) {
+        if (vozesGranulares[v].tocando) {
+            pausar ? PauseAudioStream(vozesGranulares[v].fluxo) : ResumeAudioStream(vozesGranulares[v].fluxo);
+        }
+    }
     for (int i = 0; i < FAIXAS_ACELERANDO; i++) {
         if (acelerando[i].carregada && motorDoJogadorTocando) {
             pausar ? PauseMusicStream(acelerando[i].musica) : ResumeMusicStream(acelerando[i].musica);
@@ -777,7 +936,7 @@ void pausarEfeitosDaCorrida(int pausar) {
     }
     for (int v = 0; v < VOZES_DE_RIVAL; v++) {
         for (int f = 0; f < FAIXAS_DE_RIVAL; f++) {
-            if (vozes[v].faixas[f].carregada && vozes[v].tocando) {
+            if (vozes[v].faixas[f].carregada && vozes[v].tocando && !vozesGranulares[1 + v].valida) {
                 pausar ? PauseMusicStream(vozes[v].faixas[f].musica) : ResumeMusicStream(vozes[v].faixas[f].musica);
             }
         }
@@ -810,6 +969,7 @@ static void atualizarMotorDoJogador(int ativo, const Carro *jogador, float tempo
         }
         motorDoJogadorTocando = 1;
         entradaDoMotor = 0.0f;
+        ligarMotorGranular(0);
     }
     motorAtivoAntes = ativo;
     if (!motorDoJogadorTocando) {
@@ -826,6 +986,7 @@ static void atualizarMotorDoJogador(int ativo, const Carro *jogador, float tempo
         }
         motorDoJogadorTocando = 0;
         entradaDoMotor = 0.0f;
+        desligarMotorGranular(0);
         return;
     }
 
@@ -833,6 +994,11 @@ static void atualizarMotorDoJogador(int ativo, const Carro *jogador, float tempo
     float carga = limitar(jogador->motor.carga, 0.0f, 1.0f);
     float rpm = giro * RPM_MAXIMO;
     float forca = VOLUME_MOTOR_DO_JOGADOR * entradaDoMotor * (0.55f + 0.45f * giro);
+    if (vozesGranulares[0].tocando) {
+        /* O motor do jogador é o da gravação: o volume segue a entrada, a rotação e a carga (pé no fundo ou levantado) */
+        atualizarMotorGranular(0, jogador->motor.marcha, giro, entradaDoMotor * (0.55f + 0.45f * giro) * (0.35f + 0.65f * sqrtf(carga)), 0.5f);
+        forca *= NASCAR_SOB_O_MOTOR;
+    }
 
     misturarFaixas(acelerando, FAIXAS_ACELERANDO, rpm, forca * sqrtf(carga), 0.5f, 1.0f);
     misturarFaixas(aliviando, FAIXAS_ALIVIANDO, rpm, forca * VOLUME_ALIVIADO * sqrtf(1.0f - carga), 0.5f, 1.0f);
@@ -942,19 +1108,35 @@ static void atualizarMotoresDosRivais(Corrida *corrida, int ativo, float tempo) 
         }
 
         voz->volume = aproximar(voz->volume, alvo, ENTRADA_DO_MOTOR, SAIDA_DO_MOTOR, tempo);
+        int comGravacao = vozesGranulares[1 + v].valida;   /* o motor do rival também é a gravação, quando ela existe */
         if (voz->volume > 0.002f && !voz->tocando) {
-            for (int f = 0; f < FAIXAS_DE_RIVAL; f++) {
-                tocarFaixa(&voz->faixas[f]);
+            if (comGravacao) {
+                ligarMotorGranular(1 + v);
+            } else {
+                for (int f = 0; f < FAIXAS_DE_RIVAL; f++) {
+                    tocarFaixa(&voz->faixas[f]);
+                }
             }
             voz->tocando = 1;
         } else if (voz->volume <= 0.002f && alvo <= 0.0f && voz->tocando) {
-            for (int f = 0; f < FAIXAS_DE_RIVAL; f++) {
-                pararFaixa(&voz->faixas[f]);
+            if (comGravacao) {
+                desligarMotorGranular(1 + v);
+            } else {
+                for (int f = 0; f < FAIXAS_DE_RIVAL; f++) {
+                    pararFaixa(&voz->faixas[f]);
+                }
             }
             voz->tocando = 0;
         }
         if (voz->tocando) {
-            misturarFaixas(voz->faixas, FAIXAS_DE_RIVAL, rpm, voz->volume, lado, voz->doppler);
+            if (comGravacao) {
+                const Carro *dono = (voz->rival >= 0) ? &corrida->rivais[voz->rival] : NULL;
+                /* o Doppler muda o tom do mesmo jeito que mudaria a rotação */
+                atualizarMotorGranular(1 + v, (dono != NULL) ? dono->motor.marcha : 0,
+                                       (dono != NULL) ? dono->motor.giro * voz->doppler : 0.2f, voz->volume, lado);
+            } else {
+                misturarFaixas(voz->faixas, FAIXAS_DE_RIVAL, rpm, voz->volume, lado, voz->doppler);
+            }
         }
     }
 }
@@ -1076,9 +1258,10 @@ static void dispararEfeitosCurtos(Carro *jogador) {
     }
 
     /* O pneu estoura: o tiro e o chiado (depois, a borracha batendo vem de tocarPneuEstourado) */
-    if (jogador->pneuEstourado && !estado.pneuEstourado && somDePneuPronto) {
-        SetSoundVolume(somDoEstouro, 1.0f);
-        SetSoundPitch(somDoEstouro, 1.0f);
+    if ((jogador->pneuEstourado & ~estado.pneuEstourado) && somDePneuPronto) {   /* cada pneu que estoura faz o seu estouro */
+        int primeiro = (estado.pneuEstourado == 0);
+        SetSoundVolume(somDoEstouro, primeiro ? 1.0f : 0.85f);
+        SetSoundPitch(somDoEstouro, primeiro ? 1.0f : 0.88f + 0.08f * (float) quantosPneusEstourados(jogador));
         PlaySound(somDoEstouro);
     }
     estado.pneuEstourado = jogador->pneuEstourado;

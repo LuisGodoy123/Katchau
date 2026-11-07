@@ -60,7 +60,8 @@ typedef struct {
 
 static Pedaco pedacos[MAXIMO_DE_PEDACOS];
 static int totalDePedacos = 0;
-static int pneuEstouradoAntes = 0;       /* o pneu do jogador já estava estourado no quadro anterior */
+static int pneuEstouradoAntes = 0;       /* os pneus do jogador que já estavam estourados no quadro anterior (um bit para cada roda) */
+static int rodaDaFumaca = 0;             /* a roda estourada que solta a próxima nuvem */
 static float sobraDoAro = 0.0f;          /* frações de faísca do aro que ficam para o próximo quadro */
 static float tempoDaFumacaDoAro = 0.0f;
 
@@ -86,6 +87,7 @@ void limparFaiscas(void) {
     totalDeClaroes = 0;
     totalDePedacos = 0;
     pneuEstouradoAntes = 0;
+    rodaDaFumaca = 0;
     sobraDoAro = 0.0f;
     for (int i = 0; i < TOTAL_CARROS; i++) {
         tinhaContato[i] = 0;
@@ -118,15 +120,15 @@ static Vector3 velocidadeNoMundo(const Carro *carro) {
 
 /*
  * rodaEstourada
- * Recebe: o carro (com o pneu estourado).
+ * Recebe: o carro e a roda (0 e 1 dianteiras, 2 e 3 traseiras; as pares são as da esquerda).
  * Devolve: onde o aro toca o asfalto, no mundo (um pouco acima do chão, que é onde as faíscas quicam).
  */
-static Vector3 rodaEstourada(const Carro *carro) {
+static Vector3 rodaEstourada(const Carro *carro, int roda) {
     Vector3 frente = frenteDoCarro(carro);
     Vector3 direita = { -frente.z, 0.0f, frente.x };
     PontoNoMundo p = pontoNoMundo(carro->posicao, carro->deslocamentoLateral);
-    float lado = (carro->pneuEstourado == 1) ? -1.0f : 1.0f;
-    float adiante = carro->comprimento * 0.30f, aoLado = lado * carro->largura * 0.5f;
+    float lado = (roda % 2 == 0) ? -1.0f : 1.0f;
+    float adiante = carro->comprimento * ((roda < 2) ? 0.30f : -0.30f), aoLado = lado * carro->largura * 0.5f;
     return (Vector3){ p.x + frente.x * adiante + direita.x * aoLado, p.y + ALTURA_DO_CHAO,
                       p.z + frente.z * adiante + direita.z * aoLado };
 }
@@ -195,13 +197,13 @@ static void soltarPedaco(Vector3 ponto, Vector3 velocidadeDoCarro) {
 
 /*
  * estourarRoda
- * O estouro do pneu: um clarão, uma rajada de faíscas do aro, pedaços de borracha voando e uma
+ * O estouro de um pneu: um clarão, uma rajada de faíscas do aro, pedaços de borracha voando e uma
  * nuvem de fumaça saindo da roda.
- * Recebe: o carro com o pneu estourado.
+ * Recebe: o carro e a roda que estourou.
  * Devolve: nada.
  */
-static void estourarRoda(const Carro *carro) {
-    Vector3 roda = rodaEstourada(carro);
+static void estourarRoda(const Carro *carro, int qual) {
+    Vector3 roda = rodaEstourada(carro, qual);
     Vector3 velocidade = velocidadeNoMundo(carro);
     for (int k = 0; k < 90; k++) {
         soltarFaisca(roda, Vector3Scale(velocidade, 0.35f), 1.0f);
@@ -264,24 +266,31 @@ void soltarFaiscasDaCorrida(Corrida *corrida, float tempoQuadro) {
         }
     }
 
-    /* O pneu estourado do jogador: a rajada do estouro e, rodando no aro, a chuva de faíscas no asfalto */
+    /* Os pneus estourados do jogador: a rajada de cada estouro e, rodando nos aros, a chuva de faíscas no asfalto */
     Carro *jogador = &corrida->jogador;
-    if (jogador->pneuEstourado != 0 && !pneuEstouradoAntes) {
-        estourarRoda(jogador);
+    for (int roda = 0; roda < 4; roda++) {
+        int bit = 1 << roda;
+        if ((jogador->pneuEstourado & bit) && !(pneuEstouradoAntes & bit)) {
+            estourarRoda(jogador, roda);
+        }
     }
-    pneuEstouradoAntes = jogador->pneuEstourado != 0;
-    if (jogador->pneuEstourado != 0 && jogador->estadoDoPit == PIT_FORA && jogador->velocidade > 400.0f) {
+    pneuEstouradoAntes = jogador->pneuEstourado;
+    int estourados = quantosPneusEstourados(jogador);
+    if (estourados > 0 && jogador->estadoDoPit == PIT_FORA && jogador->velocidade > 400.0f) {
         float proporcao = jogador->velocidade / jogador->velocidadeMaxima;
-        Vector3 roda = rodaEstourada(jogador);
         Vector3 velocidade = velocidadeNoMundo(jogador);
-        sobraDoAro += (70.0f + 260.0f * proporcao) * tempoQuadro;
+        sobraDoAro += (70.0f + 260.0f * proporcao) * (0.7f + 0.3f * (float) estourados) * tempoQuadro;
         while (sobraDoAro >= 1.0f) {
-            soltarFaisca(roda, Vector3Scale(velocidade, 0.2f), 0.55f + 0.3f * proporcao);
             sobraDoAro -= 1.0f;
+            /* cada faísca sai de uma das rodas estouradas, uma de cada vez */
+            do {
+                rodaDaFumaca = (rodaDaFumaca + 1) % 4;
+            } while (!(jogador->pneuEstourado & (1 << rodaDaFumaca)));
+            soltarFaisca(rodaEstourada(jogador, rodaDaFumaca), Vector3Scale(velocidade, 0.2f), 0.55f + 0.3f * proporcao);
         }
         tempoDaFumacaDoAro += tempoQuadro;
-        if (tempoDaFumacaDoAro > 0.09f) {
-            soltarNuvem(roda, velocidade, 0.35f, NUVEM_DE_PNEU);
+        if (tempoDaFumacaDoAro > 0.09f / (float) estourados) {
+            soltarNuvem(rodaEstourada(jogador, rodaDaFumaca), velocidade, 0.35f, NUVEM_DE_PNEU);
             tempoDaFumacaDoAro = 0.0f;
         }
     }

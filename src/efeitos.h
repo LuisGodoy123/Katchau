@@ -14,7 +14,10 @@
  *     apagando, volta completa, melhor volta e o pit stop (aviso, pistola das rodas e
  *     "pode ir").
  *
- * Os arquivos são WAV em recursos/sons/nascar e recursos/sons/efeitos. Dá para trocar
+ * O motor do carro do jogador é a gravação recursos/sons/efeitos/nitro_car.mp3, tocada pelo
+ * motorgranular.c: o tom segue a rotação do jogo e cada marcha usa a sua arrancada da gravação.
+ *
+ * Os outros arquivos são WAV em recursos/sons/nascar e recursos/sons/efeitos. Dá para trocar
  * qualquer um por outra gravação com o mesmo nome. Se um arquivo faltar, só aquele som
  * fica mudo.
  *

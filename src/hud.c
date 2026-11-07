@@ -806,11 +806,18 @@ static void desenharAvisosDoPit(Corrida *corrida) {
         Color cor = (sobra > 0.5f) ? COR_VERDE_HUD : (sobra > 0.25f) ? COR_AMARELO : COR_VERMELHO;
         float larguraDaBarra = 150.0f, xDaBarra = direita - larguraDaBarra;
         escrever(FONTE_FORTE, TextFormat("PNEUS %d%%", (int) (sobra * 100.0f + 0.5f)), xDaBarra, 158.0f, 15.0f, cor);
+        /* As quatro rodas, vistas de cima: a que estourou fica vermelha */
+        for (int roda = 0; roda < 4; roda++) {
+            Rectangle quadro = { xDaBarra - 30.0f + (float) (roda % 2) * 13.0f, 154.0f + (float) (roda / 2) * 17.0f, 9.0f, 14.0f };
+            caixaArredondada(quadro, 3.0f, (jogador->pneuEstourado & (1 << roda)) ? COR_VERMELHO : Fade(COR_TEXTO_CLARO, 0.55f));
+        }
         caixaArredondada((Rectangle){ xDaBarra, 178.0f, larguraDaBarra, 8.0f }, 4.0f, Fade(COR_GRAFITE, 0.85f));
         caixaArredondada((Rectangle){ xDaBarra, 178.0f, larguraDaBarra * sobra, 8.0f }, 4.0f, cor);
         if (jogador->pneuEstourado && !carroNoPit(jogador)) {   /* o aviso pisca */
             float pisca = 0.55f + 0.45f * sinf((float) GetTime() * 9.0f);
-            escreverCentralizado(FONTE_TITULO, "PNEU ESTOURADO!", centro, 100.0f, 30.0f, Fade(COR_VERMELHO, pisca));
+            int estourados = quantosPneusEstourados(jogador);
+            escreverCentralizado(FONTE_TITULO, (estourados == 1) ? "PNEU ESTOURADO!" : TextFormat("%d PNEUS ESTOURADOS!", estourados),
+                                 centro, 100.0f, 30.0f, Fade(COR_VERMELHO, pisca));
             escreverCentralizado(FONTE_FORTE, "VÁ PARA OS BOXES", centro, 134.0f, 18.0f, COR_TEXTO_CLARO);
         } else if (sobra <= 0.25f && !carroNoPit(jogador)) {
             escreverCentralizado(FONTE_FORTE, "PNEUS NO FIM: PARE NOS BOXES", centro, 108.0f, 20.0f, COR_VERMELHO);

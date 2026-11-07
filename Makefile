@@ -10,11 +10,11 @@
 
 NOME   = katchau
 CC     = gcc
-CFLAGS = -std=c99 -Wall -Wextra -g -Isrc
+CFLAGS = -std=c99 -O2 -Wall -Wextra -g -Isrc
 
 # Módulos de lógica: não usam a raylib (regra 2 do roadmap)
 LOGICA = src/pista.c src/obstaculos.c src/carro.c src/ia.c \
-         src/ordenacao.c src/corrida.c src/motor.c src/recordes.c src/olhar.c src/pitstop.c src/vibracao.c src/configuracoes.c
+         src/ordenacao.c src/corrida.c src/motor.c src/motorgranular.c src/recordes.c src/olhar.c src/pitstop.c src/vibracao.c src/configuracoes.c
 
 # Módulos que desenham na tela
 DESENHO = src/render.c src/mundo.c src/construcao.c src/paisagem.c src/infraestrutura.c src/carros3d.c src/fumaca.c src/faiscas.c src/fogos.c src/marcas.c src/torcida3d.c src/telao.c src/posprocesso.c src/noite.c src/hud.c src/menu.c src/visual.c src/audio.c src/efeitos.c src/exibicao.c src/apresentacao.c src/intro.c src/videofundo.c src/controle.c

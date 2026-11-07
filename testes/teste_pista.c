@@ -24,6 +24,7 @@
 #include "ordenacao.h"
 #include "ia.h"
 #include "obstaculos.h"
+#include "motorgranular.h"
 #include "motor.h"
 #include "olhar.h"
 #include "pitstop.h"
@@ -2802,6 +2803,45 @@ static void testarPneuEstourado(void) {
            com.deslocamentoLateral, sem.deslocamentoLateral, lado);
     verificar((com.deslocamentoLateral - sem.deslocamentoLateral) * lado > 0.3f, "o carro puxa para o lado do pneu estourado");
 
+    /* Os quatro estouram aos poucos: um a cada marca de desgaste (80, 86, 92 e 97%), e cada um piora o carro */
+    Carro aos = criarCarro("Teste", 0, buscarSegmento(pista, 1000), 0.0f, 12000.0f, 2400.0f, 0.5f);
+    aos.controladoPeloJogador = 1;
+    aos.gastaPneu = 1;
+    aos.habilidade = 1.0f;
+    aos.desgaste = 0.79f;
+    aos.velocidade = aos.velocidadeMaxima;
+    static const float MARCAS[4] = { 0.80f, 0.86f, 0.92f, 0.97f };
+    static const float TETOS[5] = { 1.0f, 0.55f, 0.46f, 0.38f, 0.30f };
+    int certo = 1, ordemCerta = 1, vistos = 0, anterior = 0;
+    float maiorComQuatro = 0.0f;
+    for (int i = 0; i < 60 * 60 * 6 && quantosPneusEstourados(&aos) < 4 + 1; i++) {
+        aos.distanciaAFrente = -1.0f;
+        atualizarCarro(&aos, atualizarIA(&aos, pista), quadro);
+        int n = quantosPneusEstourados(&aos), devia = 0;
+        for (int k = 0; k < 4; k++) {
+            devia += (aos.desgaste >= MARCAS[k]);
+        }
+        certo &= (n == devia) && (n >= anterior);
+        if (n > anterior) {
+            ordemCerta &= (n > 1 || aos.pneuEstourado == 1 || aos.pneuEstourado == 2);   /* o primeiro e dianteiro */
+            ordemCerta &= (n != 2 || (aos.pneuEstourado & 3) == 3);                        /* o segundo e o outro dianteiro */
+            vistos |= 1 << n;
+        }
+        anterior = n;
+        if (n == 4 && aos.tempoDoEstouro > 1.5f) {   /* depois da freada ate o teto novo */
+            maiorComQuatro = fmaxf(maiorComQuatro, aos.velocidade);
+            if (aos.desgaste >= 0.995f || i > 60 * 60 * 5) {
+                break;
+            }
+        }
+    }
+    verificar(certo, "cada pneu estoura na sua marca de desgaste, na ordem, e nenhum volta sozinho");
+    verificar(ordemCerta && aos.pneuEstourado == 15, "primeiro um dianteiro, depois o outro dianteiro, depois os de tras: os quatro");
+    verificar(vistos == ((1 << 1) | (1 << 2) | (1 << 3) | (1 << 4)), "e estouraram um de cada vez (1, 2, 3 e 4 pneus)");
+    printf("     com os quatro estourados: velocidade maxima vista %.0f (teto %.0f)\n", maiorComQuatro, aos.velocidadeMaxima * TETOS[4]);
+    verificar(maiorComQuatro <= aos.velocidadeMaxima * TETOS[4] * 1.02f, "com os quatro no aro, nao passa de 30% da velocidade maxima");
+    verificar(aderenciaAtual(&aos) < aderenciaAtual(&sem) * 0.6f, "e o carro segura bem menos");
+
     /* A troca nos boxes conserta */
     corrida.jogador.estadoDoPit = PIT_TROCANDO;
     corrida.jogador.tempoDaTroca = corrida.jogador.duracaoDaTroca;
@@ -3305,6 +3345,84 @@ static void testarConfiguracoes(void) {
     verificar(lida.resolucao == 0 && lida.modoDeTela == MODO_TELA_CHEIA && lida.sincroniaVertical == 1
               && lida.limiteDeQuadros == LIMITE_PADRAO_DE_QUADROS && lida.mostrarFps == 1, "exibicao estragada no arquivo: so o que esta certo vale");
     remove(arquivo);
+}
+
+/*
+ * testarMotorGranular
+ * O motor do jogador montado em pedacinhos da gravacao: o tom segue a rotacao, cada marcha usa a sua
+ * arrancada, e a saida e limpa (sem estalos, sem passar do limite).
+ */
+static void testarMotorGranular(void) {
+    printf("\n32b) Motor da gravacao (nitro_car): tom pela rotacao e marcha\n");
+    verificar(fabsf(tomDoGiro(RPM_DA_TROCA / RPM_MAXIMO) - 322.0f) < 0.5f, "na linha vermelha do jogo, o tom e o da troca de marcha da gravacao");
+    verificar(tomDoGiro(0.2f) < tomDoGiro(0.4f) && tomDoGiro(0.4f) < tomDoGiro(0.8f), "mais giro, mais tom");
+
+    /* A tabela: o ponto da gravacao anda para a frente com o tom, e uma marcha de cima sobe como a de baixo */
+    for (int marcha = 0; marcha < 3; marcha++) {
+        float anterior = -1.0f, anteriorTom = 0.0f;
+        int cresce = 1, tomCerto = 1;
+        for (float tom = 60.0f; tom <= 322.0f; tom += 4.0f) {
+            float segundos, tomDaGravacao;
+            int dentro = pontoDaGravacao(marcha, tom, &segundos, &tomDaGravacao);
+            if (dentro) {
+                tomCerto &= fabsf(tomDaGravacao - tom) < 0.01f;   /* dentro da marcha, o ponto tem exatamente o tom pedido */
+                if (anterior >= 0.0f && tomDaGravacao > anteriorTom) {
+                    cresce &= (segundos >= anterior - 1.9f);       /* so a emenda da 1a marcha (1,3 s -> 3,1 s) pula, e para a frente */
+                }
+                anterior = segundos;
+                anteriorTom = tomDaGravacao;
+            }
+        }
+        verificar(cresce && tomCerto, "o ponto da gravacao acompanha o tom pedido");
+    }
+    float segundos, tomDaGravacao;
+    verificar(pontoDaGravacao(1, 100.0f, &segundos, &tomDaGravacao) == 0 && tomDaGravacao > 200.0f, "tom que a marcha da gravacao nao tem: fica na ponta e toca mais lento");
+    float s1, t1, s2, t2, s3, t3;
+    pontoDaGravacao(0, 250.0f, &s1, &t1);
+    pontoDaGravacao(1, 250.0f, &s2, &t2);
+    pontoDaGravacao(4, 250.0f, &s3, &t3);
+    verificar(s1 < 5.0f && s2 > 5.0f && s2 < 9.5f && s3 > 9.5f, "a 1a, a 2a e a 3a marcha usam subidas diferentes da gravacao (e da 3a em diante e a mesma)");
+
+    /* A saida, com uma gravacao de mentira: um tom que sobe com o tempo, 20 s a 44100 Hz */
+    int total = 20 * TAXA_DO_MOTOR_GRANULAR;
+    float *fonte = malloc(sizeof(float) * (size_t) total);
+    float fase = 0.0f;
+    for (int i = 0; i < total; i++) {
+        float t = (float) i / TAXA_DO_MOTOR_GRANULAR;
+        fase += 2.0f * 3.14159265f * (100.0f + 12.0f * t) / TAXA_DO_MOTOR_GRANULAR;
+        fonte[i] = 0.3f * sinf(fase) + 0.15f * sinf(2.0f * fase) + 0.07f * sinf(3.0f * fase);
+    }
+    MotorGranular motor;
+    verificar(!iniciarMotorGranular(&motor, fonte, 5 * TAXA_DO_MOTOR_GRANULAR), "uma gravacao curta demais nao serve");
+    verificar(!iniciarMotorGranular(&motor, NULL, 0), "sem gravacao nao serve");
+    verificar(iniciarMotorGranular(&motor, fonte, total), "uma gravacao de 20 s serve");
+    static float saida[TAXA_DO_MOTOR_GRANULAR];
+    definirMotorGranular(&motor, 2, 0.6f, 0.0f);
+    gerarMotorGranular(&motor, saida, 4096);
+    float maior = 0.0f;
+    for (int i = 0; i < 4096; i++) {
+        maior = fmaxf(maior, fabsf(saida[i]));
+    }
+    verificar(maior == 0.0f, "com volume zero, silencio");
+    int limpo = 1, finito = 1, barulho = 0;
+    float picoDoSom = 0.0f, maiorSalto = 0.0f, anterior = 0.0f;
+    for (int bloco = 0; bloco < 30; bloco++) {   /* meio segundo de motor, com a marcha e o giro mudando no meio */
+        definirMotorGranular(&motor, (bloco < 15) ? 1 : 3, (bloco < 15) ? 0.55f : 0.70f, 1.0f);
+        gerarMotorGranular(&motor, saida, 735);
+        for (int i = 0; i < 735; i++) {
+            finito &= isfinite(saida[i]);
+            picoDoSom = fmaxf(picoDoSom, fabsf(saida[i]));
+            if (bloco > 3) {
+                maiorSalto = fmaxf(maiorSalto, fabsf(saida[i] - anterior));
+            }
+            anterior = saida[i];
+            barulho |= fabsf(saida[i]) > 0.05f;
+        }
+    }
+    limpo = (picoDoSom < 1.5f) && (maiorSalto < 0.6f);
+    verificar(finito && barulho, "com volume, sai som, e so numeros normais");
+    verificar(limpo, "sem estalos (nenhum salto grande de uma amostra para a outra) e sem passar do limite");
+    free(fonte);
 }
 
 /*
@@ -4397,6 +4515,7 @@ int main(int argc, char *argv[]) {
     testarPneuEstourado();
     testarVibracao();
     testarConfiguracoes();
+    testarMotorGranular();
     testarCurvaNaMaoDoPiloto();
     testarCambio();
     testarTransitoNoPit();
