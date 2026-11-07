@@ -74,6 +74,80 @@ void configuracoesPadrao(Configuracoes *config) {
     config->efeitos = 1;
     config->inverterCameraX = 0;
     config->inverterCameraY = 0;
+    config->resolucao = 0;
+    config->modoDeTela = MODO_TELA_CHEIA;
+    config->sincroniaVertical = 1;
+    config->limiteDeQuadros = LIMITE_PADRAO_DE_QUADROS;
+    config->mostrarFps = 0;
+}
+
+/* A tabela de resoluções (a automática é a primeira) e a de limites de quadros */
+static const int RESOLUCOES[TOTAL_RESOLUCOES][2] = {
+    { 0, 0 }, { 800, 600 }, { 1024, 768 }, { 1280, 720 }, { 1366, 768 }, { 1600, 900 }, { MAIOR_LARGURA, MAIOR_ALTURA },
+};
+static const int LIMITES_DE_QUADROS[TOTAL_LIMITES_DE_QUADROS] = { 30, 60, 120, 144, 240, 0 };
+
+/*
+ * resolucaoDaTabela
+ * Recebe: o índice e onde guardar a largura e a altura.
+ * Devolve: 1 se o índice existe (a automática, índice 0, devolve 0x0), 0 se não.
+ */
+int resolucaoDaTabela(int indice, int *largura, int *altura) {
+    if (indice < 0 || indice >= TOTAL_RESOLUCOES) {
+        return 0;
+    }
+    *largura = RESOLUCOES[indice][0];
+    *altura = RESOLUCOES[indice][1];
+    return 1;
+}
+
+/*
+ * resolucaoCabe
+ * Recebe: o índice e o tamanho do monitor.
+ * Devolve: 1 se a resolução cabe no monitor (a automática sempre cabe).
+ */
+int resolucaoCabe(int indice, int larguraDoMonitor, int alturaDoMonitor) {
+    int l, a;
+    if (!resolucaoDaTabela(indice, &l, &a)) {
+        return 0;
+    }
+    return indice == 0 || (l <= larguraDoMonitor && a <= alturaDoMonitor);
+}
+
+/*
+ * resolucaoEfetiva
+ * A resolução que vale de verdade: a escolhida (se cabe no monitor) ou, na automática, a maior da
+ * tabela que cabe: na tela cheia, no monitor inteiro; em janela, deixando folga para as bordas e a
+ * barra de tarefas (até 85% da altura). Nunca passa de 1920x1080.
+ * Recebe: as configurações, o tamanho do monitor e onde guardar a largura e a altura.
+ * Devolve: nada.
+ */
+void resolucaoEfetiva(const Configuracoes *config, int larguraDoMonitor, int alturaDoMonitor, int *largura, int *altura) {
+    if (config->resolucao > 0 && resolucaoCabe(config->resolucao, larguraDoMonitor, alturaDoMonitor)) {
+        resolucaoDaTabela(config->resolucao, largura, altura);
+        return;
+    }
+    int alturaMaxima = (config->modoDeTela == MODO_JANELA) ? alturaDoMonitor * 85 / 100 : alturaDoMonitor;
+    int escolhida = 1;   /* a menor serve quando nada cabe */
+    for (int i = 1; i < TOTAL_RESOLUCOES; i++) {
+        if (RESOLUCOES[i][0] <= larguraDoMonitor && RESOLUCOES[i][1] <= alturaMaxima) {
+            escolhida = i;
+        }
+    }
+    *largura = RESOLUCOES[escolhida][0];
+    *altura = RESOLUCOES[escolhida][1];
+}
+
+/*
+ * quadrosPorSegundoDoLimite
+ * Recebe: o índice na tabela de limites.
+ * Devolve: os quadros por segundo (0 = sem limite).
+ */
+int quadrosPorSegundoDoLimite(int indice) {
+    if (indice < 0 || indice >= TOTAL_LIMITES_DE_QUADROS) {
+        indice = LIMITE_PADRAO_DE_QUADROS;
+    }
+    return LIMITES_DE_QUADROS[indice];
 }
 
 /*
@@ -136,9 +210,10 @@ int salvarConfiguracoes(const Configuracoes *config, const char *arquivo) {
         fprintf(saida, "comando %s %d %d %d %d\n", CHAVES_DAS_ACOES[a], config->comandos[a][0], config->comandos[a][1],
                 config->comandos[a][2], config->comandos[a][3]);
     }
-    fprintf(saida, "vibracao %d\nforca %d\ngatilhos %d\nzona_morta %d\nvolante %d\ndirecao_guiada %d\nsombras %d\nefeitos %d\ncamera_x %d\ncamera_y %d\n",
+    fprintf(saida, "vibracao %d\nforca %d\ngatilhos %d\nzona_morta %d\nvolante %d\ndirecao_guiada %d\nsombras %d\nefeitos %d\ncamera_x %d\ncamera_y %d\nresolucao %d\nmodo_de_tela %d\nsincronia_vertical %d\nlimite_de_quadros %d\nmostrar_fps %d\n",
             config->vibracaoLigada, config->forcaDaVibracao, config->gatilhosAdaptativos, config->zonaMorta,
-            config->respostaDoVolante, config->direcaoGuiada, config->sombras, config->efeitos, config->inverterCameraX, config->inverterCameraY);
+            config->respostaDoVolante, config->direcaoGuiada, config->sombras, config->efeitos, config->inverterCameraX, config->inverterCameraY,
+            config->resolucao, config->modoDeTela, config->sincroniaVertical, config->limiteDeQuadros, config->mostrarFps);
     fclose(saida);
     return 1;
 }
@@ -201,6 +276,16 @@ int carregarConfiguracoes(Configuracoes *config, const char *arquivo) {
                 valorValido(valor, 0, 1, &config->inverterCameraX);
             } else if (strcmp(chave, "camera_y") == 0) {
                 valorValido(valor, 0, 1, &config->inverterCameraY);
+            } else if (strcmp(chave, "resolucao") == 0) {
+                valorValido(valor, 0, TOTAL_RESOLUCOES - 1, &config->resolucao);
+            } else if (strcmp(chave, "modo_de_tela") == 0) {
+                valorValido(valor, 0, TOTAL_MODOS_DE_TELA - 1, &config->modoDeTela);
+            } else if (strcmp(chave, "sincronia_vertical") == 0) {
+                valorValido(valor, 0, 1, &config->sincroniaVertical);
+            } else if (strcmp(chave, "limite_de_quadros") == 0) {
+                valorValido(valor, 0, TOTAL_LIMITES_DE_QUADROS - 1, &config->limiteDeQuadros);
+            } else if (strcmp(chave, "mostrar_fps") == 0) {
+                valorValido(valor, 0, 1, &config->mostrarFps);
             }
         }
     }

@@ -55,6 +55,8 @@ typedef struct {
     float destaqueOrdem;                        /* animação (0 a 1) do seletor de ordem */
     int opcaoPausa;                             /* item marcado na pausa */
     float destaquePausa[TOTAL_OPCOES_PAUSA];    /* animação (0 a 1) de cada botão da pausa */
+    int abaConfig;                              /* a aba das configurações: 0 = controles, 1 = exibição */
+    float segundosParaAplicar;                  /* > 0: a resolução ou o modo de tela mudou e a janela muda quando chegar a zero */
     int linhaConfig;                            /* a linha marcada nas configurações */
     int colunaConfig;                           /* a coluna marcada, nas linhas de comandos */
     int esperandoComando;                       /* 1: esperando apertar a tecla ou o botão novo */

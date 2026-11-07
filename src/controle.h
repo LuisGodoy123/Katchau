@@ -32,6 +32,8 @@ typedef enum {
     BOTAO_START,
     BOTAO_LIMPAR,      /* Y */
     BOTAO_CAMERA,      /* touchpad do PlayStation (ou SELECT/BACK) */
+    BOTAO_ABA_ANTERIOR,   /* LB / L1 */
+    BOTAO_ABA_SEGUINTE,   /* RB / R1 */
     TOTAL_BOTOES
 } BotaoDoControle;
 

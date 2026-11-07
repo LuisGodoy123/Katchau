@@ -35,6 +35,7 @@
 #include "visual.h"
 #include "audio.h"
 #include "efeitos.h"
+#include "exibicao.h"
 #include "apresentacao.h"
 #include "intro.h"
 #include "videofundo.h"
@@ -179,22 +180,27 @@ static int abrirJanela(int emJanela) {
      * intervalos regulares, sem os "trancos" de quadros irregulares.
      * Precisa vir antes do InitWindow. O SetTargetFPS logo abaixo
      * continua valendo como limite, caso o driver de vídeo ignore o VSync. */
-    SetConfigFlags(FLAG_VSYNC_HINT);
+    if (configuracoesAtuais()->sincroniaVertical) {
+        SetConfigFlags(FLAG_VSYNC_HINT);
+    }
     InitWindow(LARGURA_TELA, ALTURA_TELA, TITULO_JANELA);
     if (!IsWindowReady()) {
         return 0;   /* por exemplo, com a tela do computador desligada */
     }
     if (!emJanela) {
-        ToggleBorderlessWindowed();   /* ocupa o monitor inteiro */
+        aplicarTela(configuracoesAtuais());   /* o modo e a resolução escolhidos nas configurações (padrão: o monitor inteiro) */
         HideCursor();
     }
-    SetTargetFPS(QUADROS_POR_SEG);
+    aplicarDesempenho(configuracoesAtuais());
     SetExitKey(KEY_NULL);   /* ESC volta de tela; para sair, use "SAIR" no menu */
     return 1;
 }
 
 int main(int argc, char *argv[]) {
     int emJanela = (argc > 1 && strcmp(argv[1], "--janela") == 0);
+    /* As configurações (inclusive a exibição) são lidas antes de abrir a janela, para ela já abrir como o jogador quer */
+    ChangeDirectory(GetApplicationDirectory());
+    carregarConfiguracoes(configuracoesAtuais(), ARQUIVO_DE_CONFIGURACOES);
     if (!abrirJanela(emJanela)) {
         printf("Nao deu para abrir a janela do jogo. A tela do computador esta ligada?\n");
         return 1;
@@ -223,7 +229,6 @@ int main(int argc, char *argv[]) {
     Corrida corrida;
     EstadoMenu menu;
     iniciarMenu(&menu);
-    carregarConfiguracoes(configuracoesAtuais(), ARQUIVO_DE_CONFIGURACOES);
     carregarRecordes();
     Tela tela = TELA_ENTRADA;   /* primeiro a tela de entrada; depois do vídeo de abertura, dissolve nela */
     int venceuAntes = 0;   /* para soltar o confete uma vez só, no quadro da vitória */
@@ -501,6 +506,11 @@ int main(int argc, char *argv[]) {
                 break;
         }
         desenharSaidaDaIntro(tempoQuadro);   /* o fim do vídeo se dissolvendo no menu */
+        if (configuracoesAtuais()->mostrarFps) {   /* o contador de quadros por segundo, no canto de cima */
+            comecarInterface(0);
+            escrever(FONTE_FORTE, TextFormat("%d FPS", GetFPS()), larguraVirtual() - 78.0f, 8.0f, 16.0f, COR_AMARELO);
+            terminarInterface();
+        }
         /* A transição: a tela clareia do preto (depois de sair da entrada) */
         if (transicaoAlfa > 0.0f) {
             DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Fade(BLACK, transicaoAlfa));
