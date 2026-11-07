@@ -24,6 +24,7 @@
 #include "carros3d.h"
 #include "visual.h"
 #include "audio.h"
+#include "exibicao.h"
 #include "controle.h"
 #include "recordes.h"
 
@@ -397,6 +398,8 @@ void iniciarMenu(EstadoMenu *menu) {
     menu->voltarAnterior = 0;
     menu->destaqueVoltar = 0.0f;
     abrirPausa(menu);
+    menu->abaConfig = 0;
+    menu->segundosParaAplicar = 0.0f;
     menu->linhaConfig = 0;
     menu->colunaConfig = 0;
     menu->esperandoComando = 0;
@@ -1445,12 +1448,31 @@ enum {
     LINHA_GATILHOS,
     LINHA_ZONA_MORTA,
     LINHA_VOLANTE,
-    LINHA_SOMBRAS,
     LINHA_CAMERA_X,
     LINHA_CAMERA_Y,
+    /* a aba de exibição começa aqui */
+    LINHA_RESOLUCAO,
+    LINHA_MODO_DE_TELA,
+    LINHA_SINCRONIA,
+    LINHA_LIMITE_DE_QUADROS,
+    LINHA_MOSTRAR_FPS,
+    LINHA_SOMBRAS,
+    /* e esta vale nas duas abas */
     LINHA_PADRAO,
     TOTAL_LINHAS_CONFIG
 };
+
+/* As abas das configurações */
+enum { ABA_CONTROLES, ABA_EXIBICAO, TOTAL_ABAS_CONFIG };
+#define X_ABAS_CONFIG          330.0f
+#define Y_ABAS_CONFIG          24.0f
+#define LARGURA_ABA_CONFIG     150.0f
+#define ALTURA_ABA_CONFIG      30.0f
+#define Y_LINHAS_EXIBICAO      122.0f
+#define ALTURA_LINHA_EXIBICAO  34.0f
+#define SEGUNDOS_PARA_APLICAR  0.6f   /* a janela só muda depois de uns instantes sem mexer, para não piscar a cada clique */
+
+static int abaAtualDaConfig = ABA_CONTROLES;   /* a aba que as funções abaixo estão atendendo agora */
 
 #define Y_TITULO_COMANDOS     92.0f
 #define Y_COMANDOS            114.0f
@@ -1477,7 +1499,42 @@ static float yDaLinhaConfig(int linha) {
     if (linha < TOTAL_ACOES) {
         return Y_COMANDOS + linha * ALTURA_LINHA_COMANDO;
     }
-    return Y_OPCOES_CONTROLE + (linha - TOTAL_ACOES) * ALTURA_LINHA_OPCAO;
+    if (abaAtualDaConfig == ABA_EXIBICAO) {
+        return Y_LINHAS_EXIBICAO + (linha - LINHA_RESOLUCAO) * ALTURA_LINHA_EXIBICAO + ((linha == LINHA_PADRAO) ? 14.0f : 0.0f);
+    }
+    int posicao = (linha == LINHA_PADRAO) ? LINHA_CAMERA_Y - TOTAL_ACOES + 1 : linha - TOTAL_ACOES;
+    return Y_OPCOES_CONTROLE + posicao * ALTURA_LINHA_OPCAO;
+}
+
+/*
+ * linhaNaAba
+ * Recebe: a linha e a aba.
+ * Devolve: 1 se a linha aparece nessa aba (a de voltar ao padrão aparece nas duas).
+ */
+static int linhaNaAba(int linha, int aba) {
+    if (linha == LINHA_PADRAO) {
+        return 1;
+    }
+    return (aba == ABA_EXIBICAO) ? linha >= LINHA_RESOLUCAO : linha < LINHA_RESOLUCAO;
+}
+
+/*
+ * andarNaAba
+ * Move a marcação entre as linhas da aba (dando a volta nas pontas).
+ * Recebe: a linha marcada e a aba.
+ * Devolve: a nova linha.
+ */
+static int andarNaAba(int linha, int aba) {
+    int lista[TOTAL_LINHAS_CONFIG], total = 0, indice = 0;
+    for (int i = 0; i < TOTAL_LINHAS_CONFIG; i++) {
+        if (linhaNaAba(i, aba)) {
+            if (i == linha) {
+                indice = total;
+            }
+            lista[total++] = i;
+        }
+    }
+    return lista[andarNaLista(indice, total)];
 }
 
 /*
@@ -1486,7 +1543,10 @@ static float yDaLinhaConfig(int linha) {
  * Devolve: a altura dela.
  */
 static float alturaDaLinhaConfig(int linha) {
-    return (linha < TOTAL_ACOES) ? ALTURA_LINHA_COMANDO : ALTURA_LINHA_OPCAO;
+    if (linha < TOTAL_ACOES) {
+        return ALTURA_LINHA_COMANDO;
+    }
+    return (abaAtualDaConfig == ABA_EXIBICAO) ? ALTURA_LINHA_EXIBICAO : ALTURA_LINHA_OPCAO;
 }
 
 /*
@@ -1544,6 +1604,34 @@ static void mudarOpcao(EstadoMenu *menu, int linha, int sentido) {
             config->efeitos = (nivel >= 1);
             break;
         }
+        case LINHA_RESOLUCAO: {
+            /* anda pela tabela, pulando o que não cabe no monitor */
+            int indice = config->resolucao;
+            for (int tentativa = 0; tentativa < TOTAL_RESOLUCOES; tentativa++) {
+                indice = (indice + sentido + TOTAL_RESOLUCOES) % TOTAL_RESOLUCOES;
+                if (resolucaoCabeNoMonitor(indice)) {
+                    break;
+                }
+            }
+            config->resolucao = indice;
+            menu->segundosParaAplicar = SEGUNDOS_PARA_APLICAR;
+            break;
+        }
+        case LINHA_MODO_DE_TELA:
+            config->modoDeTela = (config->modoDeTela + sentido + TOTAL_MODOS_DE_TELA) % TOTAL_MODOS_DE_TELA;
+            menu->segundosParaAplicar = SEGUNDOS_PARA_APLICAR;
+            break;
+        case LINHA_SINCRONIA:
+            config->sincroniaVertical = !config->sincroniaVertical;
+            aplicarDesempenho(config);
+            break;
+        case LINHA_LIMITE_DE_QUADROS:
+            config->limiteDeQuadros = (config->limiteDeQuadros + sentido + TOTAL_LIMITES_DE_QUADROS) % TOTAL_LIMITES_DE_QUADROS;
+            aplicarDesempenho(config);
+            break;
+        case LINHA_MOSTRAR_FPS:
+            config->mostrarFps = !config->mostrarFps;
+            break;
         case LINHA_CAMERA_X:
             config->inverterCameraX = !config->inverterCameraX;
             break;
@@ -1621,6 +1709,9 @@ static void apertarLinhaConfig(EstadoMenu *menu) {
         if (menu->confirmarPadrao > 0.0f) {
             configuracoesPadrao(configuracoesAtuais());
             guardarConfiguracoes();
+            aplicarDesempenho(configuracoesAtuais());
+            aplicarTela(configuracoesAtuais());
+            menu->segundosParaAplicar = 0.0f;
             menu->confirmarPadrao = 0.0f;
             menu->pulsoDeVibracao = SEGUNDOS_DO_TOQUE;
             tocarSom(SOM_CONFIRMAR);
@@ -1644,9 +1735,41 @@ Tela atualizarConfiguracoes(EstadoMenu *menu) {
         return TELA_CONFIGURACOES;
     }
     menu->confirmarPadrao = fmaxf(menu->confirmarPadrao - GetFrameTime(), 0.0f);
+    abaAtualDaConfig = menu->abaConfig;
+
+    /* A janela muda quando o jogador para de mexer na resolução e no modo de tela */
+    if (menu->segundosParaAplicar > 0.0f) {
+        menu->segundosParaAplicar -= GetFrameTime();
+        if (menu->segundosParaAplicar <= 0.0f) {
+            aplicarTela(configuracoesAtuais());
+            menu->segundosParaAplicar = 0.0f;
+        }
+    }
+
+    /* Trocar de aba: TAB, os gatilhos LB e RB, ou clicar nela */
+    float abaMouseX, abaMouseY;
+    posicaoDoMouseNaInterface(&abaMouseX, &abaMouseY);
+    int novaAba = menu->abaConfig;
+    if (IsKeyPressed(KEY_TAB) || controleApertou(BOTAO_ABA_SEGUINTE) || controleApertou(BOTAO_ABA_ANTERIOR)) {
+        novaAba = (menu->abaConfig + 1) % TOTAL_ABAS_CONFIG;
+    }
+    for (int aba = 0; aba < TOTAL_ABAS_CONFIG; aba++) {
+        Rectangle r = { X_ABAS_CONFIG + aba * (LARGURA_ABA_CONFIG + 10.0f), Y_ABAS_CONFIG, LARGURA_ABA_CONFIG, ALTURA_ABA_CONFIG };
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && dentroDoRetangulo(abaMouseX, abaMouseY, r.x, r.y, r.width, r.height)) {
+            novaAba = aba;
+        }
+    }
+    if (novaAba != menu->abaConfig) {
+        menu->abaConfig = novaAba;
+        abaAtualDaConfig = novaAba;
+        menu->linhaConfig = (novaAba == ABA_EXIBICAO) ? LINHA_RESOLUCAO : 0;
+        menu->colunaConfig = 0;
+        menu->confirmarPadrao = 0.0f;
+        tocarSom(SOM_CURSOR);
+    }
 
     int anterior = menu->linhaConfig, colunaAnterior = menu->colunaConfig;
-    menu->linhaConfig = andarNaLista(menu->linhaConfig, TOTAL_LINHAS_CONFIG);
+    menu->linhaConfig = andarNaAba(menu->linhaConfig, menu->abaConfig);
     if (menu->linhaConfig < TOTAL_ACOES) {
         if (apertouParaDireita()) {
             menu->colunaConfig = (menu->colunaConfig + 1) % TOTAL_COLUNAS;
@@ -1666,7 +1789,7 @@ Tela atualizarConfiguracoes(EstadoMenu *menu) {
     int voltar = sobreOVoltar(mouseX, mouseY);
     int sobre = -1;
     for (int i = 0; i < TOTAL_LINHAS_CONFIG; i++) {
-        if (dentroDoRetangulo(mouseX, mouseY, X_LINHAS_CONFIG, yDaLinhaConfig(i), LARGURA_LINHAS_CONFIG, alturaDaLinhaConfig(i))) {
+        if (linhaNaAba(i, menu->abaConfig) && dentroDoRetangulo(mouseX, mouseY, X_LINHAS_CONFIG, yDaLinhaConfig(i), LARGURA_LINHAS_CONFIG, alturaDaLinhaConfig(i))) {
             sobre = i;
         }
     }
@@ -1687,6 +1810,10 @@ Tela atualizarConfiguracoes(EstadoMenu *menu) {
     menu->destaqueVoltar = animarDestaque(menu->destaqueVoltar, voltar);
 
     if (apertouVoltar() || (voltar && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))) {
+        if (menu->segundosParaAplicar > 0.0f) {   /* saiu antes da hora: a janela muda agora */
+            aplicarTela(configuracoesAtuais());
+            menu->segundosParaAplicar = 0.0f;
+        }
         tocarSom(SOM_VOLTAR);
         return TELA_MENU;
     }
@@ -1774,7 +1901,7 @@ static void desenharLinhaDeOpcao(EstadoMenu *menu, int linha, const char *nome, 
     float y = yDaLinhaConfig(linha);
     Color corDoTexto = apagada ? COR_TEXTO_FRACO : (marcada ? COR_TEXTO_CLARO : COR_CROMO);
     desenharFundoDaLinhaConfig(linha, marcada);
-    float yTexto = noMeio(FONTE_FORTE, 15.0f, y + (ALTURA_LINHA_OPCAO - 2.0f) / 2.0f);   /* no meio do fundo da linha */
+    float yTexto = noMeio(FONTE_FORTE, 15.0f, y + (alturaDaLinhaConfig(linha) - 2.0f) / 2.0f);   /* no meio do fundo da linha */
     escrever(FONTE_FORTE, nome, X_LINHAS_CONFIG + 12.0f, yTexto, 15.0f, corDoTexto);
     if (linha != LINHA_PADRAO) {   /* as setas "< >" ficam sempre ao lado do valor; brancas na linha marcada */
         Color corDasSetas = marcada ? COR_TEXTO_CLARO : Fade(COR_TEXTO_CLARO, 0.45f);
@@ -1789,12 +1916,70 @@ static void desenharLinhaDeOpcao(EstadoMenu *menu, int linha, const char *nome, 
  * Recebe: o estado do menu.
  * Devolve: nada.
  */
+/*
+ * desenharAbasDaConfig
+ * As duas abas ao lado do título: CONTROLES e EXIBIÇÃO.
+ * Recebe: a aba aberta.
+ * Devolve: nada.
+ */
+static void desenharAbasDaConfig(int aberta) {
+    static const char *NOMES[TOTAL_ABAS_CONFIG] = { "CONTROLES", "EXIBIÇÃO" };
+    float mouseX, mouseY;
+    posicaoDoMouseNaInterface(&mouseX, &mouseY);
+    for (int aba = 0; aba < TOTAL_ABAS_CONFIG; aba++) {
+        Rectangle r = { X_ABAS_CONFIG + aba * (LARGURA_ABA_CONFIG + 10.0f), Y_ABAS_CONFIG, LARGURA_ABA_CONFIG, ALTURA_ABA_CONFIG };
+        int sobre = dentroDoRetangulo(mouseX, mouseY, r.x, r.y, r.width, r.height);
+        Color fundo = (aba == aberta) ? COR_VERMELHO : Fade(COR_GRAFITE, sobre ? 0.98f : 0.85f);
+        caixaArredondada(r, raioDoTamanho(r.width, r.height), fundo);
+        escreverCentralizado(FONTE_FORTE, NOMES[aba], r.x + r.width / 2.0f, r.y + 6.0f, 16.0f, (aba == aberta || sobre) ? WHITE : COR_CROMO);
+    }
+    escrever(FONTE_FORTE, controleConectado() ? "LB / RB TROCA DE ABA" : "TAB TROCA DE ABA", X_ABAS_CONFIG + 4.0f, Y_ABAS_CONFIG + ALTURA_ABA_CONFIG + 4.0f, 11.0f, COR_TEXTO_FRACO);
+}
+
+/*
+ * textoDaResolucao
+ * Recebe: o índice na tabela de resoluções.
+ * Devolve: o texto do valor ("AUTOMÁTICA (1920 x 1080)", "1280 x 720"...).
+ */
+static const char *textoDaResolucao(int indice) {
+    int l = 0, a = 0;
+    if (indice == 0) {
+        int monitorL, monitorA;
+        tamanhoDoMonitor(&monitorL, &monitorA);
+        resolucaoEfetiva(configuracoesAtuais(), monitorL, monitorA, &l, &a);
+        return TextFormat("AUTOMÁTICA (%d x %d)", l, a);
+    }
+    resolucaoDaTabela(indice, &l, &a);
+    return TextFormat("%d x %d", l, a);
+}
+
 void desenharConfiguracoes(EstadoMenu *menu) {
     static const char *VOLANTES[TOTAL_VOLANTES] = { "SUAVE", "NORMAL", "DIRETO" };
     const Configuracoes *config = configuracoesAtuais();
+    abaAtualDaConfig = menu->abaConfig;
     escurecerTela(0.75f, 0.6f, 0.8f);
     desenharCabecalho("CONFIGURAÇÕES");
+    desenharAbasDaConfig(menu->abaConfig);
     desenharBotaoVoltar(menu->destaqueVoltar);
+
+    if (menu->abaConfig == ABA_EXIBICAO) {
+        static const char *MODOS[TOTAL_MODOS_DE_TELA] = { "TELA CHEIA", "JANELA" };
+        desenharTituloDeSecao("EXIBIÇÃO", Y_TITULO_COMANDOS);
+        desenharLinhaDeOpcao(menu, LINHA_RESOLUCAO, "RESOLUÇÃO", textoDaResolucao(config->resolucao), 0);
+        desenharLinhaDeOpcao(menu, LINHA_MODO_DE_TELA, "MODO DE TELA", MODOS[config->modoDeTela], 0);
+        desenharLinhaDeOpcao(menu, LINHA_SINCRONIA, "SINCRONIA VERTICAL (VSYNC)", config->sincroniaVertical ? "LIGADA" : "DESLIGADA", 0);
+        int fps = quadrosPorSegundoDoLimite(config->limiteDeQuadros);
+        desenharLinhaDeOpcao(menu, LINHA_LIMITE_DE_QUADROS, "LIMITE DE QUADROS POR SEGUNDO", fps > 0 ? TextFormat("%d FPS", fps) : "SEM LIMITE", 0);
+        desenharLinhaDeOpcao(menu, LINHA_MOSTRAR_FPS, "MOSTRAR O CONTADOR DE FPS", config->mostrarFps ? "SIM" : "NÃO", 0);
+        desenharLinhaDeOpcao(menu, LINHA_SOMBRAS, "GRÁFICOS (SOMBRAS E EFEITOS)",
+                             config->sombras ? "ALTO" : (config->efeitos ? "MÉDIO" : "BAIXO"), 0);
+        desenharLinhaDeOpcao(menu, LINHA_PADRAO, "VOLTAR TUDO AO PADRÃO", (menu->confirmarPadrao > 0.0f) ? "APERTE DE NOVO" : "", 0);
+        escrever(FONTE_FORTE, TextFormat("AGORA: %d x %d%s  |  A MAIOR RESOLUÇÃO É %d x %d", GetScreenWidth(), GetScreenHeight(),
+                                         IsWindowFullscreen() ? " (TELA CHEIA)" : (IsWindowState(FLAG_BORDERLESS_WINDOWED_MODE) ? " (SEM BORDAS)" : " (JANELA)"),
+                                         MAIOR_LARGURA, MAIOR_ALTURA),
+                 X_LINHAS_CONFIG + 12.0f, Y_LINHAS_EXIBICAO + 8.0f * ALTURA_LINHA_EXIBICAO + 8.0f, 13.0f, COR_TEXTO_FRACO);
+        return;
+    }
 
     /* Comandos */
     desenharTituloDeSecao("COMANDOS", Y_TITULO_COMANDOS);
@@ -1814,8 +1999,6 @@ void desenharConfiguracoes(EstadoMenu *menu) {
     desenharLinhaDeOpcao(menu, LINHA_GATILHOS, "TREMOR NO ACELERADOR (DUALSENSE)", config->gatilhosAdaptativos ? "LIGADO" : "DESLIGADO", !vibra);
     desenharLinhaDeOpcao(menu, LINHA_ZONA_MORTA, "ZONA MORTA DO ANALÓGICO", TextFormat("%d%%", config->zonaMorta), 0);
     desenharLinhaDeOpcao(menu, LINHA_VOLANTE, "RESPOSTA DO VOLANTE NO ANALÓGICO", VOLANTES[config->respostaDoVolante], 0);
-    desenharLinhaDeOpcao(menu, LINHA_SOMBRAS, "GRÁFICOS (SOMBRAS E EFEITOS)",
-                         config->sombras ? "ALTO" : (config->efeitos ? "MÉDIO" : "BAIXO"), 0);
     desenharLinhaDeOpcao(menu, LINHA_CAMERA_X, "INVERTER A CÂMERA NA HORIZONTAL", config->inverterCameraX ? "SIM" : "NÃO", 0);
     desenharLinhaDeOpcao(menu, LINHA_CAMERA_Y, "INVERTER A CÂMERA NA VERTICAL", config->inverterCameraY ? "SIM" : "NÃO", 0);
     desenharLinhaDeOpcao(menu, LINHA_PADRAO, "VOLTAR TUDO AO PADRÃO", (menu->confirmarPadrao > 0.0f) ? "APERTE DE NOVO" : "", 0);

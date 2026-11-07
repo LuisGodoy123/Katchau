@@ -123,6 +123,10 @@ int controleApertou(BotaoDoControle botao) {
             return IsGamepadButtonPressed(controle, GAMEPAD_BUTTON_MIDDLE_RIGHT);
         case BOTAO_LIMPAR:
             return IsGamepadButtonPressed(controle, GAMEPAD_BUTTON_RIGHT_FACE_UP);
+        case BOTAO_ABA_ANTERIOR:
+            return IsGamepadButtonPressed(controle, GAMEPAD_BUTTON_LEFT_TRIGGER_1);
+        case BOTAO_ABA_SEGUINTE:
+            return IsGamepadButtonPressed(controle, GAMEPAD_BUTTON_RIGHT_TRIGGER_1);
         case BOTAO_CAMERA:
             return acabouDeApertarOTouchpad || IsGamepadButtonPressed(controle, GAMEPAD_BUTTON_MIDDLE_LEFT);
         default:

@@ -3251,6 +3251,60 @@ static void testarConfiguracoes(void) {
     config.gatilhosAdaptativos = 0;
     v = vibracaoAoGosto(cheia, &config);
     verificar(v.grave == cheia.grave && v.noAcelerador == 0.0f, "sem o tremor no gatilho, as maos continuam vibrando");
+
+    /* A exibicao: resolucao, modo de tela, vsync, limite de quadros e FPS */
+    configuracoesPadrao(&config);
+    verificar(config.resolucao == 0 && config.modoDeTela == MODO_TELA_CHEIA && config.sincroniaVertical == 1
+              && quadrosPorSegundoDoLimite(config.limiteDeQuadros) == 60 && config.mostrarFps == 0,
+              "padrao da exibicao: automatica, tela cheia, vsync ligado, 60 FPS, sem contador");
+    int l = 0, a2 = 0, maiorL = 0, maiorA = 0, ordenada = 1, anteriorArea = 0;
+    for (int i = 1; i < TOTAL_RESOLUCOES; i++) {
+        verificar(resolucaoDaTabela(i, &l, &a2) && l > 0 && a2 > 0 && l <= MAIOR_LARGURA && a2 <= MAIOR_ALTURA, "toda resolucao da tabela fica ate 1920x1080");
+        ordenada &= (l * a2 > anteriorArea);
+        anteriorArea = l * a2;
+        maiorL = l > maiorL ? l : maiorL;
+        maiorA = a2 > maiorA ? a2 : maiorA;
+    }
+    verificar(ordenada && maiorL == 1920 && maiorA == 1080, "a tabela vai crescendo e a maior e 1920x1080");
+    verificar(!resolucaoDaTabela(TOTAL_RESOLUCOES, &l, &a2) && !resolucaoDaTabela(-1, &l, &a2), "indice fora da tabela nao existe");
+    verificar(resolucaoCabe(0, 640, 480) && !resolucaoCabe(6, 1600, 900) && resolucaoCabe(6, 1920, 1080) && resolucaoCabe(3, 1920, 1080), "cabe no monitor: so o que nao passa dele");
+
+    /* A automatica: a maior que cabe (nunca passa de 1920x1080, nem num monitor 4K); em janela, com folga */
+    config.resolucao = 0;
+    config.modoDeTela = MODO_TELA_CHEIA;
+    resolucaoEfetiva(&config, 1920, 1080, &l, &a2);
+    verificar(l == 1920 && a2 == 1080, "tela cheia automatica num monitor 1080p: 1920x1080");
+    resolucaoEfetiva(&config, 3840, 2160, &l, &a2);
+    verificar(l == 1920 && a2 == 1080, "e num monitor 4K ela nao passa de 1920x1080");
+    resolucaoEfetiva(&config, 1366, 768, &l, &a2);
+    verificar(l == 1366 && a2 == 768, "num monitor 1366x768, o tamanho dele");
+    config.modoDeTela = MODO_JANELA;
+    resolucaoEfetiva(&config, 1920, 1080, &l, &a2);
+    verificar(l == 1600 && a2 == 900, "em janela automatica num monitor 1080p: 1600x900, sobra espaco para as bordas");
+    config.resolucao = 3;
+    resolucaoEfetiva(&config, 1920, 1080, &l, &a2);
+    verificar(l == 1280 && a2 == 720, "a resolucao escolhida vale como esta");
+    resolucaoEfetiva(&config, 1024, 768, &l, &a2);
+    verificar(l <= 1024 && a2 <= 768, "se ela nao cabe no monitor, cai para uma que cabe");
+
+    verificar(quadrosPorSegundoDoLimite(0) == 30 && quadrosPorSegundoDoLimite(TOTAL_LIMITES_DE_QUADROS - 1) == 0
+              && quadrosPorSegundoDoLimite(99) == 60, "limites de quadros: de 30 a sem limite; fora da tabela volta a 60");
+
+    /* A exibicao vai e volta do arquivo; valores absurdos ficam no padrao */
+    config.resolucao = 5;
+    config.modoDeTela = MODO_JANELA;
+    config.sincroniaVertical = 0;
+    config.limiteDeQuadros = 3;
+    config.mostrarFps = 1;
+    verificar(salvarConfiguracoes(&config, arquivo) && carregarConfiguracoes(&lida, arquivo) && memcmp(&config, &lida, sizeof(Configuracoes)) == 0,
+              "a exibicao volta igual do arquivo");
+    estragado = fopen(arquivo, "w");
+    fprintf(estragado, "resolucao 99\nmodo_de_tela 5\nsincronia_vertical 2\nlimite_de_quadros -1\nmostrar_fps 1\n");
+    fclose(estragado);
+    carregarConfiguracoes(&lida, arquivo);
+    verificar(lida.resolucao == 0 && lida.modoDeTela == MODO_TELA_CHEIA && lida.sincroniaVertical == 1
+              && lida.limiteDeQuadros == LIMITE_PADRAO_DE_QUADROS && lida.mostrarFps == 1, "exibicao estragada no arquivo: so o que esta certo vale");
+    remove(arquivo);
 }
 
 /*

@@ -2,7 +2,9 @@
  * configuracoes.h
  * ------------------------------------------------------------------
  * O que o jogador escolhe na tela de configurações: as teclas e os botões de
- * cada comando e as opções do controle. Fica salvo em um arquivo de texto.
+ * cada comando, as opções do controle e as de exibição (resolução, modo de tela,
+ * sincronia vertical, limite de quadros, contador de FPS e gráficos).
+ * Fica salvo em um arquivo de texto.
  *
  * Este módulo NÃO usa a raylib: os códigos das teclas e dos botões são
  * apenas números (os mesmos da raylib), e quem os lê é o controle.c.
@@ -44,6 +46,21 @@ typedef enum {
     TOTAL_VOLANTES
 } RespostaDoVolante;
 
+/* O modo de tela: ocupar o monitor todo ou abrir numa janela */
+typedef enum {
+    MODO_TELA_CHEIA,
+    MODO_JANELA,
+    TOTAL_MODOS_DE_TELA
+} ModoDeTela;
+
+/* As resoluções da tabela (índice 0 = automática). A maior é 1920x1080. */
+#define TOTAL_RESOLUCOES          7
+#define MAIOR_LARGURA             1920
+#define MAIOR_ALTURA              1080
+/* Os limites de quadros por segundo da tabela (o último é sem limite) */
+#define TOTAL_LIMITES_DE_QUADROS  6
+#define LIMITE_PADRAO_DE_QUADROS  1     /* índice do 60 */
+
 #define MENOR_FORCA_DA_VIBRACAO   10
 #define PASSO_DA_FORCA            10
 #define MENOR_ZONA_MORTA          2
@@ -62,6 +79,11 @@ typedef struct {
     int direcaoGuiada;        /* 1: o carro acompanha a curva; 0: ele mantém o rumo e quem vira é o volante */
     int inverterCameraX;
     int inverterCameraY;
+    int resolucao;            /* índice na tabela de resoluções; 0 = automática */
+    int modoDeTela;           /* ModoDeTela */
+    int sincroniaVertical;    /* 1: cada quadro sai junto com a atualização do monitor (VSync) */
+    int limiteDeQuadros;      /* índice na tabela de limites de quadros por segundo */
+    int mostrarFps;           /* 1: mostra o contador de quadros por segundo no canto da tela */
 } Configuracoes;
 
 Configuracoes *configuracoesAtuais(void);
@@ -71,5 +93,9 @@ int limparComando(Configuracoes *config, AcaoDeCorrida acao, ColunaDeComando col
 int salvarConfiguracoes(const Configuracoes *config, const char *arquivo);
 int carregarConfiguracoes(Configuracoes *config, const char *arquivo);
 const char *nomeDaAcao(AcaoDeCorrida acao);
+int resolucaoDaTabela(int indice, int *largura, int *altura);
+int resolucaoCabe(int indice, int larguraDoMonitor, int alturaDoMonitor);
+void resolucaoEfetiva(const Configuracoes *config, int larguraDoMonitor, int alturaDoMonitor, int *largura, int *altura);
+int quadrosPorSegundoDoLimite(int indice);
 
 #endif
