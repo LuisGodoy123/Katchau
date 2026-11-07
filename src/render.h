@@ -25,5 +25,6 @@ void definirOlhar(Olhar olhar);
 void desenharPistaDeFundo(Pista *pista);
 void desenharFundoAlternado(Pista *pistas[]);
 void desenharCarroParado(int numero, float centroX, float baseY, float escala);
+Texture2D fotografarVitrine(int numero, float giro, Vector2 *chao);
 
 #endif

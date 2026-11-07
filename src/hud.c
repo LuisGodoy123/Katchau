@@ -356,6 +356,15 @@ const char *codigoDoCarro(int numero) {
 }
 
 /*
+ * corDoCarro
+ * Recebe: o número do carro.
+ * Devolve: a cor da equipe dele (a mesma da torre de posições).
+ */
+Color corDoCarro(int numero) {
+    return CORES_DAS_EQUIPES[numero % TOTAL_CARROS];
+}
+
+/*
  * desenharEtiqueta
  * Uma etiqueta pequena do lado de fora da torre (volta mais rápida, boxes).
  * Recebe: onde, o texto, a cor do fundo e a do texto.
@@ -363,7 +372,7 @@ const char *codigoDoCarro(int numero) {
  */
 static void desenharEtiqueta(float x, float y, const char *texto, Color fundo, Color letra) {
     float largura = larguraDoTexto(FONTE_FORTE, texto, 9.5f) + 8.0f;
-    DrawRectangleRounded((Rectangle){ x, y + 2.0f, largura, ALTURA_LINHA_TORRE - 4.0f }, 0.3f, 4, fundo);
+    caixaArredondada((Rectangle){ x, y + 2.0f, largura, ALTURA_LINHA_TORRE - 4.0f }, RAIO_PEQUENO, fundo);
     escrever(FONTE_FORTE, texto, x + 4.0f, y + 1.5f, 9.5f, letra);
 }
 
@@ -375,7 +384,7 @@ static void desenharEtiqueta(float x, float y, const char *texto, Color fundo, C
  */
 static void desenharCronometro(float x, float y) {
     float lado = ALTURA_LINHA_TORRE - 2.0f;
-    DrawRectangleRounded((Rectangle){ x, y + 1.0f, lado, lado }, 0.3f, 4, COR_ROXO_HUD);
+    caixaArredondada((Rectangle){ x, y + 1.0f, lado, lado }, RAIO_PEQUENO, COR_ROXO_HUD);
     Vector2 centro = { x + lado / 2.0f, y + 1.0f + lado / 2.0f + 0.5f };
     DrawRing(centro, 3.2f, 4.4f, 0.0f, 360.0f, 16, COR_TEXTO_CLARO);
     DrawLineEx(centro, (Vector2){ centro.x + 1.8f, centro.y - 1.8f }, 1.2f, COR_TEXTO_CLARO);
@@ -395,7 +404,8 @@ static void desenharPainelDePosicoes(Corrida *corrida) {
     Carro *jogador = &corrida->jogador;
     float x = MARGEM_HUD, y = MARGEM_HUD;
     float altura = ALTURA_LOGO_TORRE + ALTURA_VOLTA_TORRE + TOTAL_CARROS * ALTURA_LINHA_TORRE + 6.0f;
-    DrawRectangleRec((Rectangle){ x, y, LARGURA_TORRE, altura }, COR_DA_TORRE);
+    float raioDaTorre = raioDoTamanho(LARGURA_TORRE, altura);
+    caixaArredondada((Rectangle){ x, y, LARGURA_TORRE, altura }, raioDaTorre, COR_DA_TORRE);
 
     /* O logo e a volta */
     float meio = x + LARGURA_TORRE / 2.0f;
@@ -419,11 +429,11 @@ static void desenharPainelDePosicoes(Corrida *corrida) {
         Color letra = COR_TEXTO_CLARO;
 
         if (ehJogador) {
-            DrawRectangleRec((Rectangle){ x, y, LARGURA_DO_DESTAQUE, ALTURA_LINHA_TORRE }, COR_TEXTO_CLARO);
+            caixaArredondada((Rectangle){ x, y, LARGURA_DO_DESTAQUE, ALTURA_LINHA_TORRE }, RAIO_PEQUENO, COR_TEXTO_CLARO);
             letra = COR_GRAFITE;
         }
         if (i == 0) {
-            DrawRectangleRec((Rectangle){ x + 2.0f, y + 1.0f, 16.0f, ALTURA_LINHA_TORRE - 2.0f }, COR_VERMELHO);
+            caixaArredondada((Rectangle){ x + 2.0f, y + 1.0f, 16.0f, ALTURA_LINHA_TORRE - 2.0f }, raioDeDentro(RAIO_PEQUENO, 2.0f), COR_VERMELHO);
         }
         escreverCentralizado(FONTE_FORTE, TextFormat("%d", i + 1), x + 10.0f, y + 0.5f, LETRA_TORRE,
                              (i == 0) ? COR_TEXTO_CLARO : letra);
@@ -485,7 +495,7 @@ static void desenharPainelDaVolta(Corrida *corrida) {
     float x = larguraVirtual() - MARGEM_HUD - largura;
     float y = MARGEM_HUD;
     char texto[32];
-    DrawRectangleRec((Rectangle){ x, y, largura, 70.0f }, COR_DA_TORRE);
+    caixaArredondada((Rectangle){ x, y, largura, 70.0f }, raioDoTamanho(largura, 70.0f), COR_DA_TORRE);
 
     escrever(FONTE_TEXTO, "SUA VOLTA", x + 8.0f, y + 4.0f, 11.0f, Fade(COR_TEXTO_CLARO, 0.75f));
     if (jogador->temDiferenca) {
@@ -514,7 +524,7 @@ static void desenharPainelDaVolta(Corrida *corrida) {
         if (agora && situacao == SETOR_PENDENTE) {
             cor = Fade(COR_TEXTO_CLARO, 0.45f);
         }
-        DrawRectangleRec((Rectangle){ x + 8.0f + s * (larguraSetor + vao), y + 60.0f, larguraSetor, 4.0f }, cor);
+        caixaArredondada((Rectangle){ x + 8.0f + s * (larguraSetor + vao), y + 60.0f, larguraSetor, 4.0f }, 2.0f, cor);   /* pílula */
     }
 }
 
@@ -793,8 +803,8 @@ static void desenharAvisosDoPit(Corrida *corrida) {
         Color cor = (sobra > 0.5f) ? COR_VERDE_HUD : (sobra > 0.25f) ? COR_AMARELO : COR_VERMELHO;
         float larguraDaBarra = 150.0f, xDaBarra = direita - larguraDaBarra;
         escrever(FONTE_FORTE, TextFormat("PNEUS %d%%", (int) (sobra * 100.0f + 0.5f)), xDaBarra, 158.0f, 15.0f, cor);
-        DrawRectangleRec((Rectangle){ xDaBarra, 178.0f, larguraDaBarra, 7.0f }, Fade(COR_GRAFITE, 0.85f));
-        DrawRectangleRec((Rectangle){ xDaBarra, 178.0f, larguraDaBarra * sobra, 7.0f }, cor);
+        caixaArredondada((Rectangle){ xDaBarra, 178.0f, larguraDaBarra, 8.0f }, 4.0f, Fade(COR_GRAFITE, 0.85f));
+        caixaArredondada((Rectangle){ xDaBarra, 178.0f, larguraDaBarra * sobra, 8.0f }, 4.0f, cor);
         if (jogador->pneuEstourado && !carroNoPit(jogador)) {   /* o aviso pisca */
             float pisca = 0.55f + 0.45f * sinf((float) GetTime() * 9.0f);
             escreverCentralizado(FONTE_TITULO, "PNEU ESTOURADO!", centro, 100.0f, 30.0f, Fade(COR_VERMELHO, pisca));
@@ -860,39 +870,52 @@ void desenharHud(Corrida *corrida) {
  * Devolve: nada.
  */
 void desenharFimDeCorrida(Corrida *corrida) {
+    /* Na grade de 4: o cartão com 24 de folga e cantos de 24; o título dentro dele, a 16 da borda,
+     * com cantos de 24 - 16 = 8 */
+    const float largura = 384.0f, folga = 24.0f, linhaDaVolta = 32.0f, borda = 16.0f, alturaDoTitulo = 64.0f;
     Carro *jogador = &corrida->jogador;
     char tempo[32];
+    int temObservacao = corrida->desclassificado || jogador->ultimaTroca > 0.0f;
 
-    float largura = 440.0f;
-    float linhaDaVolta = 28.0f;
-    float altura = 164.0f + corrida->totalVoltas * linhaDaVolta + 46.0f;
-    float x = (larguraVirtual() - largura) / 2.0f;
-    float y = (alturaVirtual() - altura) / 2.0f - 30.0f;
+    float altura = borda + alturaDoTitulo + 24.0f            /* título */
+                 + 40.0f + (temObservacao ? 20.0f : 0.0f)    /* tempo total */
+                 + 16.0f + corrida->totalVoltas * linhaDaVolta /* voltas */
+                 + 24.0f + 24.0f + folga;                     /* dica */
+    float x = roundf((larguraVirtual() - largura) / 8.0f) * 4.0f;
+    float y = roundf((alturaVirtual() - altura) / 8.0f) * 4.0f - 24.0f;
     float centro = x + largura / 2.0f;
+    float raio = raioDoTamanho(largura, altura);
 
-    DrawRectangleRec((Rectangle){ x, y, largura, altura }, COR_PAINEL);
-    desenharQuadriculado(x, y, largura, 12.0f, 6.0f);
+    Rectangle cartao = { x, y, largura, altura };
+    caixaArredondada(cartao, raio, Fade(COR_GRAFITE, 0.92f));
+    contornoArredondado(cartao, raio, 1.0f, Fade(COR_CROMO, 0.16f));
 
-    /* Faixa do título: só o 1º lugar ganha o grito de KATCHAU! */
-    desenharParalelogramo(x - 14, y + 24, largura + 14, 62, 14, COR_VERMELHO);
-    desenharParalelogramo(x - 7, y + 24, largura + 14, 31, 7, Fade(WHITE, 0.12f));
+    /* O título, numa faixa vermelha dentro do cartão, com o quadriculado fino embaixo */
+    Rectangle faixa = { x + borda, y + borda, largura - 2.0f * borda, alturaDoTitulo };
+    caixaArredondada(faixa, raioDeDentro(raio, borda), COR_VERMELHO);
+    desenharQuadriculado(faixa.x + 8.0f, faixa.y + alturaDoTitulo - 8.0f, faixa.width - 16.0f, 4.0f, 4.0f);
     const char *titulo = (corrida->posicaoFinal == 1) ? "KATCHAU!" : TextFormat("%dº LUGAR", corrida->posicaoFinal);
     if (corrida->desclassificado) {
         titulo = "DESCLASSIFICADO";
     }
-    escreverCentralizado(FONTE_TITULO, titulo, centro, y + 26, TAMANHO_TITULO_FIM, COR_TEXTO_CLARO);
+    escreverCentralizado(FONTE_TITULO, titulo, centro, faixa.y + 8.0f, 40.0f, COR_TEXTO_CLARO);
+    float cursor = faixa.y + alturaDoTitulo + 24.0f;
 
+    /* Tempo total */
     formatarTempo(jogador->tempoDeChegada, tempo, sizeof(tempo));
-    escrever(FONTE_FORTE, "TEMPO TOTAL", x + 40, y + 106, 16.0f, COR_TEXTO_FRACO);
-    escreverADireita(FONTE_TITULO, tempo, x + largura - 40, y + 98, 30.0f, COR_AMARELO);
-
+    escrever(FONTE_FORTE, "TEMPO TOTAL", x + folga, cursor + 12.0f, 14.0f, COR_TEXTO_FRACO);
+    escreverADireita(FONTE_TITULO, tempo, x + largura - folga, cursor, 32.0f, COR_AMARELO);
+    cursor += 40.0f;
     if (corrida->desclassificado) {
-        escreverCentralizado(FONTE_FORTE, "VOCÊ NÃO FEZ A PARADA OBRIGATÓRIA", centro, y + 130, 14.0f, COR_AMARELO);
+        escrever(FONTE_FORTE, "VOCÊ NÃO FEZ A PARADA OBRIGATÓRIA", x + folga, cursor, 12.0f, COR_AMARELO);
+        cursor += 20.0f;
     } else if (jogador->ultimaTroca > 0.0f) {
-        escreverCentralizado(FONTE_FORTE, TextFormat("TROCA DE PNEUS DO GUIDO: %.2f s", jogador->ultimaTroca), centro, y + 130, 14.0f, COR_TEXTO_FRACO);
+        escrever(FONTE_FORTE, TextFormat("TROCA DE PNEUS DO GUIDO  %.2f s", jogador->ultimaTroca), x + folga, cursor, 12.0f, COR_TEXTO_FRACO);
+        cursor += 20.0f;
     }
+    cursor += 16.0f;
 
-    /* Procura a melhor volta antes de escrever cada uma */
+    /* As voltas: fios finos separando; a melhor em roxo, com o selo em pílula */
     int melhorVolta = 0;
     for (int i = 0; i < corrida->totalVoltas; i++) {
         if (jogador->temposDeVolta[i] < jogador->temposDeVolta[melhorVolta]) {
@@ -900,22 +923,23 @@ void desenharFimDeCorrida(Corrida *corrida) {
         }
     }
     for (int i = 0; i < corrida->totalVoltas; i++) {
-        float linha = y + 156 + i * linhaDaVolta;
         int ehMelhor = (i == melhorVolta);
-        DrawRectangleRec((Rectangle){ x + 30, linha - 2, largura - 60, linhaDaVolta - 3 }, Fade(COR_GRAFITE, ehMelhor ? 0.95f : 0.6f));
-        escrever(FONTE_FORTE, TextFormat("VOLTA %d", i + 1), x + 42, linha, TAMANHO_TEXTO_FIM, COR_CROMO);
+        DrawRectangleRec((Rectangle){ x + folga, cursor, largura - 2.0f * folga, 1.0f }, Fade(COR_TEXTO_CLARO, 0.10f));
+        escrever(FONTE_FORTE, TextFormat("VOLTA %d", i + 1), x + folga, cursor + 8.0f, 16.0f, COR_TEXTO_FRACO);
         if (ehMelhor) {
-            desenharParalelogramo(x + 150, linha + 1, 70, 20, 5, COR_AMARELO);
-            escreverCentralizado(FONTE_FORTE, "MELHOR", x + 188, linha + 1, 15.0f, COR_GRAFITE);
+            caixaArredondada((Rectangle){ x + folga + 80.0f, cursor + 8.0f, 64.0f, 16.0f }, RAIO_PEQUENO, COR_ROXO_HUD);
+            escreverCentralizado(FONTE_FORTE, "MELHOR", x + folga + 112.0f, cursor + 8.0f, 12.0f, COR_TEXTO_CLARO);
         }
         formatarTempo(jogador->temposDeVolta[i], tempo, sizeof(tempo));
-        escreverADireita(FONTE_FORTE, tempo, x + largura - 42, linha, TAMANHO_TEXTO_FIM,
-                         ehMelhor ? COR_AMARELO : COR_TEXTO_CLARO);
+        escreverADireita(FONTE_FORTE, tempo, x + largura - folga, cursor + 8.0f, 16.0f, ehMelhor ? COR_ROXO_HUD : COR_TEXTO_CLARO);
+        cursor += linhaDaVolta;
     }
+    DrawRectangleRec((Rectangle){ x + folga, cursor, largura - 2.0f * folga, 1.0f }, Fade(COR_TEXTO_CLARO, 0.10f));
+    cursor += 24.0f;
 
     const char *tecla = nomeNoControle("ENTER");   /* "A" com o controle ligado */
-    float larguraDica = larguraDaTecla(tecla) + 8 + larguraDoTexto(FONTE_FORTE, "VER O RESULTADO", 15.0f);
-    float xDica = centro - larguraDica / 2.0f;
-    xDica += desenharTecla(xDica, y + altura - 40, tecla) + 8;
-    escrever(FONTE_FORTE, "VER O RESULTADO", xDica, y + altura - 39, 15.0f, COR_TEXTO_FRACO);
+    float larguraDica = larguraDaTecla(tecla) + 8.0f + larguraDoTexto(FONTE_FORTE, "VER O RESULTADO", 14.0f);
+    float xDica = roundf((centro - larguraDica / 2.0f) / 4.0f) * 4.0f;
+    xDica += desenharTecla(xDica, cursor - 2.0f, tecla) + 8.0f;
+    escrever(FONTE_FORTE, "VER O RESULTADO", xDica, cursor, 14.0f, COR_TEXTO_FRACO);
 }

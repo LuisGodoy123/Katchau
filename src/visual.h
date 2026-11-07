@@ -49,6 +49,15 @@ void escreverADireita(TipoFonte fonte, const char *texto, float direita, float y
 
 /* ---------- Formas ---------- */
 void usarFormasRetas(int ligado);
+
+/* Os cantos da interface: múltiplos de 8, pelo tamanho da peça; dentro de outra, o de fora menos o espaço */
+#define RAIO_PEQUENO  8.0f
+#define RAIO_MEDIO    16.0f
+#define RAIO_GRANDE   24.0f
+float raioDoTamanho(float largura, float altura);
+float raioDeDentro(float raioDeFora, float espaco);
+void caixaArredondada(Rectangle r, float raio, Color cor);
+void contornoArredondado(Rectangle r, float raio, float grossura, Color cor);
 void desenharParalelogramo(float x, float y, float largura, float altura, float inclinacao, Color cor);
 void desenharContornoParalelogramo(float x, float y, float largura, float altura, float inclinacao,
                                    float espessura, Color cor);

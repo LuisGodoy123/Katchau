@@ -21,6 +21,7 @@
 #include "configuracoes.h"
 #include "render.h"
 #include "hud.h"
+#include "carros3d.h"
 #include "visual.h"
 #include "audio.h"
 #include "controle.h"
@@ -63,22 +64,30 @@
 #define Y_PRIMEIRA_OPCAO_PAUSA 270.0f
 
 /* ---------- Garagem ---------- */
-#define Y_ABAS                92.0f
-#define Y_PRIMEIRA_LINHA      134.0f
-#define ALTURA_LINHA          29.5f
-#define X_LISTA               16.0f
-#define LARGURA_LISTA         416.0f
 #define LARGURA_VOLTAR        120.0f
 #define ALTURA_VOLTAR         30.0f
 #define X_VOLTAR              (LARGURA_TELA - 20.0f - LARGURA_VOLTAR)
 #define Y_VOLTAR              (Y_CABECALHO + 12.0f)
-#define ALTURA_ABA            28.0f
-#define X_BARRA_LISTA         226.0f
-#define LARGURA_BARRA_LISTA   120.0f
-#define X_FICHA               448.0f
-#define LARGURA_FICHA         336.0f
-#define LARGURA_BARRA_FICHA   200.0f
 #define FRACAO_MINIMA_BARRA   0.15f   /* o pior carro ainda mostra um pedacinho de barra */
+
+/* A vitrine da garagem, na grade de 4 */
+#define X_PALCO               24.0f    /* o carro girando */
+#define Y_PALCO               96.0f
+#define LARGURA_PALCO         480.0f
+#define ALTURA_PALCO          300.0f
+#define X_FICHA               536.0f   /* o nome e os atributos */
+#define Y_FICHA               128.0f
+#define LARGURA_FICHA         240.0f
+#define ALTURA_ATRIBUTO       56.0f
+#define Y_CARROSSEL           432.0f   /* as miniaturas */
+#define LARGURA_CARTAO        96.0f
+#define ALTURA_CARTAO         80.0f
+#define VAO_DO_CARROSSEL      8.0f
+#define X_ORDEM               (LARGURA_TELA - 24.0f - LARGURA_ORDEM)
+#define Y_ORDEM               396.0f
+#define LARGURA_ORDEM         180.0f
+#define ALTURA_ORDEM          24.0f
+#define GIRO_DA_VITRINE       0.55f    /* radianos por segundo */
 #define UNIDADES_EM_100_KMH   4000.0f /* 100 km/h em unidades por segundo (KMH_POR_UNIDADE = 0,025) */
 
 /* ---------- Resultado ---------- */
@@ -147,24 +156,22 @@ static void escurecerTela(float cima, float meio, float baixo) {
 static void desenharCabecalho(const char *titulo) {
     float tamanho = 26.0f;
     Rectangle caixa = { 28.0f, Y_CABECALHO - 6.0f, larguraDoTexto(FONTE_TITULO, titulo, tamanho) + 44.0f, 40.0f };
-    DrawRectangleRounded(caixa, 0.22f, 8, COR_VERMELHO);
+    caixaArredondada(caixa, raioDoTamanho(caixa.width, caixa.height), COR_VERMELHO);
     escrever(FONTE_TITULO, titulo, caixa.x + 22.0f, caixa.y + (caixa.height - tamanho) / 2.0f - 2.0f, tamanho, WHITE);
 }
 
 /*
  * desenharCabecalhoDeEvento
  * O cabeçalho da escolha de evento: uma etiqueta vermelha pequena, o título grande em branco e,
- * embaixo, uma linha menor com o evento escolhido.
- * Recebe: a etiqueta, o título e a linha de baixo.
+ * Recebe: a etiqueta e o título.
  * Devolve: nada.
  */
-static void desenharCabecalhoDeEvento(const char *etiqueta, const char *titulo, const char *linha) {
+static void desenharCabecalhoDeEvento(const char *etiqueta, const char *titulo) {
     float x = 40.0f;
     float larguraDaEtiqueta = larguraDoTexto(FONTE_FORTE, etiqueta, 14.0f) + 24.0f;
-    DrawRectangleRounded((Rectangle){ x, Y_CABECALHO - 6.0f, larguraDaEtiqueta, 22.0f }, 0.3f, 6, COR_VERMELHO);
+    caixaArredondada((Rectangle){ x, Y_CABECALHO - 6.0f, larguraDaEtiqueta, 22.0f }, RAIO_PEQUENO, COR_VERMELHO);
     escrever(FONTE_FORTE, etiqueta, x + 12.0f, Y_CABECALHO - 4.0f, 14.0f, WHITE);
     escrever(FONTE_TITULO, titulo, x - 1.0f, Y_CABECALHO + 18.0f, 36.0f, WHITE);
-    escrever(FONTE_FORTE, linha, x, Y_CABECALHO + 60.0f, 16.0f, COR_CROMO);
 }
 
 /*
@@ -252,8 +259,10 @@ static float escreverComQuebra(TipoFonte fonte, const char *texto, float x, floa
  * Devolve: nada.
  */
 static void desenharPainel(float x, float y, float largura, float altura) {
-    DrawRectangleRounded((Rectangle){ x, y, largura, altura }, fminf(0.06f, 16.0f / fminf(largura, altura)), 8, COR_PAINEL);
-    DrawRectangleRec((Rectangle){ x + 8.0f, y + 1.0f, largura - 16.0f, 3.0f }, COR_VERMELHO);
+    float raio = raioDoTamanho(largura, altura);
+    caixaArredondada((Rectangle){ x, y, largura, altura }, raio, COR_PAINEL);
+    /* O fio vermelho fica no trecho reto da borda de cima, entre as curvas dos cantos */
+    caixaArredondada((Rectangle){ x + raio, y, largura - 2.0f * raio, 4.0f }, 2.0f, COR_VERMELHO);
 }
 
 /*
@@ -526,13 +535,13 @@ static void desenharBotaoPadrao(const char *texto, float x, float y, float largu
     float suave = suavizar(destaque);
     float largura = larguraBase + 14.0f * suave;
     Rectangle r = { x, y, largura, ALTURA_BOTAO_MENU };
-    float arredondado = 12.0f / ALTURA_BOTAO_MENU;
+    float raio = raioDoTamanho(r.width, r.height);
     Color fundo = ColorLerp(Fade(COR_GRAFITE, 0.86f), Fade((Color){ 46, 50, 62, 255 }, 0.94f), suave);
-    DrawRectangleRounded(r, arredondado, 6, fundo);
-    DrawRectangleRoundedLinesEx(r, arredondado, 6, 1.0f, Fade(COR_CROMO, 0.16f * (1.0f - suave)));
+    caixaArredondada(r, raio, fundo);
+    contornoArredondado(r, raio, 1.0f, Fade(COR_CROMO, 0.16f * (1.0f - suave)));
     if (suave > 0.0f) {
-        DrawRectangleRoundedLinesEx(r, arredondado, 6, 2.0f, Fade(WHITE, suave));
-        DrawRectangleRounded((Rectangle){ x + 2.0f, y + 6.0f, 4.0f * suave, ALTURA_BOTAO_MENU - 12.0f }, 1.0f, 4, Fade(COR_VERMELHO, suave));
+        contornoArredondado(r, raio, 2.0f, Fade(WHITE, suave));
+        caixaArredondada((Rectangle){ x + 4.0f, y + 8.0f, 4.0f * suave, ALTURA_BOTAO_MENU - 16.0f }, raioDeDentro(raio, 4.0f), Fade(COR_VERMELHO, suave));
     }
     float tamanho = 22.0f + 1.5f * suave;
     escrever(FONTE_TITULO, texto, x + 22.0f + 4.0f * suave, y + (ALTURA_BOTAO_MENU - tamanho) / 2.0f - 2.0f, tamanho,
@@ -563,8 +572,9 @@ static void desenharItemDoMenu(const char *texto, int item, float destaque) {
     float largura = (principal ? LARGURA_BOTAO_MENU : LARGURA_BOTAO_MENU - 40.0f) + 10.0f * suave;
     Rectangle pilula = { X_MENU_PRINCIPAL - 6.0f, y, largura, altura };
     if (suave > 0.0f) {
-        DrawRectangleRounded(pilula, 0.5f, 10, Fade((Color){ 82, 86, 98, 255 }, 0.80f * suave));
-        DrawRectangleRoundedLinesEx(pilula, 0.5f, 10, 2.0f, Fade(WHITE, suave));
+        float raio = raioDoTamanho(pilula.width, pilula.height);
+        caixaArredondada(pilula, raio, Fade((Color){ 82, 86, 98, 255 }, 0.80f * suave));
+        contornoArredondado(pilula, raio, 2.0f, Fade(WHITE, suave));
     }
     float tamanho = principal ? 30.0f : 21.0f;
     escrever(FONTE_TITULO, texto, X_MENU_PRINCIPAL + 14.0f, y + (altura - tamanho) / 2.0f - 3.0f, tamanho,
@@ -633,8 +643,8 @@ void desenharMenuPrincipal(EstadoMenu *menu) {
         const char *nome = fichaDoCarro(menu->carroEscolhido)->nome;
         float larguraDaEtiqueta = larguraDoTexto(FONTE_FORTE, rotulo, 13.0f) + larguraDoTexto(FONTE_TITULO, nome, 20.0f) + 56.0f;
         float x = LARGURA_TELA + margemX() - larguraDaEtiqueta - 26.0f;
-        DrawRectangleRounded((Rectangle){ x, 22.0f, larguraDaEtiqueta, 34.0f }, 0.3f, 8, Fade(COR_GRAFITE, 0.85f));
-        DrawRectangleRounded((Rectangle){ x + 6.0f, 28.0f, 4.0f, 22.0f }, 1.0f, 4, COR_VERMELHO);
+        caixaArredondada((Rectangle){ x, 24.0f, larguraDaEtiqueta, 32.0f }, RAIO_PEQUENO, Fade(COR_GRAFITE, 0.85f));
+        caixaArredondada((Rectangle){ x + 8.0f, 32.0f, 4.0f, 16.0f }, raioDeDentro(RAIO_PEQUENO, 8.0f), COR_VERMELHO);
         escrever(FONTE_FORTE, rotulo, x + 20.0f, 32.0f, 13.0f, COR_TEXTO_FRACO);
         escrever(FONTE_TITULO, nome, x + 34.0f + larguraDoTexto(FONTE_FORTE, rotulo, 13.0f), 28.0f, 20.0f, WHITE);
     }
@@ -663,48 +673,25 @@ static void reordenarGaragem(EstadoMenu *menu) {
     }
 }
 
-#define TAMANHO_ABA 19.0f
 
 /*
- * geometriaDaAba
- * Onde fica a etiqueta de um critério (as abas ficam lado a lado, cada
- * uma com a largura do seu texto). Serve para desenhar e para o mouse.
- * Recebe: o atributo e onde guardar o x e a largura.
- * Devolve: nada.
+ * xDaMiniatura / miniaturaSobOMouse / sobreAOrdem / sobreOVoltar
+ * Onde fica cada miniatura do carrossel (o carro marcado no meio da tela) e o que está embaixo
+ * do mouse na garagem (coordenadas do quadro 800x600).
  */
-static void geometriaDaAba(int atributo, float *x, float *largura) {
-    float xAtual = 24.0f + larguraDoTexto(FONTE_FORTE, "ORDENAR POR", 15.0f) + 16.0f;
-    for (int i = 0; i < atributo; i++) {
-        xAtual += larguraDoTexto(FONTE_FORTE, NOMES_CRITERIO[i], TAMANHO_ABA) + 28.0f + 10.0f;
-    }
-    *x = xAtual;
-    *largura = larguraDoTexto(FONTE_FORTE, NOMES_CRITERIO[atributo], TAMANHO_ABA) + 28.0f;
+static float xDaMiniatura(const EstadoMenu *menu, int i) {
+    return LARGURA_TELA / 2.0f + (i - menu->rolagemDaVitrine) * (LARGURA_CARTAO + VAO_DO_CARROSSEL) - LARGURA_CARTAO / 2.0f;
 }
-
-/*
- * abaSobOMouse / linhaSobOMouse / sobreOVoltar
- * Dizem o que está embaixo do mouse na garagem (coordenadas do quadro 800x600).
- * Recebe: a posição do mouse.
- * Devolve: o índice da aba / da linha (ou -1), e 1 ou 0 para o botão VOLTAR.
- */
-static int abaSobOMouse(float mouseX, float mouseY) {
-    for (int atributo = 0; atributo < TOTAL_ATRIBUTOS; atributo++) {
-        float x, largura;
-        geometriaDaAba(atributo, &x, &largura);
-        if (dentroDoRetangulo(mouseX, mouseY, x, Y_ABAS, largura + 9.0f, ALTURA_ABA)) {
-            return atributo;
-        }
-    }
-    return -1;
-}
-static int linhaSobOMouse(float mouseX, float mouseY) {
+static int miniaturaSobOMouse(const EstadoMenu *menu, float mouseX, float mouseY) {
     for (int i = 0; i < TOTAL_CARROS; i++) {
-        if (dentroDoRetangulo(mouseX, mouseY, X_LISTA, Y_PRIMEIRA_LINHA + i * ALTURA_LINHA, LARGURA_LISTA,
-                              ALTURA_LINHA)) {
+        if (dentroDoRetangulo(mouseX, mouseY, xDaMiniatura(menu, i), Y_CARROSSEL, LARGURA_CARTAO, ALTURA_CARTAO)) {
             return i;
         }
     }
     return -1;
+}
+static int sobreAOrdem(float mouseX, float mouseY) {
+    return dentroDoRetangulo(mouseX, mouseY, X_ORDEM, Y_ORDEM, LARGURA_ORDEM, ALTURA_ORDEM);
 }
 static int sobreOVoltar(float mouseX, float mouseY) {
     return dentroDoRetangulo(mouseX, mouseY, X_VOLTAR, Y_VOLTAR, LARGURA_VOLTAR + INCLINACAO, ALTURA_VOLTAR);
@@ -720,62 +707,79 @@ static int sobreOVoltar(float mouseX, float mouseY) {
  * Devolve: a próxima tela.
  */
 Tela atualizarGaragem(EstadoMenu *menu) {
-    int linhaAnterior = menu->selecionado;
-    menu->selecionado = andarNaLista(menu->selecionado, TOTAL_CARROS);
+    /* Entrando agora (o carrossel não andou desde a última vez): começa no seu carro, já no meio */
+    static double ultimoQuadro = -1.0;
+    double agora = GetTime();
+    if (ultimoQuadro < 0.0 || agora - ultimoQuadro > 0.25) {
+        for (int i = 0; i < TOTAL_CARROS; i++) {
+            if (numeroDaFicha(menu->garagem[i]) == menu->carroEscolhido) {
+                menu->selecionado = i;
+                menu->rolagemDaVitrine = (float) i;
+            }
+        }
+    }
+    ultimoQuadro = agora;
+    int marcadoAntes = menu->selecionado;
+    if (apertouParaDireita() && menu->selecionado < TOTAL_CARROS - 1) {
+        menu->selecionado++;
+    }
+    if (apertouParaEsquerda() && menu->selecionado > 0) {
+        menu->selecionado--;
+    }
 
     float mouseX, mouseY;
     posicaoDoMouseNaInterface(&mouseX, &mouseY);
-    int linha = linhaSobOMouse(mouseX, mouseY);
-    int aba = abaSobOMouse(mouseX, mouseY);
+    int cartao = miniaturaSobOMouse(menu, mouseX, mouseY);
+    int ordem = sobreAOrdem(mouseX, mouseY);
     int voltar = sobreOVoltar(mouseX, mouseY);
-    if (linha >= 0 && mouseSeMexeu()) {
-        menu->selecionado = linha;
-    }
-    if (menu->selecionado != linhaAnterior) {
+    if ((voltar && !menu->voltarAnterior) || (ordem && menu->abaAnterior != 1)) {
         tocarSom(SOM_CURSOR);
     }
-    /* O mouse entrando numa aba ou no VOLTAR também faz o "tic" */
-    if ((aba >= 0 && aba != menu->abaAnterior) || (voltar && !menu->voltarAnterior)) {
-        tocarSom(SOM_CURSOR);
-    }
-    menu->abaAnterior = aba;
+    menu->abaAnterior = ordem;
     menu->voltarAnterior = voltar;
+
+    /* A ordem do carrossel: cima/baixo (ou o clique no seletor) trocam o critério do Merge Sort */
+    int trocarOrdem = 0;
+    if (apertouParaBaixo() || (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && ordem)) {
+        trocarOrdem = 1;
+    } else if (apertouParaCima()) {
+        trocarOrdem = -1;
+    }
+    if (trocarOrdem != 0) {
+        menu->criterio = (Atributo) ((menu->criterio + TOTAL_ATRIBUTOS + trocarOrdem) % TOTAL_ATRIBUTOS);
+        reordenarGaragem(menu);
+        menu->rolagemDaVitrine = (float) menu->selecionado;   /* o mesmo carro, sem o carrossel correr */
+        tocarSom(SOM_CURSOR);
+        marcadoAntes = menu->selecionado;
+    }
 
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
         if (voltar) {
             tocarSom(SOM_VOLTAR);
             return TELA_MENU;
         }
-        if (aba >= 0 && aba != (int) menu->criterio) {
-            menu->criterio = (Atributo) aba;
-            reordenarGaragem(menu);
-            tocarSom(SOM_CONFIRMAR);
-        } else if (aba < 0 && linha >= 0) {
-            menu->carroEscolhido = numeroDaFicha(menu->garagem[linha]);
-            tocarSom(SOM_CONFIRMAR);
-            return TELA_MENU;
+        if (cartao >= 0) {
+            if (cartao == menu->selecionado) {
+                menu->carroEscolhido = numeroDaFicha(menu->garagem[cartao]);
+                tocarSom(SOM_CONFIRMAR);
+                return TELA_MENU;
+            }
+            menu->selecionado = cartao;   /* o primeiro clique traz para o meio; o segundo escolhe */
         }
     }
+    if (menu->selecionado != marcadoAntes) {
+        tocarSom(SOM_CURSOR);
+    }
 
-    /* Linhas, abas e o botão acendem com o mouse (ou a marcação) e apagam ao sair */
+    /* O carrossel desliza até o marcado; o carro gira; os cartões acendem e apagam */
+    float passo = fminf(GetFrameTime() * 10.0f, 1.0f);
+    menu->rolagemDaVitrine += (menu->selecionado - menu->rolagemDaVitrine) * passo;
+    menu->giroDaVitrine = fmodf(menu->giroDaVitrine + GIRO_DA_VITRINE * GetFrameTime(), 2.0f * PI);
     for (int i = 0; i < TOTAL_CARROS; i++) {
         menu->destaqueLinha[i] = animarDestaque(menu->destaqueLinha[i], i == menu->selecionado);
     }
-    for (int i = 0; i < TOTAL_ATRIBUTOS; i++) {
-        menu->destaqueAba[i] = animarDestaque(menu->destaqueAba[i], i == aba);
-    }
+    menu->destaqueOrdem = animarDestaque(menu->destaqueOrdem, ordem);
     menu->destaqueVoltar = animarDestaque(menu->destaqueVoltar, voltar);
-
-    if (apertouParaDireita()) {
-        menu->criterio = (menu->criterio + 1) % TOTAL_ATRIBUTOS;
-        reordenarGaragem(menu);
-        tocarSom(SOM_CURSOR);
-    }
-    if (apertouParaEsquerda()) {
-        menu->criterio = (menu->criterio + TOTAL_ATRIBUTOS - 1) % TOTAL_ATRIBUTOS;
-        reordenarGaragem(menu);
-        tocarSom(SOM_CURSOR);
-    }
 
     if (apertouConfirmar()) {
         menu->carroEscolhido = numeroDaFicha(menu->garagem[menu->selecionado]);
@@ -839,42 +843,6 @@ static const char *textoDoAtributo(const FichaTecnica *ficha, Atributo atributo)
 }
 
 /*
- * desenharAbasDeCriterio
- * Os três critérios lado a lado, em etiquetas inclinadas; o ativo fica
- * amarelo e a que está embaixo do mouse cresce e fica vermelha.
- * Recebe: o estado do menu.
- * Devolve: nada.
- */
-static void desenharAbasDeCriterio(EstadoMenu *menu) {
-    escrever(FONTE_FORTE, "ORDENAR POR", 24.0f, Y_ABAS + 5, 15.0f, COR_TEXTO_FRACO);
-
-    float xFim = 0.0f;
-    for (int atributo = 0; atributo < TOTAL_ATRIBUTOS; atributo++) {
-        float x, largura;
-        geometriaDaAba(atributo, &x, &largura);
-        float suave = suavizar(menu->destaqueAba[atributo]);
-        float cresce = 6.0f * suave;
-        x -= cresce / 2.0f;
-        largura += cresce;
-        float y = Y_ABAS - suave * 2.0f;
-
-        if (atributo == (int) menu->criterio) {
-            desenharParalelogramo(x, y, largura, ALTURA_ABA, 9, ColorLerp(COR_AMARELO, WHITE, suave * 0.35f));
-            escreverCentralizado(FONTE_FORTE, NOMES_CRITERIO[atributo], x + 4 + largura / 2, y + 2, TAMANHO_ABA,
-                                 COR_GRAFITE);
-        } else {
-            desenharParalelogramo(x, y, largura, ALTURA_ABA, 9, ColorLerp(COR_PAINEL, COR_VERMELHO, suave));
-            desenharContornoParalelogramo(x, y, largura, ALTURA_ABA, 9, 1.5f,
-                                          Fade(COR_CROMO, 0.4f * (1.0f - suave)));
-            escreverCentralizado(FONTE_FORTE, NOMES_CRITERIO[atributo], x + 4 + largura / 2, y + 2, TAMANHO_ABA,
-                                 COR_TEXTO_CLARO);
-        }
-        xFim = x + largura + 10.0f;
-    }
-    escrever(FONTE_TEXTO, "ordenado com Merge Sort", xFim + 8, Y_ABAS + 6, 14.0f, COR_TEXTO_FRACO);
-}
-
-/*
  * desenharBotaoVoltar
  * Botão no canto do cabeçalho. Ao passar o mouse ele cresce, fica amarelo
  * e a setinha da esquerda dá um pulinho.
@@ -903,86 +871,70 @@ static void desenharBotaoVoltar(float destaque) {
 }
 
 /*
- * desenharListaDaGaragem
- * As 8 fichas, na ordem do Merge Sort, com a barra do critério atual.
- * Recebe: o estado do menu.
- * Devolve: nada.
+ * notaGeral
+ * Recebe: a ficha.
+ * Devolve: a nota do carro, de 70 a 99, pela média dos três atributos (o selo "geral").
  */
-static void desenharListaDaGaragem(EstadoMenu *menu) {
-    desenharPainel(X_LISTA, Y_PRIMEIRA_LINHA - 6, LARGURA_LISTA, TOTAL_CARROS * ALTURA_LINHA + 10);
-
-    for (int i = 0; i < TOTAL_CARROS; i++) {
-        const FichaTecnica *ficha = menu->garagem[i];
-        float y = Y_PRIMEIRA_LINHA + i * ALTURA_LINHA;
-        int ehEscolhido = (numeroDaFicha(ficha) == menu->carroEscolhido);
-        float suave = suavizar(menu->destaqueLinha[i]);
-
-        if (suave > 0.0f) {
-            /* A marcação entra deslizando da esquerda enquanto acende */
-            float recuo = (1.0f - suave) * 16.0f;
-            desenharParalelogramo(X_LISTA + 4 - recuo, y + 2, LARGURA_LISTA - 16, ALTURA_LINHA - 4, 10,
-                                  Fade(COR_VERMELHO, suave));
-            desenharParalelogramo(X_LISTA - 2 - recuo, y + 2, 6, ALTURA_LINHA - 4, 10, Fade(COR_AMARELO, suave));
-            desenharContornoParalelogramo(X_LISTA + 4 - recuo, y + 2, LARGURA_LISTA - 16, ALTURA_LINHA - 4, 10, 2.0f, Fade(WHITE, suave));
-        }
-
-        /* Número da posição numa etiqueta */
-        Color fundoNumero = ColorLerp(COR_GRAFITE, COR_AMARELO, suave);
-        Color corNumero = ColorLerp(COR_CROMO, COR_GRAFITE, suave);
-        desenharParalelogramo(X_LISTA + 14, y + 4, 30, 21, 5, fundoNumero);
-        escreverCentralizado(FONTE_TITULO, TextFormat("%d", i + 1), X_LISTA + 30, y + 4, 17.0f, corNumero);
-
-        escrever(FONTE_TITULO, ficha->nome, X_LISTA + 52, y + 4, 18.0f, ColorLerp(COR_CROMO, COR_TEXTO_CLARO, suave));
-        if (ehEscolhido) {
-            float x = X_LISTA + 52 + larguraDoTexto(FONTE_TITULO, ficha->nome, 18.0f) + 8;
-            escrever(FONTE_FORTE, "SEU", x, y + 7, 12.0f, COR_AMARELO);
-        }
-
-        desenharBarraDeBlocos(X_BARRA_LISTA, y + 9, LARGURA_BARRA_LISTA, 11,
-                              fracaoDoAtributo(ficha, menu->criterio), ColorLerp(COR_CROMO, COR_AMARELO, suave));
-        escreverADireita(FONTE_FORTE, textoDoAtributo(ficha, menu->criterio),
-                         X_LISTA + LARGURA_LISTA - 14, y + 5, 15.0f, COR_TEXTO_CLARO);
+static int notaGeral(const FichaTecnica *ficha) {
+    float soma = 0.0f;
+    for (int a = 0; a < TOTAL_ATRIBUTOS; a++) {
+        soma += fracaoDoAtributo(ficha, (Atributo) a);
     }
+    return 70 + (int) (soma / TOTAL_ATRIBUTOS * 29.0f + 0.5f);
 }
 
 /*
- * desenharFichaMarcada
- * Painel da direita: o carro marcado em tamanho grande, iluminado, e os
- * três atributos.
- * Recebe: o estado do menu.
+ * desenharCartaoDoCarro
+ * A ficha do carro, como um cartão de piloto: o brilho na cor da equipe, o número grande ao fundo,
+ * o nome, o selo da nota geral e os três atributos em barras de gomos. O atributo que ordena o
+ * carrossel fica aceso.
+ * Recebe: o estado do menu, a ficha e o número do carro.
  * Devolve: nada.
  */
-static void desenharFichaMarcada(EstadoMenu *menu) {
-    const FichaTecnica *ficha = menu->garagem[menu->selecionado];
-    int numero = numeroDaFicha(ficha);
-    float topo = Y_PRIMEIRA_LINHA - 6;
-    float centroX = X_FICHA + LARGURA_FICHA / 2.0f;
+static void desenharCartaoDoCarro(EstadoMenu *menu, const FichaTecnica *ficha, int numero) {
+    const float x = X_FICHA - 16.0f, largura = LARGURA_FICHA + 32.0f, altura = 264.0f;
+    const float y0 = Y_FICHA - 24.0f;
+    Color equipe = corDoCarro(numero);
 
-    desenharPainel(X_FICHA, topo, LARGURA_FICHA, TOTAL_CARROS * ALTURA_LINHA + 10);
-    escrever(FONTE_FORTE, "FICHA TÉCNICA", X_FICHA + 14, topo + 10, 14.0f, COR_TEXTO_FRACO);
+    /* O cartão e a faixa da equipe */
+    Rectangle cartao = { x, y0, largura, altura };
+    caixaArredondada(cartao, RAIO_GRANDE, Fade(COR_GRAFITE, 0.86f));
+    caixaArredondada(cartao, RAIO_GRANDE, Fade(equipe, 0.07f));   /* um toque da cor da equipe no cartão todo */
+    contornoArredondado(cartao, RAIO_GRANDE, 1.0f, Fade(COR_CROMO, 0.16f));
+    /* O número da equipe, grande e apagado, atrás do nome */
+    escreverADireita(FONTE_TITULO, TextFormat("%d", numero + 1), x + largura - 12.0f, y0 - 8.0f, 88.0f, Fade(COR_TEXTO_CLARO, 0.06f));
 
-    /* Holofote e sombra embaixo do carro */
-    desenharBrilho(centroX, topo + 110, 120, Fade(COR_AMARELO, 0.32f));
-    DrawEllipse((int) centroX, (int) (topo + 168), 110, 12, Fade(BLACK, 0.6f));
-    desenharCarroParado(numero, centroX, topo + 176, 1.22f);
-
-    escreverCentralizado(FONTE_TITULO, ficha->nome, centroX, topo + 172, 42.0f, COR_AMARELO);
-    escreverCentralizado(FONTE_TEXTO, ficha->descricao, centroX, topo + 220, 18.0f, COR_CROMO);
-
-    float y = topo + 256;
-    for (int atributo = 0; atributo < TOTAL_ATRIBUTOS; atributo++) {
-        float linha = y + atributo * 46;
-        int ativo = (atributo == (int) menu->criterio);
-        Color cor = ativo ? COR_AMARELO : COR_CROMO;
-        escrever(FONTE_FORTE, NOMES_CRITERIO[atributo], X_FICHA + 16, linha, 15.0f,
-                 ativo ? COR_AMARELO : COR_TEXTO_FRACO);
-        desenharBarraDeBlocos(X_FICHA + 16, linha + 21, LARGURA_BARRA_FICHA, 14,
-                              fracaoDoAtributo(ficha, (Atributo) atributo), cor);
-        escreverADireita(FONTE_FORTE, textoDoAtributo(ficha, (Atributo) atributo),
-                         X_FICHA + LARGURA_FICHA - 16, linha + 14, 22.0f, COR_TEXTO_CLARO);
+    /* O nome, a frase dele e o selo da nota */
+    float y = y0 + 16.0f;
+    escrever(FONTE_TITULO, ficha->nome, X_FICHA, y, 28.0f, COR_TEXTO_CLARO);
+    escrever(FONTE_TEXTO, ficha->descricao, X_FICHA, y + 32.0f, 12.0f, COR_TEXTO_FRACO);
+    float xSelo = X_FICHA + LARGURA_FICHA - 48.0f;
+    caixaArredondada((Rectangle){ xSelo, y, 48.0f, 48.0f }, raioDeDentro(RAIO_GRANDE, 16.0f), equipe);   /* 16 do cartão */
+    escreverCentralizado(FONTE_TITULO, TextFormat("%d", notaGeral(ficha)), xSelo + 24.0f, y + 2.0f, 28.0f, COR_TEXTO_CLARO);
+    escreverCentralizado(FONTE_FORTE, "GERAL", xSelo + 24.0f, y + 32.0f, 10.0f, Fade(COR_TEXTO_CLARO, 0.8f));
+    if (numero == menu->carroEscolhido) {
+        caixaArredondada((Rectangle){ X_FICHA, y + 52.0f, 64.0f, 16.0f }, raioDeDentro(RAIO_GRANDE, 16.0f), COR_AMARELO);
+        escreverCentralizado(FONTE_FORTE, "SEU CARRO", X_FICHA + 32.0f, y + 52.0f, 12.0f, COR_GRAFITE);
     }
-    escrever(FONTE_TEXTO, "aceleração: segundos de 0 a 100 km/h", X_FICHA + 16, y + 3 * 46 - 2, 14.0f,
-             COR_TEXTO_FRACO);
+    y += 84.0f;
+
+    /* Os atributos: rótulo, valor, colocação e a barra em 12 gomos */
+    const int gomos = 12;
+    const float vao = 4.0f, larguraDoGomo = (LARGURA_FICHA - vao * (gomos - 1)) / gomos;
+    for (int atributo = 0; atributo < TOTAL_ATRIBUTOS; atributo++) {
+        int ordenando = (atributo == (int) menu->criterio);
+        Color corDaBarra = ordenando ? COR_AMARELO : equipe;
+        escrever(FONTE_FORTE, NOMES_CRITERIO[atributo], X_FICHA, y, 12.0f, ordenando ? COR_AMARELO : COR_TEXTO_FRACO);
+        escreverADireita(FONTE_FORTE, textoDoAtributo(ficha, (Atributo) atributo), X_FICHA + LARGURA_FICHA, y - 4.0f, 20.0f, COR_TEXTO_CLARO);
+
+        int cheios = (int) (fracaoDoAtributo(ficha, (Atributo) atributo) * gomos + 0.5f);
+        for (int g = 0; g < gomos; g++) {
+            float gx = X_FICHA + g * (larguraDoGomo + vao);
+            Color cor = (g < cheios) ? Fade(corDaBarra, 0.55f + 0.45f * (g + 1) / gomos) : Fade(COR_TEXTO_CLARO, 0.08f);
+            DrawRectangleRounded((Rectangle){ gx, y + 24.0f, larguraDoGomo, 8.0f }, 0.5f, 4, cor);   /* gomos em pílula */
+        }
+        y += ALTURA_ATRIBUTO;
+    }
 }
 
 /*
@@ -991,17 +943,65 @@ static void desenharFichaMarcada(EstadoMenu *menu) {
  * Devolve: nada.
  */
 void desenharGaragem(EstadoMenu *menu) {
-    escurecerTela(0.7f, 0.55f, 0.75f);
+    const FichaTecnica *ficha = menu->garagem[menu->selecionado];
+    int numero = numeroDaFicha(ficha);
 
+    /* A foto do carro girando sai antes: ela tem a câmera dela, fora do modo 2D */
+    terminarInterface();
+    Vector2 chao;
+    Texture2D foto = fotografarVitrine(numero, menu->giroDaVitrine, &chao);
+    comecarInterface(1);
+
+    escurecerTela(0.7f, 0.55f, 0.75f);
     desenharCabecalho("GARAGEM");
     desenharBotaoVoltar(menu->destaqueVoltar);
-    desenharAbasDeCriterio(menu);
-    desenharListaDaGaragem(menu);
-    desenharFichaMarcada(menu);
+
+    /* O palco: holofote, e o carro em cima dele */
+    /* O chão do palco cai exatamente embaixo do carro (o ponto que a foto devolve) */
+    float chaoX = X_PALCO + LARGURA_PALCO * chao.x, chaoY = Y_PALCO + ALTURA_PALCO * chao.y;
+    desenharBrilho(chaoX, chaoY - 56.0f, 200.0f, Fade(COR_AMARELO, 0.14f));
+    DrawEllipse((int) chaoX, (int) chaoY, 184, 24, Fade(BLACK, 0.40f));
+    DrawTexturePro(foto, (Rectangle){ 0, 0, (float) foto.width, -(float) foto.height },
+                   (Rectangle){ X_PALCO, Y_PALCO, LARGURA_PALCO, ALTURA_PALCO }, (Vector2){ 0 }, 0.0f, WHITE);
+
+    desenharCartaoDoCarro(menu, ficha, numero);
+
+    /* O seletor da ordem do carrossel, discreto, acima dele à direita */
+    float suave = suavizar(menu->destaqueOrdem);
+    caixaArredondada((Rectangle){ X_ORDEM, Y_ORDEM, LARGURA_ORDEM, ALTURA_ORDEM }, RAIO_PEQUENO, ColorLerp(Fade(COR_GRAFITE, 0.8f), COR_VERMELHO, suave));
+    escrever(FONTE_FORTE, "ORDEM", X_ORDEM + 8.0f, Y_ORDEM + 4.0f, 12.0f, COR_TEXTO_FRACO);
+    escreverADireita(FONTE_FORTE, NOMES_CRITERIO[menu->criterio], X_ORDEM + LARGURA_ORDEM - 8.0f, Y_ORDEM + 4.0f, 12.0f, COR_TEXTO_CLARO);
+
+    /* O carrossel: o marcado no meio, aceso, com a faixa vermelha; os outros somem para as bordas */
+    for (int i = 0; i < TOTAL_CARROS; i++) {
+        float x = xDaMiniatura(menu, i);
+        if (x + LARGURA_CARTAO < 0.0f || x > LARGURA_TELA) {
+            continue;
+        }
+        float aceso = suavizar(menu->destaqueLinha[i]);
+        float distancia = fabsf(x + LARGURA_CARTAO / 2.0f - LARGURA_TELA / 2.0f) / (LARGURA_TELA / 2.0f);
+        float alfa = fmaxf(1.0f - distancia * 0.85f, 0.15f);
+        int carro = numeroDaFicha(menu->garagem[i]);
+        Rectangle cartao = { x, Y_CARROSSEL, LARGURA_CARTAO, ALTURA_CARTAO };
+        caixaArredondada(cartao, RAIO_MEDIO, Fade(ColorLerp(COR_GRAFITE, COR_PAINEL, aceso), (0.55f + 0.35f * aceso) * alfa));
+        BeginBlendMode(BLEND_ALPHA);
+        desenharMiniatura(carro, x + LARGURA_CARTAO / 2.0f, Y_CARROSSEL + ALTURA_CARTAO - 12.0f, LARGURA_CARTAO - 16.0f);
+        EndBlendMode();
+        if (alfa < 1.0f) {   /* esmaece a miniatura junto com o cartão */
+            caixaArredondada(cartao, RAIO_MEDIO, Fade(COR_GRAFITE, (1.0f - alfa) * 0.8f));
+        }
+        if (aceso > 0.01f) {   /* o marcado: um traço vermelho em pílula, centralizado embaixo */
+            float traco = 48.0f * aceso;
+            DrawRectangleRounded((Rectangle){ x + (LARGURA_CARTAO - traco) / 2.0f, Y_CARROSSEL + ALTURA_CARTAO + 8.0f, traco, 4.0f }, 1.0f, 4, COR_VERMELHO);
+        }
+        if (carro == menu->carroEscolhido) {   /* o seu carro: contornado em amarelo */
+            contornoArredondado(cartao, RAIO_MEDIO, 2.0f, Fade(COR_AMARELO, alfa));
+        }
+    }
 
     Dica dicas[] = {
-        { { "CIMA", "BAIXO", NULL }, "CARRO" },
-        { { "ESQ", "DIR", NULL }, "ORDENAR" },
+        { { "ESQ", "DIR", NULL }, "CARRO" },
+        { { "CIMA", "BAIXO", NULL }, "ORDEM" },
         { { "ENTER", NULL }, "ESCOLHER" },
         { { "ESC", NULL }, "VOLTAR" },
     };
@@ -1022,7 +1022,7 @@ enum { FOCO_NA_PISTA, FOCO_NO_NIVEL, FOCO_NO_CORRER, TOTAL_FOCOS };
 #define X_INFO_PISTA          28.0f    /* o cartão de informações da pista marcada */
 #define Y_INFO_PISTA          128.0f
 #define LARGURA_INFO_PISTA    272.0f
-#define ALTURA_INFO_PISTA     262.0f
+#define ALTURA_INFO_PISTA     296.0f   /* as três linhas de informação e 16 de folga embaixo */
 #define X_COLUNA_DIREITA      326.0f   /* a coluna da dificuldade e do CORRER */
 #define LARGURA_COLUNA_DIREITA 440.0f
 #define LADO_DO_TRACADO       96.0f
@@ -1253,11 +1253,11 @@ static void desenharCartaoDePista(int cartao, Pista *pista, float destaque, int 
     float suave = suavizar(destaque);
     float x = xDoCartao(cartao);
     Rectangle r = { x, Y_CARTAO_PISTA, LARGURA_CARTAO_PISTA, ALTURA_CARTAO_PISTA };
-    float arredondado = 12.0f / ALTURA_CARTAO_PISTA;
-    DrawRectangleRounded(r, arredondado, 8, ColorLerp(Fade(COR_GRAFITE, 0.84f), Fade((Color){ 56, 60, 72, 255 }, 0.96f), suave));
-    DrawRectangleRoundedLinesEx(r, arredondado, 8, 1.0f, Fade(COR_CROMO, 0.18f * (1.0f - suave)));
+    float raio = raioDoTamanho(r.width, r.height);
+    caixaArredondada(r, raio, ColorLerp(Fade(COR_GRAFITE, 0.84f), Fade((Color){ 56, 60, 72, 255 }, 0.96f), suave));
+    contornoArredondado(r, raio, 1.0f, Fade(COR_CROMO, 0.18f * (1.0f - suave)));
     if (suave > 0.0f) {
-        DrawRectangleRoundedLinesEx(r, arredondado, 8, comCursor ? 2.5f : 1.5f, Fade(comCursor ? corDoCursor() : COR_CROMO, suave));
+        contornoArredondado(r, raio, comCursor ? 2.5f : 1.5f, Fade(comCursor ? corDoCursor() : COR_CROMO, suave));
     }
     char nome[48];
     maiusculas(nome, sizeof(nome), pista->nome);
@@ -1308,8 +1308,8 @@ static void desenharLinhaDoCartaoDeInfo(float x, float y, float largura, const c
  */
 static void desenharInfoDaPista(Pista *pista) {
     Rectangle r = { X_INFO_PISTA, Y_INFO_PISTA, LARGURA_INFO_PISTA, ALTURA_INFO_PISTA };
-    DrawRectangleRounded(r, 0.035f, 8, Fade((Color){ 22, 22, 30, 255 }, 0.84f));
-    DrawRectangleRoundedLinesEx(r, 0.035f, 8, 1.0f, Fade(COR_CROMO, 0.16f));
+    caixaArredondada(r, raioDoTamanho(r.width, r.height), Fade((Color){ 22, 22, 30, 255 }, 0.84f));
+    contornoArredondado(r, raioDoTamanho(r.width, r.height), 1.0f, Fade(COR_CROMO, 0.16f));
     desenharTracado(pista, X_INFO_PISTA + LARGURA_INFO_PISTA / 2.0f, Y_INFO_PISTA + 76.0f, LADO_DO_TRACADO, WHITE, 6.0f);
 
     float metros = contarSegmentos(pista) * COMPRIMENTO_SEGMENTO / UNIDADES_POR_METRO;
@@ -1345,11 +1345,11 @@ static void desenharBotaoDeNivel(int nivel, float destaque, int comCursor) {
     float suave = suavizar(destaque);
     float x = xDoNivel(nivel);
     Rectangle r = { x, Y_BOTAO_NIVEL, LARGURA_BOTAO_NIVEL, ALTURA_BOTAO_NIVEL };
-    float arredondado = 12.0f / ALTURA_BOTAO_NIVEL;
-    DrawRectangleRounded(r, arredondado, 8, ColorLerp(Fade(COR_GRAFITE, 0.86f), COR_VERMELHO, suave));
-    DrawRectangleRoundedLinesEx(r, arredondado, 8, 1.0f, Fade(COR_CROMO, 0.18f * (1.0f - suave)));
+    float raio = raioDoTamanho(r.width, r.height);
+    caixaArredondada(r, raio, ColorLerp(Fade(COR_GRAFITE, 0.86f), COR_VERMELHO, suave));
+    contornoArredondado(r, raio, 1.0f, Fade(COR_CROMO, 0.18f * (1.0f - suave)));
     if (comCursor) {
-        DrawRectangleRoundedLinesEx(r, arredondado, 8, 2.5f, corDoCursor());
+        contornoArredondado(r, raio, 2.5f, corDoCursor());
     }
     escreverCentralizado(FONTE_TITULO, fichaDoNivel((NivelDaCorrida) nivel)->nome, x + LARGURA_BOTAO_NIVEL / 2.0f,
                          Y_BOTAO_NIVEL + (ALTURA_BOTAO_NIVEL - 24.0f) / 2.0f - 2.0f, 24.0f,
@@ -1364,10 +1364,10 @@ static void desenharBotaoDeNivel(int nivel, float destaque, int comCursor) {
  */
 static void desenharBotaoCorrer(int comCursor) {
     Rectangle r = { X_BOTAO_CORRER, Y_BOTAO_CORRER, LARGURA_BOTAO_CORRER, ALTURA_BOTAO_CORRER };
-    float arredondado = 14.0f / ALTURA_BOTAO_CORRER;
-    DrawRectangleRounded(r, arredondado, 8, comCursor ? COR_VERMELHO : ColorLerp(Fade(COR_GRAFITE, 0.9f), COR_VERMELHO, 0.55f));
+    float raio = raioDoTamanho(r.width, r.height);
+    caixaArredondada(r, raio, comCursor ? COR_VERMELHO : ColorLerp(Fade(COR_GRAFITE, 0.9f), COR_VERMELHO, 0.55f));
     if (comCursor) {
-        DrawRectangleRoundedLinesEx(r, arredondado, 8, 2.5f, corDoCursor());
+        contornoArredondado(r, raio, 2.5f, corDoCursor());
     }
     escreverCentralizado(FONTE_TITULO, "CORRER", X_BOTAO_CORRER + LARGURA_BOTAO_CORRER / 2.0f, Y_BOTAO_CORRER + 12.0f, 32.0f,
                          comCursor ? WHITE : Fade(WHITE, 0.78f));
@@ -1409,10 +1409,9 @@ static void desenharResumoDaCorrida(EstadoMenu *menu) {
 void desenharEscolhaDePista(EstadoMenu *menu, Pista *pistas[]) {
     escurecerTela(0.45f, 0.15f, 0.55f);
     Pista *marcada = pistas[menu->pistaEscolhida];
-    char nome[48], linha[96];
+    char nome[48];
     maiusculas(nome, sizeof(nome), marcada->nome);
-    snprintf(linha, sizeof(linha), "%s  |  NÍVEL %s", nome, fichaDoNivel(menu->nivelEscolhido)->nome);
-    desenharCabecalhoDeEvento("CORRIDA", "ESCOLHER EVENTO", linha);
+    desenharCabecalhoDeEvento("CORRIDA", "ESCOLHER EVENTO");
     desenharBotaoVoltar(menu->destaqueVoltar);
 
     int foco = menu->focoDaCorrida;
@@ -1729,10 +1728,10 @@ static void desenharTituloDeSecao(const char *texto, float y) {
 static void desenharFundoDaLinhaConfig(int linha, int marcada) {
     float y = yDaLinhaConfig(linha), altura = alturaDaLinhaConfig(linha);
     Rectangle fundo = { X_LINHAS_CONFIG, y, LARGURA_LINHAS_CONFIG, altura - 2.0f };
-    float arredondado = fminf(0.5f, 6.0f / fminf(fundo.width, fundo.height));
-    DrawRectangleRounded(fundo, arredondado, 6, marcada ? Fade((Color){ 46, 50, 62, 255 }, 0.95f) : Fade(COR_GRAFITE, 0.80f));
+    float raio = raioDoTamanho(fundo.width, fundo.height);
+    caixaArredondada(fundo, raio, marcada ? Fade((Color){ 46, 50, 62, 255 }, 0.95f) : Fade(COR_GRAFITE, 0.80f));
     if (marcada && linha >= TOTAL_ACOES) {
-        DrawRectangleRoundedLinesEx(fundo, arredondado, 6, 2.0f, corDoCursor());
+        contornoArredondado(fundo, raio, 2.0f, corDoCursor());
     }
 }
 

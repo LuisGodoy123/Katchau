@@ -19,6 +19,7 @@
 
 void desenharHud(Corrida *corrida);
 const char *codigoDoCarro(int numero);
+Color corDoCarro(int numero);
 void desenharFimDeCorrida(Corrida *corrida);
 void formatarTempo(float segundos, char *texto, int tamanho);
 

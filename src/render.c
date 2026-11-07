@@ -1118,6 +1118,54 @@ void desenharFundoAlternado(Pista *pistas[]) {
     }
 }
 
+/* A vitrine da garagem: o carro girando, fotografado a cada quadro numa imagem transparente */
+#define LARGURA_DA_VITRINE    960
+#define ALTURA_DA_VITRINE     600
+static RenderTexture2D vitrine = { 0 };
+
+/*
+ * fotografarVitrine
+ * O carro de pé num ponto, girando, visto de cima em três quartos, com a sombra no chão. Chamar
+ * fora do modo 2D (a imagem tem a câmera dela).
+ * Recebe: o carro, o giro (radianos) e onde guardar o ponto do chão embaixo do carro, de 0 a 1 na imagem.
+ * Devolve: a imagem (de cabeça para baixo, como toda RenderTexture), com fundo transparente.
+ */
+Texture2D fotografarVitrine(int numero, float giro, Vector2 *chao) {
+    if (vitrine.id == 0) {
+        vitrine = LoadRenderTexture(LARGURA_DA_VITRINE, ALTURA_DA_VITRINE);
+        SetTextureFilter(vitrine.texture, TEXTURE_FILTER_BILINEAR);
+    }
+    float comprimento = comprimentoDoCarro3D(numero), altura = alturaDoCarro3D(numero);
+    /* Enquadra pelo maior: o comprimento ou a altura (o Guido é curto, mas alto) */
+    float tamanho = fmaxf(comprimento, altura * 2.4f);
+    float distancia = tamanho * 1.5f + 1.0f;
+    Camera3D camera = { 0 };
+    camera.position = (Vector3){ 0.0f, altura * 0.5f + distancia * 0.26f, distancia };
+    camera.target = (Vector3){ 0.0f, altura * 0.5f, 0.0f };
+    camera.up = (Vector3){ 0.0f, 1.0f, 0.0f };
+    camera.fovy = 30.0f;
+    camera.projection = CAMERA_PERSPECTIVE;
+    Matrix noMundo = MatrixRotateY(giro);
+
+    rlDrawRenderBatchActive();
+    BeginTextureMode(vitrine);
+    ClearBackground(BLANK);
+    prepararLuzes(0);
+    definirOlhoDosCarros(camera.position);
+    BeginMode3D(camera);
+    rlDisableBackfaceCulling();
+    desenharSombra(numero, noMundo);
+    desenharCarro3D(numero, noMundo, 0.0f, 0.0f);
+    rlEnableBackfaceCulling();
+    EndMode3D();
+    EndTextureMode();
+    if (chao != NULL) {
+        Vector2 p = GetWorldToScreenEx((Vector3){ 0.0f, 0.0f, 0.0f }, camera, LARGURA_DA_VITRINE, ALTURA_DA_VITRINE);
+        *chao = (Vector2){ p.x / LARGURA_DA_VITRINE, p.y / ALTURA_DA_VITRINE };
+    }
+    return vitrine.texture;
+}
+
 /*
  * desenharCarroParado
  * A miniatura de um carro, para a garagem e o menu.

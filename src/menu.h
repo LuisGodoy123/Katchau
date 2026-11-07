@@ -50,6 +50,9 @@ typedef struct {
     int abaAnterior;                            /* aba sob o mouse no quadro anterior (-1 = nenhuma) */
     int voltarAnterior;                         /* o mouse estava no VOLTAR no quadro anterior? */
     float destaqueVoltar;                       /* animação (0 a 1) do botão VOLTAR */
+    float rolagemDaVitrine;                     /* o carrossel da garagem, andando até o carro marcado */
+    float giroDaVitrine;                        /* o carro da vitrine girando (radianos) */
+    float destaqueOrdem;                        /* animação (0 a 1) do seletor de ordem */
     int opcaoPausa;                             /* item marcado na pausa */
     float destaquePausa[TOTAL_OPCOES_PAUSA];    /* animação (0 a 1) de cada botão da pausa */
     int linhaConfig;                            /* a linha marcada nas configurações */

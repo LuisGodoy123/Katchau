@@ -10,7 +10,7 @@
 #include "visual.h"
 
 #define PASTA_FONTES        "recursos/fontes/"
-#define ARQUIVO_LOGO        "recursos/texturas/logo/katchau.png"
+#define ARQUIVO_LOGO        "recursos/texturas/logo/LogoKatchau.png"
 
 /* As fontes são geradas grandes e reduzidas com mipmaps: os menus são
  * ampliados para a tela real (até ~2x num monitor Full HD) e assim as
@@ -155,7 +155,62 @@ void escreverADireita(TipoFonte fonte, const char *texto, float direita, float y
 /* O estilo das formas: 0 = "deitadas para a frente" (o HUD e a apresentação da corrida); 1 = retângulos
  * com os cantos levemente arredondados (os menus, no padrão dos jogos de corrida modernos). */
 static int formasRetas = 0;
-#define RAIO_DOS_CANTOS 5.0f
+
+/*
+ * raioDoTamanho
+ * Os cantos de toda a interface, em múltiplos de 8, pelo menor lado da peça: as pequenas (botões,
+ * etiquetas, linhas) com 8, as médias (cartões) com 16 e as grandes (painéis) com 24.
+ * Recebe: a largura e a altura.
+ * Devolve: o raio, em pixels.
+ */
+float raioDoTamanho(float largura, float altura) {
+    float menor = fminf(largura, altura);
+    if (menor < 48.0f) {
+        return RAIO_PEQUENO;
+    }
+    return (menor < 128.0f) ? RAIO_MEDIO : RAIO_GRANDE;
+}
+
+/*
+ * raioDeDentro
+ * Uma peça dentro de outra: o raio de fora é o de dentro mais o espaço entre as duas, para as
+ * curvas ficarem paralelas.
+ * Recebe: o raio da peça de fora e o espaço até a de dentro.
+ * Devolve: o raio da de dentro (nunca negativo).
+ */
+float raioDeDentro(float raioDeFora, float espaco) {
+    return fmaxf(raioDeFora - espaco, 0.0f);
+}
+
+/*
+ * fracaoDoRaio
+ * A raylib pede o arredondamento como fração do lado menor; aqui o raio é em pixels.
+ */
+static float fracaoDoRaio(Rectangle r, float raio) {
+    float menor = fminf(r.width, r.height);
+    return (menor <= 0.0f) ? 0.0f : fminf(2.0f * raio / menor, 1.0f);
+}
+
+/*
+ * caixaArredondada / contornoArredondado
+ * Um retângulo (ou o contorno dele) com cantos de um raio em pixels.
+ * Recebe: o retângulo, o raio, (a grossura do contorno) e a cor.
+ * Devolve: nada.
+ */
+void caixaArredondada(Rectangle r, float raio, Color cor) {
+    if (raio <= 0.0f) {
+        DrawRectangleRec(r, cor);
+        return;
+    }
+    DrawRectangleRounded(r, fracaoDoRaio(r, raio), 12, cor);
+}
+void contornoArredondado(Rectangle r, float raio, float grossura, Color cor) {
+    if (raio <= 0.0f) {
+        DrawRectangleLinesEx(r, grossura, cor);
+        return;
+    }
+    DrawRectangleRoundedLinesEx(r, fracaoDoRaio(r, raio), 12, grossura, cor);
+}
 
 /*
  * usarFormasRetas
@@ -170,8 +225,7 @@ void usarFormasRetas(int ligado) {
 }
 
 static float arredondamento(float largura, float altura) {
-    float menor = fminf(largura, altura);
-    return (menor <= 0.0f) ? 0.0f : fminf(1.0f, 2.0f * RAIO_DOS_CANTOS / menor);
+    return fracaoDoRaio((Rectangle){ 0, 0, largura, altura }, raioDoTamanho(largura, altura));
 }
 
 /*
@@ -344,8 +398,8 @@ static float desenharIconeDoControle(float x, float y, const char *nome) {
     if (ehGatilhoOuOmbro(nome)) {
         int gatilho = (nome[1] == '2' || nome[1] == 'T');
         Rectangle corpo = { x, y + (gatilho ? 0.0f : 3.0f), largura, ALTURA_TECLA + (gatilho ? 2.0f : -2.0f) };
-        DrawRectangleRounded(corpo, gatilho ? 0.65f : 0.35f, 6, COR_CORPO_DO_ICONE);
-        DrawRectangleRoundedLinesEx(corpo, gatilho ? 0.65f : 0.35f, 6, 1.0f, COR_CROMO);
+        caixaArredondada(corpo, RAIO_PEQUENO, COR_CORPO_DO_ICONE);
+        contornoArredondado(corpo, RAIO_PEQUENO, 1.0f, COR_CROMO);
         letraNoCentro(nome, c, LETRA_TECLA, COR_TEXTO_CLARO);
         return largura;
     }
