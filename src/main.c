@@ -21,6 +21,7 @@
 #include "mundo.h"
 #include "carros3d.h"
 #include "fumaca.h"
+#include "fogos.h"
 #include "marcas.h"
 #include "posprocesso.h"
 #include "carro.h"
@@ -36,13 +37,15 @@
 #include "efeitos.h"
 #include "apresentacao.h"
 #include "intro.h"
+#include "videofundo.h"
+#include "recordes.h"
 #include "controle.h"
 
 /* Na vitória, o painel de chegada espera um pouco para o jogador ver o
  * confete e o refrão entrando */
 #define SEGUNDOS_ANTES_DE_SEGUIR 1.5f   /* depois da bandeirada */
 #define FORCA_DO_TOQUE 0.7f   /* o toque de teste da vibração, nas configurações */
-#define ATRASO_DO_PAINEL_NA_VITORIA  2.5f   /* segundos depois de cruzar a linha */
+#define ATRASO_DO_PAINEL_NA_VITORIA  9.6f   /* segundos depois de cruzar a linha: as duas primeiras câmeras da festa passam limpas */
 
 /*
  * lerComandos
@@ -139,6 +142,16 @@ static Tela atualizarTelaDaCorrida(Corrida *corrida, EstadoMenu *menu, int *paus
 
     Comandos comandos = lerComandos();
     atualizarCorrida(corrida, comandos, tempoQuadro);
+    /* O recorde da pista: quando o jogador termina, a melhor volta dele entra no recorde, se for a melhor de todas */
+    static int recordeRegistrado = 0;
+    if (corrida->contagemRegressiva > 0.0f) {
+        recordeRegistrado = 0;
+    } else if (corrida->terminou && !recordeRegistrado) {
+        recordeRegistrado = 1;
+        if (!corrida->desclassificado && corrida->jogador.melhorVolta > 0.0f) {
+            registrarRecorde(corrida->pista->id, corrida->jogador.melhorVolta, corrida->jogador.nome);
+        }
+    }
     registrarTelemetria(corrida, &comandos);
     /* Espera um pouco: o botão de confirmar é também o freio de mão, e quem o aperta
      * na bandeirada não pode pular a tela da chegada sem querer */
@@ -193,6 +206,10 @@ int main(int argc, char *argv[]) {
     ChangeDirectory(GetApplicationDirectory());
     carregarVisual();   /* fontes e logo dos menus */
     carregarAudio();    /* música dos menus */
+    /* Os vídeos de fundo: a tela de entrada e o menu principal (em loop; se faltarem, a tela segue sem vídeo) */
+    VideoDeFundo *videoDaEntrada = abrirVideoDeFundo("recursos/video/tela_entrada.mjpeg");
+    VideoDeFundo *videoDoMenu = abrirVideoDeFundo("recursos/video/tela_menu.mjpeg");
+    float transicaoAlfa = 0.0f;   /* 1 logo depois de sair da entrada: a tela clareia do preto até o menu */
 
     Pista *pistas[TOTAL_PISTAS];
     for (int i = 0; i < TOTAL_PISTAS; i++) {
@@ -207,7 +224,8 @@ int main(int argc, char *argv[]) {
     EstadoMenu menu;
     iniciarMenu(&menu);
     carregarConfiguracoes(configuracoesAtuais(), ARQUIVO_DE_CONFIGURACOES);
-    Tela tela = TELA_MENU;
+    carregarRecordes();
+    Tela tela = TELA_ENTRADA;   /* primeiro a tela de entrada; depois do vídeo de abertura, dissolve nela */
     int venceuAntes = 0;   /* para soltar o confete uma vez só, no quadro da vitória */
     Olhar olhar = olharParaAFrente();
     int pausada = 0;       /* a corrida está na pausa (ESC) */
@@ -239,10 +257,19 @@ int main(int argc, char *argv[]) {
             continue;   /* quando acaba, a intro se dissolve por cima do menu (desenharSaidaDaIntro) */
         }
         atualizarControle();   /* acha o controle e lê o analógico, antes das telas perguntarem */
+        /* Os vídeos de fundo avançam só enquanto a tela deles está aberta */
+        if (tela == TELA_ENTRADA) {
+            atualizarVideoDeFundo(videoDaEntrada, tempoQuadro);
+        } else if (tela == TELA_MENU) {
+            atualizarVideoDeFundo(videoDoMenu, tempoQuadro);
+        }
 
         /* ---- 1) Atualizar a tela atual e descobrir a próxima ---- */
         Tela proxima = tela;
         switch (tela) {
+            case TELA_ENTRADA:
+                proxima = atualizarTelaDeEntrada();
+                break;
             case TELA_MENU:
                 proxima = atualizarMenuPrincipal(&menu);
                 break;
@@ -277,10 +304,22 @@ int main(int argc, char *argv[]) {
             iniciarCorrida(&corrida, pistas[menu.pistaEscolhida], menu.carroEscolhido, menu.nivelEscolhido);
             limparConfetes();
             limparFumaca();
+            limparFogos();
             olhar = olharParaAFrente();
             iniciarEstadoDaVibracao(&estadoDaVibracao);
             iniciarEfeitosDaCorrida();
             iniciarApresentacao(&apresentacao);
+        }
+        /* Troca de tela: o vídeo da tela nova recomeça do início; sair da entrada clareia até o menu */
+        if (proxima != tela) {
+            if (proxima == TELA_ENTRADA) {
+                reiniciarVideoDeFundo(videoDaEntrada);
+            } else if (proxima == TELA_MENU) {
+                reiniciarVideoDeFundo(videoDoMenu);
+            }
+            if (tela == TELA_ENTRADA && proxima == TELA_MENU) {
+                transicaoAlfa = 1.0f;
+            }
         }
         tela = proxima;
 
@@ -335,7 +374,7 @@ int main(int argc, char *argv[]) {
 
         /* A música toca nos menus e some quando a corrida começa */
         int apresentando = (tela == TELA_CORRIDA && apresentacaoAtiva(&apresentacao));
-        atualizarAudio(tela == TELA_MENU || tela == TELA_GARAGEM || tela == TELA_PISTAS || tela == TELA_CONFIGURACOES || tela == TELA_COMO_JOGAR
+        atualizarAudio(tela == TELA_ENTRADA || tela == TELA_MENU || tela == TELA_GARAGEM || tela == TELA_PISTAS || tela == TELA_CONFIGURACOES || tela == TELA_COMO_JOGAR
                        || apresentando);   /* na apresentação da largada, a música segue de trilha */
 
         /* Sons da corrida:
@@ -370,6 +409,7 @@ int main(int argc, char *argv[]) {
         BeginDrawing();
         ClearBackground(BLACK);
         congelarCena(tela == TELA_CORRIDA && pausada);
+        usarFormasRetas(tela != TELA_CORRIDA);   /* os menus usam retângulos arredondados; o HUD da corrida, não */
 
         /* A câmera livre vale na corrida; na pausa ela fica onde está */
         if (!pausada) {
@@ -381,8 +421,20 @@ int main(int argc, char *argv[]) {
             definirOlhar(olhar);
         }
         switch (tela) {
+            case TELA_ENTRADA:
+                if (videoDaEntrada != NULL) {
+                    desenharVideoDeFundo(videoDaEntrada, 1.0f);
+                }
+                comecarInterface(1);
+                desenharTelaDeEntrada(tempoQuadro);
+                terminarInterface();
+                break;
             case TELA_MENU:
-                desenharFundoAlternado(pistas);
+                if (videoDoMenu != NULL) {
+                    desenharVideoDeFundo(videoDoMenu, 1.0f);   /* o vídeo do carro, por trás de tudo */
+                } else {
+                    desenharFundoAlternado(pistas);
+                }
                 comecarInterface(1);
                 desenharMenuPrincipal(&menu);
                 terminarInterface();
@@ -423,7 +475,9 @@ int main(int argc, char *argv[]) {
                 }
                 desenharVisaoDoJogador(&corrida);
                 comecarInterface(0);
-                desenharHud(&corrida);
+                if (!venceu) {   /* na festa da vitória a tela fica limpa: só a imagem, os fogos e o painel */
+                    desenharHud(&corrida);
+                }
                 if (corrida.terminou && (!venceu || corrida.tempoDeCorrida - corrida.jogador.tempoDeChegada
                                                     > ATRASO_DO_PAINEL_NA_VITORIA)) {
                     desenharFimDeCorrida(&corrida);
@@ -447,6 +501,11 @@ int main(int argc, char *argv[]) {
                 break;
         }
         desenharSaidaDaIntro(tempoQuadro);   /* o fim do vídeo se dissolvendo no menu */
+        /* A transição: a tela clareia do preto (depois de sair da entrada) */
+        if (transicaoAlfa > 0.0f) {
+            DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Fade(BLACK, transicaoAlfa));
+            transicaoAlfa -= tempoQuadro * 1.6f;
+        }
         EndDrawing();
     }
     encerrarIntro();   /* se a janela fechou no meio da dissolução */
@@ -461,6 +520,8 @@ int main(int argc, char *argv[]) {
         liberarPista(pistas[i]);
     }
     descarregarVisual();
+    fecharVideoDeFundo(videoDaEntrada);
+    fecharVideoDeFundo(videoDoMenu);
     descarregarAudio();
     CloseWindow();
     return 0;

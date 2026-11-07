@@ -2733,6 +2733,98 @@ static void testarNiveisEDesgaste(void) {
 }
 
 /*
+ * testarPneuEstourado
+ * No dificil, com a vida do pneu perto de 20%, o pneu do jogador estoura: o carro perde velocidade,
+ * puxa para um lado e so a troca nos boxes resolve.
+ */
+static void testarPneuEstourado(void) {
+    printf("\n28b) Pneu estourado no dificil\n");
+    float quadro = 1.0f / 60.0f;
+    Pista *pista = criarPista();
+    static Corrida corrida;
+    Comandos acelerar = { 1, 0, 0, 0, 0.0f, 0, 0 };
+
+    /* O pneu cruza os 80% de desgaste e estoura (so o do jogador, so no dificil) */
+    iniciarCorrida(&corrida, pista, 0, NIVEL_DIFICIL);
+    corrida.contagemRegressiva = 0.0f;
+    corrida.jogador.velocidade = corrida.jogador.velocidadeMaxima;
+    corrida.jogador.desgaste = 0.78f;
+    verificar(corrida.jogador.pneuEstourado == 0, "comeca sem pneu estourado");
+    for (int i = 0; i < 60 * 3; i++) {
+        atualizarCorrida(&corrida, acelerar, quadro);
+    }
+    corrida.jogador.desgaste = 0.799f;
+    int estourou = 0;
+    for (int i = 0; i < 60 * 20 && !estourou; i++) {
+        atualizarCorrida(&corrida, acelerar, quadro);
+        estourou = corrida.jogador.pneuEstourado != 0;
+    }
+    verificar(estourou, "chegando aos 80% de desgaste o pneu estoura");
+    verificar(corrida.jogador.pneuEstourado == 1 || corrida.jogador.pneuEstourado == 2, "e e um pneu dianteiro (1 ou 2)");
+    verificar(!corrida.jogador.nitroLigado, "o nitro apaga");
+    verificar(corrida.rivais[0].pneuEstourado == 0, "os rivais nao estouram");
+
+    /* Rodando no aro, com alguem dirigindo (a IA): a velocidade cai ate perto de 55% do maximo, nao passa
+     * disso e o carro continua na pista, ainda que puxe para o lado */
+    Carro aro = criarCarro("Teste", 0, buscarSegmento(pista, 1000), 0.0f, 12000.0f, 2400.0f, 0.5f);
+    aro.controladoPeloJogador = 1;
+    aro.habilidade = 1.0f;
+    aro.velocidade = aro.velocidadeMaxima;
+    estourarPneu(&aro);
+    float maior = 0.0f, menor = 1e9f;
+    int saiu = 0;
+    for (int i = 0; i < 60 * 25; i++) {
+        aro.distanciaAFrente = -1.0f;
+        atualizarCarro(&aro, atualizarIA(&aro, pista), quadro);
+        if (i > 60 * 8) {
+            maior = fmaxf(maior, aro.velocidade);
+            menor = fminf(menor, aro.velocidade);
+        }
+        saiu |= fabsf(aro.deslocamentoLateral) > 1.3f;
+    }
+    float teto = aro.velocidadeMaxima * 0.55f;
+    printf("     no aro, dirigido pela IA: velocidade entre %.0f e %.0f (teto %.0f, maxima %.0f)\n", menor, maior, teto, aro.velocidadeMaxima);
+    verificar(maior <= teto * 1.02f, "no aro o carro nao passa de ~55% da velocidade maxima");
+    verificar(menor > teto * 0.3f, "mas anda (da para chegar aos boxes)");
+    verificar(!saiu, "e quem dirige consegue segurar o carro na pista");
+
+    /* Puxa para o lado: sem mexer no volante o carro sai do lugar para o lado do pneu */
+    Carro com = criarCarro("Teste", 0, buscarSegmento(pista, 1000), 0.0f, 12000.0f, 2400.0f, 0.5f);
+    Carro sem = com;
+    com.velocidade = sem.velocidade = 6000.0f;
+    estourarPneu(&com);
+    float lado = (com.pneuEstourado == 1) ? -1.0f : 1.0f;
+    for (int i = 0; i < 60 * 2; i++) {
+        atualizarCarro(&com, acelerar, quadro);
+        atualizarCarro(&sem, acelerar, quadro);
+    }
+    printf("     deslocamento lateral em 2 s sem virar: com pneu estourado %.2f, normal %.2f (lado %+.0f)\n",
+           com.deslocamentoLateral, sem.deslocamentoLateral, lado);
+    verificar((com.deslocamentoLateral - sem.deslocamentoLateral) * lado > 0.3f, "o carro puxa para o lado do pneu estourado");
+
+    /* A troca nos boxes conserta */
+    corrida.jogador.estadoDoPit = PIT_TROCANDO;
+    corrida.jogador.tempoDaTroca = corrida.jogador.duracaoDaTroca;
+    Comandos nada = { 0, 0, 0, 0, 0.0f, 0, 0 };
+    atualizarCorrida(&corrida, nada, quadro);
+    verificar(corrida.jogador.desgaste == 0.0f && corrida.jogador.pneuEstourado == 0, "a troca nos boxes conserta o pneu");
+
+    /* No medio os pneus nao gastam, entao nunca estoura */
+    iniciarCorrida(&corrida, pista, 0, NIVEL_MEDIO);
+    corrida.contagemRegressiva = 0.0f;
+    corrida.jogador.desgaste = 0.9f;
+    for (int i = 0; i < 60 * 5; i++) {
+        atualizarCorrida(&corrida, acelerar, quadro);
+    }
+    verificar(corrida.jogador.pneuEstourado == 0, "no medio nao estoura");
+
+    /* A IA dirigindo o jogador no dificil, parando nos boxes na hora, nao estoura */
+    correrComoIA(&corrida, pista, NIVEL_DIFICIL, 0.97f);
+    verificar(corrida.terminou && corrida.jogador.pneuEstourado == 0, "parando no pit certo, a corrida inteira passa sem estourar");
+    liberarPista(pista);
+}
+
+/*
  * vibracaoEm
  * Roda a vibração por um tempo, sem mexer no carro.
  * Recebe: a corrida, o estado e onde guardar o maior grave e o maior agudo.
@@ -4248,6 +4340,7 @@ int main(int argc, char *argv[]) {
     testarPitstop();
     testarFreioDeMao();
     testarNiveisEDesgaste();
+    testarPneuEstourado();
     testarVibracao();
     testarConfiguracoes();
     testarCurvaNaMaoDoPiloto();

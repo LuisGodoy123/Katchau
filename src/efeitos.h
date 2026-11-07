@@ -32,5 +32,6 @@ void iniciarEfeitosDaCorrida(void);
 void atualizarEfeitosDaCorrida(Corrida *corrida, int ativo, float tempoQuadro);
 void pausarEfeitosDaCorrida(int pausar);
 void descarregarEfeitos(void);
+void tocarSomDeFogos(int explosao, float volume, float lado);
 
 #endif

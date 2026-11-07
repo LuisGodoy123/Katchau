@@ -126,6 +126,7 @@ typedef struct {
     EstadoDoPit pit;
     int cantoDaPistola;       /* a roda que a pistola está trocando (-1 = nenhuma) */
     double horaDoCambio;
+    int pneuEstourado;        /* o pneu do jogador já estava estourado no quadro anterior */
 } EstadoDosEfeitos;
 
 static EstadoDosEfeitos estado;
@@ -314,6 +315,201 @@ static void tocarBatidasDeLata(Corrida *corrida, int ativo) {
     horaDaUltimaLata = agora;
 }
 
+/* ---------- Pneu estourado e fogos de artifício (sons gerados aqui, em C) ----------
+ * Quatro sons que também não têm arquivo: o estouro do pneu (tiro seco + chiado do ar), a
+ * pancada da borracha solta batendo no asfalto (repetida enquanto o carro roda no aro), o
+ * assobio do foguete subindo e a explosão do fogo (estrondo grave + chuva de estalinhos). */
+#define VARIACOES_DE_FOGO        3
+
+static Sound somDoEstouro, somDaBorracha, somDoFoguete;
+static Sound somDeFogoExplodindo[VARIACOES_DE_FOGO];
+static int somDePneuPronto = 0, somDeFogosPronto = 0;
+static double horaDaBorracha = 0.0;
+
+/*
+ * somDeBuffer
+ * Normaliza o que foi sintetizado (corte suave dos picos, apagando no finalzinho) e vira Sound.
+ * Recebe: as amostras (liberadas aqui), quantas são, a duração e o volume máximo (0 a 1).
+ * Devolve: o som (vazio se faltou memória).
+ */
+static Sound somDeBuffer(float *x, int n, float duracao, float ganho) {
+    short *dados = malloc(sizeof(short) * (size_t) n);
+    if (dados == NULL) {
+        free(x);
+        return (Sound){ 0 };
+    }
+    float maior = 1e-6f;
+    for (int i = 0; i < n; i++) {
+        maior = fmaxf(maior, fabsf(x[i]));
+    }
+    for (int i = 0; i < n; i++) {
+        float t = (float) i / TAXA_DA_LATA;
+        float fim = fminf(1.0f, (duracao - t) / 0.02f);
+        float y = tanhf(1.5f * x[i] / maior) / tanhf(1.5f) * ganho * fim;
+        dados[i] = (short) (y * 32767.0f);
+    }
+    free(x);
+    Wave onda = { (unsigned int) n, TAXA_DA_LATA, 16, 1, dados };
+    Sound som = LoadSoundFromWave(onda);
+    free(dados);
+    return som;
+}
+
+/* O estouro do pneu: o tiro seco (grave que cai + estalo largo), o ar saindo (chiado agudo) e a borracha
+ * batendo no asfalto nas primeiras voltas da roda. */
+static Sound gerarEstouroDePneu(void) {
+    sementeDaLata = 777u;
+    float duracao = 1.3f;
+    int n = (int) (duracao * TAXA_DA_LATA);
+    float *x = calloc((size_t) n, sizeof(float));
+    if (x == NULL) {
+        return (Sound){ 0 };
+    }
+    FiltroDeBanda estalo = filtroDeBanda(1800.0f, 0.6f);
+    FiltroDeBanda chiado = filtroDeBanda(5200.0f, 0.7f);
+    FiltroDeBanda sopro = filtroDeBanda(900.0f, 0.9f);
+    float fase = 0.0f;
+    for (int i = 0; i < n; i++) {
+        float t = (float) i / TAXA_DA_LATA;
+        float ruido = aleatorioDaLata() * 2.0f - 1.0f;
+        float freq = 42.0f + 90.0f * expf(-t / 0.035f);
+        fase += 2.0f * PI * freq / TAXA_DA_LATA;
+        x[i] += 1.6f * sinf(fase) * expf(-t / 0.14f);                                        /* o tranco grave */
+        x[i] += 3.2f * filtrar(&estalo, ruido) * (1.0f - expf(-t / 0.0007f)) * expf(-t / 0.045f);   /* o estalo */
+        x[i] += 1.5f * filtrar(&sopro, ruido) * expf(-t / 0.22f);                            /* o sopro do ar */
+        x[i] += 1.1f * filtrar(&chiado, ruido) * (1.0f - expf(-t / 0.02f)) * expf(-t / 0.55f);     /* o chiado */
+    }
+    /* Pedaços de borracha batendo: pancadas surdas cada vez mais espaçadas */
+    float quando = 0.09f;
+    for (int k = 0; k < 7; k++) {
+        int inicio = (int) (quando * TAXA_DA_LATA);
+        float forca = 0.9f * expf(-quando / 0.35f);
+        for (int j = 0; j < (int) (0.06f * TAXA_DA_LATA) && inicio + j < n; j++) {
+            float tj = (float) j / TAXA_DA_LATA;
+            x[inicio + j] += forca * sinf(2.0f * PI * (95.0f - 200.0f * tj) * tj) * expf(-tj / 0.02f);
+        }
+        quando += 0.07f + 0.035f * (float) k;
+    }
+    return somDeBuffer(x, n, duracao, 0.95f);
+}
+
+/* A pancada da borracha solta batendo no chão: uma só, curtinha (a corrida repete conforme a roda gira) */
+static Sound gerarBatidaDeBorracha(void) {
+    sementeDaLata = 4242u;
+    float duracao = 0.13f;
+    int n = (int) (duracao * TAXA_DA_LATA);
+    float *x = calloc((size_t) n, sizeof(float));
+    if (x == NULL) {
+        return (Sound){ 0 };
+    }
+    FiltroDeBanda batida = filtroDeBanda(520.0f, 0.9f);
+    float fase = 0.0f;
+    for (int i = 0; i < n; i++) {
+        float t = (float) i / TAXA_DA_LATA;
+        fase += 2.0f * PI * (75.0f + 70.0f * expf(-t / 0.02f)) / TAXA_DA_LATA;
+        float ruido = aleatorioDaLata() * 2.0f - 1.0f;
+        x[i] += sinf(fase) * expf(-t / 0.035f);
+        x[i] += 1.6f * filtrar(&batida, ruido) * (1.0f - expf(-t / 0.001f)) * expf(-t / 0.03f);
+    }
+    return somDeBuffer(x, n, duracao, 0.9f);
+}
+
+/* O foguete subindo: assobio que sobe de tom + o rastro de fogo (ruído) */
+static Sound gerarFoguete(void) {
+    sementeDaLata = 31337u;
+    float duracao = 1.4f;
+    int n = (int) (duracao * TAXA_DA_LATA);
+    float *x = calloc((size_t) n, sizeof(float));
+    if (x == NULL) {
+        return (Sound){ 0 };
+    }
+    FiltroDeBanda fogo = filtroDeBanda(2600.0f, 0.5f);
+    float fase = 0.0f;
+    for (int i = 0; i < n; i++) {
+        float t = (float) i / TAXA_DA_LATA;
+        float u = t / duracao;
+        float entra = fminf(t / 0.08f, 1.0f) * fminf((duracao - t) / 0.25f, 1.0f);
+        fase += 2.0f * PI * (900.0f + 2300.0f * u * u) / TAXA_DA_LATA;
+        float ruido = aleatorioDaLata() * 2.0f - 1.0f;
+        x[i] += 0.45f * sinf(fase) * entra;
+        x[i] += 1.1f * filtrar(&fogo, ruido) * entra * (0.6f + 0.4f * u);
+    }
+    return somDeBuffer(x, n, duracao, 0.55f);
+}
+
+/* A explosão do fogo: o estrondo (grave que cai, mais longo que o do pneu), o estouro de ruído e
+ * os estalinhos das faíscas caindo, cada vez menos. */
+static Sound gerarExplosaoDeFogo(unsigned int semente) {
+    sementeDaLata = semente * 2654435761u + 99u;
+    float duracao = 2.0f;
+    int n = (int) (duracao * TAXA_DA_LATA);
+    float *x = calloc((size_t) n, sizeof(float));
+    if (x == NULL) {
+        return (Sound){ 0 };
+    }
+    FiltroDeBanda estouro = filtroDeBanda(700.0f + 400.0f * aleatorioDaLata(), 0.5f);
+    FiltroDeBanda brilho = filtroDeBanda(3500.0f, 0.8f);
+    float fase = 0.0f;
+    for (int i = 0; i < n; i++) {
+        float t = (float) i / TAXA_DA_LATA;
+        float ruido = aleatorioDaLata() * 2.0f - 1.0f;
+        fase += 2.0f * PI * (38.0f + 70.0f * expf(-t / 0.06f)) / TAXA_DA_LATA;
+        x[i] += 1.5f * sinf(fase) * expf(-t / 0.28f);
+        x[i] += 3.0f * filtrar(&estouro, ruido) * (1.0f - expf(-t / 0.002f)) * expf(-t / 0.16f);
+        x[i] += 1.0f * filtrar(&brilho, ruido) * (1.0f - expf(-t / 0.004f)) * expf(-t / 0.35f);
+    }
+    for (int k = 0; k < 90; k++) {   /* os estalinhos, mais seguidos no começo */
+        float u = aleatorioDaLata();
+        float quando = 0.12f + 1.6f * u * u;
+        int inicio = (int) (quando * TAXA_DA_LATA);
+        float forca = (0.15f + 0.45f * aleatorioDaLata()) * expf(-quando / 0.8f);
+        FiltroDeBanda clique = filtroDeBanda(2800.0f + 4500.0f * aleatorioDaLata(), 2.0f);
+        for (int j = 0; j < (int) (0.003f * TAXA_DA_LATA) && inicio + j < n; j++) {
+            float ruido = aleatorioDaLata() * 2.0f - 1.0f;
+            x[inicio + j] += 1.8f * forca * filtrar(&clique, ruido) * expf(-(float) j / (0.0008f * TAXA_DA_LATA));
+        }
+    }
+    return somDeBuffer(x, n, duracao, 0.9f);
+}
+
+/*
+ * tocarSomDeFogos
+ * Toca o foguete subindo ou o fogo explodindo (uma das variações, com o tom um pouco diferente).
+ * Recebe: 1 para explosão e 0 para foguete, o volume (0 a 1) e o lado (0 esquerda, 0,5 meio, 1 direita).
+ * Devolve: nada.
+ */
+void tocarSomDeFogos(int explosao, float volume, float lado) {
+    if (!somDeFogosPronto || volume < 0.01f) {
+        return;
+    }
+    Sound som = explosao ? somDeFogoExplodindo[GetRandomValue(0, VARIACOES_DE_FOGO - 1)] : somDoFoguete;
+    SetSoundVolume(som, fminf(volume, 1.0f));
+    SetSoundPitch(som, 0.88f + 0.24f * (float) GetRandomValue(0, 100) / 100.0f);
+    SetSoundPan(som, fminf(fmaxf(lado, 0.0f), 1.0f));
+    PlaySound(som);
+}
+
+/*
+ * tocarPneuEstourado
+ * Enquanto o carro roda no aro: a borracha solta batendo no asfalto, mais rápido quanto mais veloz.
+ * Recebe: o carro do jogador e se a corrida está andando.
+ * Devolve: nada.
+ */
+static void tocarPneuEstourado(const Carro *jogador, int ativo) {
+    if (!somDePneuPronto || !ativo || !jogador->pneuEstourado || carroNoPit(jogador) || jogador->velocidade < 300.0f) {
+        return;
+    }
+    float f = fminf(jogador->velocidade / jogador->velocidadeMaxima, 1.0f);
+    double agora = GetTime();
+    if (agora - horaDaBorracha < 1.0 / (3.0 + 8.0 * f)) {
+        return;
+    }
+    horaDaBorracha = agora;
+    SetSoundVolume(somDaBorracha, 0.55f + 0.3f * f);
+    SetSoundPitch(somDaBorracha, 0.8f + 0.5f * f + 0.15f * (float) GetRandomValue(0, 100) / 100.0f);
+    PlaySound(somDaBorracha);
+}
+
 /* ==================================================================
  * Utilidades
  * ================================================================== */
@@ -423,6 +619,15 @@ void carregarEfeitos(void) {
     for (int v = 0; v < VARIACOES_DE_LATA; v++) {
         latasProntas = latasProntas && IsSoundValid(latasFortes[v]) && IsSoundValid(latasLeves[v]);
     }
+    somDoEstouro = gerarEstouroDePneu();
+    somDaBorracha = gerarBatidaDeBorracha();
+    somDePneuPronto = IsSoundValid(somDoEstouro) && IsSoundValid(somDaBorracha);
+    somDoFoguete = gerarFoguete();
+    somDeFogosPronto = IsSoundValid(somDoFoguete);
+    for (int v = 0; v < VARIACOES_DE_FOGO; v++) {
+        somDeFogoExplodindo[v] = gerarExplosaoDeFogo(300u + (unsigned int) v);
+        somDeFogosPronto = somDeFogosPronto && IsSoundValid(somDeFogoExplodindo[v]);
+    }
     for (int i = 0; i < FAIXAS_ACELERANDO; i++) {
         carregarFaixa(&acelerando[i]);
     }
@@ -476,6 +681,22 @@ void descarregarEfeitos(void) {
         }
     }
     latasProntas = 0;
+    if (IsSoundValid(somDoEstouro)) {
+        UnloadSound(somDoEstouro);
+    }
+    if (IsSoundValid(somDaBorracha)) {
+        UnloadSound(somDaBorracha);
+    }
+    if (IsSoundValid(somDoFoguete)) {
+        UnloadSound(somDoFoguete);
+    }
+    for (int v = 0; v < VARIACOES_DE_FOGO; v++) {
+        if (IsSoundValid(somDeFogoExplodindo[v])) {
+            UnloadSound(somDeFogoExplodindo[v]);
+        }
+    }
+    somDePneuPronto = 0;
+    somDeFogosPronto = 0;
     for (int i = 0; i < FAIXAS_ACELERANDO; i++) {
         descarregarFaixa(&acelerando[i]);
     }
@@ -800,7 +1021,8 @@ static void atualizarLoopsDoJogador(Corrida *corrida, int ativo, float tempo) {
 
     /* O muro */
     int raspando = ativo && f > 0.03f && (jogador->raspandoNoMuro ||
-                                         (jogador->contatoComCarro && jogador->contatoDeslize > 1.5f));
+                                         (jogador->contatoComCarro && jogador->contatoDeslize > 1.5f) ||
+                                         (jogador->pneuEstourado && !carroNoPit(jogador)));   /* o aro no asfalto */
     atualizarLoop(&loops[LOOP_MURO], raspando ? VOLUME_MURO * powf(f, 0.6f) : 0.0f, 0.8f + 0.4f * f, tempo);
 
     /* O nitro queimando */
@@ -825,6 +1047,7 @@ static void sincronizarEstado(const Carro *jogador) {
     estado.melhorVolta = jogador->melhorVolta;
     estado.pit = jogador->estadoDoPit;
     estado.cantoDaPistola = -1;
+    estado.pneuEstourado = jogador->pneuEstourado;
 }
 
 /*
@@ -851,6 +1074,14 @@ static void dispararEfeitosCurtos(Carro *jogador) {
         }
         estado.marcha = jogador->motor.marcha;
     }
+
+    /* O pneu estoura: o tiro e o chiado (depois, a borracha batendo vem de tocarPneuEstourado) */
+    if (jogador->pneuEstourado && !estado.pneuEstourado && somDePneuPronto) {
+        SetSoundVolume(somDoEstouro, 1.0f);
+        SetSoundPitch(somDoEstouro, 1.0f);
+        PlaySound(somDoEstouro);
+    }
+    estado.pneuEstourado = jogador->pneuEstourado;
 
     /* Nitro */
     if (jogador->nitroLigado && !estado.nitroLigado) {
@@ -907,6 +1138,7 @@ void atualizarEfeitosDaCorrida(Corrida *corrida, int ativo, float tempoQuadro) {
     atualizarMotoresDosRivais(corrida, ativo, tempoQuadro);
     atualizarLoopsDoJogador(corrida, ativo, tempoQuadro);
     tocarBatidasDeLata(corrida, ativo);
+    tocarPneuEstourado(jogador, ativo);
 
     if (!estado.pronto || !ativo) {
         sincronizarEstado(jogador);   /* sem som: só acompanha, para ouvir apenas o que mudar depois */

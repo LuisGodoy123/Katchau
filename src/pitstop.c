@@ -328,6 +328,8 @@ int atualizarCarroNoPit(Carro *carro, Pista *pista, float tempoQuadro) {
             carro->querParar = 0;
             carro->ultimaTroca = carro->tempoDaTroca;
             carro->desgaste = 0.0f;   /* pneus novos */
+            carro->pneuEstourado = 0;
+            carro->tempoDoEstouro = 0.0f;
         }
     }
 

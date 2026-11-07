@@ -120,6 +120,11 @@
 #define METROS_DE_UM_JOGO_DE_PNEUS 38000.0f /* numa corrida de verdade, com as derrapagens, dura cerca de 5 voltas */
 #define GASTO_DERRAPANDO          4.0f     /* derrapando ou de lado, gasta tantas vezes mais */
 #define ADERENCIA_PERDIDA         0.45f    /* com o pneu acabado */
+#define DESGASTE_DO_ESTOURO       0.80f    /* o pneu estoura quando sobra ~20% de vida */
+#define TETO_COM_PNEU_ESTOURADO   0.55f    /* a velocidade máxima, rodando no aro: fração da máxima do carro */
+#define FREADA_DO_PNEU_ESTOURADO  3500.0f  /* o quanto a velocidade cai por segundo até esse teto */
+#define PUXAO_DO_PNEU_ESTOURADO   0.30f    /* o carro puxa para o lado do pneu: soma isso ao volante, na máxima */
+#define ADERENCIA_NO_ARO          0.70f    /* e o aro segura menos que o pneu */
 #define VELOCIDADE_PERDIDA        0.035f   /* com o pneu acabado, a máxima cai esse tanto */
 #define RAIO_DA_RODA               0.35f /* metros: quanto a roda gira por metro andado */
 #define GIRO_MAXIMO_DAS_RODAS     30.0f  /* radianos por segundo: mais que isso, na tela, a roda parece girar ao contrário */
@@ -236,6 +241,8 @@ Carro criarCarro(const char *nome, int numero, Segmento *largada, float deslocam
     carro.giroDoDrift = 0.0f;
     carro.gastaPneu = 0;
     carro.desgaste = 0.0f;
+    carro.pneuEstourado = 0;
+    carro.tempoDoEstouro = 0.0f;
     for (int i = 0; i < MAXIMO_DE_VOLTAS; i++) {
         carro.temposDeVolta[i] = 0.0f;
     }
@@ -424,6 +431,11 @@ static float alvoDoVolante(Comandos comandos) {
  */
 static void atualizarVolante(Carro *carro, Comandos comandos, float tempoQuadro) {
     float alvo = alvoDoVolante(comandos);
+    if (carro->pneuEstourado) {
+        /* Com o pneu estourado o carro puxa para o lado dele: quem dirige tem de virar para o outro */
+        float lado = (carro->pneuEstourado == 1) ? -1.0f : 1.0f;
+        alvo = limitar(alvo + lado * PUXAO_DO_PNEU_ESTOURADO * (carro->velocidade / carro->velocidadeMaxima), -1.0f, 1.0f);
+    }
 
     /* Voltando: o alvo está mais perto do centro ou do outro lado */
     int voltando = fabsf(alvo) < fabsf(carro->volante) || alvo * carro->volante < 0.0f;
@@ -451,7 +463,8 @@ static float respostaDaDirecao(float proporcaoVelocidade) {
  * Devolve: a aderência de agora, de 0 a 1.
  */
 float aderenciaAtual(const Carro *carro) {
-    return carro->aderencia * (1.0f - ADERENCIA_PERDIDA * carro->desgaste * carro->desgaste);
+    float aderencia = carro->aderencia * (1.0f - ADERENCIA_PERDIDA * carro->desgaste * carro->desgaste);
+    return carro->pneuEstourado ? aderencia * ADERENCIA_NO_ARO : aderencia;
 }
 
 /*
@@ -500,6 +513,24 @@ static void atualizarDrift(Carro *carro, Comandos comandos, float tempoQuadro) {
 }
 
 /*
+ * estourarPneu
+ * Um pneu dianteiro estoura (o lado é sorteado pelo caminho que o carro andou, para não ser sempre o mesmo).
+ * Daí em diante o carro roda no aro: não passa de uma fração da velocidade máxima, puxa para o lado do
+ * pneu e segura menos. Só uma troca nos boxes resolve. O nitro apaga e o controle vibra forte.
+ * Recebe: o carro.
+ * Devolve: nada.
+ */
+void estourarPneu(Carro *carro) {
+    if (carro->pneuEstourado != 0) {
+        return;
+    }
+    carro->pneuEstourado = (((long) carro->distanciaPercorrida / 997) % 2 == 0) ? 1 : 2;
+    carro->tempoDoEstouro = 0.0f;
+    carro->nitroLigado = 0;
+    carro->pancada = 1.0f;
+}
+
+/*
  * atualizarDesgaste
  * Os pneus gastam com o caminho, e bem mais derrapando ou de lado.
  * Recebe: o carro e quantas unidades ele andou.
@@ -511,6 +542,11 @@ static void atualizarDesgaste(Carro *carro, float distancia) {
     }
     float metros = distancia / UNIDADES_POR_METRO * (1.0f + GASTO_DERRAPANDO * carro->derrapagem);
     carro->desgaste = fminf(carro->desgaste + metros / METROS_DE_UM_JOGO_DE_PNEUS, 1.0f);
+    /* O pneu do jogador estoura quando a vida chega a ~20%; só na pista (no pit lane ele já está parando) */
+    if (carro->controladoPeloJogador && carro->pneuEstourado == 0 && carro->desgaste >= DESGASTE_DO_ESTOURO
+        && carro->estadoDoPit == PIT_FORA) {
+        estourarPneu(carro);
+    }
 }
 
 /*
@@ -1068,6 +1104,13 @@ int atualizarCarro(Carro *carro, Comandos comandos, float tempoQuadro) {
                    (comandos.acelerar || carro->nitroLigado) && !comandos.frear && !comandos.freioDeMao,
                    comandos.frear, carro->forcaDoDrift > SEGURA_A_MARCHA, tempoQuadro);
     atualizarVelocidade(carro, comandos, tempoQuadro);
+    if (carro->pneuEstourado) {   /* rodando no aro, a velocidade cai até o teto e não passa dele */
+        carro->tempoDoEstouro += tempoQuadro;
+        float teto = carro->velocidadeMaxima * TETO_COM_PNEU_ESTOURADO;
+        if (carro->velocidade > teto) {
+            carro->velocidade = fmaxf(teto, carro->velocidade - FREADA_DO_PNEU_ESTOURADO * tempoQuadro);
+        }
+    }
     atualizarVolante(carro, comandos, tempoQuadro);
     atualizarDrift(carro, comandos, tempoQuadro);
     if (carro->direcaoLivre) {

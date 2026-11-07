@@ -795,7 +795,11 @@ static void desenharAvisosDoPit(Corrida *corrida) {
         escrever(FONTE_FORTE, TextFormat("PNEUS %d%%", (int) (sobra * 100.0f + 0.5f)), xDaBarra, 158.0f, 15.0f, cor);
         DrawRectangleRec((Rectangle){ xDaBarra, 178.0f, larguraDaBarra, 7.0f }, Fade(COR_GRAFITE, 0.85f));
         DrawRectangleRec((Rectangle){ xDaBarra, 178.0f, larguraDaBarra * sobra, 7.0f }, cor);
-        if (sobra <= 0.25f && !carroNoPit(jogador)) {
+        if (jogador->pneuEstourado && !carroNoPit(jogador)) {   /* o aviso pisca */
+            float pisca = 0.55f + 0.45f * sinf((float) GetTime() * 9.0f);
+            escreverCentralizado(FONTE_TITULO, "PNEU ESTOURADO!", centro, 100.0f, 30.0f, Fade(COR_VERMELHO, pisca));
+            escreverCentralizado(FONTE_FORTE, "VÁ PARA OS BOXES", centro, 134.0f, 18.0f, COR_TEXTO_CLARO);
+        } else if (sobra <= 0.25f && !carroNoPit(jogador)) {
             escreverCentralizado(FONTE_FORTE, "PNEUS NO FIM: PARE NOS BOXES", centro, 108.0f, 20.0f, COR_VERMELHO);
         }
     }

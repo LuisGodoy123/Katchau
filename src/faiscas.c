@@ -10,6 +10,7 @@
 #include "raymath.h"
 #include "rlgl.h"
 #include "faiscas.h"
+#include "fumaca.h"
 
 #define MAXIMO_DE_FAISCAS      900
 #define MAXIMO_DE_CLAROES      24
@@ -47,6 +48,22 @@ typedef struct {
     float tamanho;
 } Clarao;
 
+/* Os pedaços de borracha do pneu que estoura: cubinhos escuros que voam, quicam e somem */
+#define MAXIMO_DE_PEDACOS      90
+typedef struct {
+    Vector3 posicao;
+    Vector3 velocidade;
+    float vida;       /* segundos que faltam */
+    float tamanho;    /* metros */
+    float chao;       /* a altura do chão onde nasceu */
+} Pedaco;
+
+static Pedaco pedacos[MAXIMO_DE_PEDACOS];
+static int totalDePedacos = 0;
+static int pneuEstouradoAntes = 0;       /* o pneu do jogador já estava estourado no quadro anterior */
+static float sobraDoAro = 0.0f;          /* frações de faísca do aro que ficam para o próximo quadro */
+static float tempoDaFumacaDoAro = 0.0f;
+
 static Faisca faiscas[MAXIMO_DE_FAISCAS];
 static int totalDeFaiscas = 0;
 static Clarao claroes[MAXIMO_DE_CLAROES];
@@ -67,10 +84,27 @@ static float aleatorio(float de, float ate) {
 void limparFaiscas(void) {
     totalDeFaiscas = 0;
     totalDeClaroes = 0;
+    totalDePedacos = 0;
+    pneuEstouradoAntes = 0;
+    sobraDoAro = 0.0f;
     for (int i = 0; i < TOTAL_CARROS; i++) {
         tinhaContato[i] = 0;
         sobraDaChuva[i] = 0.0f;
     }
+}
+
+/*
+ * frenteDoCarro
+ * Recebe: o carro.
+ * Devolve: para onde a frente dele aponta no mundo (vista de cima, y = 0), de comprimento 1.
+ */
+static Vector3 frenteDoCarro(const Carro *carro) {
+    PosicaoNaPista adiante = carro->posicao;
+    moverNaPista(&adiante, UNIDADES_POR_METRO);
+    PontoNoMundo aqui = pontoNoMundo(carro->posicao, carro->deslocamentoLateral);
+    PontoNoMundo la = pontoNoMundo(adiante, carro->deslocamentoLateral);
+    Vector3 frente = { la.x - aqui.x, 0.0f, la.z - aqui.z };
+    return (Vector3LengthSqr(frente) < 1e-8f) ? (Vector3){ 0.0f, 0.0f, -1.0f } : Vector3Normalize(frente);
 }
 
 /*
@@ -79,12 +113,22 @@ void limparFaiscas(void) {
  * Devolve: a velocidade dele no mundo, em metros por segundo (para onde a pista aponta ali).
  */
 static Vector3 velocidadeNoMundo(const Carro *carro) {
-    PosicaoNaPista adiante = carro->posicao;
-    moverNaPista(&adiante, UNIDADES_POR_METRO);
-    PontoNoMundo aqui = pontoNoMundo(carro->posicao, carro->deslocamentoLateral);
-    PontoNoMundo la = pontoNoMundo(adiante, carro->deslocamentoLateral);
-    Vector3 frente = Vector3Normalize((Vector3){ la.x - aqui.x, 0.0f, la.z - aqui.z });
-    return Vector3Scale(frente, carro->velocidade / UNIDADES_POR_METRO);
+    return Vector3Scale(frenteDoCarro(carro), carro->velocidade / UNIDADES_POR_METRO);
+}
+
+/*
+ * rodaEstourada
+ * Recebe: o carro (com o pneu estourado).
+ * Devolve: onde o aro toca o asfalto, no mundo (um pouco acima do chão, que é onde as faíscas quicam).
+ */
+static Vector3 rodaEstourada(const Carro *carro) {
+    Vector3 frente = frenteDoCarro(carro);
+    Vector3 direita = { -frente.z, 0.0f, frente.x };
+    PontoNoMundo p = pontoNoMundo(carro->posicao, carro->deslocamentoLateral);
+    float lado = (carro->pneuEstourado == 1) ? -1.0f : 1.0f;
+    float adiante = carro->comprimento * 0.30f, aoLado = lado * carro->largura * 0.5f;
+    return (Vector3){ p.x + frente.x * adiante + direita.x * aoLado, p.y + ALTURA_DO_CHAO,
+                      p.z + frente.z * adiante + direita.z * aoLado };
 }
 
 /*
@@ -127,6 +171,48 @@ static void soltarClarao(Vector3 ponto, float forca) {
         return;
     }
     claroes[totalDeClaroes++] = (Clarao){ ponto, VIDA_DO_CLARAO, TAMANHO_DO_CLARAO * (0.4f + 0.6f * forca) };
+}
+
+/*
+ * soltarPedaco
+ * Um pedaço de borracha: sai da roda com um espirro para cima e para os lados.
+ * Recebe: o ponto, a velocidade do carro.
+ * Devolve: nada.
+ */
+static void soltarPedaco(Vector3 ponto, Vector3 velocidadeDoCarro) {
+    if (totalDePedacos >= MAXIMO_DE_PEDACOS) {
+        return;
+    }
+    Pedaco *p = &pedacos[totalDePedacos++];
+    float angulo = aleatorio(0.0f, 2.0f * PI), espirro = aleatorio(1.5f, 6.0f);
+    p->velocidade = (Vector3){ velocidadeDoCarro.x * 0.6f + cosf(angulo) * espirro, aleatorio(2.0f, 7.5f),
+                               velocidadeDoCarro.z * 0.6f + sinf(angulo) * espirro };
+    p->posicao = ponto;
+    p->vida = aleatorio(1.1f, 1.9f);
+    p->tamanho = aleatorio(0.07f, 0.22f);
+    p->chao = ponto.y - ALTURA_DO_CHAO + p->tamanho * 0.5f;
+}
+
+/*
+ * estourarRoda
+ * O estouro do pneu: um clarão, uma rajada de faíscas do aro, pedaços de borracha voando e uma
+ * nuvem de fumaça saindo da roda.
+ * Recebe: o carro com o pneu estourado.
+ * Devolve: nada.
+ */
+static void estourarRoda(const Carro *carro) {
+    Vector3 roda = rodaEstourada(carro);
+    Vector3 velocidade = velocidadeNoMundo(carro);
+    for (int k = 0; k < 90; k++) {
+        soltarFaisca(roda, Vector3Scale(velocidade, 0.35f), 1.0f);
+    }
+    soltarClarao(roda, 1.0f);
+    for (int k = 0; k < 30; k++) {
+        soltarPedaco(roda, velocidade);
+    }
+    for (int k = 0; k < 8; k++) {
+        soltarNuvem(roda, velocidade, 1.0f, NUVEM_DE_PNEU);
+    }
 }
 
 /*
@@ -177,6 +263,28 @@ void soltarFaiscasDaCorrida(Corrida *corrida, float tempoQuadro) {
             }
         }
     }
+
+    /* O pneu estourado do jogador: a rajada do estouro e, rodando no aro, a chuva de faíscas no asfalto */
+    Carro *jogador = &corrida->jogador;
+    if (jogador->pneuEstourado != 0 && !pneuEstouradoAntes) {
+        estourarRoda(jogador);
+    }
+    pneuEstouradoAntes = jogador->pneuEstourado != 0;
+    if (jogador->pneuEstourado != 0 && jogador->estadoDoPit == PIT_FORA && jogador->velocidade > 400.0f) {
+        float proporcao = jogador->velocidade / jogador->velocidadeMaxima;
+        Vector3 roda = rodaEstourada(jogador);
+        Vector3 velocidade = velocidadeNoMundo(jogador);
+        sobraDoAro += (70.0f + 260.0f * proporcao) * tempoQuadro;
+        while (sobraDoAro >= 1.0f) {
+            soltarFaisca(roda, Vector3Scale(velocidade, 0.2f), 0.55f + 0.3f * proporcao);
+            sobraDoAro -= 1.0f;
+        }
+        tempoDaFumacaDoAro += tempoQuadro;
+        if (tempoDaFumacaDoAro > 0.09f) {
+            soltarNuvem(roda, velocidade, 0.35f, NUVEM_DE_PNEU);
+            tempoDaFumacaDoAro = 0.0f;
+        }
+    }
 }
 
 /*
@@ -203,6 +311,22 @@ void atualizarFaiscas(float tempoQuadro) {
             f->velocidade.y = -f->velocidade.y * QUIQUE;
             f->velocidade.x *= ATRITO_NO_CHAO;
             f->velocidade.z *= ATRITO_NO_CHAO;
+        }
+    }
+    for (int i = 0; i < totalDePedacos; i++) {
+        Pedaco *p = &pedacos[i];
+        p->vida -= tempoQuadro;
+        if (p->vida <= 0.0f) {
+            pedacos[i--] = pedacos[--totalDePedacos];
+            continue;
+        }
+        p->velocidade.y -= GRAVIDADE * tempoQuadro;
+        p->posicao = Vector3Add(p->posicao, Vector3Scale(p->velocidade, tempoQuadro));
+        if (p->posicao.y < p->chao) {
+            p->posicao.y = p->chao;
+            p->velocidade.y = -p->velocidade.y * 0.3f;
+            p->velocidade.x *= 0.6f;
+            p->velocidade.z *= 0.6f;
         }
     }
     for (int i = 0; i < totalDeClaroes; i++) {
@@ -237,6 +361,11 @@ static Color corDaFaisca(float passou, float calor) {
  * Devolve: nada.
  */
 void desenharFaiscas(Camera3D camera) {
+    for (int i = 0; i < totalDePedacos; i++) {
+        const Pedaco *p = &pedacos[i];
+        DrawCubeV(p->posicao, (Vector3){ p->tamanho, p->tamanho * 0.45f, p->tamanho * 0.8f },
+                  Fade((Color){ 22, 22, 24, 255 }, fminf(p->vida * 2.0f, 1.0f)));
+    }
     if (totalDeFaiscas == 0 && totalDeClaroes == 0) {
         return;
     }

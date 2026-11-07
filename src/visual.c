@@ -130,6 +130,16 @@ void escrever(TipoFonte fonte, const char *texto, float x, float y, float tamanh
     DrawTextEx(fontes[fonte], texto, (Vector2){ x, y }, tamanho, espaco, cor);
 }
 
+/*
+ * escreverSemSombra
+ * O mesmo que escrever(), sem a sombra (para letras grandes, desenhadas em camadas).
+ * Recebe: a fonte, o texto, o canto superior esquerdo, o tamanho e a cor.
+ * Devolve: nada.
+ */
+void escreverSemSombra(TipoFonte fonte, const char *texto, float x, float y, float tamanho, Color cor) {
+    DrawTextEx(fontes[fonte], texto, (Vector2){ x, y }, tamanho, tamanho * ESPACO_ENTRE_LETRAS, cor);
+}
+
 void escreverCentralizado(TipoFonte fonte, const char *texto, float centroX, float y, float tamanho, Color cor) {
     escrever(fonte, texto, centroX - larguraDoTexto(fonte, texto, tamanho) / 2.0f, y, tamanho, cor);
 }
@@ -142,15 +152,42 @@ void escreverADireita(TipoFonte fonte, const char *texto, float direita, float y
  * Formas
  * ================================================================== */
 
+/* O estilo das formas: 0 = "deitadas para a frente" (o HUD e a apresentação da corrida); 1 = retângulos
+ * com os cantos levemente arredondados (os menus, no padrão dos jogos de corrida modernos). */
+static int formasRetas = 0;
+#define RAIO_DOS_CANTOS 5.0f
+
+/*
+ * usarFormasRetas
+ * Liga ou desliga o estilo de retângulos arredondados em todas as formas desenhadas daqui em
+ * diante (desenharParalelogramo e o contorno dele). O main.c liga nas telas de menu e desliga
+ * na corrida.
+ * Recebe: 1 para ligar, 0 para desligar.
+ * Devolve: nada.
+ */
+void usarFormasRetas(int ligado) {
+    formasRetas = ligado;
+}
+
+static float arredondamento(float largura, float altura) {
+    float menor = fminf(largura, altura);
+    return (menor <= 0.0f) ? 0.0f : fminf(1.0f, 2.0f * RAIO_DOS_CANTOS / menor);
+}
+
 /*
  * desenharParalelogramo
  * Um retângulo "deitado para a frente", como as faixas de jogo de
  * corrida: o lado de cima fica "inclinacao" pixels à direita do de baixo.
+ * Com as formas retas ligadas, vira um retângulo de cantos levemente arredondados.
  * Recebe: x do canto de baixo à esquerda, y do topo, largura, altura,
  *         inclinação e cor.
  * Devolve: nada.
  */
 void desenharParalelogramo(float x, float y, float largura, float altura, float inclinacao, Color cor) {
+    if (formasRetas) {
+        DrawRectangleRounded((Rectangle){ x + inclinacao * 0.5f, y, largura, altura }, arredondamento(largura, altura), 6, cor);
+        return;
+    }
     Vector2 cimaEsquerda  = { x + inclinacao, y };
     Vector2 cimaDireita   = { x + inclinacao + largura, y };
     Vector2 baixoEsquerda = { x, y + altura };
@@ -162,6 +199,11 @@ void desenharParalelogramo(float x, float y, float largura, float altura, float 
 
 void desenharContornoParalelogramo(float x, float y, float largura, float altura, float inclinacao,
                                    float espessura, Color cor) {
+    if (formasRetas) {
+        DrawRectangleRoundedLinesEx((Rectangle){ x + inclinacao * 0.5f, y, largura, altura }, arredondamento(largura, altura), 6,
+                                    espessura, cor);
+        return;
+    }
     Vector2 cimaEsquerda  = { x + inclinacao, y };
     Vector2 cimaDireita   = { x + inclinacao + largura, y };
     Vector2 baixoEsquerda = { x, y + altura };

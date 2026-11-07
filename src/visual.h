@@ -43,10 +43,12 @@ void descarregarVisual(void);
 Font fonteDoJogo(TipoFonte fonte);
 float larguraDoTexto(TipoFonte fonte, const char *texto, float tamanho);
 void escrever(TipoFonte fonte, const char *texto, float x, float y, float tamanho, Color cor);
+void escreverSemSombra(TipoFonte fonte, const char *texto, float x, float y, float tamanho, Color cor);
 void escreverCentralizado(TipoFonte fonte, const char *texto, float centroX, float y, float tamanho, Color cor);
 void escreverADireita(TipoFonte fonte, const char *texto, float direita, float y, float tamanho, Color cor);
 
 /* ---------- Formas ---------- */
+void usarFormasRetas(int ligado);
 void desenharParalelogramo(float x, float y, float largura, float altura, float inclinacao, Color cor);
 void desenharContornoParalelogramo(float x, float y, float largura, float altura, float inclinacao,
                                    float espessura, Color cor);

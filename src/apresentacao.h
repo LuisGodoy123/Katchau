@@ -17,6 +17,11 @@
  * o jogador pode pular com ENTER ou o botão de confirmar. Cada tomada tem um
  * número (TomadaDaApresentacao), para as falas de cada momento.
  *
+ * Quando o jogador vence, o mesmo módulo faz o jogo de câmeras da festa (cameraDaVitoria):
+ * uma câmera de TV ao lado da pista, uma de perseguição alta, uma que acompanha o carro
+ * pela lateral e uma grua alta e aberta, uma de cada vez, sempre olhando para o carro e para
+ * o céu, onde estouram os fogos (fogos.h). Elas se repetem até a corrida acabar.
+ *
  * Módulo que usa a raylib.
  * ------------------------------------------------------------------
  */
@@ -47,5 +52,6 @@ void iniciarApresentacao(Apresentacao *apresentacao);
 void atualizarApresentacao(Apresentacao *apresentacao, int pular, float tempoQuadro);
 int apresentacaoAtiva(const Apresentacao *apresentacao);
 void desenharApresentacao(const Apresentacao *apresentacao, Corrida *corrida);
+Camera3D cameraDaVitoria(Corrida *corrida, float segundosDesdeAChegada, int *cortou, float *escuro);
 
 #endif

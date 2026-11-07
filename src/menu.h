@@ -16,6 +16,7 @@
 
 /* As telas do jogo. O main.c guarda em qual delas o jogador está. */
 typedef enum {
+    TELA_ENTRADA,      /* "APERTE QUALQUER BOTÃO PARA ENTRAR", com o vídeo de entrada em loop */
     TELA_MENU,
     TELA_GARAGEM,
     TELA_PISTAS,
@@ -66,6 +67,9 @@ typedef struct {
 } EstadoMenu;
 
 void iniciarMenu(EstadoMenu *menu);
+
+Tela atualizarTelaDeEntrada(void);
+void desenharTelaDeEntrada(float tempoQuadro);
 
 Tela atualizarMenuPrincipal(EstadoMenu *menu);
 void desenharMenuPrincipal(EstadoMenu *menu);

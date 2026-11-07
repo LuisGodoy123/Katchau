@@ -228,6 +228,103 @@ static Camera3D cameraPronto(Corrida *corrida, float t) {
 }
 
 /* ==================================================================
+ * O jogo de câmeras da vitória
+ * ================================================================== */
+
+#define TOMADAS_DA_VITORIA     4
+#define FADE_DO_CORTE          0.22f   /* segundos de escuro saindo do corte */
+#define FADE_ANTES_DO_CORTE    0.12f   /* e entrando nele */
+
+static const float DURACAO_DA_TOMADA_DA_VITORIA[TOMADAS_DA_VITORIA] = { 4.8f, 4.6f, 4.2f, 5.6f };
+
+/*
+ * cameraDaVitoria
+ * As quatro câmeras da festa, uma depois da outra e de novo (cada vez do outro lado da pista):
+ *   0) TV na pista    parada ao lado da pista, bem à frente: o carro vem de longe, passa por ela e se afasta;
+ *   1) perseguição    alta, atrás do carro, olhando para a frente e para o céu;
+ *   2) lateral        acompanha o carro à frente dele, do lado, com o céu em cima;
+ *   3) grua           parada, alta e mais longe, abrindo a festa inteira.
+ * As paradas ficam presas ao ponto da pista que o carro tinha no começo da tomada. Todas olham um
+ * pouco acima do carro, para o céu dos fogos.
+ * Recebe: a corrida, os segundos desde que o jogador cruzou a linha, onde guardar se houve corte
+ *         neste quadro e quanto a imagem está escura (0 a 1, perto dos cortes).
+ * Devolve: a câmera.
+ */
+Camera3D cameraDaVitoria(Corrida *corrida, float segundosDesdeAChegada, int *cortou, float *escuro) {
+    static int tomadaAnterior = -1, cicloAnterior = -1;
+    static float tempoAnterior = 0.0f;
+    static PosicaoNaPista ancora;
+
+    float ciclo = 0.0f;
+    for (int i = 0; i < TOMADAS_DA_VITORIA; i++) {
+        ciclo += DURACAO_DA_TOMADA_DA_VITORIA[i];
+    }
+    float tempo = fmaxf(segundosDesdeAChegada, 0.0f);
+    if (tempo < tempoAnterior - 0.5f) {   /* corrida nova */
+        tomadaAnterior = -1;
+        cicloAnterior = -1;
+    }
+    tempoAnterior = tempo;
+
+    int voltas = (int) (tempo / ciclo);
+    float noCiclo = tempo - (float) voltas * ciclo;
+    int tomada = 0;
+    while (tomada < TOMADAS_DA_VITORIA - 1 && noCiclo >= DURACAO_DA_TOMADA_DA_VITORIA[tomada]) {
+        noCiclo -= DURACAO_DA_TOMADA_DA_VITORIA[tomada];
+        tomada++;
+    }
+    float duracao = DURACAO_DA_TOMADA_DA_VITORIA[tomada];
+
+    const Carro *jogador = &corrida->jogador;
+    float lado = (voltas % 2 == 0) ? 1.0f : -1.0f;   /* a cada ciclo, o outro lado da pista */
+    int tomadaNova = (tomada != tomadaAnterior || voltas != cicloAnterior);
+    if (tomadaNova) {
+        float adiante = (tomada == 0) ? 140.0f : 210.0f;
+        ancora = naPista(jogador->posicao, adiante);
+        tomadaAnterior = tomada;
+        cicloAnterior = voltas;
+    }
+    if (cortou != NULL) {
+        *cortou = tomadaNova;
+    }
+    if (escuro != NULL) {
+        float entrando = 1.0f - noCiclo / FADE_DO_CORTE;
+        float saindo = (noCiclo - (duracao - FADE_ANTES_DO_CORTE)) / FADE_ANTES_DO_CORTE;
+        *escuro = Clamp(fmaxf(entrando, saindo), 0.0f, 1.0f);
+    }
+
+    float fx, fz, rx, rz;
+    frenteDaPista(jogador->posicao, &fx, &fz, &rx, &rz);
+    Vector3 carro = centroDoCarro(jogador, 0.5f);
+    Vector3 frente = { fx, 0.0f, fz }, direita = { rx, 0.0f, rz };
+
+    switch (tomada) {
+        case 0: {   /* TV na pista */
+            Vector3 posicao = pontoAoLado(ancora, 11.0f * lado, 2.4f);
+            float distancia = Vector3Distance(posicao, carro);
+            Vector3 alvo = { carro.x, carro.y + 2.5f + distancia * 0.20f, carro.z };
+            return novaCamera(posicao, alvo, 44.0f);
+        }
+        case 1: {   /* perseguição alta */
+            Vector3 posicao = Vector3Add(Vector3Add(carro, Vector3Scale(frente, -26.0f)), Vector3Add(Vector3Scale(direita, 5.5f * lado), (Vector3){ 0.0f, 9.0f, 0.0f }));
+            Vector3 alvo = Vector3Add(Vector3Add(carro, Vector3Scale(frente, 45.0f)), (Vector3){ 0.0f, 22.0f, 0.0f });
+            return novaCamera(posicao, alvo, 68.0f);
+        }
+        case 2: {   /* lateral, à frente do carro */
+            Vector3 posicao = Vector3Add(Vector3Add(carro, Vector3Scale(frente, 26.0f)), Vector3Add(Vector3Scale(direita, 9.5f * lado), (Vector3){ 0.0f, 1.8f, 0.0f }));
+            Vector3 alvo = Vector3Add(carro, (Vector3){ 0.0f, 11.0f, 0.0f });
+            return novaCamera(posicao, alvo, 56.0f);
+        }
+        default: {  /* grua */
+            Vector3 posicao = pontoAoLado(ancora, -24.0f * lado, 17.0f);
+            float distancia = Vector3Distance(posicao, carro);
+            Vector3 alvo = { carro.x, carro.y + 8.0f + distancia * 0.20f, carro.z };
+            return novaCamera(posicao, alvo, 52.0f);
+        }
+    }
+}
+
+/* ==================================================================
  * Andar no tempo
  * ================================================================== */
 

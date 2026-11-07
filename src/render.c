@@ -22,6 +22,8 @@
 #include "carros3d.h"
 #include "fumaca.h"
 #include "faiscas.h"
+#include "fogos.h"
+#include "apresentacao.h"
 #include "marcas.h"
 #include "torcida3d.h"
 #include "telao.h"
@@ -696,7 +698,7 @@ static int desenhandoOTelao = 0;   /* 1 enquanto a transmissão dos telões é d
  * Devolve: o desfoque das bordas, de 0 a 1.
  */
 static float desfoqueDeVelocidade(Corrida *corrida) {
-    if (corrida == NULL || cenaPausada) {
+    if (corrida == NULL || cenaPausada || jogadorVenceu(corrida)) {   /* na festa as câmeras são de TV: sem desfoque */
         return 0.0f;
     }
     Carro *j = &corrida->jogador;
@@ -771,6 +773,7 @@ static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
         if (!desenhandoOTelao) {
             desenharFumaca3D(camera);
             desenharFaiscas(camera);
+            desenharFogos(camera);
         }
         comecarChamas();
         for (int r = 0; r < TOTAL_RIVAIS; r++) {
@@ -794,6 +797,7 @@ static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
         if (corrida != NULL) {
             rlDisableBackfaceCulling();
             desenharFaiscas(camera);   /* as faíscas também brilham (o halo nasce delas) */
+            desenharFogos(camera);
             rlEnableBackfaceCulling();
             comecarChamas();
             for (int r = 0; r < TOTAL_RIVAIS; r++) {
@@ -984,6 +988,14 @@ void desenharVisaoDoJogador(Corrida *corrida) {
     if (jogador->estadoDoPit == PIT_TROCANDO) {
         camera = cameraDaTroca(camera, jogador);
     }
+    /* A vitória: o jogo de câmeras da festa, com fogos de artifício, até a corrida acabar */
+    int festa = jogadorVenceu(corrida);
+    int cortou = 0;
+    float escuro = 0.0f, desdeAChegada = 0.0f;
+    if (festa) {
+        desdeAChegada = corrida->tempoDeCorrida - jogador->tempoDeChegada;
+        camera = cameraDaVitoria(corrida, desdeAChegada, &cortou, &escuro);
+    }
 
     /* A fumaça anda com o relógio da corrida: na pausa e na contagem, ele para.
      * Se ele voltou atrás, é uma corrida nova. */
@@ -994,6 +1006,7 @@ void desenharVisaoDoJogador(Corrida *corrida) {
         limparFumaca();
         limparMarcas();
         limparFaiscas();
+        limparFogos();
         passou = 0.0f;
     }
     if (passou > 0.0f) {
@@ -1005,11 +1018,41 @@ void desenharVisaoDoJogador(Corrida *corrida) {
         marcarPneus(jogador);
         soltarFaiscasDaCorrida(corrida, passou);
     }
+    if (festa) {
+        /* A câmera anda? (a de perseguição sim): os fogos nascem adiantados o tanto que ela vai andar */
+        static Vector3 posicaoAnterior;
+        static int temAnterior = 0;
+        Vector3 velocidadeDaCamera = { 0.0f, 0.0f, 0.0f };
+        if (temAnterior && passou > 0.0f && !cortou) {
+            velocidadeDaCamera = Vector3Scale(Vector3Subtract(camera.position, posicaoAnterior), 1.0f / passou);
+            velocidadeDaCamera.y = 0.0f;
+            if (Vector3Length(velocidadeDaCamera) > 160.0f) {
+                velocidadeDaCamera = (Vector3){ 0.0f, 0.0f, 0.0f };
+            }
+        }
+        posicaoAnterior = camera.position;
+        temAnterior = 1;
+        PontoNoMundo chao = pontoNoMundo(jogador->posicao, jogador->deslocamentoLateral);
+        soltarFogosDaVitoria(camera, velocidadeDaCamera, chao.y, cortou, passou);
+    }
     atualizarFumaca(passou);
     atualizarFaiscas(passou);
+    atualizarFogos(passou);
     atualizarMarcas(passou);
 
     desenharMundo3D(camera, corrida->pista, corrida);
+
+    if (festa) {
+        /* As tarjas de cinema entram no começo da festa e a imagem escurece um instante nos cortes */
+        float largura = (float) GetScreenWidth(), altura = (float) GetScreenHeight();
+        float entrada = fminf(desdeAChegada / 0.8f, 1.0f);
+        float tarja = altura * 0.095f * entrada * entrada * (3.0f - 2.0f * entrada);
+        DrawRectangle(0, 0, (int) largura, (int) tarja, BLACK);
+        DrawRectangle(0, (int) (altura - tarja), (int) largura, (int) tarja + 1, BLACK);
+        if (escuro > 0.0f) {
+            DrawRectangle(0, 0, (int) largura, (int) altura, Fade(BLACK, escuro));
+        }
+    }
 }
 
 /*

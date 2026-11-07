@@ -24,6 +24,7 @@
 #include "visual.h"
 #include "audio.h"
 #include "controle.h"
+#include "recordes.h"
 
 /* ---------- Comuns ---------- */
 #define INCLINACAO            12.0f   /* quanto os painéis "deitam" para a frente */
@@ -46,6 +47,16 @@
 #define Y_CARTAO_CARRO        300.0f
 #define LARGURA_CARTAO_CARRO  168.0f
 #define ALTURA_CARTAO_CARRO   196.0f
+
+/* ---------- Menu principal à esquerda (sobre o vídeo de fundo) ---------- */
+#define X_MENU_PRINCIPAL      44.0f    /* a coluna dos botões, encostada à esquerda */
+#define Y_MENU_PRINCIPAL      236.0f
+#define LARGURA_BOTAO_MENU    300.0f
+#define ALTURA_BOTAO_MENU     44.0f
+#define ESPACO_BOTOES_MENU    54.0f
+#define LARGURA_LOGO_MENU     300.0f
+#define ITENS_PRINCIPAIS      2        /* os dois primeiros itens são grandes; o resto, menor, depois de um fio */
+#define LARGURA_DA_FAIXA_ESCURA 520.0f  /* o degradê escuro atrás dos botões, para lerem sobre o vídeo */
 
 /* ---------- Pausa ---------- */
 #define Y_TITULO_PAUSA        176.0f
@@ -128,86 +139,67 @@ static void escurecerTela(float cima, float meio, float baixo) {
 
 /*
  * desenharCabecalho
- * Faixa vermelha inclinada com o título da tela, um fio amarelo embaixo
- * e o quadriculado de bandeira até a borda direita.
+ * O título da tela, no alto à esquerda, como a etiqueta das telas de configurações dos jogos de
+ * corrida modernos: um retângulo vermelho de cantos arredondados com o título em branco.
  * Recebe: o título.
  * Devolve: nada.
  */
 static void desenharCabecalho(const char *titulo) {
-    float tamanho = 44.0f;
-    float fimDaFaixa = 40.0f + larguraDoTexto(FONTE_TITULO, titulo, tamanho) + 36.0f;
-    float inicio = -margemX() - INCLINACAO * 2;
+    float tamanho = 26.0f;
+    Rectangle caixa = { 28.0f, Y_CABECALHO - 6.0f, larguraDoTexto(FONTE_TITULO, titulo, tamanho) + 44.0f, 40.0f };
+    DrawRectangleRounded(caixa, 0.22f, 8, COR_VERMELHO);
+    escrever(FONTE_TITULO, titulo, caixa.x + 22.0f, caixa.y + (caixa.height - tamanho) / 2.0f - 2.0f, tamanho, WHITE);
+}
 
-    desenharParalelogramo(inicio, Y_CABECALHO, fimDaFaixa - inicio, ALTURA_CABECALHO, INCLINACAO * 1.5f,
-                          COR_VERMELHO);
-    desenharParalelogramo(inicio, Y_CABECALHO, fimDaFaixa - inicio, ALTURA_CABECALHO / 2, INCLINACAO * 0.75f,
-                          Fade(WHITE, 0.10f));   /* brilho na metade de cima */
-    desenharParalelogramo(inicio, Y_CABECALHO + ALTURA_CABECALHO + 3, fimDaFaixa - inicio - 4, 5, 3,
-                          COR_AMARELO);
-    escrever(FONTE_TITULO, titulo, 40.0f, Y_CABECALHO + 3, tamanho, COR_TEXTO_CLARO);
-
-    float xQuadriculado = fimDaFaixa + 40.0f;
-    desenharQuadriculado(xQuadriculado, Y_CABECALHO + 15, LARGURA_TELA + margemX() - xQuadriculado,
-                         24.0f, 12.0f);
+/*
+ * desenharCabecalhoDeEvento
+ * O cabeçalho da escolha de evento: uma etiqueta vermelha pequena, o título grande em branco e,
+ * embaixo, uma linha menor com o evento escolhido.
+ * Recebe: a etiqueta, o título e a linha de baixo.
+ * Devolve: nada.
+ */
+static void desenharCabecalhoDeEvento(const char *etiqueta, const char *titulo, const char *linha) {
+    float x = 40.0f;
+    float larguraDaEtiqueta = larguraDoTexto(FONTE_FORTE, etiqueta, 14.0f) + 24.0f;
+    DrawRectangleRounded((Rectangle){ x, Y_CABECALHO - 6.0f, larguraDaEtiqueta, 22.0f }, 0.3f, 6, COR_VERMELHO);
+    escrever(FONTE_FORTE, etiqueta, x + 12.0f, Y_CABECALHO - 4.0f, 14.0f, WHITE);
+    escrever(FONTE_TITULO, titulo, x - 1.0f, Y_CABECALHO + 18.0f, 36.0f, WHITE);
+    escrever(FONTE_FORTE, linha, x, Y_CABECALHO + 60.0f, 16.0f, COR_CROMO);
 }
 
 /*
  * desenharBarraDeDicas
- * Barra escura no pé da tela, com um fio quadriculado em cima e as
- * dicas de controle (teclas desenhadas + ação) centralizadas.
+ * A barra de dicas de teclas do pé da tela foi retirada: o padrão dos jogos de corrida modernos não
+ * a mostra. A função continua para as telas poderem dizer o que cada botão faz, se um dia
+ * voltarem a querer.
  * Recebe: as dicas e quantas são.
  * Devolve: nada.
  */
 static void desenharBarraDeDicas(const Dica dicas[], int total) {
-    float x0 = -margemX();
-    float largura = larguraVirtual();
-    DrawRectangleRec((Rectangle){ x0, Y_BARRA_DICAS, largura, ALTURA_TELA + margemY() - Y_BARRA_DICAS },
-                     Fade(COR_GRAFITE, 0.92f));
-    desenharQuadriculado(x0, Y_BARRA_DICAS - 8, largura, 8.0f, 4.0f);
-
-    /* Primeiro mede tudo, para centralizar */
-    float espacoTecla = 4.0f, espacoAcao = 8.0f, espacoDica = 30.0f;
-    float larguraTotal = 0.0f;
-    for (int i = 0; i < total; i++) {
-        for (int t = 0; t < 4 && dicas[i].teclas[t] != NULL; t++) {
-            larguraTotal += larguraDaTecla(nomeNoControle(dicas[i].teclas[t])) + espacoTecla;
-        }
-        larguraTotal += espacoAcao + larguraDoTexto(FONTE_FORTE, dicas[i].acao, TAMANHO_DICA);
-        if (i < total - 1) {
-            larguraTotal += espacoDica;
-        }
-    }
-
-    float x = (LARGURA_TELA - larguraTotal) / 2.0f;
-    float y = Y_BARRA_DICAS + 9.0f;
-    for (int i = 0; i < total; i++) {
-        for (int t = 0; t < 4 && dicas[i].teclas[t] != NULL; t++) {
-            x += desenharTecla(x, y, nomeNoControle(dicas[i].teclas[t])) + espacoTecla;
-        }
-        x += espacoAcao;
-        escrever(FONTE_FORTE, dicas[i].acao, x, y + 2, TAMANHO_DICA, COR_TEXTO_FRACO);
-        x += larguraDoTexto(FONTE_FORTE, dicas[i].acao, TAMANHO_DICA) + espacoDica;
-    }
+    (void) dicas;
+    (void) total;
 }
 
 /*
- * desenharSetas
- * Duas setinhas amarelas que andam sem parar, apontando para a opção
- * marcada (como num menu de fliperama).
- * Recebe: onde começam (x), a altura do meio (y) e o sentido (+1 aponta
- *         para a direita, -1 para a esquerda).
+ * maiusculas
+ * Copia um texto em maiúsculas, inclusive as letras acentuadas (UTF-8 de 2 bytes: Ã, É, Ç...).
+ * Recebe: onde guardar, o tamanho disso e o texto.
  * Devolve: nada.
  */
-static void desenharSetas(float x, float centroY, float sentido) {
-    float tempo = (float) GetTime();
-    for (int i = 0; i < 2; i++) {
-        float fase = fmodf(tempo * 1.6f + i * 0.5f, 1.0f);
-        float ponta = x + sentido * (fase * 12.0f + 7.0f);
-        float base = ponta - sentido * 7.0f;
-        Color cor = Fade(COR_AMARELO, 1.0f - fase * 0.7f);
-        DrawLineEx((Vector2){ base, centroY - 7 }, (Vector2){ ponta, centroY }, 3.0f, cor);
-        DrawLineEx((Vector2){ ponta, centroY }, (Vector2){ base, centroY + 7 }, 3.0f, cor);
+static void maiusculas(char *destino, int tamanho, const char *texto) {
+    int n = 0;
+    for (const unsigned char *c = (const unsigned char *) texto; *c != '\0' && n < tamanho - 2; c++) {
+        if (*c == 0xC3 && c[1] >= 0xA0 && c[1] <= 0xBE && c[1] != 0xB7) {
+            destino[n++] = (char) 0xC3;
+            destino[n++] = (char) (c[1] - 0x20);
+            c++;
+        } else if (*c >= 'a' && *c <= 'z') {
+            destino[n++] = (char) (*c - 32);
+        } else {
+            destino[n++] = (char) *c;
+        }
     }
+    destino[n] = '\0';
 }
 
 /*
@@ -260,8 +252,8 @@ static float escreverComQuebra(TipoFonte fonte, const char *texto, float x, floa
  * Devolve: nada.
  */
 static void desenharPainel(float x, float y, float largura, float altura) {
-    DrawRectangleRec((Rectangle){ x, y, largura, altura }, COR_PAINEL);
-    DrawRectangleRec((Rectangle){ x, y, largura, 3.0f }, COR_VERMELHO);
+    DrawRectangleRounded((Rectangle){ x, y, largura, altura }, fminf(0.06f, 16.0f / fminf(largura, altura)), 8, COR_PAINEL);
+    DrawRectangleRec((Rectangle){ x + 8.0f, y + 1.0f, largura - 16.0f, 3.0f }, COR_VERMELHO);
 }
 
 /*
@@ -438,6 +430,54 @@ static int opcaoSobOMouse(float yPrimeira, int totalOpcoes) {
 }
 
 /*
+ * atualizarTelaDeEntrada
+ * Qualquer botão (tecla, clique ou botão do controle) leva ao menu principal. Só o primeiro aperto
+ * conta: a tela troca uma vez e o menu começa limpo, sem repetir o aperto.
+ * Recebe: nada.
+ * Devolve: TELA_MENU quando algo foi apertado, TELA_ENTRADA enquanto isso não acontece.
+ */
+Tela atualizarTelaDeEntrada(void) {
+    int apertou = 0;
+    while (GetKeyPressed() != 0) {   /* esvazia a fila de teclas: nenhuma tecla desta vez chega ao menu */
+        apertou = 1;
+    }
+    for (int botao = MOUSE_BUTTON_LEFT; botao <= MOUSE_BUTTON_BACK; botao++) {
+        apertou = apertou || IsMouseButtonPressed(botao);
+    }
+    apertou = apertou || botaoApertadoAgora() != 0;
+    return apertou ? TELA_MENU : TELA_ENTRADA;
+}
+
+/*
+ * yDoItemDoMenu / alturaDoItemDoMenu
+ * Onde fica cada item da coluna do menu principal: os principais são grandes; depois de um fio vêm
+ * os secundários, menores.
+ * Recebe: o número do item.
+ * Devolve: o y do topo dele / a altura dele.
+ */
+static float yDoItemDoMenu(int i) {
+    if (i < ITENS_PRINCIPAIS) {
+        return Y_MENU_PRINCIPAL + i * 58.0f;
+    }
+    return Y_MENU_PRINCIPAL + ITENS_PRINCIPAIS * 58.0f + 24.0f + (i - ITENS_PRINCIPAIS) * 42.0f;
+}
+
+static float alturaDoItemDoMenu(int i) {
+    return (i < ITENS_PRINCIPAIS) ? 52.0f : 36.0f;
+}
+
+static int botaoDoMenuSobOMouse(void) {
+    float mouseX, mouseY;
+    posicaoDoMouseNaInterface(&mouseX, &mouseY);
+    for (int i = 0; i < TOTAL_OPCOES; i++) {
+        if (dentroDoRetangulo(mouseX, mouseY, X_MENU_PRINCIPAL, yDoItemDoMenu(i), LARGURA_BOTAO_MENU + 12.0f, alturaDoItemDoMenu(i))) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+/*
  * atualizarMenuPrincipal
  * Cima/baixo ou o mouse trocam a opção; ENTER ou o clique entram nela.
  * O mouse só marca uma opção quando se mexe, para não brigar com o
@@ -449,7 +489,7 @@ Tela atualizarMenuPrincipal(EstadoMenu *menu) {
     int opcaoAnterior = menu->opcaoMenu;
     menu->opcaoMenu = andarNaLista(menu->opcaoMenu, TOTAL_OPCOES);
 
-    int sobre = opcaoSobOMouse(Y_PRIMEIRA_OPCAO, TOTAL_OPCOES);
+    int sobre = botaoDoMenuSobOMouse();
     if (sobre >= 0 && mouseSeMexeu()) {
         menu->opcaoMenu = sobre;
     }
@@ -475,89 +515,129 @@ Tela atualizarMenuPrincipal(EstadoMenu *menu) {
 }
 
 /*
+ * desenharBotaoPadrao
+ * O botão dos menus, no padrão dos jogos de corrida modernos: retângulo escuro de cantos levemente
+ * arredondados e texto branco. Quando marcado, ganha um contorno branco, uma barra vermelha à
+ * esquerda e fica um pouco mais largo e claro (a animação é o destaque, de 0 a 1).
+ * Recebe: o texto, a posição, a largura e o destaque (0 a 1).
+ * Devolve: nada.
+ */
+static void desenharBotaoPadrao(const char *texto, float x, float y, float larguraBase, float destaque) {
+    float suave = suavizar(destaque);
+    float largura = larguraBase + 14.0f * suave;
+    Rectangle r = { x, y, largura, ALTURA_BOTAO_MENU };
+    float arredondado = 12.0f / ALTURA_BOTAO_MENU;
+    Color fundo = ColorLerp(Fade(COR_GRAFITE, 0.86f), Fade((Color){ 46, 50, 62, 255 }, 0.94f), suave);
+    DrawRectangleRounded(r, arredondado, 6, fundo);
+    DrawRectangleRoundedLinesEx(r, arredondado, 6, 1.0f, Fade(COR_CROMO, 0.16f * (1.0f - suave)));
+    if (suave > 0.0f) {
+        DrawRectangleRoundedLinesEx(r, arredondado, 6, 2.0f, Fade(WHITE, suave));
+        DrawRectangleRounded((Rectangle){ x + 2.0f, y + 6.0f, 4.0f * suave, ALTURA_BOTAO_MENU - 12.0f }, 1.0f, 4, Fade(COR_VERMELHO, suave));
+    }
+    float tamanho = 22.0f + 1.5f * suave;
+    escrever(FONTE_TITULO, texto, x + 22.0f + 4.0f * suave, y + (ALTURA_BOTAO_MENU - tamanho) / 2.0f - 2.0f, tamanho,
+             ColorLerp(COR_TEXTO_FRACO, WHITE, suave));
+}
+
+/*
  * desenharOpcao
- * Um botão do menu principal. Conforme o destaque sobe de 0 a 1, o botão
- * cresce (com um pequeno "tranco" no meio), fica vermelho, ganha o fio
- * amarelo na frente e, no fim, as setinhas andando dos dois lados.
+ * Um botão da pausa (e de outras telas): o botão padrão, no meio da tela.
  * Recebe: o texto, a altura (y) e o destaque (0 a 1).
  * Devolve: nada.
  */
 static void desenharOpcao(const char *texto, float y, float destaque) {
-    float centro = LARGURA_TELA / 2.0f;
+    desenharBotaoPadrao(texto, (LARGURA_TELA - LARGURA_BOTAO_MENU) / 2.0f - 7.0f, y, LARGURA_BOTAO_MENU, destaque);
+}
+
+/*
+ * desenharItemDoMenu
+ * Um item da coluna do menu principal, como no menu dos jogos de corrida modernos: o texto grande e
+ * branco, sem caixa; o item marcado fica dentro de uma pílula cinza de contorno branco.
+ * Recebe: o texto, o número do item e o destaque (0 a 1).
+ * Devolve: nada.
+ */
+static void desenharItemDoMenu(const char *texto, int item, float destaque) {
     float suave = suavizar(destaque);
-    float tranco = sinf(destaque * PI) * 6.0f;                      /* incha um pouco no meio da animação */
-    float largura = LARGURA_OPCAO + (LARGURA_OPCAO_MARCADA - LARGURA_OPCAO) * suave + tranco;
-    float x = centro - largura / 2.0f - INCLINACAO / 2.0f;
-
-    desenharParalelogramo(x, y, largura, ALTURA_OPCAO, INCLINACAO, ColorLerp(COR_PAINEL, COR_VERMELHO, suave));
-    if (suave < 1.0f) {
-        desenharContornoParalelogramo(x, y, largura, ALTURA_OPCAO, INCLINACAO, 1.5f,
-                                      Fade(COR_CROMO, 0.35f * (1.0f - suave)));
-    }
+    int principal = item < ITENS_PRINCIPAIS;
+    float y = yDoItemDoMenu(item), altura = alturaDoItemDoMenu(item);
+    float largura = (principal ? LARGURA_BOTAO_MENU : LARGURA_BOTAO_MENU - 40.0f) + 10.0f * suave;
+    Rectangle pilula = { X_MENU_PRINCIPAL - 6.0f, y, largura, altura };
     if (suave > 0.0f) {
-        float recuo = (1.0f - suave) * 10.0f;   /* os fios amarelos deslizam para o lugar */
-        desenharParalelogramo(x + INCLINACAO / 2, y, largura, ALTURA_OPCAO / 2, INCLINACAO / 2,
-                              Fade(WHITE, 0.14f * suave));
-        desenharParalelogramo(x - 12 + recuo, y, 7, ALTURA_OPCAO, INCLINACAO, Fade(COR_AMARELO, suave));
-        desenharParalelogramo(x + largura + 5 - recuo, y, 7, ALTURA_OPCAO, INCLINACAO, Fade(COR_AMARELO, suave));
+        DrawRectangleRounded(pilula, 0.5f, 10, Fade((Color){ 82, 86, 98, 255 }, 0.80f * suave));
+        DrawRectangleRoundedLinesEx(pilula, 0.5f, 10, 2.0f, Fade(WHITE, suave));
     }
-
-    float tamanho = 30.0f + 6.0f * suave;
-    escreverCentralizado(FONTE_TITULO, texto, centro, y + 7 - 4 * suave, tamanho,
-                         ColorLerp(COR_TEXTO_FRACO, COR_TEXTO_CLARO, suave));
-
-    if (destaque >= 1.0f) {
-        desenharSetas(x - 40, y + ALTURA_OPCAO / 2, 1.0f);
-        desenharSetas(x + largura + INCLINACAO + 40, y + ALTURA_OPCAO / 2, -1.0f);
-    }
+    float tamanho = principal ? 30.0f : 21.0f;
+    escrever(FONTE_TITULO, texto, X_MENU_PRINCIPAL + 14.0f, y + (altura - tamanho) / 2.0f - 3.0f, tamanho,
+             ColorLerp(Fade(WHITE, 0.88f), WHITE, suave));
 }
 
 /*
- * desenharCartaoDoCarro
- * Cartão no canto, para lembrar com qual carro o jogador vai correr.
- * Recebe: o número do carro.
- * Devolve: nada.
+ * descricaoDoItem
+ * Recebe: o número do item do menu.
+ * Devolve: o texto que explica o que ele faz (embaixo, à esquerda).
  */
-static void desenharCartaoDoCarro(int numero) {
-    float x = X_CARTAO_CARRO, y = Y_CARTAO_CARRO;
-    float centro = x + LARGURA_CARTAO_CARRO / 2.0f;
-
-    desenharParalelogramo(x, y, LARGURA_CARTAO_CARRO, ALTURA_CARTAO_CARRO, 0, COR_PAINEL);
-    desenharParalelogramo(x - 6, y, LARGURA_CARTAO_CARRO + 6, 26, 8, COR_VERMELHO);
-    escreverCentralizado(FONTE_FORTE, "SEU CARRO", centro, y + 3, 17.0f, COR_TEXTO_CLARO);
-
-    desenharBrilho(centro, y + 96, 76, Fade(COR_AMARELO, 0.35f));
-    DrawEllipse((int) centro, (int) (y + 140), 70, 9, Fade(BLACK, 0.55f));
-    desenharCarroParado(numero, centro, y + 140, 0.86f);
-
-    escreverCentralizado(FONTE_TITULO, fichaDoCarro(numero)->nome, centro, y + 148, 30.0f, COR_AMARELO);
+static const char *descricaoDoItem(int item) {
+    static const char *DESCRICOES[TOTAL_OPCOES] = {
+        "Escolha a pista e a dificuldade e largue em último contra 13 rivais.",
+        "Compare a velocidade, a aceleração e a aderência dos carros e escolha o seu.",
+        "Veja os controles e as dicas de pilotagem.",
+        "Ajuste os comandos, a vibração, a direção e os gráficos.",
+        "Fechar o jogo.",
+    };
+    return DESCRICOES[item];
 }
 
 /*
- * desenharMenuPrincipal
- * Logo, botões e o carro escolhido. A pista passando ao fundo é
- * desenhada antes, pelo main.c.
- * Recebe: o estado do menu.
+ * desenharTelaDeEntrada
+ * A tela de entrada: a logo no alto e "APERTE QUALQUER BOTÃO PARA ENTRAR" embaixo, pulsando. O
+ * vídeo de fundo é desenhado antes, pelo main.c.
+ * Recebe: o tempo do quadro (para a pulsação).
  * Devolve: nada.
  */
+void desenharTelaDeEntrada(float tempoQuadro) {
+    (void) tempoQuadro;
+    float telaA = (float) alturaVirtual(), telaL = (float) larguraVirtual();
+    /* Um degradê escuro só embaixo, onde fica a mensagem */
+    DrawRectangleGradientV(-margemX(), (int) (telaA * 0.66f), (int) telaL, (int) (telaA * 0.34f + margemY()),
+                           Fade(BLACK, 0.0f), Fade(BLACK, 0.75f));
+    float flutuar = sinf((float) GetTime() * 1.2f) * 2.0f;
+    desenharLogo(LARGURA_TELA / 2.0f, 40.0f + flutuar, 380.0f);
+    float pulso = 0.55f + 0.45f * (0.5f + 0.5f * sinf((float) GetTime() * 2.6f));
+    const char *aviso = "APERTE QUALQUER BOTÃO PARA ENTRAR";
+    escreverCentralizado(FONTE_TITULO, aviso, LARGURA_TELA / 2.0f, 520.0f, 30.0f, Fade(WHITE, pulso));
+}
+
 void desenharMenuPrincipal(EstadoMenu *menu) {
-    escurecerTela(0.55f, 0.15f, 0.7f);
+    /* Uma faixa escura à esquerda (o vídeo continua visível à direita e por trás) */
+    DrawRectangleGradientH(-margemX(), -margemY(), LARGURA_DA_FAIXA_ESCURA, alturaVirtual(),
+                           Fade(BLACK, 0.80f), Fade(BLACK, 0.0f));
 
-    /* A logo flutua devagar */
-    float flutuar = sinf((float) GetTime() * 1.6f) * 3.0f;
-    desenharLogo(LARGURA_TELA / 2.0f, 6.0f + flutuar, LARGURA_LOGO);
+    /* A logo, no alto à esquerda, flutua devagar */
+    float flutuar = sinf((float) GetTime() * 1.6f) * 2.0f;
+    desenharLogo(X_MENU_PRINCIPAL + LARGURA_LOGO_MENU / 2.0f, 22.0f + flutuar, LARGURA_LOGO_MENU);
 
     for (int i = 0; i < TOTAL_OPCOES; i++) {
-        desenharOpcao(TEXTOS_OPCOES[i], Y_PRIMEIRA_OPCAO + i * ESPACO_OPCOES, menu->destaque[i]);
+        if (i == ITENS_PRINCIPAIS) {   /* o fio entre os itens principais e os secundários */
+            float yFio = yDoItemDoMenu(i) - 14.0f;
+            DrawRectangleRec((Rectangle){ X_MENU_PRINCIPAL, yFio, LARGURA_BOTAO_MENU - 20.0f, 1.0f }, Fade(WHITE, 0.45f));
+        }
+        desenharItemDoMenu(TEXTOS_OPCOES[i], i, menu->destaque[i]);
     }
 
-    desenharCartaoDoCarro(menu->carroEscolhido);
+    /* O que o item marcado faz, embaixo à esquerda */
+    escreverComQuebra(FONTE_TEXTO, descricaoDoItem(menu->opcaoMenu), X_MENU_PRINCIPAL, 540.0f, 16.0f, 330.0f, COR_TEXTO_CLARO);
 
-    Dica dicas[] = {
-        { { "CIMA", "BAIXO", NULL }, "ESCOLHER" },
-        { { "ENTER", NULL }, "CONFIRMAR" },
-    };
-    desenharBarraDeDicas(dicas, 2);
+    /* O carro escolhido, em uma etiqueta no canto de cima, à direita */
+    {
+        const char *rotulo = "SEU CARRO";
+        const char *nome = fichaDoCarro(menu->carroEscolhido)->nome;
+        float larguraDaEtiqueta = larguraDoTexto(FONTE_FORTE, rotulo, 13.0f) + larguraDoTexto(FONTE_TITULO, nome, 20.0f) + 56.0f;
+        float x = LARGURA_TELA + margemX() - larguraDaEtiqueta - 26.0f;
+        DrawRectangleRounded((Rectangle){ x, 22.0f, larguraDaEtiqueta, 34.0f }, 0.3f, 8, Fade(COR_GRAFITE, 0.85f));
+        DrawRectangleRounded((Rectangle){ x + 6.0f, 28.0f, 4.0f, 22.0f }, 1.0f, 4, COR_VERMELHO);
+        escrever(FONTE_FORTE, rotulo, x + 20.0f, 32.0f, 13.0f, COR_TEXTO_FRACO);
+        escrever(FONTE_TITULO, nome, x + 34.0f + larguraDoTexto(FONTE_FORTE, rotulo, 13.0f), 28.0f, 20.0f, WHITE);
+    }
 }
 
 /* ==================================================================
@@ -843,6 +923,7 @@ static void desenharListaDaGaragem(EstadoMenu *menu) {
             desenharParalelogramo(X_LISTA + 4 - recuo, y + 2, LARGURA_LISTA - 16, ALTURA_LINHA - 4, 10,
                                   Fade(COR_VERMELHO, suave));
             desenharParalelogramo(X_LISTA - 2 - recuo, y + 2, 6, ALTURA_LINHA - 4, 10, Fade(COR_AMARELO, suave));
+            desenharContornoParalelogramo(X_LISTA + 4 - recuo, y + 2, LARGURA_LISTA - 16, ALTURA_LINHA - 4, 10, 2.0f, Fade(WHITE, suave));
         }
 
         /* Número da posição numa etiqueta */
@@ -934,20 +1015,28 @@ void desenharGaragem(EstadoMenu *menu) {
 /* As linhas da tela */
 enum { FOCO_NA_PISTA, FOCO_NO_NIVEL, FOCO_NO_CORRER, TOTAL_FOCOS };
 
-#define Y_CARTAO_PISTA        112.0f
-#define LARGURA_CARTAO_PISTA  170.0f
-#define ALTURA_CARTAO_PISTA   190.0f
-#define ESPACO_ENTRE_CARTOES  13.0f
-#define LADO_DO_TRACADO       112.0f
+#define Y_CARTAO_PISTA        452.0f   /* os cartões das pistas, em fila embaixo */
+#define LARGURA_CARTAO_PISTA  182.0f
+#define ALTURA_CARTAO_PISTA   118.0f
+#define ESPACO_ENTRE_CARTOES  10.0f
+#define X_INFO_PISTA          28.0f    /* o cartão de informações da pista marcada */
+#define Y_INFO_PISTA          128.0f
+#define LARGURA_INFO_PISTA    272.0f
+#define ALTURA_INFO_PISTA     262.0f
+#define X_COLUNA_DIREITA      326.0f   /* a coluna da dificuldade e do CORRER */
+#define LARGURA_COLUNA_DIREITA 440.0f
+#define LADO_DO_TRACADO       96.0f
 #define PASSO_DO_TRACADO      4        /* desenha o traçado de 4 em 4 segmentos */
-#define Y_TITULO_PISTA        90.0f
-#define Y_TITULO_NIVEL        316.0f
-#define Y_BOTAO_NIVEL         338.0f
-#define LARGURA_BOTAO_NIVEL   224.0f
-#define ALTURA_BOTAO_NIVEL    52.0f
-#define ESPACO_ENTRE_NIVEIS   24.0f
-#define Y_RESUMO              404.0f
-#define Y_BOTAO_CORRER        452.0f
+#define Y_TITULO_NIVEL        132.0f
+#define Y_BOTAO_NIVEL         162.0f
+#define LARGURA_BOTAO_NIVEL   140.0f
+#define ALTURA_BOTAO_NIVEL    46.0f
+#define ESPACO_ENTRE_NIVEIS   10.0f
+#define Y_RESUMO              222.0f
+#define Y_BOTAO_CORRER        256.0f
+#define X_BOTAO_CORRER        326.0f
+#define LARGURA_BOTAO_CORRER  440.0f
+#define ALTURA_BOTAO_CORRER   58.0f
 #define FOLGA_DO_CURSOR       5.0f     /* o contorno amarelo fica um pouco para fora do item */
 #define GROSSURA_DO_CURSOR    3.0f
 #define RAPIDEZ_DO_CURSOR     5.0f     /* a pulsação dele */
@@ -961,7 +1050,7 @@ enum { FOCO_NA_PISTA, FOCO_NO_NIVEL, FOCO_NO_CORRER, TOTAL_FOCOS };
  * Recebe: a pista, o centro do quadrado, o lado dele e a cor.
  * Devolve: nada.
  */
-static void desenharTracado(Pista *pista, float centroX, float centroY, float lado, Color cor) {
+static void desenharTracado(Pista *pista, float centroX, float centroY, float lado, Color cor, float espessura) {
     float minX = 1e9f, maxX = -1e9f, minZ = 1e9f, maxZ = -1e9f;
     Segmento *atual = pista->largada;
     do {
@@ -981,13 +1070,13 @@ static void desenharTracado(Pista *pista, float centroX, float centroY, float la
         atual = atual->proximo;
         if (++passo % PASSO_DO_TRACADO == 0 || atual == pista->largada) {
             Vector2 seguinte = { centroX + (atual->xMundo - meioX) * escala, centroY + (atual->zMundo - meioZ) * escala };
-            DrawLineEx(ponto, seguinte, 4.0f, cor);
+            DrawLineEx(ponto, seguinte, espessura, cor);
             ponto = seguinte;
         }
     } while (atual != pista->largada);
 
     /* A linha de chegada: um pontinho vermelho */
-    DrawCircleV(inicio, 5.0f, COR_VERMELHO);
+    DrawCircleV(inicio, espessura * 1.1f, COR_VERMELHO);
 }
 
 /*
@@ -1006,9 +1095,7 @@ static float xDoCartao(int cartao) {
  * Devolve: o x do canto esquerdo do botão dele.
  */
 static float xDoNivel(int nivel) {
-    /* O paralelogramo passa da largura pela inclinação: desconta metade, para o conjunto ficar no meio */
-    float total = TOTAL_NIVEIS * LARGURA_BOTAO_NIVEL + (TOTAL_NIVEIS - 1) * ESPACO_ENTRE_NIVEIS;
-    return (LARGURA_TELA - total) / 2.0f - INCLINACAO / 4.0f + nivel * (LARGURA_BOTAO_NIVEL + ESPACO_ENTRE_NIVEIS);
+    return X_COLUNA_DIREITA + nivel * (LARGURA_BOTAO_NIVEL + ESPACO_ENTRE_NIVEIS);
 }
 
 /*
@@ -1061,7 +1148,7 @@ Tela atualizarEscolhaDePista(EstadoMenu *menu) {
     posicaoDoMouseNaInterface(&mouseX, &mouseY);
     int cartao = cartaoSobOMouse(mouseX, mouseY);
     int nivel = nivelSobOMouse(mouseX, mouseY);
-    int sobreCorrer = opcaoSobOMouse(Y_BOTAO_CORRER, 1) == 0;
+    int sobreCorrer = dentroDoRetangulo(mouseX, mouseY, X_BOTAO_CORRER, Y_BOTAO_CORRER, LARGURA_BOTAO_CORRER, ALTURA_BOTAO_CORRER);
     int voltar = sobreOVoltar(mouseX, mouseY);
     if (mouseSeMexeu()) {
         menu->focoDaCorrida = (cartao >= 0) ? FOCO_NA_PISTA : (nivel >= 0) ? FOCO_NO_NIVEL : sobreCorrer ? FOCO_NO_CORRER : menu->focoDaCorrida;
@@ -1111,79 +1198,162 @@ Tela atualizarEscolhaDePista(EstadoMenu *menu) {
 
 /*
  * corDoCursor
- * O contorno de "você está aqui" é sempre amarelo, e pulsa de leve, para chamar o olho.
+ * O contorno de "você está aqui" é branco, e pulsa de leve, para chamar o olho.
  * Recebe: nada.
  * Devolve: a cor deste quadro.
  */
 static Color corDoCursor(void) {
-    return ColorLerp(COR_AMARELO, WHITE, 0.25f + 0.25f * sinf((float) GetTime() * RAPIDEZ_DO_CURSOR));
+    return ColorLerp(COR_CROMO, WHITE, 0.55f + 0.45f * sinf((float) GetTime() * RAPIDEZ_DO_CURSOR));
 }
 
 /*
- * desenharTituloDaLinha
- * Recebe: o texto, a altura e se o cursor está nesta linha.
- * Devolve: nada.
+ * contarCurvas
+ * Conta as curvas de uma pista pelos segmentos: um trecho seguido de segmentos curvos (juntando
+ * os que têm menos de 25 retos entre eles) que, somados, viram pelo menos 25 graus. A conta é
+ * feita uma vez por pista.
+ * Recebe: a pista.
+ * Devolve: quantas curvas ela tem.
  */
-static void desenharTituloDaLinha(const char *texto, float y, int marcada) {
-    escreverCentralizado(FONTE_FORTE, texto, LARGURA_TELA / 2.0f, y, 16.0f, marcada ? COR_TEXTO_CLARO : COR_TEXTO_FRACO);
-}
-
-/*
- * desenharSetasDaLinha
- * As setas nas pontas da linha marcada: dizem que ela muda para os lados.
- * Recebe: o centro da linha, na altura.
- * Devolve: nada.
- */
-static void desenharSetasDaLinha(float y) {
-    desenharSetas(X_SETA_ESQUERDA, y, -1.0f);
-    desenharSetas(X_SETA_DIREITA, y, 1.0f);
+static int contarCurvas(const Pista *pista) {
+    static int guardado[TOTAL_PISTAS];
+    static int pronto[TOTAL_PISTAS];
+    if (pronto[pista->id]) {
+        return guardado[pista->id];
+    }
+    int curvas = 0, emCurva = 0, retos = 0;
+    float soma = 0.0f;
+    const Segmento *atual = pista->largada;
+    do {
+        float curvatura = fabsf(atual->curvatura);
+        if (curvatura > 0.10f) {
+            emCurva = 1;
+            retos = 0;
+            soma += curvatura;
+        } else if (emCurva && ++retos > 25) {
+            curvas += (soma >= 25.0f);
+            emCurva = 0;
+            soma = 0.0f;
+        }
+        atual = atual->proximo;
+    } while (atual != pista->largada);
+    curvas += (emCurva && soma >= 25.0f);
+    guardado[pista->id] = curvas;
+    pronto[pista->id] = 1;
+    return curvas;
 }
 
 /*
  * desenharCartaoDePista
- * Só o que importa: o traçado, o nome e o tamanho. O vermelho diz qual está escolhida;
- * o contorno amarelo, que o cursor está aqui.
+ * Um cartão da fila de baixo: o nome em maiúsculas no alto e o traçado da pista embaixo. O marcado
+ * fica mais claro, com contorno branco.
  * Recebe: o cartão, a pista, o destaque (0 a 1) e se o cursor está nele.
  * Devolve: nada.
  */
 static void desenharCartaoDePista(int cartao, Pista *pista, float destaque, int comCursor) {
     float suave = suavizar(destaque);
     float x = xDoCartao(cartao);
-    Rectangle cartaoInteiro = { x, Y_CARTAO_PISTA, LARGURA_CARTAO_PISTA, ALTURA_CARTAO_PISTA };
-    DrawRectangleRec(cartaoInteiro, COR_PAINEL);
-    DrawRectangleRec(cartaoInteiro, Fade(COR_VERMELHO, 0.28f * suave));
-    DrawRectangleLinesEx(cartaoInteiro, 1.0f + suave, ColorLerp(Fade(COR_CROMO, 0.25f), COR_VERMELHO, suave));
-    if (comCursor) {
-        DrawRectangleLinesEx((Rectangle){ x - FOLGA_DO_CURSOR, Y_CARTAO_PISTA - FOLGA_DO_CURSOR, LARGURA_CARTAO_PISTA + FOLGA_DO_CURSOR * 2.0f,
-                                          ALTURA_CARTAO_PISTA + FOLGA_DO_CURSOR * 2.0f }, GROSSURA_DO_CURSOR, corDoCursor());
+    Rectangle r = { x, Y_CARTAO_PISTA, LARGURA_CARTAO_PISTA, ALTURA_CARTAO_PISTA };
+    float arredondado = 12.0f / ALTURA_CARTAO_PISTA;
+    DrawRectangleRounded(r, arredondado, 8, ColorLerp(Fade(COR_GRAFITE, 0.84f), Fade((Color){ 56, 60, 72, 255 }, 0.96f), suave));
+    DrawRectangleRoundedLinesEx(r, arredondado, 8, 1.0f, Fade(COR_CROMO, 0.18f * (1.0f - suave)));
+    if (suave > 0.0f) {
+        DrawRectangleRoundedLinesEx(r, arredondado, 8, comCursor ? 2.5f : 1.5f, Fade(comCursor ? corDoCursor() : COR_CROMO, suave));
     }
+    char nome[48];
+    maiusculas(nome, sizeof(nome), pista->nome);
+    escrever(FONTE_FORTE, nome, x + 14.0f, Y_CARTAO_PISTA + 11.0f, 16.0f, ColorLerp(COR_TEXTO_FRACO, WHITE, 0.4f + 0.6f * suave));
+    desenharTracado(pista, x + LARGURA_CARTAO_PISTA / 2.0f, Y_CARTAO_PISTA + 76.0f, 60.0f,
+                    ColorLerp(Fade(COR_CROMO, 0.55f), WHITE, suave), 3.0f);
+}
 
-    float centroX = x + LARGURA_CARTAO_PISTA / 2.0f;
-    desenharTracado(pista, centroX, Y_CARTAO_PISTA + 70.0f, LADO_DO_TRACADO, ColorLerp(COR_TEXTO_FRACO, COR_TEXTO_CLARO, suave));
+/*
+ * desenharNomeGrandeDaPista
+ * O nome da pista em letras enormes só de contorno, atravessando a tela atrás de tudo.
+ * Recebe: o nome em maiúsculas.
+ * Devolve: nada.
+ */
+static void desenharNomeGrandeDaPista(const char *nome) {
+    float tamanho = 108.0f;
+    float largura = larguraDoTexto(FONTE_TITULO, nome, tamanho);
+    if (largura > 730.0f) {
+        tamanho *= 730.0f / largura;
+        largura = 730.0f;
+    }
+    float x = LARGURA_TELA + margemX() - 28.0f - largura, y = 338.0f;
+    for (int k = 0; k < 8; k++) {   /* o contorno: o texto claro deslocado em volta... */
+        float angulo = k * PI / 4.0f;
+        escreverSemSombra(FONTE_TITULO, nome, x + cosf(angulo) * 1.6f, y + sinf(angulo) * 1.6f, tamanho, Fade(WHITE, 0.40f));
+    }
+    escreverSemSombra(FONTE_TITULO, nome, x, y, tamanho, Fade((Color){ 14, 14, 20, 255 }, 0.55f));   /* ...e o miolo escuro */
+}
+
+/*
+ * desenharLinhaDoCartaoDeInfo
+ * Um par "RÓTULO / valor" do cartão de informações, com um fio embaixo.
+ * Recebe: o x, o y, a largura, o rótulo e o valor.
+ * Devolve: nada.
+ */
+static void desenharLinhaDoCartaoDeInfo(float x, float y, float largura, const char *rotulo, const char *valor) {
+    escrever(FONTE_FORTE, rotulo, x, y, 14.0f, WHITE);
+    escrever(FONTE_TEXTO, valor, x, y + 17.0f, 17.0f, COR_CROMO);
+    DrawRectangleRec((Rectangle){ x, y + 41.0f, largura, 1.0f }, Fade(COR_CROMO, 0.25f));
+}
+
+/*
+ * desenharInfoDaPista
+ * O cartão de informações da pista marcada: o traçado em cima e, embaixo, as curvas, o comprimento,
+ * a dificuldade da pista e o recorde de volta.
+ * Recebe: a pista.
+ * Devolve: nada.
+ */
+static void desenharInfoDaPista(Pista *pista) {
+    Rectangle r = { X_INFO_PISTA, Y_INFO_PISTA, LARGURA_INFO_PISTA, ALTURA_INFO_PISTA };
+    DrawRectangleRounded(r, 0.035f, 8, Fade((Color){ 22, 22, 30, 255 }, 0.84f));
+    DrawRectangleRoundedLinesEx(r, 0.035f, 8, 1.0f, Fade(COR_CROMO, 0.16f));
+    desenharTracado(pista, X_INFO_PISTA + LARGURA_INFO_PISTA / 2.0f, Y_INFO_PISTA + 76.0f, LADO_DO_TRACADO, WHITE, 6.0f);
 
     float metros = contarSegmentos(pista) * COMPRIMENTO_SEGMENTO / UNIDADES_POR_METRO;
-    escreverCentralizado(FONTE_TITULO, pista->nome, centroX, Y_CARTAO_PISTA + 134.0f, 20.0f, ColorLerp(COR_TEXTO_FRACO, COR_TEXTO_CLARO, suave));
-    escreverCentralizado(FONTE_FORTE, TextFormat("%.2f km", metros / 1000.0f), centroX, Y_CARTAO_PISTA + 162.0f, 16.0f, ColorLerp(COR_TEXTO_FRACO, COR_TEXTO_CLARO, suave));
+    int curvas = contarCurvas(pista);
+    const char *dificuldade = (curvas <= 5) ? "FÁCIL" : (curvas <= 10) ? "MÉDIA" : "DIFÍCIL";
+    char dono[TAMANHO_DO_NOME_DO_RECORDE];
+    float recorde = recordeDaPista(pista->id, dono, sizeof(dono));
+    char tempo[32] = "N/D", comprimento[32], quantas[16];
+    if (recorde > 0.0f) {
+        formatarTempo(recorde, tempo, sizeof(tempo));
+    }
+    snprintf(comprimento, sizeof(comprimento), "%.3f km", metros / 1000.0f);
+    snprintf(quantas, sizeof(quantas), "%d", curvas);
+
+    float x1 = X_INFO_PISTA + 18.0f, x2 = X_INFO_PISTA + LARGURA_INFO_PISTA / 2.0f + 6.0f;
+    float larguraDaColuna = LARGURA_INFO_PISTA / 2.0f - 26.0f;
+    float y0 = Y_INFO_PISTA + 142.0f;
+    desenharLinhaDoCartaoDeInfo(x1, y0, larguraDaColuna, "CURVAS", quantas);
+    desenharLinhaDoCartaoDeInfo(x2, y0, larguraDaColuna, "COMPRIMENTO", comprimento);
+    desenharLinhaDoCartaoDeInfo(x1, y0 + 48.0f, larguraDaColuna, "DIFICULDADE", dificuldade);
+    desenharLinhaDoCartaoDeInfo(x2, y0 + 48.0f, larguraDaColuna, "RECORDE DA VOLTA", tempo);
+    desenharLinhaDoCartaoDeInfo(x1, y0 + 96.0f, larguraDaColuna * 2.0f + 14.0f, "RECORDISTA", (recorde > 0.0f && dono[0] != '\0') ? dono : "N/D");
 }
 
 /*
  * desenharBotaoDeNivel
+ * Uma pílula da dificuldade: a escolhida fica vermelha; o contorno branco diz que o cursor está
+ * nessa linha.
  * Recebe: o nível, o destaque (0 a 1) e se o cursor está nele.
  * Devolve: nada.
  */
 static void desenharBotaoDeNivel(int nivel, float destaque, int comCursor) {
     float suave = suavizar(destaque);
     float x = xDoNivel(nivel);
-    desenharParalelogramo(x, Y_BOTAO_NIVEL, LARGURA_BOTAO_NIVEL, ALTURA_BOTAO_NIVEL, INCLINACAO / 2.0f, ColorLerp(COR_PAINEL, COR_VERMELHO, suave));
-    if (suave < 1.0f) {
-        desenharContornoParalelogramo(x, Y_BOTAO_NIVEL, LARGURA_BOTAO_NIVEL, ALTURA_BOTAO_NIVEL, INCLINACAO / 2.0f, 1.5f, Fade(COR_CROMO, 0.35f * (1.0f - suave)));
-    }
+    Rectangle r = { x, Y_BOTAO_NIVEL, LARGURA_BOTAO_NIVEL, ALTURA_BOTAO_NIVEL };
+    float arredondado = 12.0f / ALTURA_BOTAO_NIVEL;
+    DrawRectangleRounded(r, arredondado, 8, ColorLerp(Fade(COR_GRAFITE, 0.86f), COR_VERMELHO, suave));
+    DrawRectangleRoundedLinesEx(r, arredondado, 8, 1.0f, Fade(COR_CROMO, 0.18f * (1.0f - suave)));
     if (comCursor) {
-        desenharContornoParalelogramo(x - FOLGA_DO_CURSOR, Y_BOTAO_NIVEL - FOLGA_DO_CURSOR, LARGURA_BOTAO_NIVEL + FOLGA_DO_CURSOR * 2.0f,
-                                      ALTURA_BOTAO_NIVEL + FOLGA_DO_CURSOR * 2.0f, INCLINACAO / 2.0f, GROSSURA_DO_CURSOR, corDoCursor());
+        DrawRectangleRoundedLinesEx(r, arredondado, 8, 2.5f, corDoCursor());
     }
-    escreverCentralizado(FONTE_TITULO, fichaDoNivel((NivelDaCorrida) nivel)->nome, x + (LARGURA_BOTAO_NIVEL + INCLINACAO / 2.0f) / 2.0f, Y_BOTAO_NIVEL + 12.0f, 24.0f,
-                         ColorLerp(COR_TEXTO_FRACO, COR_TEXTO_CLARO, suave));
+    escreverCentralizado(FONTE_TITULO, fichaDoNivel((NivelDaCorrida) nivel)->nome, x + LARGURA_BOTAO_NIVEL / 2.0f,
+                         Y_BOTAO_NIVEL + (ALTURA_BOTAO_NIVEL - 24.0f) / 2.0f - 2.0f, 24.0f,
+                         ColorLerp(COR_TEXTO_FRACO, WHITE, suave));
 }
 
 /*
@@ -1193,19 +1363,19 @@ static void desenharBotaoDeNivel(int nivel, float destaque, int comCursor) {
  * Devolve: nada.
  */
 static void desenharBotaoCorrer(int comCursor) {
-    float largura = LARGURA_OPCAO_MARCADA;
-    float x = LARGURA_TELA / 2.0f - largura / 2.0f - INCLINACAO / 2.0f;
-    desenharParalelogramo(x, Y_BOTAO_CORRER, largura, ALTURA_OPCAO, INCLINACAO, comCursor ? COR_VERMELHO : ColorLerp(COR_PAINEL, COR_VERMELHO, 0.45f));
+    Rectangle r = { X_BOTAO_CORRER, Y_BOTAO_CORRER, LARGURA_BOTAO_CORRER, ALTURA_BOTAO_CORRER };
+    float arredondado = 14.0f / ALTURA_BOTAO_CORRER;
+    DrawRectangleRounded(r, arredondado, 8, comCursor ? COR_VERMELHO : ColorLerp(Fade(COR_GRAFITE, 0.9f), COR_VERMELHO, 0.55f));
     if (comCursor) {
-        desenharContornoParalelogramo(x - FOLGA_DO_CURSOR, Y_BOTAO_CORRER - FOLGA_DO_CURSOR, largura + FOLGA_DO_CURSOR * 2.0f,
-                                      ALTURA_OPCAO + FOLGA_DO_CURSOR * 2.0f, INCLINACAO, GROSSURA_DO_CURSOR, corDoCursor());
+        DrawRectangleRoundedLinesEx(r, arredondado, 8, 2.5f, corDoCursor());
     }
-    escreverCentralizado(FONTE_TITULO, "CORRER", LARGURA_TELA / 2.0f, Y_BOTAO_CORRER + 3.0f, 36.0f, comCursor ? COR_TEXTO_CLARO : Fade(COR_TEXTO_CLARO, 0.65f));
+    escreverCentralizado(FONTE_TITULO, "CORRER", X_BOTAO_CORRER + LARGURA_BOTAO_CORRER / 2.0f, Y_BOTAO_CORRER + 12.0f, 32.0f,
+                         comCursor ? WHITE : Fade(WHITE, 0.78f));
 }
 
 /*
  * desenharResumoDaCorrida
- * O que muda na corrida marcada, em uma linha.
+ * O que muda na corrida marcada, em uma linha, embaixo da dificuldade.
  * Recebe: o estado do menu.
  * Devolve: nada.
  */
@@ -1213,69 +1383,54 @@ static void desenharResumoDaCorrida(EstadoMenu *menu) {
     const FichaDoNivel *ficha = fichaDoNivel(menu->nivelEscolhido);
     int parada = ficha->temParada;
     int gasta = ficha->gastaPneu && parada;
-    const char *partes[3] = { TextFormat("%d VOLTAS", ficha->voltas), parada ? "PITSTOP OBRIGATÓRIO" : "SEM PITSTOP", "PNEUS GASTAM" };
     char voltas[32];
-    snprintf(voltas, sizeof(voltas), "%s", partes[0]);   /* TextFormat reaproveita o próprio texto */
-    partes[0] = voltas;
+    snprintf(voltas, sizeof(voltas), "%d VOLTAS", ficha->voltas);
+    const char *partes[3] = { voltas, parada ? "PITSTOP OBRIGATÓRIO" : "SEM PITSTOP", "PNEUS GASTAM" };
     int total = gasta ? 3 : 2;
-    float tamanho = 18.0f, espaco = 34.0f, largura = (total - 1) * espaco;
+    float x = X_COLUNA_DIREITA;
     for (int i = 0; i < total; i++) {
-        largura += larguraDoTexto(FONTE_FORTE, partes[i], tamanho);
-    }
-    float x = (LARGURA_TELA - largura) / 2.0f;
-    for (int i = 0; i < total; i++) {
-        escrever(FONTE_FORTE, partes[i], x, Y_RESUMO, tamanho, (i == 2) ? COR_AMARELO : COR_TEXTO_CLARO);
-        x += larguraDoTexto(FONTE_FORTE, partes[i], tamanho);
+        escrever(FONTE_FORTE, partes[i], x, Y_RESUMO, 15.0f, COR_TEXTO_CLARO);
+        x += larguraDoTexto(FONTE_FORTE, partes[i], 15.0f);
         if (i + 1 < total) {
-            desenharParalelogramo(x + espaco / 2.0f - 4.0f, Y_RESUMO + 7.0f, 8.0f, 8.0f, 3.0f, COR_VERMELHO);
-            x += espaco;
+            DrawRectangleRounded((Rectangle){ x + 11.0f, Y_RESUMO + 5.0f, 6.0f, 6.0f }, 1.0f, 4, COR_VERMELHO);
+            x += 28.0f;
         }
     }
 }
 
 /*
  * desenharEscolhaDePista
+ * A escolha do evento, no padrão dos jogos de corrida modernos: o cartão de informações da pista, a
+ * dificuldade e o CORRER à direita, o nome da pista em letras de contorno atrás e a fila de pistas
+ * embaixo.
  * Recebe: o estado do menu e as pistas.
  * Devolve: nada.
  */
 void desenharEscolhaDePista(EstadoMenu *menu, Pista *pistas[]) {
-    escurecerTela(0.7f, 0.55f, 0.75f);
-    desenharCabecalho("CORRIDA");
+    escurecerTela(0.45f, 0.15f, 0.55f);
+    Pista *marcada = pistas[menu->pistaEscolhida];
+    char nome[48], linha[96];
+    maiusculas(nome, sizeof(nome), marcada->nome);
+    snprintf(linha, sizeof(linha), "%s  |  NÍVEL %s", nome, fichaDoNivel(menu->nivelEscolhido)->nome);
+    desenharCabecalhoDeEvento("CORRIDA", "ESCOLHER EVENTO", linha);
     desenharBotaoVoltar(menu->destaqueVoltar);
 
     int foco = menu->focoDaCorrida;
-    desenharTituloDaLinha("PISTA", Y_TITULO_PISTA, foco == FOCO_NA_PISTA);
-    for (int i = 0; i < TOTAL_PISTAS; i++) {
-        desenharCartaoDePista(i, pistas[i], menu->destaquePista[i], foco == FOCO_NA_PISTA && i == menu->pistaEscolhida);
-    }
-    desenharTituloDaLinha("DIFICULDADE", Y_TITULO_NIVEL, foco == FOCO_NO_NIVEL);
+    desenharNomeGrandeDaPista(nome);
+    desenharInfoDaPista(marcada);
+
+    escrever(FONTE_TITULO, "DIFICULDADE", X_COLUNA_DIREITA, Y_TITULO_NIVEL, 17.0f, WHITE);
+    float fimDoTitulo = larguraDoTexto(FONTE_TITULO, "DIFICULDADE", 17.0f);
+    DrawRectangleRec((Rectangle){ X_COLUNA_DIREITA + fimDoTitulo + 12.0f, Y_TITULO_NIVEL + 12.0f, LARGURA_COLUNA_DIREITA - fimDoTitulo - 12.0f, 1.0f },
+                     Fade(COR_CROMO, 0.3f));
     for (int i = 0; i < TOTAL_NIVEIS; i++) {
         desenharBotaoDeNivel(i, menu->destaqueNivel[i], foco == FOCO_NO_NIVEL && i == (int) menu->nivelEscolhido);
     }
     desenharResumoDaCorrida(menu);
     desenharBotaoCorrer(foco == FOCO_NO_CORRER);
 
-    if (foco == FOCO_NA_PISTA) {
-        desenharSetasDaLinha(Y_CARTAO_PISTA + ALTURA_CARTAO_PISTA / 2.0f);
-    } else if (foco == FOCO_NO_NIVEL) {
-        desenharSetasDaLinha(Y_BOTAO_NIVEL + ALTURA_BOTAO_NIVEL / 2.0f);
-    }
-
-    /* As dicas dizem o que cada botão faz na linha em que o cursor está */
-    if (foco == FOCO_NO_CORRER) {
-        Dica dicas[] = {
-            { { "CIMA", NULL }, "SUBIR" },
-            { { "ENTER", NULL }, "CORRER" },
-            { { "ESC", NULL }, "VOLTAR" },
-        };
-        desenharBarraDeDicas(dicas, 3);
-    } else {
-        Dica dicas[] = {
-            { { "ESQ", "DIR", NULL }, (foco == FOCO_NA_PISTA) ? "TROCAR A PISTA" : "TROCAR A DIFICULDADE" },
-            { { "ENTER", NULL }, "PRÓXIMO" },
-            { { "ESC", NULL }, "VOLTAR" },
-        };
-        desenharBarraDeDicas(dicas, 3);
+    for (int i = 0; i < TOTAL_PISTAS; i++) {
+        desenharCartaoDePista(i, pistas[i], menu->destaquePista[i], foco == FOCO_NA_PISTA && i == menu->pistaEscolhida);
     }
 }
 
@@ -1560,7 +1715,10 @@ Tela atualizarConfiguracoes(EstadoMenu *menu) {
  * Devolve: nada.
  */
 static void desenharTituloDeSecao(const char *texto, float y) {
-    escrever(FONTE_TITULO, texto, X_LINHAS_CONFIG + 10.0f, y, 17.0f, COR_AMARELO);
+    escrever(FONTE_TITULO, texto, X_LINHAS_CONFIG + 10.0f, y, 17.0f, COR_TEXTO_CLARO);
+    float fimDoTexto = larguraDoTexto(FONTE_TITULO, texto, 17.0f);
+    DrawRectangleRec((Rectangle){ X_LINHAS_CONFIG + 22.0f + fimDoTexto, y + 12.0f, LARGURA_LINHAS_CONFIG - fimDoTexto - 32.0f, 1.0f },
+                     Fade(COR_CROMO, 0.3f));
 }
 
 /*
@@ -1570,10 +1728,11 @@ static void desenharTituloDeSecao(const char *texto, float y) {
  */
 static void desenharFundoDaLinhaConfig(int linha, int marcada) {
     float y = yDaLinhaConfig(linha), altura = alturaDaLinhaConfig(linha);
-    DrawRectangleRec((Rectangle){ X_LINHAS_CONFIG, y, LARGURA_LINHAS_CONFIG, altura - 2.0f },
-                     marcada ? Fade(COR_CROMO, 0.14f) : Fade(COR_GRAFITE, 0.78f));
+    Rectangle fundo = { X_LINHAS_CONFIG, y, LARGURA_LINHAS_CONFIG, altura - 2.0f };
+    float arredondado = fminf(0.5f, 6.0f / fminf(fundo.width, fundo.height));
+    DrawRectangleRounded(fundo, arredondado, 6, marcada ? Fade((Color){ 46, 50, 62, 255 }, 0.95f) : Fade(COR_GRAFITE, 0.80f));
     if (marcada && linha >= TOTAL_ACOES) {
-        DrawRectangleLinesEx((Rectangle){ X_LINHAS_CONFIG, y, LARGURA_LINHAS_CONFIG, altura - 2.0f }, 2.0f, corDoCursor());
+        DrawRectangleRoundedLinesEx(fundo, arredondado, 6, 2.0f, corDoCursor());
     }
 }
 
@@ -1620,12 +1779,12 @@ static void desenharLinhaDeOpcao(EstadoMenu *menu, int linha, const char *nome, 
     Color corDoTexto = apagada ? COR_TEXTO_FRACO : (marcada ? COR_TEXTO_CLARO : COR_CROMO);
     desenharFundoDaLinhaConfig(linha, marcada);
     escrever(FONTE_FORTE, nome, X_LINHAS_CONFIG + 12.0f, y + 3.0f, 15.0f, corDoTexto);
-    escreverCentralizado(FONTE_FORTE, valor, X_VALOR_OPCAO + LARGURA_VALOR_OPCAO / 2.0f, y + 3.0f, 15.0f,
-                         apagada ? COR_TEXTO_FRACO : COR_AMARELO);
-    if (marcada && linha != LINHA_PADRAO) {
-        escrever(FONTE_FORTE, "<", X_VALOR_OPCAO, y + 3.0f, 15.0f, COR_AMARELO);
-        escreverADireita(FONTE_FORTE, ">", X_VALOR_OPCAO + LARGURA_VALOR_OPCAO, y + 3.0f, 15.0f, COR_AMARELO);
+    if (linha != LINHA_PADRAO) {   /* as setas "< >" ficam sempre ao lado do valor; brancas na linha marcada */
+        Color corDasSetas = marcada ? COR_TEXTO_CLARO : Fade(COR_TEXTO_CLARO, 0.45f);
+        escrever(FONTE_FORTE, "<", X_VALOR_OPCAO, y + 3.0f, 15.0f, corDasSetas);
+        escrever(FONTE_FORTE, ">", X_VALOR_OPCAO + 16.0f, y + 3.0f, 15.0f, corDasSetas);
     }
+    escrever(FONTE_FORTE, valor, X_VALOR_OPCAO + 44.0f, y + 3.0f, 15.0f, apagada ? COR_TEXTO_FRACO : COR_TEXTO_CLARO);
 }
 
 /*
@@ -1861,6 +2020,7 @@ EscolhaDaPausa atualizarPausa(EstadoMenu *menu) {
  * Devolve: nada.
  */
 void desenharPausa(EstadoMenu *menu) {
+    usarFormasRetas(1);   /* desenhada dentro da corrida, onde as formas retas ficam desligadas */
     escurecerTela(0.75f, 0.6f, 0.8f);
 
     float centro = LARGURA_TELA / 2.0f;
@@ -1880,6 +2040,7 @@ void desenharPausa(EstadoMenu *menu) {
         { { "ESC", NULL }, "CONTINUAR" },
     };
     desenharBarraDeDicas(dicas, 3);
+    usarFormasRetas(0);
 }
 
 /* ==================================================================
