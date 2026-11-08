@@ -38,6 +38,8 @@
 #define CORTE_NA_TROCA             0.2f  /* na troca de marcha sobra 20% da força do motor */
 #define ATRITO_GRAMA            4500.0f  /* quanto cai por segundo na grama */
 #define VELOCIDADE_MAXIMA_GRAMA 3000.0f  /* na grama o carro não passa disso */
+#define ATRITO_ESCAPE           3000.0f  /* na área de escape asfaltada, cai menos... */
+#define VELOCIDADE_MAXIMA_ESCAPE 6000.0f /* ...e o carro anda até a metade da máxima */
 #define VELOCIDADE_DE_VIRADA       2.0f  /* larguras de pista por segundo, na velocidade máxima */
 #define GIRO_DO_VOLANTE            6.0f  /* com a seta apertada, o volante vai de 0 a 1 em ~0,17 s */
 #define CALMA_DO_VOLANTE_RAPIDO    0.45f /* na máxima, sem a guiada, o volante gira 45% mais devagar */
@@ -46,7 +48,7 @@
 #define FORCA_DA_ARRANCADA         0.55f /* a aceleração parado é 55% da "aceleracao" da ficha (era 75%: rápido demais)... */
 #define PERDA_NA_MAXIMA            0.8f  /* ...e na velocidade máxima cai 80% (sobram 20%) */
 #define INICIO_DA_DERRAPAGEM       0.7f  /* a curva usando 70% do volante: começa a derrapar */
-#define LIMITE_LATERAL             2.5f  /* até onde o carro pode ir pela grama */
+#define LIMITE_LATERAL             2.5f  /* até onde o carro pode ir pela grama, onde a pista não mediu os muros */
 #define EMPURRAO_SEM_PEDAL         0.9f  /* aliviando na curva, o empurrão para fora é 10% menor... */
 #define EMPURRAO_FREANDO           0.8f  /* ...e freando, 20% (acelerando: o empurrão inteiro) */
 #define PERDA_NA_DERRAPAGEM    30000.0f  /* passando 10% do limite, perde 3000 por segundo (1/4 do freio)... */
@@ -247,6 +249,7 @@ Carro criarCarro(const char *nome, int numero, Segmento *largada, float deslocam
     carro.giroDoDrift = 0.0f;
     carro.gastaPneu = 0;
     carro.desgaste = 0.0f;
+    carro.metrosDeUmJogoDePneus = METROS_DE_UM_JOGO_DE_PNEUS;
     carro.pneuEstourado = 0;
     carro.ladoDoPrimeiroEstouro = 0;
     carro.tempoDoEstouro = 0.0f;
@@ -292,16 +295,27 @@ static float limitar(float valor, float minimo, float maximo) {
 }
 
 /*
+ * superficieDoCarro
+ * Recebe: o carro.
+ * Devolve: o que ele tem embaixo das rodas (no pit lane, sempre asfalto).
+ */
+Superficie superficieDoCarro(Carro *carro) {
+    if (carro->estadoDoPit != PIT_FORA) {
+        return SUPERFICIE_ASFALTO;   /* o pit lane é asfalto, mesmo longe da pista */
+    }
+    float lateral = carro->deslocamentoLateral * larguraDoLado(carro->posicao.segmento, carro->deslocamentoLateral);
+    return superficieNaLateral(carro->posicao, lateral);
+}
+
+/*
  * estaForaDaPista
  * Recebe: o carro.
- * Devolve: 1 se o carro está na grama, 0 se está no asfalto.
+ * Devolve: 1 se o carro está fora da pista (na grama ou na área de escape), 0 se está
+ *          no asfalto ou na zebra.
  */
 int estaForaDaPista(Carro *carro) {
-    if (carro->estadoDoPit != PIT_FORA) {
-        return 0;   /* o pit lane é asfalto, mesmo longe da pista */
-    }
-    return carro->deslocamentoLateral < -carro->posicao.segmento->asfaltoEsquerda ||
-           carro->deslocamentoLateral > LIMITE_PISTA;
+    Superficie embaixo = superficieDoCarro(carro);
+    return embaixo == SUPERFICIE_GRAMA || embaixo == SUPERFICIE_ESCAPE;
 }
 
 /*
@@ -383,8 +397,13 @@ static void atualizarVelocidade(Carro *carro, Comandos comandos, float tempoQuad
     float senoDoAngulo = sinf(carro->anguloDeDrift * 0.0174533f);
     carro->velocidade -= (PERDA_NO_DRIFT * carro->forcaDoDrift + ARRASTO_DE_LADO * senoDoAngulo * senoDoAngulo) * tempoQuadro;
 
-    if (estaForaDaPista(carro) && carro->velocidade > VELOCIDADE_MAXIMA_GRAMA) {
+    /* Fora da pista o carro perde velocidade: muito na grama, menos na área de escape
+     * asfaltada (senão cortar caminho por ela compensaria) */
+    Superficie embaixo = superficieDoCarro(carro);
+    if (embaixo == SUPERFICIE_GRAMA && carro->velocidade > VELOCIDADE_MAXIMA_GRAMA) {
         carro->velocidade -= ATRITO_GRAMA * tempoQuadro;
+    } else if (embaixo == SUPERFICIE_ESCAPE && carro->velocidade > VELOCIDADE_MAXIMA_ESCAPE) {
+        carro->velocidade -= ATRITO_ESCAPE * tempoQuadro;
     }
 
     /* Acima da máxima (acabou de sair do vácuo): o ar tira o excesso aos
@@ -579,7 +598,7 @@ static void atualizarDesgaste(Carro *carro, float distancia) {
         return;
     }
     float metros = distancia / UNIDADES_POR_METRO * (1.0f + GASTO_DERRAPANDO * carro->derrapagem);
-    carro->desgaste = fminf(carro->desgaste + metros / METROS_DE_UM_JOGO_DE_PNEUS, 1.0f);
+    carro->desgaste = fminf(carro->desgaste + metros / carro->metrosDeUmJogoDePneus, 1.0f);
     /* Os pneus do jogador estouram um a um quando a vida passa de ~20%; só na pista (no pit lane ele já está parando) */
     while (carro->controladoPeloJogador && carro->estadoDoPit == PIT_FORA && quantosPneusEstourados(carro) < 4
            && carro->desgaste >= DESGASTE_DE_CADA_ESTOURO[quantosPneusEstourados(carro)]) {
@@ -656,7 +675,9 @@ static void encostarNoLimite(Carro *carro, float lado, float tempoQuadro) {
  */
 static void aplicarLimites(Carro *carro, float tempoQuadro) {
     Segmento *aqui = carro->posicao.segmento;
-    carro->deslocamentoLateral = limitar(carro->deslocamentoLateral, -LIMITE_LATERAL, LIMITE_LATERAL);
+    if (aqui->limiteDireita <= 0.0f) {
+        carro->deslocamentoLateral = limitar(carro->deslocamentoLateral, -LIMITE_LATERAL, LIMITE_LATERAL);
+    }
 
     int jaRaspava = carro->raspandoNoMuro;
     carro->raspandoNoMuro = 0;
@@ -700,7 +721,7 @@ static void aplicarLimites(Carro *carro, float tempoQuadro) {
  * arrasta e tira velocidade, proporcional a quanto passou.
  * O deslocamento lateral é medido em larguras da pista, e no oval cada lado
  * tem uma largura: a conta corrige isso, para o carro andar de lado os mesmos
- * metros por segundo em qualquer ponto (em Interlagos o fator é 1).
+ * metros por segundo em qualquer ponto (com os dois lados iguais, o fator é 1).
  * Recebe: o carro, os comandos (o pé muda o empurrão) e o tempo do quadro.
  * Devolve: nada (altera deslocamentoLateral, derrapagem e velocidade).
  */

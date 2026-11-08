@@ -4,12 +4,11 @@
  * O cenário 3D de cada pista, desenhado com a raylib em 3D de verdade:
  *
  *   - Copa Pistão: o modelo do estádio (recursos/modelos/copa_pistao.glb);
- *   - Interlagos: malhas geradas a partir da lista de segmentos (asfalto,
- *     zebras e terreno), com o céu, a cidade e os morros em volta, e os
- *     objetos da beira, modelos de recursos/modelos/objetos.
+ *   - Interlagos, Oval e Splat: o modelo 3D de cada uma, de dia, com o que o
+ *     jogo põe em cima (telões, torcida, vagas do pit e objetos dos mapas).
  *
  * A lógica do jogo continua na lista circular da pista. Este módulo só
- * transforma os segmentos em malhas, uma vez, no começo.
+ * carrega os modelos e monta, uma vez, no começo, o que vai em cima deles.
  * ------------------------------------------------------------------
  */
 

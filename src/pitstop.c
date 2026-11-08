@@ -19,19 +19,23 @@
 #define FIM_DO_ENCOSTAR       2.0f   /* metros antes da vaga em que o carro já está no lado dela */
 #define ANGULO_ENCOSTANDO     35.0f  /* graus: o bico entra na vaga com até tanto de ângulo */
 #define ENDIREITANDO          0.35f  /* segundos: o bico volta a alinhar com o pit lane */
+#define SEGUINDO_O_CAMINHO    0.12f  /* segundos: longe da vaga, o bico segue o caminho do pit lane */
+#define GIRO_MAXIMO_NO_PIT    90.0f  /* graus por segundo que o bico gira, no máximo, andando no pit lane */
+#define MENOR_FATOR_NO_PIT    0.1f   /* a saída passa bem por dentro do S do Senna: lá um metro da linha vale uns 25 cm */
+#define ABRINDO_NA_FILA       0.6f   /* colado no da frente, anda a esta fração da velocidade dele */
+#define PERTO_DO_CAMINHO      0.15f  /* metros: daqui para dentro o carro anda exatamente pelo caminho */
+#define ACELERACAO_DE_LADO_NO_PIT 25.0f /* m/s²: nas curvas do caminho, ele anda no máximo tão rápido que isto */
+#define FREADA_ANTES_DA_CURVA 8.0f   /* m/s²: ele chega na curva freando com calma, sem tranco */
+#define OLHAR_A_CURVA         12.0f  /* metros do caminho entre os pontos que medem a curva à frente */
 #define MUDANCA_DO_VOLANTE    5.0f   /* por segundo: o volante não pula de uma vez */
 #define GUIDO_ENCOSTADO       0.15f     /* metros entre o nariz dele e o carro, trabalhando */
 #define GUIDO_ESPERANDO       0.9f      /* metros a mais de folga, esperando */
 #define GUIDO_FOLGA_NAS_PONTAS 0.5f     /* metros além do carro, dando a volta nele */
 #define VELOCIDADE_ENCOSTANDO 1400.0f   /* devagar nesse trecho, para chegar até o fim da manobra */
-#define SEGUNDOS_OLHANDO_ADIANTE 1.2f
-#define BORDA_DEPOIS_DA_SAIDA 0.9f      /* larguras da pista: um pouco para dentro do asfalto */
-#define SEGUNDOS_VOLTANDO_A_PISTA 0.5f
 #define PARADO_NA_VAGA        0.05f     /* metros: chegou */
 #define PASSOU_DA_VAGA        3.0f      /* metros: entrou rápido demais e passou da vaga. Sem dar ré, segue
                                          * direto pelo pit lane sem trocar (e deve a parada ainda); parado
                                          * ali, travaria a fila de todo mundo atrás */
-#define FAIXA_RAPIDA          4.5f      /* metros do muro até o centro do carro, andando no pit lane */
 #define RAPIDEZ_DE_LADO       17.0f     /* metros por segundo, no máximo */
 #define RAPIDEZ_NO_CAMINHO    24.0f     /* onde a estrada do pit dobra de verdade */
 #define RESPOSTA_DE_LADO      2.5f      /* por segundo: quanto do caminho até a linha ele anda */
@@ -82,10 +86,8 @@ int dentroDoLimiteDoPit(const Pista *pista, float metros) {
  * Devolve: quantos metros a vaga fica da linha da pista, para o lado do pit lane.
  */
 static float metrosAteAVaga(const Pista *pista, const Segmento *segmento) {
-    if (pista->pit.noModelo) {
-        return pista->pit.vaga;
-    }
-    return segmento->larguraEsquerda + LARGURA_DO_PIT_LANE - METROS_DA_VAGA_AO_PREDIO;
+    (void) segmento;
+    return pista->pit.vaga;
 }
 
 /*
@@ -130,20 +132,18 @@ int querEntrarNoPit(const Pista *pista, const Carro *carro) {
     if (carro->querParar) {
         return 1;
     }
-    if (pista->pit.noModelo) {
-        /* Aqui o asfalto do pit lane emenda no da pista: só entra quem ainda deve a parada */
-        if (carro->pitFeito) {
-            return 0;
-        }
-        /* Onde a pista se afunila na direção do pit lane, basta estar encostado no lado dele */
-        float largura = larguraDoLadoDoPit(pista, carro->posicao.segmento);
-        float precisa = fminf(pista->pit.paraEntrar, largura * FRACAO_PARA_ENTRAR);
-        return pista->pit.lado * carro->deslocamentoLateral * largura >= precisa;
+    /* O asfalto do pit lane emenda no da pista: só entra quem ainda deve a parada */
+    if (carro->pitFeito) {
+        return 0;
     }
-    float largura = 0.0f;
-    float borda = ladoDentroDoPit(metros, pista->metrosDaVolta, &largura);
-    float dentro = METROS_PARA_ENTRAR / carro->posicao.segmento->larguraEsquerda;
-    return depoisDaEntrada >= metrosDesdeAEntrada(pista, pista->pit.inicioLivre) && carro->deslocamentoLateral < -(borda + dentro);
+    if (depoisDaEntrada < metrosDesdeAEntrada(pista, pista->pit.inicioLivre)) {
+        return 0;
+    }
+    /* Onde a pista se afunila na direção do pit lane, basta estar encostado no lado dele */
+    float largura = larguraDoLadoDoPit(pista, carro->posicao.segmento);
+    float precisa = pista->pit.soEncostadoNaBorda ? largura - pista->pit.paraEntrar
+                                                  : fminf(pista->pit.paraEntrar, largura * FRACAO_PARA_ENTRAR);
+    return pista->pit.lado * carro->deslocamentoLateral * largura >= precisa;
 }
 
 /*
@@ -210,6 +210,15 @@ static float ladoNoCaminho(const Pista *pista, float noPit) {
 }
 
 /*
+ * ladoNoCaminhoEm
+ * Recebe: a pista e quantos metros depois da entrada do pit lane.
+ * Devolve: a lateral (em metros, com o sinal do lado do pit) da estrada do pit ali.
+ */
+static float ladoNoCaminhoEm(const Pista *pista, float noPit) {
+    return pista->pit.lado * ladoNoCaminho(pista, noPit);
+}
+
+/*
  * suaveNoPit
  * Recebe: um andamento (fora de 0 a 1, fica na ponta).
  * Devolve: o andamento, começando e terminando devagar.
@@ -227,50 +236,70 @@ static float suaveNoPit(float t) {
  * Devolve: o lado, em metros (negativo à esquerda).
  */
 float linhaNoPit(const Pista *pista, const Carro *carro, int saindo, float metrosPorSegundoAgora) {
-    float largura = 0.0f;
-    float larguraDaPista = larguraDoLadoDoPit(pista, carro->posicao.segmento);
-    float metrosDaVolta = pista->metrosDaVolta;
-    float metros = metrosNaVolta(carro);
-    float noPit = metrosDesdeAEntrada(pista, metros);
+    float noPit = metrosDesdeAEntrada(pista, metrosNaVolta(carro));
     const DadosDoPit *pit = &pista->pit;
     float fim = metrosDesdeAEntrada(pista, pit->fim);
+    /* Ele olha adiante o tanto que demora para responder: assim o carro passa mesmo por
+     * onde o pit lane passa, e não fica para trás cortando pela grama */
+    (void) saindo;
+    float adiante = noPit + metrosPorSegundoAgora / RESPOSTA_DE_LADO;
     float linha;
-    if (pit->noModelo) {
-        /* Ele olha adiante o tanto que demora para responder: assim o carro passa mesmo por
-         * onde o pit lane passa, e não fica para trás cortando pela grama */
-        float adiante = noPit + metrosPorSegundoAgora / RESPOSTA_DE_LADO;
-        if (pit->pontosDoCaminho > 0) {
-            linha = pit->lado * ladoNoCaminho(pista, adiante);
-        } else {
-            float chegou = suaveNoPit(adiante / metrosDesdeAEntrada(pista, pit->noCaminhoDaFaixa));
-            float deixaAFaixa = metrosDesdeAEntrada(pista, pit->deixaAFaixa);
-            float voltou = suaveNoPit((fim - adiante) / (fim - deixaAFaixa));
-            linha = pit->lado * (pit->borda + (pit->faixa - pit->borda) * fminf(chegou, voltou));
-        }
+    if (pit->pontosDoCaminho > 0) {
+        linha = pit->lado * ladoNoCaminho(pista, adiante);
     } else {
-        /* Ele olha adiante para já estar longe do muro quando o pit lane se afasta da pista;
-         * mas só encosta nela quando o pit lane encosta, para não cortar caminho pela grama.
-         * Só nos últimos metros, voltando à pista, ele antecipa um pouco. */
-        float borda = ladoDentroDoPit(metros, metrosDaVolta, &largura);
-        if (saindo && borda == 0.0f) {
-            borda = BORDA_DEPOIS_DA_SAIDA;   /* passou do fim do pit lane: termina de entrar na pista */
-        }
-        float noFim = INICIO_DA_VOLTA;
-        if (saindo && metros < FIM_DO_PIT_LANE && metros > noFim) {
-            float metrosAdiante = fminf(metros + metrosPorSegundoAgora * SEGUNDOS_VOLTANDO_A_PISTA, FIM_DO_PIT_LANE);
-            borda = ladoDentroDoPit(metrosAdiante, metrosDaVolta, &largura);
-        } else {
-            float metrosAdiante = fmodf(metros + metrosPorSegundoAgora * SEGUNDOS_OLHANDO_ADIANTE, metrosDaVolta);
-            float larguraAdiante = 0.0f;
-            float bordaAdiante = ladoDentroDoPit(metrosAdiante, metrosDaVolta, &larguraAdiante);
-            if (bordaAdiante > borda) {
-                borda = bordaAdiante;
-            }
-        }
-        float naFaixa = fminf(FAIXA_RAPIDA, largura / 2.0f);
-        linha = -(borda * larguraDaPista + naFaixa);
+        float chegou = suaveNoPit(adiante / metrosDesdeAEntrada(pista, pit->noCaminhoDaFaixa));
+        float deixaAFaixa = metrosDesdeAEntrada(pista, pit->deixaAFaixa);
+        float voltou = suaveNoPit((fim - adiante) / (fim - deixaAFaixa));
+        linha = pit->lado * (pit->borda + (pit->faixa - pit->borda) * fminf(chegou, voltou));
     }
     return linha;
+}
+
+
+
+/*
+ * pontoDoCaminho
+ * Recebe: a pista, o carro (para achar a pista a partir dele) e quantos metros depois da entrada.
+ * Devolve: o ponto da estrada do pit ali, no mundo.
+ */
+static PontoNoMundo pontoDoCaminho(const Pista *pista, const Carro *carro, float noPit) {
+    PosicaoNaPista lugar = carro->posicao;
+    moverNaPista(&lugar, (noPit - metrosDesdeAEntrada(pista, metrosNaVolta(carro))) * UNIDADES_POR_METRO);
+    float lateral = ladoNoCaminhoEm(pista, noPit);
+    return pontoNoMundo(lugar, lateral / larguraNaPosicao(lugar, lateral));
+}
+
+/*
+ * velocidadeNaCurvaDoCaminho
+ * Mede no mundo o quanto a estrada do pit vira logo à frente, e a velocidade que faz essa curva
+ * com no máximo ACELERACAO_DE_LADO_NO_PIT.
+ * Recebe: a pista, o carro e quantos metros ele está depois da entrada.
+ * Devolve: a velocidade, em unidades por segundo.
+ */
+static float velocidadeNaCurvaDoCaminho(const Pista *pista, const Carro *carro, float noPit) {
+    float menor = 1e9f;
+    for (float adiante = 0.0f; adiante <= 100.0f; adiante += OLHAR_A_CURVA / 2.0f) {
+        PontoNoMundo a = pontoDoCaminho(pista, carro, noPit + adiante);
+        PontoNoMundo b = pontoDoCaminho(pista, carro, noPit + adiante + OLHAR_A_CURVA);
+        PontoNoMundo c = pontoDoCaminho(pista, carro, noPit + adiante + 2.0f * OLHAR_A_CURVA);
+        float ab = hypotf(b.x - a.x, b.z - a.z), bc = hypotf(c.x - b.x, c.z - b.z);
+        if (ab < 0.5f || bc < 0.5f) {
+            continue;
+        }
+        float rumo1 = atan2f(b.x - a.x, a.z - b.z), rumo2 = atan2f(c.x - b.x, b.z - c.z);
+        float vira = fabsf(rumo2 - rumo1);
+        vira = fminf(vira, 2.0f * 3.14159265f - vira);
+        if (vira < 0.01f) {
+            continue;
+        }
+        float raio = (ab + bc) / 2.0f / vira;
+        /* A curva mais adiante pode esperar: dá tempo de frear até ela */
+        float metrosPorSegundo = sqrtf(ACELERACAO_DE_LADO_NO_PIT * raio);
+        float ateLa = adiante;
+        float podeVir = sqrtf(metrosPorSegundo * metrosPorSegundo + 2.0f * FREADA_ANTES_DA_CURVA * ateLa);
+        menor = fminf(menor, podeVir);
+    }
+    return menor * UNIDADES_POR_METRO;
 }
 
 /*
@@ -307,9 +336,11 @@ int atualizarCarroNoPit(Carro *carro, Pista *pista, float tempoQuadro) {
     if (carro->estadoDoPit == PIT_CHEGANDO) {
         float falta = fmaxf(vaga - noPit, 0.0f) * UNIDADES_POR_METRO;
         alvo = fminf(alvo, sqrtf(2.0f * FREIO_NO_PIT * falta));
-        if (distanciaDaVaga < pit->encostar) {
-            alvo = fminf(alvo, VELOCIDADE_ENCOSTANDO);
-        }
+        /* O trecho em que ele vai de lado até a vaga (como o de baixo): chega nele já devagar */
+        float deLado = fabsf(pit->lado * metrosAteAVaga(pista, carro->posicao.segmento) - linhaNoPit(pista, carro, 0, 0.0f));
+        float trecho = fmaxf(pit->encostar, deLado / tanf(ANGULO_ENCOSTANDO * 0.0174533f) + FIM_DO_ENCOSTAR);
+        float ateOTrecho = fmaxf(distanciaDaVaga - trecho, 0.0f) * UNIDADES_POR_METRO;
+        alvo = fminf(alvo, sqrtf(VELOCIDADE_ENCOSTANDO * VELOCIDADE_ENCOSTANDO + 2.0f * FREIO_NO_PIT * ateOTrecho));
         Segmento *aqui = carro->posicao.segmento;
         float faltaDeLado = fabsf(carro->deslocamentoLateral * larguraDoLadoDoPit(pista, aqui) - pit->lado * metrosAteAVaga(pista, aqui));
         if (vaga - noPit < PARADO_NA_VAGA && faltaDeLado < 0.25f) {
@@ -341,9 +372,20 @@ int atualizarCarroNoPit(Carro *carro, Pista *pista, float tempoQuadro) {
         int saindoPertoDele = carro->estadoDoPit == PIT_SAINDO && carro->velocidadeAFrente <= 0.0f;
         float folga = fmaxf(carro->distanciaAFrente - (saindoPertoDele ? FOLGA_SAINDO_DA_VAGA : FOLGA_NA_FILA), 0.0f) * UNIDADES_POR_METRO;
         alvo = fminf(alvo, sqrtf(carro->velocidadeAFrente * carro->velocidadeAFrente + 2.0f * FREIO_NO_PIT * folga));
+        if (folga <= 0.0f && !saindoPertoDele) {
+            /* Já colado: a velocidade é a do mundo, e onde a estrada do pit vira em relação à pista
+             * o da frente anda menos na pista que ela; fica um pouco mais devagar, para abrir */
+            alvo = fminf(alvo, carro->velocidadeAFrente * ABRINDO_NA_FILA);
+        }
     }
     if (carro->estadoDoPit == PIT_SAINDO && distanciaDaVaga < METROS_SAINDO_DA_VAGA && carro->vemAlguemAtras) {
         alvo = 0.0f;
+    }
+
+    /* Nas curvas do caminho (a saída de Interlagos serpenteia por dentro do S do Senna), ele anda
+     * no máximo na velocidade que faz a curva sem tranco */
+    if (pit->pontosDoCaminho > 0 && carro->estadoDoPit != PIT_TROCANDO) {
+        alvo = fminf(alvo, velocidadeNaCurvaDoCaminho(pista, carro, noPit));
     }
 
     int freando = carro->velocidade > alvo;
@@ -354,8 +396,10 @@ int atualizarCarroNoPit(Carro *carro, Pista *pista, float tempoQuadro) {
 
     /* Lado: na faixa rápida; encostando na frente da própria vaga */
     float metrosPorSegundoAgora = carro->velocidade / UNIDADES_POR_METRO;
-    float larguraDaPista = larguraDoLadoDoPit(pista, carro->posicao.segmento);
-    float linha = linhaNoPit(pista, carro, carro->estadoDoPit == PIT_SAINDO, metrosPorSegundoAgora);
+    float larguraDaPista = larguraNaPosicao(carro->posicao, pista->pit.lado);
+    /* Onde há caminho medido, ele vai até o caminho dali (sem olhar adiante): assim, quando começa a
+     * encostar na vaga, a linha não salta do caminho lá na frente para o daqui */
+    float linha = linhaNoPit(pista, carro, carro->estadoDoPit == PIT_SAINDO, (pit->pontosDoCaminho > 0) ? 0.0f : metrosPorSegundoAgora);
     float naVaga = pit->lado * metrosAteAVaga(pista, carro->posicao.segmento);
     float atePerto = fabsf(vaga - noPit);
     /* De frente: o lado muda junto com o andar, num ângulo que o bico consegue fazer, e termina
@@ -371,9 +415,12 @@ int atualizarCarroNoPit(Carro *carro, Pista *pista, float tempoQuadro) {
     }
     float agora = carro->deslocamentoLateral * larguraDaPista;
     float rapidez = 0.0f;
-    /* Encostando na vaga ou saindo dela, termina a manobra de lado mesmo parado: senão quem
-     * sai com um carro logo à frente nunca sai da faixa dele, e fica preso até ele ir embora */
-    if (carro->velocidade > 0.0f || (carro->estadoDoPit != PIT_TROCANDO && atePerto < trechoDeEncostar)) {
+    /* Preso ao caminho: já em cima dele e longe da vaga, o carro anda exatamente por ele (sem atraso,
+     * que faria ele balançar); só para chegar até ele, ou encostar e sair da vaga, é que ele muda de
+     * lado aos poucos */
+    int presoAoCaminho = pit->pontosDoCaminho > 0 && atePerto >= trechoDeEncostar && carro->estadoDoPit != PIT_TROCANDO
+                         && fabsf(linhaNoPit(pista, carro, carro->estadoDoPit == PIT_SAINDO, 0.0f) - agora) < PERTO_DO_CAMINHO;
+    if (!presoAoCaminho && (carro->velocidade > 0.0f || (carro->estadoDoPit != PIT_TROCANDO && atePerto < trechoDeEncostar))) {
         float maximo = (pit->pontosDoCaminho > 0) ? RAPIDEZ_NO_CAMINHO : RAPIDEZ_DE_LADO;
         rapidez = fminf(fmaxf((linha - agora) * RESPOSTA_DE_LADO, -maximo), maximo);
         if (carro->estadoDoPit == PIT_CHEGANDO && atePerto < trechoDeEncostar && tempoQuadro > 0.0f) {
@@ -385,25 +432,38 @@ int atualizarCarroNoPit(Carro *carro, Pista *pista, float tempoQuadro) {
     if (carro->estadoDoPit == PIT_SAINDO && ((rapidez > 0.0f && carro->ocupadoDireita) || (rapidez < 0.0f && carro->ocupadoEsquerda))) {
         rapidez = 0.0f;
     }
-    agora += rapidez * tempoQuadro;
-    carro->deslocamentoLateral = agora / larguraDaPista;
-    carro->velocidadeDeLado = rapidez;
-
-    /* O bico aponta para onde ele está indo (o ângulo vai no anguloDeFuga, que o desenho soma ao
-     * rumo da pista), mudando aos poucos: entrando, ele parte de onde o piloto deixou */
-    float metrosPorSegundo = carro->velocidade / UNIDADES_POR_METRO;
-    float apontar = (metrosPorSegundo > 0.5f) ? atan2f(rapidez, metrosPorSegundo) * 57.2958f : 0.0f;
-    carro->anguloDeFuga += (apontar - carro->anguloDeFuga) * (1.0f - expf(-tempoQuadro / ENDIREITANDO));
-    float volanteAlvo = fminf(fmaxf((apontar - carro->anguloDeFuga) / GRAUS_DO_VOLANTE, -1.0f), 1.0f);
-    carro->volante = aproximarDe(carro->volante, volanteAlvo, MUDANCA_DO_VOLANTE * tempoQuadro);
 
     carro->ultimosComandos = comandos;
     atualizarMotor(&carro->motor, carro->velocidade / carro->velocidadeMaxima, comandos.acelerar, comandos.frear, 0, tempoQuadro);
     carro->anguloDasRodas = fmodf(carro->anguloDasRodas + rapidezDasRodas(carro->velocidade, 0) * tempoQuadro,
                                   2.0f * 3.14159265f);
 
-    /* Anda */
+    /* Anda. Onde há caminho medido, o passo na linha da pista é o que faz o carro andar no mundo o
+     * que a velocidade manda: longe da linha, por dentro de uma curva (a saída de Interlagos, por
+     * dentro do S do Senna), um metro da linha vale bem menos que um metro do carro */
+    PontoNoMundo antes = pontoNoMundo(carro->posicao, carro->deslocamentoLateral);
     float distancia = carro->velocidade * tempoQuadro;
+    if (pit->pontosDoCaminho > 0 && distancia > 0.0f) {
+        PosicaoNaPista adiante = carro->posicao;
+        moverNaPista(&adiante, UNIDADES_POR_METRO);
+        float lateralAdiante = presoAoCaminho ? ladoNoCaminhoEm(pista, noPit + 1.0f) : agora;   /* mudando de lado por conta própria, só a curva conta */
+        PontoNoMundo ali = pontoNoMundo(adiante, lateralAdiante / larguraNaPosicao(adiante, lateralAdiante));
+        float noMundo = fminf(fmaxf(hypotf(ali.x - antes.x, ali.z - antes.z), MENOR_FATOR_NO_PIT), 1.0f / MENOR_FATOR_NO_PIT);
+        distancia /= noMundo;
+        /* E confere no passo de verdade: onde a pista muda de jeito no meio do passo (a emenda da
+         * volta, na linha de chegada, tem um segmento sem comprimento no mundo), corrige */
+        float quer = carro->velocidade * tempoQuadro / UNIDADES_POR_METRO;
+        for (int vez = 0; vez < 2; vez++) {
+            PosicaoNaPista tentativa = carro->posicao;
+            moverNaPista(&tentativa, distancia);
+            float lateralLa = presoAoCaminho ? ladoNoCaminhoEm(pista, noPit + distancia / UNIDADES_POR_METRO) : agora;
+            PontoNoMundo la = pontoNoMundo(tentativa, lateralLa / larguraNaPosicao(tentativa, lateralLa));
+            float andou = hypotf(la.x - antes.x, la.z - antes.z);
+            if (andou > 0.001f) {
+                distancia *= fminf(fmaxf(quer / andou, 0.5f), 2.0f);
+            }
+        }
+    }
     if (carro->estadoDoPit != PIT_TROCANDO) {
         distancia += carro->empurraoPendente;
     }
@@ -413,11 +473,31 @@ int atualizarCarroNoPit(Carro *carro, Pista *pista, float tempoQuadro) {
         distancia = -carro->posicao.distanciaNoSegmento;
     }
     carro->distanciaPercorrida += distancia;
-    Segmento *segmentoAntes = carro->posicao.segmento;
     int voltasGanhas = moverNaPista(&carro->posicao, distancia);
-    if (carro->posicao.segmento != segmentoAntes) {
-        /* Muda a largura da pista: o carro continua no mesmo lugar em metros, não na mesma fração */
-        carro->deslocamentoLateral *= larguraDoLadoDoPit(pista, segmentoAntes) / larguraDoLadoDoPit(pista, carro->posicao.segmento);
+    float larguraDepois = larguraNaPosicao(carro->posicao, pista->pit.lado);
+    if (presoAoCaminho) {
+        agora = ladoNoCaminhoEm(pista, metrosDesdeAEntrada(pista, metrosNaVolta(carro)));
+    } else {
+        agora += rapidez * tempoQuadro;
+    }
+    carro->deslocamentoLateral = agora / larguraDepois;
+    carro->velocidadeDeLado = (tempoQuadro > 0.0f) ? rapidez : 0.0f;
+
+    /* O bico aponta para onde ele andou de verdade no mundo, virando aos poucos e sem passar de
+     * um giro máximo (perto da vaga, mais devagar ainda, como numa manobra) */
+    PontoNoMundo depois = pontoNoMundo(carro->posicao, carro->deslocamentoLateral);
+    float andou = hypotf(depois.x - antes.x, depois.z - antes.z);
+    if (andou > 0.001f && tempoQuadro > 0.0f) {
+        float apontar = atan2f(depois.x - antes.x, antes.z - depois.z) * 57.2958f - depois.rumo;
+        apontar -= 360.0f * roundf(apontar / 360.0f);
+        float diferenca = apontar - carro->anguloDeFuga;
+        diferenca -= 360.0f * roundf(diferenca / 360.0f);
+        float resposta = (atePerto < trechoDeEncostar) ? ENDIREITANDO : SEGUINDO_O_CAMINHO;
+        float passo = diferenca * (1.0f - expf(-tempoQuadro / resposta));
+        float maximo = GIRO_MAXIMO_NO_PIT * tempoQuadro;
+        carro->anguloDeFuga += fminf(fmaxf(passo, -maximo), maximo);
+        float volanteAlvo = fminf(fmaxf(diferenca / GRAUS_DO_VOLANTE, -1.0f), 1.0f);
+        carro->volante = aproximarDe(carro->volante, volanteAlvo, MUDANCA_DO_VOLANTE * tempoQuadro);
     }
     carro->voltas += voltasGanhas;
     atualizarSuspensao(carro, tempoQuadro);

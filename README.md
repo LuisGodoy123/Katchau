@@ -10,7 +10,7 @@ lista circular duplamente encadeada de segmentos.
 - **Fase 2:** estrada em pseudo-3D (hoje em 3D de verdade, veja "O 3D").
 - **Fase 3:** carro do jogador (`src/carro.c`), corrida de 3 voltas com tempo por volta (`src/corrida.c`) e HUD simples (`src/hud.c`).
 - **Fase 4:** 13 rivais com IA (`src/ia.c`), classificação refeita a cada quadro com Insertion Sort (`src/ordenacao.c`), colisão e posição no HUD.
-- **Fase 5 (em parte):** Interlagos com subidas e descidas, texturas, mini-mapa, zebras só nas curvas,
+- **Fase 5 (em parte):** Interlagos de verdade (o traçado de 2023, num modelo 3D medido para o jogo), mini-mapa, zebras e muros do modelo,
   linha de chegada quadriculada e objetos na beira da pista (`src/obstaculos.c`). Falta o turbo.
 - **Fase 6:** menu principal, garagem com Merge Sort, como jogar, contagem regressiva e tela de resultado (`src/menu.c`).
 
@@ -128,12 +128,14 @@ src/
   config.h         constantes compartilhadas (TOTAL_VOLTAS, tamanho da tela...)
   pista.c/.h       lista circular duplamente encadeada de segmentos   (fase 1)
   render.c/.h      câmera, carros e sprites na corrida em 3D
-  mundo.c/.h       cenário 3D: o modelo do estádio e as malhas de Interlagos
+  mundo.c/.h       cenário 3D: os modelos das pistas e o que o jogo põe em cima deles
   carros3d.c/.h    modelos 3D dos carros, sombras e fotos para os menus
   fumaca.c/.h      fumaça dos pneus e poeira da grama
   noite.c/.h       noite da Copa Pistão: refletores, torcida e flashes
   copa_pistao.h    traçado da Copa Pistão, medido no modelo 3D
   oval.h, splat.h  traçado e lugares da torcida dos outros dois modelos 3D
+  interlagos.h     traçado, bordas, muros, pit lane e torcida de Interlagos (gerado: veja ferramentas/)
+  interlagos_materiais.h  o que é cada material do modelo de Interlagos (chão e jeito de desenhar)
   tracado.h        o formato dessas tabelas
   carro.c/.h       struct Carro, Comandos e movimento                  (fase 3)
   corrida.c/.h     grid, voltas, colisão, classificação e fim          (fases 3 e 4)
@@ -151,6 +153,9 @@ src/
   controle.c/.h    controle (gamepad): comandos do carro e botões dos menus
 testes/
   teste_pista.c    testa pista, carro, corrida, IA e ordenação no terminal
+ferramentas/
+  medir_interlagos.c     mede o modelo de Interlagos e escreve src/interlagos.h (make medir-interlagos)
+  gerar_som_da_zebra.py  gera recursos/sons/efeitos/zebra.wav
 recursos/
   fontes/          Racing Sans One e Saira Condensed (licença OFL, arquivos *_licenca.txt)
   sons/            música, efeitos dos menus e falas do McQueen (*.wav, *.mp3)
@@ -175,20 +180,20 @@ uma volta lançada, sozinho na pista e dirigido pela IA, usando o nitro.
 
 | Carro | Jeito | Interlagos | Copa Pistão |
 |---|---|---|---|
-| McQueen | o carro da casa, equilibrado (o padrão) | 52,2 s | 39,5 s |
-| The King | veterano, voa na reta | 51,8 s | 37,6 s |
-| Doc Hudson | lenda, gruda nas curvas | 51,8 s | 40,7 s |
-| Francesco | formula, arranca forte | 52,0 s | 39,6 s |
-| Sally | certinha em tudo | 52,8 s | 40,3 s |
-| Ramone | estiloso e estável | 53,2 s | 41,1 s |
-| Luigi | pequeno e esperto na largada | 53,7 s | 41,8 s |
-| Guido | minúsculo, mas não erra curva | 53,6 s | 43,4 s |
-| Mater | guincho enferrujado | 54,6 s | 42,6 s |
-| Sarge | jipe militar, firme no chão | 54,2 s | 42,2 s |
-| Fillmore | sem pressa e sem sair da pista | 53,3 s | 43,0 s |
-| Finn McMissile | espião, rápido em tudo | 51,9 s | 39,2 s |
-| Wingo | tuner, nervoso na arrancada | 53,1 s | 40,0 s |
-| Snot Rod | motorzão, difícil de segurar | 52,4 s | 38,8 s |
+| McQueen | o carro da casa, equilibrado (o padrão) | 73,2 s | 39,5 s |
+| The King | veterano, voa na reta | 73,1 s | 37,6 s |
+| Doc Hudson | lenda, gruda nas curvas | 73,0 s | 40,7 s |
+| Francesco | formula, arranca forte | 72,9 s | 39,6 s |
+| Sally | certinha em tudo | 73,1 s | 40,3 s |
+| Ramone | estiloso e estável | 73,1 s | 41,1 s |
+| Luigi | pequeno e esperto na largada | 72,9 s | 41,8 s |
+| Guido | minúsculo, mas não erra curva | 72,8 s | 43,4 s |
+| Mater | guincho enferrujado | 73,1 s | 42,6 s |
+| Sarge | jipe militar, firme no chão | 73,1 s | 42,2 s |
+| Fillmore | sem pressa e sem sair da pista | 73,1 s | 43,0 s |
+| Finn McMissile | espião, rápido em tudo | 72,7 s | 39,2 s |
+| Wingo | tuner, nervoso na arrancada | 72,8 s | 40,0 s |
+| Snot Rod | motorzão, difícil de segurar | 72,7 s | 38,8 s |
 
 `carros3d.c` carrega os modelos e deixa todos iguais: mede cada um, escala para o comprimento do personagem
 (`MODELOS`), centraliza, põe as rodas no chão e a frente para +z. O carro no mundo segue a pista, o
@@ -244,9 +249,10 @@ uma `habilidade`, de 93% do limite do carro (a pole) a 86% (o último do grid, a
 
 ## Pitstop
 
-Em Interlagos, nos níveis médio e difícil, a parada nos boxes é obrigatória: quem cruza a última bandeirada sem parar é desclassificado.
+Em Interlagos, nos níveis médio e difícil, a parada nos boxes é obrigatória: quem cruza a última bandeirada sem parar é desclassificado. As garagens ficam logo depois da linha de chegada: quem entra no pit na última volta cruza a linha antes de parar, então pare antes dela.
 
-- **Entrar:** na Subida dos Boxes, a faixa de desaceleração abre colada na pista: é só ir para a esquerda, em cima dela (`querEntrarNoPit`). Ali o piloto automático assume, no limite de 100 km/h perto das garagens.
+- **Entrar:** no fim da Subida dos Boxes, onde acaba o guard-rail da esquerda e começam as faixas brancas que separam o pit lane, com as rodas da esquerda em cima da linha branca (`querEntrarNoPit`). Ali o piloto automático assume, no limite de 100 km/h perto das garagens. A linha de corrida da Subida passa pela esquerda, então só entra quem encosta de propósito na linha (`soEncostadoNaBorda`).
+- **O caminho:** é o pit lane do modelo, medido (`PIT_INTERLAGOS` em `interlagos.h`): passa na frente das garagens, logo depois da linha de chegada, corre por dentro do S do Senna e da Curva do Sol e volta à pista na Reta Oposta. A tabela medida é alisada (média dos vizinhos) e, longe da vaga, o carro anda exatamente por ela, sem atraso; o passo na pista é corrigido para ele andar no mundo o que a velocidade manda (por dentro de uma curva, um metro da linha da pista vale menos), o bico aponta para onde ele andou de verdade (com um giro máximo) e a câmera vem atrás do bico. Nas curvas do caminho ele anda no máximo na velocidade que as faz com 25 m/s² de lado, freando com calma antes delas, e antes da manobra até a vaga já chega devagar: nada de balanço, câmera de lado ou trancos na saída.
 - **A troca:** cada carro tem uma vaga. Na do jogador, o Guido passa por todas as rodas em 3,2 s (`faseDaTroca` e `lugarDoGuido` em `pitstop.c`, desenho em `render.c`), e a imagem corta para uma câmera ao lado do carro.
 - **Rivais:** cada um para numa volta (`voltaDoPit`) e leva mais tempo na troca que o Guido. No pit lane há fila: quem vem atrás reduz, quem sai da vaga espera passar quem já vem na faixa, e a colisão só separa os carros, sem tranco nem rodada; o carro parado na troca nunca é empurrado.
 
@@ -361,32 +367,38 @@ voltas atrás do painel de chegada e da tela de resultado. Essas voltas extras n
 
 ## Objetos da beira da pista
 
-Cada segmento guarda os seus objetos numa **lista simples** (`obstaculos.c`), e `decorarPista` escolhe o
-que fica onde em Interlagos:
+Cada segmento guarda os seus objetos numa **lista simples** (`obstaculos.c`). Hoje eles são os colchetes do grid, pintados
+no asfalto das pistas cujo modelo não traz o grid pintado (`decorarOval`). Em Interlagos o grid, a linha de chegada, as
+zebras, os muros, os alambrados, as arquibancadas, os boxes, as árvores e os prédios em volta já estão no modelo 3D; o
+jogo põe por cima:
 
-- o **pórtico** em cima da linha de chegada e os **colchetes do grid**, pintados no asfalto;
-- **barreiras de pneus** por fora das curvas e **placas de 150, 100 e 50 m** antes delas;
-- **arquibancadas contínuas** nos lugares do mapa oficial do GP (setores A, B, M, D, H, N, R, G, S e V; tabela `ARQUIBANCADAS`).
-  Elas acompanham a curva da pista, com muro da frente, fileiras com a torcida, corredores e, em algumas, cobertura sobre colunas;
-- a **reta dos boxes**: muro e alambrado dos dois lados, com um funil no fim da Subida dos Boxes, para quem vem pela grama, e o camarote
-  Pit Stop Club depois da linha;
-- os **boxes**: o prédio é feito de módulos de 6 garagens (`boxes.glb`), cada um na altura da reta, com pontas envidraçadas e a torre de controle,
-  com um pátio de asfalto e ruas de serviço. Onde o terreno desce, tudo fica sobre uma laje com pilares e vigas (`construirEstruturaDosBoxes`). O **pit lane** abre colado na pista na Subida dos Boxes, como uma faixa de desaceleração, passa por trás do funil, corre atrás do muro e, por dentro do S do Senna e da Curva do Sol, volta a colar na pista na Reta Oposta, como uma faixa de aceleração. Nas duas ligações há uma ilha de asfalto pintado. É por ele que passa o pitstop (`pitstop.c`);
-- **árvores** só nos bosques da tabela `BOSQUES` (sorteio com semente fixa: ficam sempre no mesmo lugar). Longe deles, o campo é aberto.
-- em volta da pista (`infraestrutura.c`): linhas brancas nas bordas, a marca de borracha no traçado, brita por fora das curvas, guard-rail com alambrado e placas de patrocínio, postos de fiscal, torres de TV, duas passarelas, o telão, bandeiras no alto das arquibancadas, a rua de serviço, tendas, estacionamento, caminhões das equipes no pátio e bancadas na mureta dos boxes. Fica tudo além de onde o carro chega: a física da pista não muda;
-- os prédios, casas, árvores, caminhões, tendas, torres e o telão são modelos `.glb` em `recursos/modelos/objetos/`; só o que acompanha a forma da pista e do terreno é montado em código (linhas, brita, guard-rail, placas, morros);
-- além do muro do autódromo (`paisagem.c`), tudo em 3D de verdade: a avenida com o trânsito, os bairros, os prédios, as matas, o centro da cidade e os morros até o horizonte, com o ar clareando o que está longe. Só o céu é uma imagem. Dentro do circuito fica o lago da Descida do Lago.
+- **treze telões**: cinco fixos (`TELOES_DE_INTERLAGOS` em `mundo.c`), quatro do lado dos boxes, virados para as
+  arquibancadas da reta e da Subida (o pé vai no chão, ou no telhado, do que estiver ali), e um no fim da reta, para quem
+  chega no S do Senna; e um de frente para cada arquibancada que o jogo levanta (dois na da Reta Oposta, que é comprida),
+  do outro lado da pista, além do muro (`colocarTeloesDasArquibancadas`): o lugar foge de outros trechos da pista e da
+  estrada do pit lane. Todos passam a transmissão da corrida;
+- a **torcida** em cada assento das arquibancadas do modelo (`TORCIDA_INTERLAGOS`), com os carrinhos 3D perto da câmera;
+- as **vagas pintadas** no pit lane, na frente das garagens;
+- as **arquibancadas que o modelo não tem** (`ARQUIBANCADAS_QUE_FALTAM` em `mundo.c`): o modelo só traz as da reta e da
+  Subida (setores A, B e M do mapa oficial do GP); as de fora do S do Senna, da Curva do Sol, da Reta Oposta e da Descida
+  do Lago (D, H, N, R, G, S e V) são **cópias da arquibancada coberta da reta**: uma seção inteira dela (37,5 m, com o
+  concreto, as fileiras, as escadas, o alambrado, os pilares e a cobertura de treliça, com os materiais e as imagens do
+  próprio modelo) é recortada do modelo (os triângulos que passam da borda são cortados nela), fatiada a cada 2,5 m e
+  repetida ao longo do trecho, cada fatia acompanhando a curva da pista. As cópias entram no modelo como malhas a mais,
+  então são desenhadas, fazem e recebem sombra como o resto dele; os lugares da torcida da seção vão junto. A frente
+  fica 6 m além do muro mais longe do trecho, o pé no chão do modelo, e as paredes descem 10 m para dentro do terreno,
+  para nada flutuar onde ele desce.
 
-Num circuito sinuoso, o lugar de um objeto pode cair em cima de outro trecho da pista. Por isso `lugarLivre` confere
-cada um contra a volta inteira: ele só entra se ficar além de onde o carro alcança em qualquer trecho.
+As **zebras**: em Interlagos são as do modelo, medidas de cada lado (`zebraDireita`, `zebraEsquerda` no segmento). Em cima
+delas o carro está na pista, mas sente: o carro pula de leve nos degraus, o controle vibra e toca o ronco da zebra
+(`zebra.wav`). Nas outras pistas, um segmento tem zebra quando vira pelo menos `CURVATURA_MINIMA_ZEBRA` graus (`temZebra()`
+em `pista.c`).
 
-As formas são modelos 3D em `recursos/modelos/objetos/` (3 árvores, pilhas de pneus, 3 placas, o pórtico, a arquibancada, o camarote e as placas dos setores, mais o refletor do estádio), feitos
-no Blender e editáveis lá. `construirObjetos` (`mundo.c`) põe cada cópia na altura exata do terreno desenhado e junta
-todas em poucas malhas, os lotes, para desenhar centenas de objetos de uma vez. O oval não tem objetos: o cenário dele
-já está no modelo 3D.
-
-As **zebras** só aparecem nas curvas, como na vida real: um segmento tem zebra quando vira
-pelo menos `CURVATURA_MINIMA_ZEBRA` graus (`temZebra()` em `pista.c`).
+O **chão** de cada lado (`superficieNaLateral` em `pista.c`): asfalto, zebra, área de escape asfaltada e grama. Na grama o
+carro não passa de 75 km/h e levanta poeira; na área de escape, de 150 km/h, sem poeira (as duas contam como fora da
+pista). Os **muros** são os do modelo: cada segmento sabe a quantos metros fica o que para o carro de cada lado
+(`limiteDireita`, `limiteEsquerda`); encostar raspa e, rápido, é batida. Onde não há barreira, o carro vai até um pouco
+além da área de escape.
 
 ## O 3D
 
@@ -395,7 +407,7 @@ raylib. Cada segmento sabe onde está no mundo, em metros (`xMundo`, `zMundo`, `
 largura de cada lado e `perfil` do chão), e `pontoNoMundo()` (`pista.c`) converte qualquer posição na pista
 em um ponto 3D. O desenho usa isso:
 
-- `mundo.c` monta e desenha o cenário fixo: o modelo do estádio ou as malhas geradas a partir da lista;
+- `mundo.c` carrega e desenha o cenário fixo: o modelo 3D de cada pista e o que o jogo põe em cima dele;
 - `render.c` põe a câmera atrás do carro, andando pela lista, desenha os objetos como sprites que encaram
   a câmera e coloca os carros (`carros3d.c`) no mundo.
 
@@ -473,8 +485,8 @@ completo (76 triângulos, `objetos/carro_torcida.glb`) até 200 m e um simples (
 `carro_torcida_longe.glb`) de 200 a 400 m; os dois são gerados por `build/exp/gerar_torcida.py`. Cada um fica
 virado para a pista, com cor sorteada e pulando, e cada grupo vai para a placa de vídeo numa chamada só
 (os lugares ficam na placa de vídeo desde a carga; por quadro, o processador só escolhe os trechos da grade perto
-da câmera, e o shader gira, posiciona e escala cada carrinho). Os lugares vêm dos degraus do estádio (Copa Pistão), das fileiras das arquibancadas
-(Interlagos) e dos lugares medidos nos modelos (Oval e Splat); uma grade de células acha os lugares perto sem
+da câmera, e o shader gira, posiciona e escala cada carrinho). Os lugares vêm dos degraus do estádio (Copa Pistão) e
+dos lugares medidos nos modelos (Interlagos, Oval e Splat); uma grade de células acha os lugares perto sem
 olhar todos. Mais longe continua a torcida pintada, que some onde os carrinhos aparecem. Na onda da Copa Pistão,
 os faróis deles acendem. `KATCHAU_SEM_TORCIDA3D=1 ./katchau` desliga, para comparar o desempenho.
 
@@ -483,7 +495,8 @@ os faróis deles acendem. `KATCHAU_SEM_TORCIDA3D=1 ./katchau` desliga, para comp
 Quando o pneu escorrega (drift, derrapagem, arrancada patinando, rodada e freada forte em alta), cada roda deixa um
 rastro escuro no asfalto, que some aos poucos (`marcas.c`). Na grama não marca.
 
-De dia, o cenário faz sombra do sol: a cada quadro, o que fica num quadrado de 280 m em volta da câmera é desenhado
+De dia, o cenário faz sombra do sol (a face que a câmera vê, se estiver de costas para o sol, fica na própria
+sombra: assim os trilhos do guard-rail e os muros finos não ficam serrilhados): a cada quadro, o que fica num quadrado de 280 m em volta da câmera é desenhado
 visto do sol num mapa de profundidade, e o shader do cenário escurece o que estiver atrás de alguma coisa. À noite,
 na Copa Pistão, não há sombra do sol. Dá para desligar em Configurações, se o computador ficar lento.
 
@@ -506,7 +519,7 @@ cada lugar, com o mesmo shader de torcida da Copa Pistão. O pit lane de cada um
 oval, entre o muro dos boxes e as garagens; no Splat, a estrada paralela à reta, na frente do prédio das
 garagens. Na Copa Pistão não há garagens: a equipe arma as tendas no pátio por dentro da Reta Oposta.
 
-As árvores e estruturas dos dois mapas (`cenario_mapas.h`) usam os mesmos modelos de Interlagos, mais pinheiros
+As árvores e estruturas dos dois mapas (`cenario_mapas.h`) usam os modelos de `recursos/modelos/objetos/`, mais pinheiros
 e um telão próprio. Cada lugar foi conferido contra a malha do modelo: arquibancadas e camarotes nas retas,
 olhando para a pista; caminhões no paddock; carros no estacionamento; postos de fiscal e torres de TV em
 volta do circuito; e a mata em uma cortina acompanhando a pista e em manchas mais longe.
@@ -527,28 +540,58 @@ Modelos:
 
 ### Interlagos
 
-As malhas são geradas da lista ao abrir o jogo (`construirInterlagos` em `mundo.c`): asfalto,
-zebras e um terreno que acompanha a altura da pista, com a cidade e os morros em volta.
+O autódromo de verdade, com o traçado de 2023, num modelo 3D (`recursos/modelos/interlagos.glb`). O modelo está em metros,
+e o jogo usa ele 40% maior (`ESCALA_INTERLAGOS` em `pista.h`): na medida real o asfalto tem de 10 a 16 m de largura e,
+com 14 carros, quase não dá para ultrapassar (um piloto perfeito, com carro 5% melhor, chegava em 10º). Para correr na
+medida real, é só pôr a escala em 1. Os pneus duram as mesmas ~5 voltas em qualquer escala (`escalaDoDesgaste` em
+`corrida.c`).
 
-Interlagos tem 2587 segmentos (cerca de 4.309 m), corrida no sentido anti-horário.
-Cada segmento guarda sua curvatura em graus (negativo para a esquerda, positivo para a
-direita), a altura do chão e o nome do trecho. A soma das curvaturas de uma volta dá
--360 graus, e o desnível é de 56 m, do S do Senna à Descida do Lago.
+O traçado foi **medido no modelo** por `ferramentas/medir_interlagos.c` (`make medir-interlagos`), que escreve
+`src/interlagos.h`. A ferramenta carrega o modelo com a raylib e:
+
+- anda pela pista a partir da linha de chegada, de 2 em 2 m, achando as duas bordas do asfalto e corrigindo o ponto para o
+  meio delas. A pista é o asfalto com a borracha do traçado por cima (o pit lane não tem borracha), mais a linha branca da
+  borda; onde outro asfalto encosta (o pit lane, o traçado antigo do Bico de Pato), a borda que salta é ignorada;
+- mede em cada ponto a largura, a altura do asfalto em 9 lugares da largura, a zebra, a área de escape, a altura do chão
+  além da borda (de 1 a 90 m, em 13 distâncias) e a distância até o muro de cada lado (um raio de lado, a 35 cm e a 90 cm do chão);
+- anda pelo pit lane, da entrada à saída, e guarda onde ele fica em relação à pista;
+- acha os assentos das arquibancadas, para a torcida.
+
+`interlagos_materiais.h` diz o que é cada um dos 177 materiais do modelo: o chão que o carro sente (pista, zebra, escape,
+grama, pit, muro) e o jeito de desenhar. O modelo veio de outro jogo, onde o canal alfa das imagens tem vários usos: na
+maioria é o brilho (ignorado), nas folhas é o recorte, nos alambrados é transparência (de longe eles viram um véu, não uma
+parede cinza), nas linhas pintadas é a tinta sobre o asfalto e na borracha do traçado é o quanto escurece. O asfalto e a
+grama usam as imagens do jogo, presas ao chão do mundo. O terreno em volta é uma foto de satélite, borrada de perto:
+dentro da área do autódromo ele vira a grama do jogo, e a foto só aparece ao longe (`definirAreaDoAutodromo`). O muro de concreto também trazia as paredes invisíveis do jogo
+original (triângulos de 20 a 45 m de altura): elas são tiradas ao carregar. As imagens gastas do modelo (o concreto
+manchado e o enferrujado, o guard-rail enferrujado) davam um ar de abandonado: o concreto (inclusive o muro com musgo do
+canal da Descida do Lago, que antes sumia e deixava ver o vazio atrás) vira um concreto limpo gerado pelo jogo
+(`gerarConcretoLimpo`), e o guard-rail usa a imagem do novo. O terreno do modelo acaba a algumas centenas de metros
+da pista: a **saia** (`construirSaiaDoTerreno`) estica a borda de fora dele até o horizonte, para não aparecer o vazio
+além dela. O lago ganhou uma cor de água (no modelo ele é azul-claro, quase da cor do céu).
+
+Interlagos tem 3625 segmentos (6.042 m na escala do jogo; 4.315 m no modelo, contra 4.309 m de verdade), corrida no
+sentido anti-horário, com o asfalto de 13 a 27 m de largura. A soma das curvaturas de uma volta dá -360 graus, e o
+desnível é de 59 m (43 m de verdade), do S do Senna à Descida do Lago.
 
 | Segmentos | Trecho |
 |---|---|
-| 0–196 | Reta dos Boxes (largada no 0) |
-| 197–294 | S do Senna |
-| 295–443 | Curva do Sol |
-| 444–802 | Reta Oposta |
-| 803–964 | Descida do Lago |
-| 1036–1214 | Ferradura |
-| 1282–1345 | Laranjinha |
-| 1437–1496 | Pinheirinho |
-| 1582–1623 | Bico de Pato |
-| 1691–1789 | Mergulho |
-| 1856–1925 | Junção |
-| 1926–2419 | Subida dos Boxes |
-| 2420–2586 | Reta dos Boxes |
+| 0–220 | Reta dos Boxes (largada no 0) |
+| 221–399 | S do Senna |
+| 400–631 | Curva do Sol |
+| 632–1134 | Reta Oposta |
+| 1135–1397 | Descida do Lago |
+| 1660–1844 | Ferradura |
+| 1909–1999 | Laranjinha |
+| 2000–2150 | Pinheirinho |
+| 2252–2355 | Bico de Pato |
+| 2415–2580 | Mergulho |
+| 2702–2780 | Junção |
+| 2781–3425 | Subida dos Boxes |
+| 3426–3624 | Reta dos Boxes |
+
+O modelo é o "Interlagos circuit 2023 layout", baixado do Sketchfab (veio como "failed import", sem o processamento do
+site). Ele traz a marca e texturas de um jogo comercial (Automobilista, da Reiza Studios): antes de publicar o jogo,
+confira a licença.
 
 A lista completa, segmento a segmento, sai com `./build/teste_pista -v`.

@@ -17,7 +17,7 @@ LOGICA = src/pista.c src/obstaculos.c src/carro.c src/ia.c \
          src/ordenacao.c src/corrida.c src/motor.c src/motorgranular.c src/recordes.c src/olhar.c src/pitstop.c src/vibracao.c src/configuracoes.c src/mjpeg.c
 
 # Módulos que desenham na tela
-DESENHO = src/render.c src/mundo.c src/construcao.c src/paisagem.c src/infraestrutura.c src/carros3d.c src/fumaca.c src/faiscas.c src/fogos.c src/marcas.c src/torcida3d.c src/telao.c src/posprocesso.c src/noite.c src/hud.c src/menu.c src/visual.c src/audio.c src/efeitos.c src/exibicao.c src/apresentacao.c src/intro.c src/videofundo.c src/controle.c
+DESENHO = src/render.c src/mundo.c src/construcao.c src/carros3d.c src/fumaca.c src/faiscas.c src/fogos.c src/marcas.c src/torcida3d.c src/telao.c src/posprocesso.c src/noite.c src/hud.c src/menu.c src/visual.c src/audio.c src/efeitos.c src/exibicao.c src/apresentacao.c src/intro.c src/videofundo.c src/controle.c
 
 FONTES = src/main.c $(LOGICA) $(DESENHO)
 OBJETOS = $(FONTES:src/%.c=build/%.o)
@@ -97,13 +97,20 @@ testar-vibracao: build/teste_vibracao
 build/teste_vibracao: testes/teste_vibracao.m src/vibrar_mac.m $(LOGICA) $(wildcard src/*.h) | build
 	$(CC) -Wall -Wextra -g -Isrc -fobjc-arc testes/teste_vibracao.m src/vibrar_mac.m $(LOGICA) -o $@ $(FRAMEWORKS_DA_VIBRACAO) -lm
 
+# Mede Interlagos no modelo 3D e reescreve src/interlagos.h (só quando o modelo muda)
+medir-interlagos: build/medir_interlagos
+	./build/medir_interlagos recursos/modelos/interlagos.glb src/interlagos.h
+
+build/medir_interlagos: ferramentas/medir_interlagos.c src/interlagos_materiais.h | build
+	$(CC) $(CFLAGS) -O2 ferramentas/medir_interlagos.c -o $@ $(LIBS)
+
 memoria: build/teste_pista
 	valgrind --leak-check=full --error-exitcode=1 ./build/teste_pista
 
 zip: clean
-	zip -r $(NOME).zip Makefile README.md src testes recursos
+	zip -r $(NOME).zip Makefile README.md src testes recursos ferramentas
 
 clean:
 	rm -rf build $(NOME) $(NOME).exe $(NOME).zip
 
-.PHONY: all run testes testar-vibracao memoria zip clean
+.PHONY: all run testes testar-vibracao medir-interlagos memoria zip clean

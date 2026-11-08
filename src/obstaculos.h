@@ -4,8 +4,8 @@
 /*
  * obstaculos.h
  * ------------------------------------------------------------------
- * Objetos da pista: os da beira (árvores, pórtico, pneus, placas) e as
- * marcas do grid de largada, pintadas no asfalto.
+ * Objetos da pista: as marcas do grid de largada, pintadas no asfalto
+ * das pistas que não trazem o grid pintado no modelo 3D.
  *
  * Cada segmento guarda os seus numa LISTA SIMPLESMENTE ENCADEADA:
  * o segmento aponta para o primeiro objeto, e cada objeto aponta para
@@ -13,27 +13,15 @@
  * os objetos só são percorridos do começo ao fim, para desenhar.
  *
  * Módulo de lógica: não usa a raylib. Só decide QUE objeto fica ONDE;
- * a forma 3D de cada tipo fica no mundo.c.
+ * a pintura fica no mundo.c.
  * ------------------------------------------------------------------
  */
 
 #include "pista.h"
 
-/* Um módulo de arquibancada: largura e fundo, em metros (os mesmos do modelo 3D) */
-#define LARGURA_DO_MODULO     24.0f
-#define FUNDO_DO_MODULO       13.0f
-
-/* O que é o objeto (o mundo.c tem uma forma 3D para cada tipo) */
+/* O que é o objeto */
 typedef enum {
-    OBJETO_ARVORE,
-    OBJETO_PORTICO,      /* pórtico da largada, por cima da pista */
-    OBJETO_PNEUS,        /* barreira de pneus por fora das curvas */
-    OBJETO_PLACA_50,     /* placas de frenagem antes das curvas */
-    OBJETO_PLACA_100,
-    OBJETO_PLACA_150,
     OBJETO_MARCA_GRID,   /* colchete de um lugar do grid: pintado no chão, não fica de pé */
-    OBJETO_ARQUIBANCADA, /* um módulo de arquibancada, de frente para a pista */
-    OBJETO_CAMAROTE,     /* um módulo de camarote */
     TOTAL_TIPOS_OBJETO
 } TipoObjeto;
 
@@ -41,21 +29,8 @@ typedef enum {
 typedef struct Obstaculo {
     TipoObjeto tipo;
     float deslocamentoLateral;    /* como o do carro: 0 no meio, ±1 nas bordas do asfalto */
-    char setor;                   /* no módulo do meio de uma arquibancada: a letra da placa (senão 0) */
     struct Obstaculo *proximo;    /* próximo objeto do mesmo segmento (NULL no último) */
 } Obstaculo;
-
-/* Uma arquibancada de Interlagos, no lugar do mapa oficial do GP. Ela é contínua e
- * acompanha a pista (mundo.c constrói a partir daqui). */
-typedef struct {
-    char setor;       /* a letra no mapa (0 = camarote) */
-    int inicio;       /* metros a partir da linha de chegada */
-    int fim;
-    float distancia;  /* metros da linha da pista até o muro da frente (+ direita) */
-    int fileiras;     /* quantas fileiras de lugares */
-    int coberta;      /* 1 = tem cobertura */
-    TipoObjeto tipo;
-} Arquibancada;
 
 /* ---------- Lista de um segmento ---------- */
 void adicionarObstaculo(Segmento *segmento, TipoObjeto tipo, float deslocamentoLateral);
@@ -63,9 +38,6 @@ int contarObstaculos(Segmento *segmento);
 void liberarObstaculos(Segmento *segmento);
 
 /* ---------- A pista inteira ---------- */
-void decorarPista(Pista *pista);
 void decorarOval(Pista *pista);
-const Arquibancada *arquibancadasDaPista(int *total);
-int lugarLivre(Pista *pista, Segmento *segmento, float lateral, float folga);
 
 #endif

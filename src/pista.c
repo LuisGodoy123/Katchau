@@ -13,11 +13,22 @@
 #include "copa_pistao.h"
 #include "oval.h"
 #include "splat.h"
+#include "interlagos.h"
 
 #define GRAUS_PARA_RADIANOS   0.017453292f
 #define META_LARGURA_DA_INCLINACAO 3.0f   /* mede a inclinação 3 m para cada lado */
 #define RAIO_DA_MEDIA_DO_NOME 40      /* segmentos para cada lado */
 #define SUBPASSOS_DO_TRACADO  64      /* entre dois pontos da tabela: bem menor que um segmento */
+#define FOLGA_DA_ZEBRA        0.3f    /* metros: a roda de fora ainda pisa na zebra */
+#define FAIXA_RAPIDA_DE_INTERLAGOS 2.5f  /* metros da borda do pit lane até o meio da faixa rápida */
+#define INICIO_DA_ENTRADA_DO_PIT (-305.0f) /* metros do modelo: onde acaba o guard-rail e começam as faixas */
+#define FIM_DA_ENTRADA_DO_PIT (-275.0f)    /* daqui em diante, as faixas brancas separam o pit lane */
+#define BORDA_NA_ENTRADA_DO_PIT 8.5f      /* metros da linha da pista: onde o carro está, entrando */
+#define DENTRO_DA_LINHA_PARA_ENTRAR 1.2f  /* metros: o meio do carro a tanto da borda (as rodas na linha) */
+#define VEZES_ALISANDO_O_PIT  2
+#define VIZINHOS_ALISANDO_O_PIT 2            /* pontos para cada lado (a tabela tem um a cada ~2 m) */
+#define VOLTANDO_A_PISTA      40.0f       /* metros do modelo, depois do fim do pit lane, até entrar de vez */
+#define DENTRO_DA_PISTA_NA_SAIDA 3.0f     /* metros da linha da pista, já no asfalto */
 #include "obstaculos.h"
 
 
@@ -55,6 +66,13 @@ static Segmento *criarSegmento(float curvatura) {
     novo->larguraEsquerda = MEIA_LARGURA_PADRAO;
     for (int i = 0; i < PONTOS_DO_PERFIL; i++) {
         novo->perfil[i] = 0.0f;   /* plano, até alguém dizer o contrário */
+    }
+    novo->temBorda = 0;
+    novo->escalaDaBorda = 1.0f;
+    novo->zebraDireita = novo->zebraEsquerda = 0.0f;
+    novo->escapeDireita = novo->escapeEsquerda = 0.0f;
+    for (int i = 0; i < PONTOS_FORA_DA_PISTA; i++) {
+        novo->foraDireita[i] = novo->foraEsquerda[i] = 0.0f;
     }
     novo->obstaculos = NULL;
     novo->proximo = novo;    /* sozinho, ele é o próprio vizinho */
@@ -109,6 +127,9 @@ Pista *criarPistaVazia(void) {
     pista->nome = "";
     pista->temPit = 0;
     pista->semDirecaoGuiada = 0;
+    pista->grid = (GridDaPista){ 0 };
+    pista->largadaPintadaNoModelo = 0;
+    pista->pit = (DadosDoPit){ 0 };
     pista->metrosDaVolta = 0.0f;
     return pista;
 }
@@ -189,234 +210,6 @@ static void suavizarCurvas(Pista *pista) {
     free(original);
 }
 
-/* Um trecho do autódromo com as medidas do mundo real. */
-typedef struct {
-    const char *nome;
-    float comprimentoMetros;
-    float anguloGraus;      /* quanto a pista vira no trecho: < 0 esquerda, > 0 direita */
-    float desnivelMetros;   /* quanto sobe (> 0) ou desce (< 0) até o fim do trecho */
-} TrechoReal;
-
-/*
- * Interlagos, na ordem em que é corrido (sentido anti-horário), a partir
- * da linha de chegada. Dados oficiais (Prefeitura de São Paulo):
- *   - 4.309 metros de extensão;
- *   - 11 curvas (o S do Senna conta como duas);
- *   - desnível de ~56 m: ponto mais alto na entrada do S do Senna (+4 m)
- *     e mais baixo na Descida do Lago (-52 m).
- * O comprimento e o ângulo de cada trecho são aproximados a partir da
- * planta do circuito, ajustados para o desenho fechar (soma dos
- * ângulos = -360 graus, soma dos desníveis = 0, soma dos comprimentos =
- * 4.309 m).
- */
-static const TrechoReal TRECHOS_INTERLAGOS[] = {
-    /* nome                         metros  ângulo  desnível   altura no fim */
-    { "Reta dos Boxes",               329,     0,      4 },  /*  +4 (mais alto) */
-    { "S do Senna",                    87,   -95,     -9 },  /*  -5 */
-    { "S do Senna",                    77,    60,     -7 },  /* -12 */
-    { "Curva do Sol",                 248,  -110,    -10 },  /* -22 */
-    { "Reta Oposta",                  598,   -15,    -18 },  /* -40 */
-    { "Descida do Lago",              115,   -90,     -8 },  /* -48 */
-    { "Descida do Lago",              155,   -60,     -4 },  /* -52 (mais baixo) */
-    { "Reta",                         118,     0,      3 },  /* -49 */
-    { "Ferradura",                    298,   135,      5 },  /* -44 */
-    { "Reta",                         111,     0,      4 },  /* -40 */
-    { "Laranjinha",                   106,    80,      4 },  /* -36 */
-    { "Reta",                         151,     0,      3 },  /* -33 */
-    { "Pinheirinho",                  100,  -130,      1 },  /* -32 */
-    { "Reta",                         141,     0,      0 },  /* -32 */
-    { "Bico de Pato",                  70,   150,      0 },  /* -32 */
-    { "Reta",                         111,     0,     -2 },  /* -34 */
-    { "Mergulho",                     165,   -95,     -8 },  /* -42 */
-    { "Reta",                         110,     0,     -2 },  /* -44 */
-    { "Juncao",                       117,  -110,     -2 },  /* -46 */
-    { "Subida dos Boxes",             823,   -80,     38 },  /*  -8 */
-    { "Reta dos Boxes",               279,     0,      8 },  /*   0 (de volta à largada) */
-};
-#define TOTAL_TRECHOS_INTERLAGOS  (int) (sizeof(TRECHOS_INTERLAGOS) / sizeof(TRECHOS_INTERLAGOS[0]))
-
-/*
- * calcularPosicoesNoMundo
- * Acha onde cada segmento fica no mundo 3D andando pela lista, como uma
- * tartaruga: anda um segmento para a frente e vira a curvatura dele. As
- * medidas são aproximadas e o fim pode não cair exatamente no começo, então
- * o erro é espalhado aos poucos para a pista fechar.
- * Recebe: a pista.
- * Devolve: nada (preenche xMundo, zMundo e rumo).
- */
-static void calcularPosicoesNoMundo(Pista *pista) {
-    float passo = COMPRIMENTO_SEGMENTO / UNIDADES_POR_METRO;
-    int total = contarSegmentos(pista);
-    float x = 0.0f, z = 0.0f, rumo = 0.0f;
-
-    Segmento *atual = pista->largada;
-    do {
-        atual->xMundo = x;
-        atual->zMundo = z;
-        atual->rumo = rumo;
-        x += sinf(rumo * GRAUS_PARA_RADIANOS) * passo;
-        z -= cosf(rumo * GRAUS_PARA_RADIANOS) * passo;
-        rumo += atual->curvatura;
-        atual = atual->proximo;
-    } while (atual != pista->largada);
-
-    /* Agora x e z são o erro de fechamento */
-    int i = 0;
-    do {
-        float fracao = (float) i / total;
-        atual->xMundo -= x * fracao;
-        atual->zMundo -= z * fracao;
-        i++;
-        atual = atual->proximo;
-    } while (atual != pista->largada);
-}
-
-/*
- * murarRetaDosBoxes
- * A reta dos boxes tem muro dos dois lados, como na vida real. Ele começa no fim da
- * Subida dos Boxes num funil, para quem vem pela grama voltar aos poucos, e termina
- * antes do S do Senna, onde a área de escape abre.
- * Recebe: a pista.
- * Devolve: nada.
- */
-static void murarRetaDosBoxes(Pista *pista) {
-    Segmento *atual = pista->largada;
-    do {
-        float metros = atual->indice * COMPRIMENTO_SEGMENTO / UNIDADES_POR_METRO;
-        if (metros >= INICIO_DO_FUNIL || metros <= FIM_DO_MURO) {
-            atual->temMuro = 1;
-            float noFunil = (metros < INICIO_DO_FUNIL + COMPRIMENTO_DO_FUNIL && metros >= INICIO_DO_FUNIL)
-                            ? 1.0f - (metros - INICIO_DO_FUNIL) / COMPRIMENTO_DO_FUNIL : 0.0f;
-            atual->lugarDoMuro = 1.0f + (ABERTURA_DO_FUNIL - 1.0f) * noFunil;
-        }
-        atual = atual->proximo;
-    } while (atual != pista->largada);
-}
-
-/*
- * suave
- * Recebe: um valor de 0 a 1.
- * Devolve: o mesmo caminho de 0 a 1, começando e terminando devagar.
- */
-static float suave(float t) {
-    t = fminf(fmaxf(t, 0.0f), 1.0f);
-    return t * t * (3.0f - 2.0f * t);
-}
-
-/*
- * ladoDentroDoPit
- * O traçado do pit lane: abre colado na pista, na Subida dos Boxes, como uma faixa de
- * desaceleração; se afasta, passa por trás do funil, encosta no muro da reta, se afasta
- * de novo depois dos boxes e, por dentro do S do Senna e da Curva do Sol, volta a colar
- * na pista na Reta Oposta, como uma faixa de aceleração, e fecha.
- * Recebe: os metros desde a linha de chegada, o comprimento da volta e onde guardar a
- *         largura do pit lane ali (em metros).
- * Devolve: onde fica a borda dele perto da pista, em larguras (ou 0 se ali não há pit lane).
- */
-float ladoDentroDoPit(float metros, float metrosDaVolta, float *largura) {
-    int depoisDaLinha = (metros <= FIM_DO_PIT_LANE);
-    float noPit = depoisDaLinha ? metros + metrosDaVolta : metros;
-    if (!depoisDaLinha && metros < ENTRADA_DO_PIT) {
-        return 0.0f;
-    }
-    float abrindo = suave((noPit - ENTRADA_DO_PIT) / METROS_ABRINDO_O_PIT);
-    float fechando = suave((metrosDaVolta + FIM_DO_PIT_LANE - noPit) / (FIM_DO_PIT_LANE - FIM_DA_VOLTA));
-    *largura = LARGURA_DO_PIT_LANE * fminf(abrindo, fechando);
-
-    if (depoisDaLinha) {
-        float afastado = suave((metros - INICIO_DO_DESVIO_DA_SAIDA) / (FIM_DO_DESVIO_DA_SAIDA - INICIO_DO_DESVIO_DA_SAIDA));
-        float voltando = suave((metros - INICIO_DA_VOLTA) / (FIM_DA_VOLTA - INICIO_DA_VOLTA));
-        return 1.0f + (LADO_DA_SAIDA - 1.0f) * afastado * (1.0f - voltando);
-    }
-
-    float fimDoFunil = INICIO_DO_FUNIL + COMPRIMENTO_DO_FUNIL;
-    if (noPit < FIM_DA_SAIDA_DA_PISTA) {
-        return 1.0f + (PIT_ATRAS_DO_FUNIL - 1.0f) * suave((noPit - INICIO_DA_SEPARACAO) / (FIM_DA_SAIDA_DA_PISTA - INICIO_DA_SEPARACAO));
-    }
-    if (noPit < INICIO_DO_FUNIL) {
-        return PIT_ATRAS_DO_FUNIL;
-    }
-    if (noPit < fimDoFunil) {
-        float noFunil = 1.0f - (noPit - INICIO_DO_FUNIL) / COMPRIMENTO_DO_FUNIL;
-        return 1.0f + (PIT_ATRAS_DO_FUNIL - 1.0f) * noFunil + (PIT_ATRAS_DO_FUNIL - ABERTURA_DO_FUNIL) * (1.0f - noFunil);
-    }
-    float encostando = fminf((noPit - fimDoFunil) / METROS_DO_RETAO_DO_PIT, 1.0f);
-    return 1.0f + (PIT_ATRAS_DO_FUNIL - ABERTURA_DO_FUNIL) * (1.0f - encostando);
-}
-
-/*
- * marcarAsfaltoDoPit
- * Onde o pit lane encosta na pista, é tudo asfalto: quem passa por ali não está na grama.
- * Recebe: a pista.
- * Devolve: nada.
- */
-static void marcarAsfaltoDoPit(Pista *pista) {
-    Segmento *atual = pista->largada;
-    do {
-        float metros = atual->indice * COMPRIMENTO_SEGMENTO / UNIDADES_POR_METRO;
-        float largura = 0.0f;
-        float lado = ladoDentroDoPit(metros, pista->metrosDaVolta, &largura);
-        if (lado > 0.0f && lado <= LADO_DA_ILHA && !atual->temMuro) {
-            atual->asfaltoEsquerda = lado + largura / atual->larguraEsquerda;
-        }
-        atual = atual->proximo;
-    } while (atual != pista->largada);
-}
-
-/*
- * criarPista
- * Monta o Autódromo de Interlagos a partir da tabela TRECHOS_INTERLAGOS,
- * suaviza a entrada e a saída das curvas, acha o lugar de cada segmento no
- * mundo 3D e põe os objetos da beira da pista.
- * Cada trecho em metros vira um bloco de segmentos:
- *   quantidade = metros * SEGMENTOS_POR_METRO
- *   curvatura  = ângulo do trecho / quantidade (graus por segmento)
- *   altura     = soma dos desníveis até ali, em unidades de mundo
- * Recebe: nada.
- * Devolve: a pista completa (o primeiro segmento é a largada).
- */
-Pista *criarPista(void) {
-    Pista *pista = criarPistaVazia();
-    pista->id = PISTA_INTERLAGOS;
-    pista->nome = "Interlagos";
-    float alturaAtual = 0.0f;   /* a linha de chegada fica na altura 0 */
-
-    for (int i = 0; i < TOTAL_TRECHOS_INTERLAGOS; i++) {
-        TrechoReal trecho = TRECHOS_INTERLAGOS[i];
-
-        int quantidade = (int) (trecho.comprimentoMetros * SEGMENTOS_POR_METRO + 0.5f);
-        float curvatura = trecho.anguloGraus / quantidade;
-        float alturaFinal = alturaAtual + trecho.desnivelMetros * UNIDADES_POR_METRO;
-
-        adicionarTrecho(pista, trecho.nome, quantidade, curvatura, alturaAtual, alturaFinal);
-        alturaAtual = alturaFinal;
-    }
-
-    suavizarCurvas(pista);
-    calcularPosicoesNoMundo(pista);
-    murarRetaDosBoxes(pista);
-    pista->temPit = 1;
-    DadosDoPit pit = { 0 };
-    pit.lado = -1;
-    pit.entrada = ENTRADA_DO_PIT;
-    pit.inicioLivre = 3440.0f;
-    pit.fimDaZona = 3600.0f;
-    pit.fimDaEntrada = 3730.0f;
-    pit.velocidadeNaEntrada = 5000.0f;
-    pit.aviso = 3150.0f;
-    pit.inicioDoLimite = 3990.0f;
-    pit.fimDoLimite = 160.0f;
-    pit.fim = FIM_DO_PIT_LANE;
-    pit.primeiraVaga = PRIMEIRO_METRO_DOS_BOXES + 5.0f;
-    pit.entreVagas = 20.0f;
-    pit.encostar = 14.0f;
-    pista->pit = pit;
-    pista->metrosDaVolta = contarSegmentos(pista) * COMPRIMENTO_SEGMENTO / UNIDADES_POR_METRO;
-    marcarAsfaltoDoPit(pista);
-    decorarPista(pista);   /* árvores, pórtico, placas... (depois: as zebras dependem das curvas) */
-    return pista;
-}
-
 /*
  * catmullRom
  * Curva suave que passa pelos pontos b e c da tabela (a e d só dão a direção).
@@ -437,18 +230,44 @@ static PontoDoTracado pontoDaTabela(const PontoDoTracado *tabela, int total, int
     return tabela[(indice + total) % total];
 }
 
+/* As distâncias além da borda onde a tabela mediu a altura do chão (ferramentas/medir_interlagos.c) */
+static const float DISTANCIAS_ALEM_DA_BORDA[PONTOS_FORA_DA_PISTA] = { 1.0f, 2.0f, 3.0f, 5.0f, 7.0f, 10.0f, 14.0f, 20.0f, 28.0f, 40.0f, 55.0f, 70.0f, 90.0f };
+
+/*
+ * copiarBorda
+ * Passa ao segmento o que fica além da borda do asfalto, entre dois pontos da tabela.
+ * Recebe: o segmento, os dois pontos, a fração entre eles e a escala.
+ * Devolve: nada.
+ */
+static void copiarBorda(Segmento *segmento, const BordaDoTracado *b, const BordaDoTracado *c, float t, float escala) {
+    segmento->temBorda = 1;
+    segmento->escalaDaBorda = escala;
+    /* A zebra não se mistura: ou tem ali, ou não tem */
+    segmento->zebraDireita = ((t < 0.5f) ? b->zebraDireita : c->zebraDireita) * escala;
+    segmento->zebraEsquerda = ((t < 0.5f) ? b->zebraEsquerda : c->zebraEsquerda) * escala;
+    segmento->escapeDireita = (b->escapeDireita + (c->escapeDireita - b->escapeDireita) * t) * escala;
+    segmento->escapeEsquerda = (b->escapeEsquerda + (c->escapeEsquerda - b->escapeEsquerda) * t) * escala;
+    /* A zebra é asfalto também: o escape vai pelo menos até o fim dela */
+    segmento->escapeDireita = fmaxf(segmento->escapeDireita, segmento->zebraDireita);
+    segmento->escapeEsquerda = fmaxf(segmento->escapeEsquerda, segmento->zebraEsquerda);
+    for (int k = 0; k < PONTOS_FORA_DA_PISTA; k++) {
+        segmento->foraDireita[k] = (b->foraDireita[k] + (c->foraDireita[k] - b->foraDireita[k]) * t) * escala;
+        segmento->foraEsquerda[k] = (b->foraEsquerda[k] + (c->foraEsquerda[k] - b->foraEsquerda[k]) * t) * escala;
+    }
+}
+
 /*
  * criarPistaDaTabela
  * Monta a pista a partir do traçado medido no modelo 3D: anda pela tabela criando
  * um segmento a cada COMPRIMENTO_SEGMENTO, já na posição exata do modelo, e deduz a
  * curvatura de cada um da mudança de rumo. Assim a física anda sobre a mesma linha
  * que a imagem mostra.
- * Recebe: a tabela, os limites de cada lado (NULL: muro na borda do asfalto), quantos pontos
- *         ela tem, a escala do modelo, qual pista é e o nome.
+ * Recebe: a tabela, os limites de cada lado (NULL: muro na borda do asfalto), o que fica além da
+ *         borda (NULL: não foi medido), quantos pontos ela tem, a escala do modelo, qual pista é e o nome.
  * Devolve: a pista completa.
  */
-static Pista *criarPistaDaTabela(const PontoDoTracado *tabela, const float (*limites)[2], int totalDePontos, float escala,
-                                 IdPista id, const char *nome) {
+static Pista *criarPistaDaTabela(const PontoDoTracado *tabela, const float (*limites)[2], const BordaDoTracado *bordas,
+                                 int totalDePontos, float escala, IdPista id, const char *nome) {
     Pista *pista = criarPistaVazia();
     pista->id = id;
     pista->nome = nome;
@@ -486,7 +305,17 @@ static Pista *criarPistaDaTabela(const PontoDoTracado *tabela, const float (*lim
             }
             novo->larguraDireita = (b.ateMuroDireita + (c.ateMuroDireita - b.ateMuroDireita) * t) * escala;
             novo->larguraEsquerda = (b.ateMuroEsquerda + (c.ateMuroEsquerda - b.ateMuroEsquerda) * t) * escala;
+            if (bordas != NULL) {
+                copiarBorda(novo, &bordas[i], &bordas[(i + 1) % totalDePontos], t, escala);
+            }
         }
+    }
+
+    /* A volta fecha no primeiro ponto: se o último segmento caiu quase em cima dele, é um segmento
+     * sem comprimento no mundo, em que o carro andaria sem sair do lugar (um tranco na linha) */
+    Segmento *ultimo = pista->largada->anterior;
+    if (hypotf(ultimo->xMundo - pista->largada->xMundo, ultimo->zMundo - pista->largada->zMundo) < passo / 2.0f) {
+        removerSegmento(pista, ultimo);
     }
 
     /* 2) Rumo de cada segmento (até o próximo) e curvatura (quanto o rumo muda) */
@@ -538,8 +367,137 @@ static Pista *criarPistaDaTabela(const PontoDoTracado *tabela, const float (*lim
         atual = atual->proximo;
     } while (atual != pista->largada);
 
-    decorarOval(pista);
     pista->metrosDaVolta = contarSegmentos(pista) * COMPRIMENTO_SEGMENTO / UNIDADES_POR_METRO;
+    return pista;
+}
+
+/* Os trechos de Interlagos, com o nome de verdade, medidos na tabela (metros desde a linha) */
+typedef struct {
+    float ate;           /* o trecho vai até aqui */
+    const char *nome;
+} TrechoDeInterlagos;
+
+static const TrechoDeInterlagos TRECHOS_INTERLAGOS[] = {
+    {  262.0f, "Reta dos Boxes" },
+    {  476.0f, "S do Senna" },
+    {  752.0f, "Curva do Sol" },
+    { 1350.0f, "Reta Oposta" },
+    { 1664.0f, "Descida do Lago" },
+    { 1976.0f, "Reta" },
+    { 2196.0f, "Ferradura" },
+    { 2272.0f, "Reta" },
+    { 2380.0f, "Laranjinha" },
+    { 2560.0f, "Pinheirinho" },
+    { 2680.0f, "Reta" },
+    { 2804.0f, "Bico de Pato" },
+    { 2874.0f, "Reta" },
+    { 3072.0f, "Mergulho" },
+    { 3216.0f, "Reta" },
+    { 3310.0f, "Junção" },
+    { 4078.0f, "Subida dos Boxes" },
+    { 1e9f,    "Reta dos Boxes" },
+};
+
+/* O pit lane de Interlagos, como o pitstop usa: { metros, metros da linha da pista até a faixa rápida } */
+static float caminhoDoPitDeInterlagos[TOTAL_PONTOS_PIT_INTERLAGOS + 2][2];
+
+/*
+ * criarPista
+ * Monta o Autódromo de Interlagos a partir do traçado medido no modelo 3D (interlagos.h):
+ * a linha, a largura, o chão, as zebras, a área de escape e os muros são os do modelo.
+ * O pit lane também: entra colado na pista no fim da Subida dos Boxes, passa na frente das
+ * garagens (logo depois da linha), corre por dentro do S do Senna e da Curva do Sol e
+ * volta à pista na Reta Oposta. O grid é o que está pintado no asfalto do modelo.
+ * Recebe: nada.
+ * Devolve: a pista completa (o primeiro segmento é a largada).
+ */
+Pista *criarPista(void) {
+    const float e = ESCALA_INTERLAGOS;   /* as medidas abaixo são as do modelo, em metros */
+    Pista *pista = criarPistaDaTabela(TRACADO_INTERLAGOS, LIMITES_INTERLAGOS, BORDAS_INTERLAGOS, TOTAL_PONTOS_INTERLAGOS,
+                                      e, PISTA_INTERLAGOS, "Interlagos");
+    float volta = pista->metrosDaVolta;
+    Segmento *atual = pista->largada;
+    do {
+        float metros = atual->indice * COMPRIMENTO_SEGMENTO / UNIDADES_POR_METRO;
+        int i = 0;
+        while (metros >= TRECHOS_INTERLAGOS[i].ate * e) {
+            i++;
+        }
+        atual->nomeTrecho = TRECHOS_INTERLAGOS[i].nome;
+        atual = atual->proximo;
+    } while (atual != pista->largada);
+
+    /* O grid do modelo: a frente da pole fica a ~5 m da linha, à direita, e há um lugar a cada
+     * 7,7 m, alternando os lados (as medidas são do meio do carro) */
+    pista->grid = (GridDaPista){ 1, 7.2f * e, 7.7f * e, 4.0f * e, 1 };
+    pista->largadaPintadaNoModelo = 1;
+
+    /* O caminho do pit. Ele começa onde acaba o guard-rail da Subida dos Boxes, com o carro
+     * encostado na linha branca da esquerda; dali segue o pit lane medido no modelo, com a faixa
+     * rápida 2,5 m para dentro da borda do lado da pista (ou no meio, onde é estreito) */
+    caminhoDoPitDeInterlagos[0][0] = INICIO_DA_ENTRADA_DO_PIT * e;
+    caminhoDoPitDeInterlagos[0][1] = BORDA_NA_ENTRADA_DO_PIT * e;
+    int pontos = 1;
+    for (int i = 0; i < TOTAL_PONTOS_PIT_INTERLAGOS; i++) {
+        if (PIT_INTERLAGOS[i][0] <= INICIO_DA_ENTRADA_DO_PIT + 5.0f) {
+            continue;   /* antes disso, o guard-rail separa o pit lane da pista */
+        }
+        float dentro = PIT_INTERLAGOS[i][1], fora = PIT_INTERLAGOS[i][2];
+        caminhoDoPitDeInterlagos[pontos][0] = PIT_INTERLAGOS[i][0] * e;
+        caminhoDoPitDeInterlagos[pontos][1] = (dentro + fminf(FAIXA_RAPIDA_DE_INTERLAGOS, (fora - dentro) / 2.0f)) * e;
+        pontos++;
+    }
+    /* A tabela medida tem pequenos dentes de um ponto para o outro: uma média dos vizinhos deixa
+     * o caminho liso (as pontas ficam onde estão) */
+    for (int vez = 0; vez < VEZES_ALISANDO_O_PIT; vez++) {
+        float alisado[TOTAL_PONTOS_PIT_INTERLAGOS + 2];
+        for (int i = 0; i < pontos; i++) {
+            float soma = 0.0f;
+            int quantos = 0;
+            for (int k = -VIZINHOS_ALISANDO_O_PIT; k <= VIZINHOS_ALISANDO_O_PIT; k++) {
+                if (i + k >= 0 && i + k < pontos) {
+                    soma += caminhoDoPitDeInterlagos[i + k][1];
+                    quantos++;
+                }
+            }
+            alisado[i] = (i == 0) ? caminhoDoPitDeInterlagos[0][1] : soma / quantos;
+        }
+        for (int i = 0; i < pontos; i++) {
+            caminhoDoPitDeInterlagos[i][1] = alisado[i];
+        }
+    }
+
+    /* No fim, ele termina de entrar na pista, já dentro do asfalto */
+    int ultimo = pontos;
+    caminhoDoPitDeInterlagos[ultimo][0] = caminhoDoPitDeInterlagos[ultimo - 1][0] + VOLTANDO_A_PISTA * e;
+    caminhoDoPitDeInterlagos[ultimo][1] = DENTRO_DA_PISTA_NA_SAIDA * e;
+    float saida = caminhoDoPitDeInterlagos[ultimo][0];
+    DadosDoPit pit = { 0 };
+    pit.lado = -1;
+    pit.noModelo = 1;
+    pit.entrada = volta + INICIO_DA_ENTRADA_DO_PIT * e;
+    pit.inicioLivre = pit.entrada;
+    pit.fimDaZona = volta + FIM_DA_ENTRADA_DO_PIT * e;   /* daqui em diante, as faixas separam o pit lane */
+    pit.fimDaEntrada = volta + (FIM_DA_ENTRADA_DO_PIT + 10.0f) * e;
+    pit.velocidadeNaEntrada = 9000.0f;          /* o pit lane é reto ali: ele só freia para o limite, de uma vez */
+    pit.aviso = volta - 700.0f * e;
+    pit.inicioDoLimite = volta - 60.0f * e;
+    pit.fimDoLimite = 300.0f * e;                 /* depois das garagens */
+    pit.fim = saida;                              /* na Reta Oposta */
+    pit.primeiraVaga = 20.0f * e;                 /* as garagens ficam logo depois da linha */
+    pit.entreVagas = 18.0f * e;
+    pit.encostar = 20.0f * e;
+    pit.noCaminhoDaFaixa = pit.entrada + 40.0f * e;
+    pit.deixaAFaixa = 290.0f * e;
+    pit.borda = 6.0f * e;
+    pit.faixa = 15.5f * e;
+    pit.vaga = 23.5f * e;                         /* a faixa de trabalho, na frente das portas */
+    pit.paraEntrar = DENTRO_DA_LINHA_PARA_ENTRAR;  /* da borda: as rodas da esquerda em cima da linha branca */
+    pit.soEncostadoNaBorda = 1;                   /* a linha de corrida da Subida também passa pela esquerda */
+    pit.caminho = (const float (*)[2]) caminhoDoPitDeInterlagos;
+    pit.pontosDoCaminho = ultimo + 1;
+    pista->pit = pit;
+    pista->temPit = 1;
     return pista;
 }
 
@@ -551,8 +509,9 @@ static Pista *criarPistaDaTabela(const PontoDoTracado *tabela, const float (*lim
  * Devolve: a pista completa.
  */
 Pista *criarCopaPistao(void) {
-    Pista *pista = criarPistaDaTabela(TRACADO_COPA_PISTAO, NULL, TOTAL_PONTOS_COPA_PISTAO, ESCALA_COPA_PISTAO,
+    Pista *pista = criarPistaDaTabela(TRACADO_COPA_PISTAO, NULL, NULL, TOTAL_PONTOS_COPA_PISTAO, ESCALA_COPA_PISTAO,
                                       PISTA_COPA_PISTAO, "Copa Pistão");
+    decorarOval(pista);
     float volta = pista->metrosDaVolta;
     /* O pit lane do estádio é o corredor entre o muro de pit (a uns 10 m da pista, de 325 m antes
      * da linha até 325 m depois) e o muro do pátio (a uns 40 m). Entra e sai pelas pontas abertas
@@ -591,7 +550,8 @@ Pista *criarCopaPistao(void) {
  * Devolve: a pista completa.
  */
 Pista *criarOval(void) {
-    Pista *pista = criarPistaDaTabela(TRACADO_OVAL, NULL, TOTAL_PONTOS_OVAL, ESCALA_OVAL, PISTA_OVAL, "Oval");
+    Pista *pista = criarPistaDaTabela(TRACADO_OVAL, NULL, NULL, TOTAL_PONTOS_OVAL, ESCALA_OVAL, PISTA_OVAL, "Oval");
+    decorarOval(pista);
     float volta = pista->metrosDaVolta;
     DadosDoPit pit = { 0 };
     pit.lado = 1;
@@ -637,7 +597,8 @@ static const float CAMINHO_DO_PIT_DO_SPLAT[][2] = {
  * Devolve: a pista completa.
  */
 Pista *criarSplat(void) {
-    Pista *pista = criarPistaDaTabela(TRACADO_SPLAT, LIMITES_SPLAT, TOTAL_PONTOS_SPLAT, ESCALA_SPLAT, PISTA_SPLAT, "Splat");
+    Pista *pista = criarPistaDaTabela(TRACADO_SPLAT, LIMITES_SPLAT, NULL, TOTAL_PONTOS_SPLAT, ESCALA_SPLAT, PISTA_SPLAT, "Splat");
+    decorarOval(pista);
     pista->semDirecaoGuiada = 1;   /* nas curvas fechadas dele, a guiada deixa o carro parecer preso a um traçado */
     float volta = pista->metrosDaVolta;
     DadosDoPit pit = { 0 };
@@ -848,6 +809,9 @@ int contarSegmentos(Pista *pista) {
  * Devolve: 1 se tem zebra, 0 se é reta (ou quase).
  */
 int temZebra(Segmento *segmento) {
+    if (segmento->temBorda) {
+        return segmento->zebraDireita > 0.0f || segmento->zebraEsquerda > 0.0f;   /* a do modelo */
+    }
     if (segmento->temMuro) {
         return 0;   /* no oval, a borda é o muro */
     }
@@ -856,22 +820,60 @@ int temZebra(Segmento *segmento) {
 }
 
 /*
+ * superficieNaLateral
+ * O que fica embaixo de um ponto da largura: asfalto, zebra, área de escape ou grama.
+ * Onde a borda não foi medida, é asfalto até a borda (ou até onde o pit lane encosta)
+ * e grama depois dela.
+ * Recebe: a posição na pista e a lateral em metros (+ direita, - esquerda).
+ * Devolve: a superfície.
+ */
+Superficie superficieNaLateral(PosicaoNaPista posicao, float lateralEmMetros) {
+    Segmento *s = posicao.segmento;
+    float largura = larguraDoLado(s, lateralEmMetros);
+    if (!s->temBorda) {
+        float fracao = lateralEmMetros / largura;
+        return (fracao < -s->asfaltoEsquerda || fracao > 1.0f) ? SUPERFICIE_GRAMA : SUPERFICIE_ASFALTO;
+    }
+    float distancia = fabsf(lateralEmMetros);
+    if (distancia <= largura) {
+        return SUPERFICIE_ASFALTO;
+    }
+    float zebra = (lateralEmMetros > 0.0f) ? s->zebraDireita : s->zebraEsquerda;
+    if (zebra > 0.0f && distancia <= zebra + FOLGA_DA_ZEBRA) {
+        return SUPERFICIE_ZEBRA;
+    }
+    float escape = (lateralEmMetros > 0.0f) ? s->escapeDireita : s->escapeEsquerda;
+    return (distancia <= escape) ? SUPERFICIE_ESCAPE : SUPERFICIE_GRAMA;
+}
+
+/*
  * distanciaDoLugarAteALinha
  * Quanto um lugar do grid fica ANTES da linha de chegada.
- * Recebe: o lugar (0 = pole).
- * Devolve: a distância em unidades de mundo (sempre múltipla do segmento).
+ * Recebe: a pista e o lugar (0 = pole).
+ * Devolve: a distância em unidades de mundo (no grid padrão, sempre múltipla do segmento;
+ *          no grid da pista, a do meio do carro até a linha).
  */
-float distanciaDoLugarAteALinha(int lugar) {
+float distanciaDoLugarAteALinha(const Pista *pista, int lugar) {
+    if (pista != NULL && pista->grid.existe) {
+        return (pista->grid.pole + lugar * pista->grid.espaco) * UNIDADES_POR_METRO;
+    }
     return DISTANCIA_DA_POLE + lugar * ESPACO_ENTRE_LUGARES;
 }
 
 /*
  * lateralDoLugar
- * Recebe: o lugar do grid (0 = pole).
- * Devolve: o deslocamento lateral dele (pares à esquerda, ímpares à direita).
+ * Recebe: a pista e o lugar do grid (0 = pole).
+ * Devolve: o deslocamento lateral dele (no grid padrão, pares à esquerda e ímpares à direita).
  */
-float lateralDoLugar(int lugar) {
-    return (lugar % 2 == 0) ? -LATERAL_DO_GRID : LATERAL_DO_GRID;
+float lateralDoLugar(const Pista *pista, int lugar) {
+    if (pista == NULL || !pista->grid.existe) {
+        return (lugar % 2 == 0) ? -LATERAL_DO_GRID : LATERAL_DO_GRID;
+    }
+    int aDireita = ((lugar % 2 == 0) == (pista->grid.poleADireita != 0));
+    float metros = aDireita ? pista->grid.lateral : -pista->grid.lateral;
+    PosicaoNaPista lugarNaPista = { pista->largada, 0.0f };
+    moverNaPista(&lugarNaPista, -distanciaDoLugarAteALinha(pista, lugar));
+    return metros / larguraDoLado(lugarNaPista.segmento, metros);
 }
 
 /*
@@ -971,11 +973,28 @@ float larguraDoLado(Segmento *segmento, float lateral) {
 /*
  * perfilNaLateral
  * A altura do chão num lugar da largura, interpolando o perfil do segmento.
- * Além da borda, vale a altura da borda.
+ * Além da borda, vale a altura da borda, ou a do chão medido além dela (Interlagos).
  * Recebe: o segmento e a lateral (-1 borda esquerda, +1 borda direita).
  * Devolve: a altura em relação à linha da pista, em metros.
  */
 static float perfilNaLateral(Segmento *segmento, float lateral) {
+    if (segmento->temBorda && fabsf(lateral) > 1.0f) {
+        /* Além da borda, o chão medido no modelo: a 1, 2, 3, 5, 7, 10, 14, 20, 28, 40, 55, 70 e 90 m dela */
+        int direita = (lateral > 0.0f);
+        float alem = (fabsf(lateral) - 1.0f) * (direita ? segmento->larguraDireita : segmento->larguraEsquerda);
+        const float *fora = direita ? segmento->foraDireita : segmento->foraEsquerda;
+        float antes = 0.0f, alturaAntes = direita ? segmento->perfil[PONTOS_DO_PERFIL - 1] : segmento->perfil[0];
+        for (int k = 0; k < PONTOS_FORA_DA_PISTA; k++) {
+            float distancia = DISTANCIAS_ALEM_DA_BORDA[k] * segmento->escalaDaBorda;
+            if (alem <= distancia) {
+                float t = (alem - antes) / (distancia - antes);
+                return alturaAntes + (fora[k] - alturaAntes) * t;
+            }
+            antes = distancia;
+            alturaAntes = fora[k];
+        }
+        return alturaAntes;
+    }
     float lugar = (lateral + 1.0f) / 2.0f * (PONTOS_DO_PERFIL - 1);
     if (lugar <= 0.0f) {
         return segmento->perfil[0];
@@ -998,6 +1017,36 @@ static float alturaNaLateral(PosicaoNaPista posicao, float lateral) {
     float t = posicao.distanciaNoSegmento / COMPRIMENTO_SEGMENTO;
     float perfil = perfilNaLateral(a, lateral) + (perfilNaLateral(a->proximo, lateral) - perfilNaLateral(a, lateral)) * t;
     return alturaNaPosicao(posicao) / UNIDADES_POR_METRO + perfil;
+}
+
+/*
+ * larguraNaPosicao
+ * A largura de um lado da pista no ponto exato, como pontoNoMundo usa: misturando a do começo
+ * do segmento com a do seguinte. Longe da linha (o pit lane), converter metros em fração da
+ * largura com a do começo do segmento faria o carro pular a cada segmento.
+ * Recebe: a posição na pista e a lateral (só importa o sinal).
+ * Devolve: a largura, em metros.
+ */
+float larguraNaPosicao(PosicaoNaPista posicao, float lateral) {
+    float t = posicao.distanciaNoSegmento / COMPRIMENTO_SEGMENTO;
+    float aqui = larguraDoLado(posicao.segmento, lateral), seguinte = larguraDoLado(posicao.segmento->proximo, lateral);
+    return aqui + (seguinte - aqui) * t;
+}
+
+/*
+ * metrosNoMundoPorMetroDaPista
+ * Longe da linha da pista, numa curva, andar um metro nela não é andar um metro no mundo:
+ * por dentro é menos, por fora é mais.
+ * Recebe: a posição na pista e a lateral em metros (+ direita, - esquerda).
+ * Devolve: quantos metros no mundo vale um metro da linha da pista ali (no mínimo
+ *          MENOR_FATOR_NO_MUNDO, perto do centro de uma curva fechada).
+ */
+float metrosNoMundoPorMetroDaPista(PosicaoNaPista posicao, float lateralEmMetros) {
+    PosicaoNaPista adiante = posicao;
+    moverNaPista(&adiante, UNIDADES_POR_METRO);
+    PontoNoMundo aqui = pontoNoMundo(posicao, lateralEmMetros / larguraNaPosicao(posicao, lateralEmMetros));
+    PontoNoMundo ali = pontoNoMundo(adiante, lateralEmMetros / larguraNaPosicao(adiante, lateralEmMetros));
+    return fmaxf(hypotf(ali.x - aqui.x, ali.z - aqui.z), MENOR_FATOR_NO_MUNDO);
 }
 
 /*

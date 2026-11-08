@@ -130,17 +130,17 @@ static float lateralEmMetros(Carro *carro) {
  * (veja registrarVolta). A distância percorrida começa negativa, do
  * tamanho do que falta até a linha, para a classificação da largada
  * sair certa (quem está mais perto da linha, na frente).
- * Recebe: o carro (já criado na linha de chegada) e o lugar (0 = pole).
+ * Recebe: o carro (já criado na linha de chegada), a pista e o lugar (0 = pole).
  * Devolve: nada.
  */
-static void colocarNoGrid(Carro *carro, int lugar) {
-    float distanciaAteALinha = distanciaDoLugarAteALinha(lugar);
+static void colocarNoGrid(Carro *carro, const Pista *pista, int lugar) {
+    float distanciaAteALinha = distanciaDoLugarAteALinha(pista, lugar);
 
     moverNaPista(&carro->posicao, -distanciaAteALinha);   /* anda para trás, atravessando a linha */
     carro->distanciaPercorrida = -distanciaAteALinha;
     carro->voltas = -1;
 
-    carro->deslocamentoLateral = lateralDoLugar(lugar);
+    carro->deslocamentoLateral = lateralDoLugar(pista, lugar);
     carro->linhaAlvo = lateralEmMetros(carro);
 }
 
@@ -156,6 +156,17 @@ static Carro criarCarroDaFicha(FichaTecnica ficha, int numero, Pista *pista) {
     carro.comprimento = ficha.comprimento;
     carro.largura = ficha.largura;
     return carro;
+}
+
+/*
+ * escalaDoDesgaste
+ * Os pneus duram cerca de 5 voltas de Interlagos. Como lá o modelo é usado maior que o de verdade
+ * (ESCALA_INTERLAGOS), a volta é mais longa e os pneus andam mais na mesma proporção.
+ * Recebe: a pista.
+ * Devolve: por quanto multiplicar a distância que um jogo de pneus anda.
+ */
+static float escalaDoDesgaste(const Pista *pista) {
+    return (pista->id == PISTA_INTERLAGOS) ? ESCALA_INTERLAGOS : 1.0f;
 }
 
 /*
@@ -190,11 +201,12 @@ void iniciarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador, NivelDaC
 
     corrida->jogador = criarCarroDaFicha(FICHAS[carroDoJogador], carroDoJogador, pista);
     corrida->jogador.controladoPeloJogador = 1;
-    colocarNoGrid(&corrida->jogador, LUGAR_DO_JOGADOR);
+    colocarNoGrid(&corrida->jogador, pista, LUGAR_DO_JOGADOR);
     corrida->jogador.duracaoDaTroca = DURACAO_DA_TROCA;
     corrida->jogador.voltaDoPit = temParada ? (ficha->voltas + 1) / 2 : 0;   /* se a IA dirigir */
     corrida->jogador.voltasDaProva = ficha->voltas;
     corrida->jogador.gastaPneu = gastaPneu;
+    corrida->jogador.metrosDeUmJogoDePneus *= escalaDoDesgaste(pista);
     corrida->jogador.pitFeito = !temParada;
     /* Sem direção guiada em nenhuma pista: o carro tem rumo próprio e quem faz a curva é o volante.
      * (A guiada só existe para os testes automáticos, que dirigem o carro com comandos simples.) */
@@ -208,7 +220,7 @@ void iniciarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador, NivelDaC
             continue;
         }
         corrida->rivais[rival] = criarCarroDaFicha(FICHAS[numero], numero, pista);
-        colocarNoGrid(&corrida->rivais[rival], rival);   /* rivais nos lugares 0 a 6 */
+        colocarNoGrid(&corrida->rivais[rival], pista, rival);   /* rivais nos lugares 0 a 6 */
         corrida->rivais[rival].habilidade = ficha->habilidadeDaPole
             - (ficha->habilidadeDaPole - ficha->habilidadeDoUltimo) * rival / (TOTAL_RIVAIS - 1);
         corrida->rivais[rival].voltasDaProva = ficha->voltas;
@@ -217,6 +229,7 @@ void iniciarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador, NivelDaC
         corrida->rivais[rival].variacao = ficha->variacao;
         corrida->rivais[rival].sorteio = 2654435761u * (unsigned int) (rival + 1) + 40503u * corridasIniciadas;
         corrida->rivais[rival].gastaPneu = gastaPneu;
+        corrida->rivais[rival].metrosDeUmJogoDePneus *= escalaDoDesgaste(pista);
         /* Cada um para numa volta, para os boxes não lotarem; na troca, eles são mais lentos que o Guido */
         corrida->rivais[rival].voltaDoPit = temParada ? 2 + rival * 5 % (ficha->voltas - 2) : 0;
         corrida->rivais[rival].pitFeito = !temParada;

@@ -143,7 +143,7 @@ void terminarInterface(void) {
 
 /* ---------- Mini-mapa (canto inferior esquerdo) ---------- */
 #define PONTOS_DESENHADOS_NO_MAPA 400
-#define MAX_PONTOS_MAPA       8192   /* um ponto por segmento; Interlagos tem ~2.600 */
+#define MAX_PONTOS_MAPA       8192   /* um ponto por segmento; Interlagos tem ~3.200 */
 #define TAMANHO_MAPA          150    /* lado do quadrado do mini-mapa, em pixels */
 #define MARGEM_MAPA           8      /* folga entre o traçado e a borda do quadrado */
 #define TAMANHO_TEXTO_MAPA    12

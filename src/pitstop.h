@@ -19,11 +19,9 @@
 #define SEGUNDOS_POR_RODA      0.62f   /* trocando uma roda: arranca a velha, a nova cai e ele encaixa */
 #define CANTOS_DO_CARRO        4       /* frente esquerda, trás esquerda, trás direita, frente direita */
 #define DURACAO_DA_TROCA       ((CANTOS_DO_CARRO + 1) * SEGUNDOS_PARA_A_RODA + CANTOS_DO_CARRO * SEGUNDOS_POR_RODA)
-#define METROS_DA_VAGA_AO_PREDIO 4.5f  /* o carro para com o centro a essa distância do prédio */
 #define MEIO_COMPRIMENTO_DO_GUIDO 1.2f /* metros */
 #define MEIA_LARGURA_DO_GUIDO  0.58f
 #define LIMITE_DO_PIT          4000.0f /* unidades por segundo: 100 km/h, perto das garagens */
-#define METROS_PARA_ENTRAR     3.0f    /* ele entra com o carro essa distância dentro do pit lane: ninguém entra sem querer */
 
 /* Onde o Guido está, em relação ao carro parado: x para a esquerda, z para a frente */
 typedef struct {

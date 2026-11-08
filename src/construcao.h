@@ -2,7 +2,7 @@
  * construcao.h
  * ------------------------------------------------------------------
  * Montar malhas 3D aos poucos, triângulo a triângulo, para o cenário
- * (mundo.c, paisagem.c e infraestrutura.c).
+ * (mundo.c: pintura da largada, vagas, torcida e céu).
  * ------------------------------------------------------------------
  */
 

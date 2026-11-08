@@ -4,8 +4,7 @@
  * A torcida 3D. Veja torcida3d.h.
  *
  * Cada pista tem o seu conjunto de lugares: na Copa Pistão eles saem dos assentos do
- * modelo do estádio; em Interlagos, das fileiras das arquibancadas; no Oval e no Splat,
- * dos lugares medidos nos modelos. A cada quadro, os lugares perto da câmera viram
+ * modelo do estádio; em Interlagos, no Oval e no Splat, dos lugares medidos nos modelos. A cada quadro, os lugares perto da câmera viram
  * carrinhos: o completo até RAIO_3D e um bem simples até RAIO_DE_LONGE, cada grupo
  * desenhado de uma vez (instâncias). Mais longe continua a torcida pintada. Uma grade de
  * células deixa achar os lugares perto sem olhar um por um. Os lugares ficam na placa

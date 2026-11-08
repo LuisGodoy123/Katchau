@@ -121,6 +121,7 @@ typedef struct {
 
     /* ---- Pneus (só no nível difícil) ---- */
     int gastaPneu;                 /* 1: os pneus gastam nesta corrida */
+    float metrosDeUmJogoDePneus;   /* quanto um jogo de pneus anda (mais se a pista for maior: veja corrida.c) */
     float desgaste;                /* de 0 (novos) a 1 (acabados); o Guido zera na troca */
     int pneuEstourado;             /* os pneus estourados, um bit para cada roda (0 = nenhum): bit 0 dianteiro esquerdo,
                                     * 1 dianteiro direito, 2 traseiro esquerdo, 3 traseiro direito. Os quatro estouram
@@ -191,6 +192,7 @@ Carro criarCarro(const char *nome, int numero, Segmento *largada, float deslocam
                  float velocidadeMaxima, float aceleracao, float aderencia);
 int atualizarCarro(Carro *carro, Comandos comandos, float tempoQuadro);
 int estaForaDaPista(Carro *carro);
+Superficie superficieDoCarro(Carro *carro);
 float aceleracaoDeCurva(const Carro *carro);
 void atualizarSuspensao(Carro *carro, float tempoQuadro);
 int velocidadeEmKmh(Carro *carro);

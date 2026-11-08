@@ -18,6 +18,8 @@
 #ifndef PISTA_H
 #define PISTA_H
 
+#include "tracado.h"
+
 /* Curvatura = quantos graus a pista vira em cada segmento.
  * Negativo vira para a esquerda, positivo para a direita, zero é reta.
  * Como o circuito é fechado, a soma das curvaturas de uma volta dá
@@ -50,27 +52,13 @@ typedef enum {
 #define SEGMENTOS_POR_METRO   0.6f
 #define UNIDADES_POR_METRO    (COMPRIMENTO_SEGMENTO * SEGMENTOS_POR_METRO)
 
-/* Largura de cada lado da pista, em metros, onde não há outra medida (Interlagos) */
-#define FIM_DO_MURO           320.0f    /* metros depois da linha: onde o muro da reta acaba */
-#define INICIO_DO_FUNIL       3650.0f   /* metros: o muro da reta dos boxes começa aqui, no fim da Subida */
-#define COMPRIMENTO_DO_FUNIL  70.0f
-#define ABERTURA_DO_FUNIL     2.5f      /* larguras da pista: até onde o carro pode ir pela grama */
-#define LARGURA_DO_PIT_LANE   14.0f
-#define ENTRADA_DO_PIT        3400.0f   /* metros: o pit lane abre colado na pista, na Subida dos Boxes */
-#define METROS_ABRINDO_O_PIT  90.0f     /* em tantos metros ele já tem a largura toda, ainda colado */
-#define INICIO_DA_SEPARACAO   3490.0f   /* aqui ele começa a se afastar da pista */
-#define FIM_DA_SAIDA_DA_PISTA 3640.0f   /* e já se afastou */
-#define LADO_DA_ILHA          1.20f     /* larguras: até aqui, entre a pista e o pit lane, é asfalto pintado */
-#define PIT_ATRAS_DO_FUNIL    2.62f     /* larguras da pista: passa por trás do muro do funil */
-#define INICIO_DO_DESVIO_DA_SAIDA 200.0f /* metros: depois dos boxes, ele se afasta do muro da reta */
-#define FIM_DO_DESVIO_DA_SAIDA 320.0f   /* e já passou da ponta do muro */
-#define LADO_DA_SAIDA         1.6f      /* larguras da pista: por dentro do S do Senna e da Curva do Sol */
-#define INICIO_DA_VOLTA       700.0f    /* metros: na Reta Oposta, ele começa a se aproximar da pista */
-#define FIM_DA_VOLTA          800.0f    /* e já está colado nela */
-#define FIM_DO_PIT_LANE       900.0f    /* daqui até o fim ele fecha, colado, como uma faixa de aceleração */
-#define METROS_DO_RETAO_DO_PIT 40.0f    /* depois do funil, ele encosta no muro */
-#define PRIMEIRO_METRO_DOS_BOXES (-270.0f)  /* a partir da linha de chegada */
+/* Largura de cada lado da pista, em metros, até alguém dizer o contrário */
 #define MEIA_LARGURA_PADRAO   (2000.0f / UNIDADES_POR_METRO)
+
+/* Interlagos vem do modelo 3D, que está em metros. Na medida real o asfalto tem de 10 a 16 m de
+ * largura e, com 14 carros, quase não dá para ultrapassar: o modelo inteiro (traçado, prédios,
+ * pit lane) é usado 40% maior. Para a medida real, é só voltar para 1 */
+#define ESCALA_INTERLAGOS        1.4f    /* o traçado do modelo, 40% maior: na medida real a pista é estreita demais para 14 carros */
 
 /* A Copa Pistão tem o comprimento real de Daytona (2,5 milhas): a pista do filme
  * não tem medida oficial. A escala do modelo 3D sai disso: metros de uma volta
@@ -85,15 +73,31 @@ typedef enum {
 /* Grid de largada, pintado no asfalto ANTES da linha de chegada, em
  * zigue-zague (pares à esquerda, ímpares à direita). O lugar 0 (pole) é
  * o mais perto da linha. As distâncias são múltiplas do segmento, então
- * cada lugar cai bem no começo de um segmento. */
+ * cada lugar cai bem no começo de um segmento. Uma pista pode ter o
+ * próprio grid (o que já vem pintado no modelo): veja GridDaPista. */
 #define LUGARES_NO_GRID       14
 #define DISTANCIA_DA_POLE     COMPRIMENTO_SEGMENTO            /* da pole até a linha */
 #define ESPACO_ENTRE_LUGARES  (2.0f * COMPRIMENTO_SEGMENTO)   /* de um lugar ao seguinte */
 #define LATERAL_DO_GRID       0.4f                            /* -0,4 à esquerda, +0,4 à direita */
 
+/* Perto do centro de uma curva fechada, a linha da pista anda no máximo tanto mais rápido que um
+ * carro longe dela, por dentro (veja metrosNoMundoPorMetroDaPista) */
+#define MENOR_FATOR_NO_MUNDO  0.3f
+
 /* O chão pode não ser plano na largura (as curvas do oval): cada segmento
  * guarda a altura dele em tantos lugares, da borda esquerda à direita. */
 #define PONTOS_DO_PERFIL      9
+
+/* O chão além da borda, onde ele foi medido (Interlagos): a tantos metros da borda */
+#define PONTOS_FORA_DA_PISTA  PONTOS_ALEM_DA_BORDA
+
+/* O que o carro tem embaixo das rodas */
+typedef enum {
+    SUPERFICIE_ASFALTO,
+    SUPERFICIE_ZEBRA,
+    SUPERFICIE_ESCAPE,    /* área de escape asfaltada: fora da pista, mas sem grama */
+    SUPERFICIE_GRAMA
+} Superficie;
 
 /* Declarada só pelo nome: a struct fica em obstaculos.h (objetos da
  * beira da pista), que por sua vez precisa do Segmento daqui. */
@@ -117,17 +121,23 @@ typedef struct Segmento {
     float larguraDireita;           /* da linha da pista até a borda direita do asfalto */
     float larguraEsquerda;          /* ...e até a esquerda (no oval os dois lados são diferentes) */
     float perfil[PONTOS_DO_PERFIL]; /* altura do chão em relação à linha, em metros, da borda esquerda à direita */
+
+    /* Além da borda do asfalto, onde o modelo foi medido (temBorda = 1). Metros a partir da linha */
+    int temBorda;
+    float zebraDireita, zebraEsquerda;     /* até onde vai a zebra; 0: ali não tem */
+    float escapeDireita, escapeEsquerda;   /* até onde o chão é asfaltado */
+    float foraDireita[PONTOS_FORA_DA_PISTA], foraEsquerda[PONTOS_FORA_DA_PISTA];   /* altura do chão além da borda */
+    float escalaDaBorda;            /* as distâncias além da borda estão nas medidas do modelo: vezes isto */
     struct Obstaculo *obstaculos;   /* lista simples dos objetos da beira (obstaculos.c) */
     struct Segmento *proximo;       /* segmento seguinte (o último aponta para o primeiro) */
     struct Segmento *anterior;      /* segmento anterior (o primeiro aponta para o último) */
 } Segmento;
 
-/* O pit lane de uma pista. Os metros são a partir da linha de chegada.
- * Interlagos tem um pit lane construído, com o desenho em ladoDentroDoPit; nas pistas de
- * modelo 3D o caminho é uma faixa paralela à pista, na medida do que o modelo mostra. */
+/* O pit lane de uma pista. Os metros são a partir da linha de chegada. O caminho
+ * é uma faixa paralela à pista, na medida do que o modelo 3D mostra. */
 typedef struct {
     int lado;              /* -1: à esquerda da pista; +1: à direita */
-    int noModelo;          /* 1: faixa paralela à pista, com as medidas abaixo */
+    int noModelo;          /* sempre 1: faixa paralela à pista, com as medidas abaixo */
     float entrada;         /* onde ele abre */
     float inicioLivre;     /* a partir daqui o jogador pode entrar */
     float fimDaZona;       /* até aqui ainda dá para entrar */
@@ -147,9 +157,21 @@ typedef struct {
     float faixa;             /* a faixa rápida */
     float vaga;              /* a vaga */
     float paraEntrar;        /* o jogador entra quando passa disto, na zona de entrada */
-    const float (*caminho)[2];  /* se a estrada dobra: { metros a partir da linha, metros até a linha da pista } */
+    int soEncostadoNaBorda;  /* 1: paraEntrar é a distância até a borda (só entra quem encosta na linha) */
+    const float (*caminho)[2];  /* se a estrada dobra: { metros a partir da linha, metros até a linha da pista },
+                                   começando na entrada */
     int pontosDoCaminho;
 } DadosDoPit;
+
+/* O grid que a pista já traz pintado (o do modelo de Interlagos). Com "existe" em 0,
+ * vale o grid padrão do jogo, pintado por ele */
+typedef struct {
+    int existe;
+    float pole;        /* metros do meio do carro da pole até a linha */
+    float espaco;      /* metros de um lugar ao seguinte (que fica do outro lado) */
+    float lateral;     /* metros da linha da pista até o meio de cada fila */
+    int poleADireita;  /* 1: a pole fica à direita */
+} GridDaPista;
 
 /* A pista em si guarda só a "porta de entrada" da lista circular.
  * Ela existe como struct para que funções que mudam o início da lista
@@ -160,6 +182,8 @@ typedef struct {
     int temPit;          /* 1: tem pit lane e a parada é obrigatória */
     DadosDoPit pit;
     int semDirecaoGuiada; /* 1: aqui o jogador sempre dirige sem a direção guiada, seja qual for a opção */
+    GridDaPista grid;
+    int largadaPintadaNoModelo;   /* 1: a linha de chegada e o grid já vêm pintados no modelo */
     float metrosDaVolta;
     IdPista id;          /* qual pista é (define o cenário 3D em mundo.c) */
     const char *nome;    /* o nome que aparece no menu */
@@ -186,7 +210,6 @@ Pista *criarCopaPistao(void);
 Pista *criarOval(void);
 Pista *criarSplat(void);
 Pista *criarPistaPorId(IdPista id);
-float ladoDentroDoPit(float metros, float metrosDaVolta, float *largura);
 float metrosDesdeAEntrada(const Pista *pista, float metros);
 void adicionarTrecho(Pista *pista, const char *nome, int quantidade, float curvatura,
                      float alturaInicial, float alturaFinal);
@@ -199,8 +222,9 @@ Segmento *proximoSegmento(Segmento *segmento);
 Segmento *segmentoAnterior(Segmento *segmento);
 int contarSegmentos(Pista *pista);
 int temZebra(Segmento *segmento);
-float distanciaDoLugarAteALinha(int lugar);
-float lateralDoLugar(int lugar);
+Superficie superficieNaLateral(PosicaoNaPista posicao, float lateralEmMetros);
+float distanciaDoLugarAteALinha(const Pista *pista, int lugar);
+float lateralDoLugar(const Pista *pista, int lugar);
 void liberarPista(Pista *pista);
 
 /* ---------- Andar pela pista ---------- */
@@ -208,6 +232,8 @@ int moverNaPista(PosicaoNaPista *posicao, float distancia);
 float alturaNaPosicao(PosicaoNaPista posicao);
 PontoNoMundo pontoNoMundo(PosicaoNaPista posicao, float deslocamentoLateral);
 float alturaDoChao(PosicaoNaPista posicao, float lateralEmMetros);
+float metrosNoMundoPorMetroDaPista(PosicaoNaPista posicao, float lateralEmMetros);
 float larguraDoLado(Segmento *segmento, float lateral);
+float larguraNaPosicao(PosicaoNaPista posicao, float lateral);
 
 #endif

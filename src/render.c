@@ -64,6 +64,8 @@
 #define GRAUS_DE_ROLAGEM      2.0f     /* e inclina para fora ao virar */
 #define MERGULHO_NA_FREADA    0.025f   /* e abaixa o nariz ao frear */
 #define TREPIDACAO_NA_GRAMA   0.06f    /* metros */
+#define TREPIDACAO_NA_ZEBRA   0.035f   /* metros: o carro pula de leve sobre os degraus */
+#define METROS_ENTRE_DEGRAUS_DA_ZEBRA 0.9f
 
 /* ---------- Fumaça ---------- */
 #define INICIO_DA_MARCA       0.40f    /* derrapagem abaixo disso não marca o asfalto */
@@ -160,9 +162,12 @@ static Camera3D montarCamera(PosicaoNaPista carro, float lateral, Olhar olhar, D
     dx /= comprimento;
     dz /= comprimento;
     if (rumoDoCarro != NULL) {
-        /* Sem a direção guiada a câmera vem atrás do carro, para onde ele vai: a curva da pista não a gira */
+        /* Sem a direção guiada a câmera vem atrás do carro, para onde ele vai: a curva da pista não a gira.
+         * A distância também é a do carro: longe da linha, numa curva, o mesmo lado da pista uns metros
+         * atrás pode estar bem mais perto ou mais longe que isso */
         dx = sinf(*rumoDoCarro * DEG2RAD);
         dz = -cosf(*rumoDoCarro * DEG2RAD);
+        comprimento = distancia.atras;
     }
     float direitaX = -dz, direitaZ = dx;
 
@@ -228,9 +233,15 @@ static Matrix matrizDoCarro(Carro *carro) {
     float meiaBitola = larguraDoCarro3D(carro->numero) * BITOLA / 2.0f;
     float lateral = carro->deslocamentoLateral * larguraDoLado(carro->posicao.segmento, carro->deslocamentoLateral);
 
+    /* Os eixos ficam a meia distância no mundo: longe da linha, numa curva (o pit lane de
+     * Interlagos, por dentro do S do Senna), isso é mais ou menos que meia distância na pista */
+    float naPista = meiaDistancia;
+    if (fabsf(carro->deslocamentoLateral) > 1.0f) {
+        naPista /= metrosNoMundoPorMetroDaPista(carro->posicao, lateral);
+    }
     PosicaoNaPista eixoDaFrente = carro->posicao, eixoDeTras = carro->posicao;
-    moverNaPista(&eixoDaFrente, meiaDistancia * UNIDADES_POR_METRO);
-    moverNaPista(&eixoDeTras, -meiaDistancia * UNIDADES_POR_METRO);
+    moverNaPista(&eixoDaFrente, naPista * UNIDADES_POR_METRO);
+    moverNaPista(&eixoDeTras, -naPista * UNIDADES_POR_METRO);
     float frenteEsquerda = alturaDoChao(eixoDaFrente, lateral - meiaBitola);
     float frenteDireita = alturaDoChao(eixoDaFrente, lateral + meiaBitola);
     float trasEsquerda = alturaDoChao(eixoDeTras, lateral - meiaBitola);
@@ -240,8 +251,13 @@ static Matrix matrizDoCarro(Carro *carro) {
     float inclinacao = ((frenteDireita + trasDireita) - (frenteEsquerda + trasEsquerda)) / (4.0f * meiaBitola);
     float y = (frenteEsquerda + frenteDireita + trasEsquerda + trasDireita) / 4.0f;
 
-    if (estaForaDaPista(carro) && carro->velocidade > 0.0f) {
+    Superficie embaixo = superficieDoCarro(carro);
+    if (embaixo == SUPERFICIE_GRAMA && carro->velocidade > 0.0f) {
         y += TREPIDACAO_NA_GRAMA * sinf(carro->distanciaPercorrida * 0.05f);
+    } else if (embaixo == SUPERFICIE_ZEBRA && carro->velocidade > 0.0f) {
+        /* Os degraus da zebra: um tranco curto a cada faixa */
+        float fase = carro->distanciaPercorrida / UNIDADES_POR_METRO / METROS_ENTRE_DEGRAUS_DA_ZEBRA;
+        y += TREPIDACAO_NA_ZEBRA * fabsf(sinf(fase * PI));
     }
     if (carro->estadoDoPit == PIT_TROCANDO) {
         float tempo = fminf(carro->tempoDaTroca, carro->duracaoDaTroca - carro->tempoDaTroca);
@@ -551,7 +567,7 @@ static void soltarFumacaDoCarro(Camera3D camera, Carro *carro, float tempoQuadro
 
     float forca = 0.0f;
     TipoDeNuvem tipo = NUVEM_DE_PNEU;
-    if (estaForaDaPista(carro)) {
+    if (superficieDoCarro(carro) == SUPERFICIE_GRAMA) {
         forca = 0.9f;
         tipo = NUVEM_DE_POEIRA;
     } else if (carro->rodando) {
@@ -607,7 +623,8 @@ static void marcarPneus(Carro *carro) {
     float forca = 0.0f;
     int todas = 0;
     float kmh = carro->velocidade / UNIDADES_POR_METRO * 3.6f;
-    if (!estaForaDaPista(carro) && carro->velocidade > 0.0f && !carroNoPit(carro)) {
+    /* Marca onde há asfalto embaixo: a pista, a zebra e a área de escape */
+    if (superficieDoCarro(carro) != SUPERFICIE_GRAMA && carro->velocidade > 0.0f && !carroNoPit(carro)) {
         if (carro->rodando) {
             forca = 1.0f;
             todas = 1;
@@ -976,7 +993,13 @@ void desenharVisaoDoJogador(Corrida *corrida) {
     /* A câmera acompanha o carro, não a pista: sem volante na curva, ela também não vira sozinha */
     Olhar olhar = olharDoJogador;
     int comRumoReal = jogador->direcaoLivre && jogador->temRumoNoMundo && jogador->estadoDoPit == PIT_FORA;
-    if (!comRumoReal) {
+    /* No pit lane o caminho nem sempre acompanha a pista (em Interlagos, a saída corta por dentro
+     * do S do Senna): a câmera vem atrás do carro, para onde o bico dele aponta */
+    int andandoNoPit = (jogador->estadoDoPit == PIT_CHEGANDO || jogador->estadoDoPit == PIT_SAINDO);
+    float rumoNoPit = andandoNoPit ? pontoNoMundo(jogador->posicao, jogador->deslocamentoLateral).rumo + jogador->anguloDeFuga : 0.0f;
+    int seguirORumo = comRumoReal || andandoNoPit;
+    float rumoSeguido = comRumoReal ? jogador->rumoNoMundo : rumoNoPit;
+    if (!seguirORumo) {
         olhar.giro += jogador->anguloDeFuga * CAMERA_NA_FUGA;
     }
     /* A distância anda aos poucos até a escolhida (perto, médio ou longe) */
@@ -988,18 +1011,18 @@ void desenharVisaoDoJogador(Corrida *corrida) {
      * carro girar na tela antes de a câmera vir atrás (presa ao bico, quem parecia girar era o mundo) */
     static float rumoDaCamera = 0.0f;
     static int cameraComRumo = 0;
-    if (comRumoReal) {
-        float diferenca = jogador->rumoNoMundo - rumoDaCamera;
+    if (seguirORumo) {
+        float diferenca = rumoSeguido - rumoDaCamera;
         diferenca -= 360.0f * roundf(diferenca / 360.0f);
         if (!cameraComRumo || fabsf(diferenca) > 120.0f) {
-            rumoDaCamera = jogador->rumoNoMundo;   /* começou agora (ou rodou): sem atraso */
+            rumoDaCamera = rumoSeguido;   /* começou agora (ou rodou): sem atraso */
         } else {
             rumoDaCamera += diferenca * (1.0f - expf(-GetFrameTime() / ATRASO_DA_CAMERA_NO_RUMO));
         }
     }
-    cameraComRumo = comRumoReal;
+    cameraComRumo = seguirORumo;
     Camera3D camera = montarCamera(jogador->posicao, jogador->deslocamentoLateral, olhar, distanciaAtual,
-                                   comRumoReal ? &rumoDaCamera : NULL);
+                                   seguirORumo ? &rumoDaCamera : NULL);
     if (jogador->estadoDoPit == PIT_TROCANDO) {
         camera = cameraDaTroca(camera, jogador);
     }

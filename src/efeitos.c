@@ -29,6 +29,7 @@
 #define VOLUME_VENTO               0.55f
 #define VOLUME_PNEU                0.80f
 #define VOLUME_GRAMA               0.75f
+#define VOLUME_ZEBRA               0.70f
 #define VOLUME_MURO                0.85f
 #define VOLUME_NITRO               0.75f
 #define VOLUME_EFEITOS_CURTOS      0.80f
@@ -224,7 +225,7 @@ static void atualizarMotorGranular(int v, int marcha, float giro, float volume, 
 }
 
 /* ---------- Loops por estado ---------- */
-enum { LOOP_VENTO, LOOP_PNEU, LOOP_GRAMA, LOOP_MURO, LOOP_NITRO, TOTAL_LOOPS };
+enum { LOOP_VENTO, LOOP_PNEU, LOOP_GRAMA, LOOP_ZEBRA, LOOP_MURO, LOOP_NITRO, TOTAL_LOOPS };
 
 typedef struct {
     const char *arquivo;
@@ -238,6 +239,7 @@ static LoopDeEfeito loops[TOTAL_LOOPS] = {
     [LOOP_VENTO] = { .arquivo = "recursos/sons/efeitos/vento.wav" },
     [LOOP_PNEU] = { .arquivo = "recursos/sons/efeitos/pneu_cantando.wav" },
     [LOOP_GRAMA] = { .arquivo = "recursos/sons/efeitos/grama.wav" },
+    [LOOP_ZEBRA] = { .arquivo = "recursos/sons/efeitos/zebra.wav" },   /* ferramentas/gerar_som_da_zebra.py */
     [LOOP_MURO] = { .arquivo = "recursos/sons/efeitos/muro_raspando.wav" },
     [LOOP_NITRO] = { .arquivo = "recursos/sons/efeitos/nitro_queimando.wav" },
 };
@@ -1197,9 +1199,12 @@ static void atualizarLoopsDoJogador(Corrida *corrida, int ativo, float tempo) {
     float pneu = VOLUME_PNEU * escorrega * limitar(f / 0.2f, 0.0f, 1.0f);
     atualizarLoop(&loops[LOOP_PNEU], ativo ? pneu : 0.0f, 0.85f + 0.35f * f, tempo);
 
-    /* A grama (e a zebra): fora do asfalto */
-    int fora = ativo && estaForaDaPista(jogador) && f > 0.04f && !carroNoPit(jogador);
-    atualizarLoop(&loops[LOOP_GRAMA], fora ? VOLUME_GRAMA * powf(f, 0.7f) : 0.0f, 0.7f + 0.7f * f, tempo);
+    /* A grama e a zebra: o chão embaixo das rodas (a área de escape é asfalto) */
+    Superficie embaixo = superficieDoCarro(jogador);
+    int naGrama = ativo && embaixo == SUPERFICIE_GRAMA && f > 0.04f && !carroNoPit(jogador);
+    atualizarLoop(&loops[LOOP_GRAMA], naGrama ? VOLUME_GRAMA * powf(f, 0.7f) : 0.0f, 0.7f + 0.7f * f, tempo);
+    int naZebra = ativo && embaixo == SUPERFICIE_ZEBRA && f > 0.04f && !carroNoPit(jogador);
+    atualizarLoop(&loops[LOOP_ZEBRA], naZebra ? VOLUME_ZEBRA * powf(f, 0.5f) : 0.0f, 0.55f + 1.0f * f, tempo);
 
     /* O muro */
     int raspando = ativo && f > 0.03f && (jogador->raspandoNoMuro ||

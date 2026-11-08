@@ -296,11 +296,19 @@ Vibracao calcularVibracao(EstadoDaVibracao *estado, Corrida *corrida, float temp
         escorregando = (carro->derrapagem - INICIO_DO_PATINAR) / (1.0f - INICIO_DO_PATINAR);
     }
 
-    /* O chão: fora do asfalto, grama ou zebra; no asfalto, a textura, sempre presente */
-    float lado = fabsf(carro->deslocamentoLateral);
-    int naZebra = (lado > INICIO_DA_ZEBRA && lado < FIM_DA_ZEBRA && temZebra(carro->posicao.segmento));
+    /* O chão: na grama ou na zebra, o relevo dela; no asfalto (e na área de escape, que
+     * também é asfalto), a textura, sempre presente. Onde a pista mediu a zebra (Interlagos),
+     * vale a medida; nas outras, a borda das curvas */
+    Superficie embaixo = superficieDoCarro(carro);
+    int naZebra;
+    if (carro->posicao.segmento->temBorda) {
+        naZebra = (embaixo == SUPERFICIE_ZEBRA);
+    } else {
+        float lado = fabsf(carro->deslocamentoLateral);
+        naZebra = (lado > INICIO_DA_ZEBRA && lado < FIM_DA_ZEBRA && temZebra(carro->posicao.segmento));
+    }
     int andando = (carro->velocidade > 0.0f);
-    if (estaForaDaPista(carro) && !naZebra) {
+    if (embaixo == SUPERFICIE_GRAMA && !naZebra) {
         float aspereza = asperezaDoChao(estado->faseDoChao);
         float forca = fminf(0.35f + rapidez * 2.0f, 1.0f) * andando;
         grave = somar(grave, GRAMA_GRAVE * forca * (0.4f + 0.6f * aspereza));

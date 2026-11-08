@@ -2118,10 +2118,10 @@ void desenharComoJogar(void) {
 
     const char *dicas[] = {
         TextFormat("Você larga em último, contra %d rivais. O nível muda as voltas e os rivais; no difícil, os pneus gastam.", TOTAL_RIVAIS),
-        "Em Interlagos, no médio e no difícil, a parada é obrigatória: saia pela esquerda na Subida dos Boxes. Quem não para é desclassificado.",
+        "Em Interlagos, no médio e no difícil, a parada é obrigatória: no fim da Subida dos Boxes, encoste na linha da esquerda. Quem não para é desclassificado.",
         "Freio de mão com o volante virado: a traseira solta e o carro entra em drift. Vira mais, mas perde velocidade e gasta pneu.",
         "Freie antes das curvas e alivie no meio: acelerando, o carro sai de frente. Fumaça = pneu no limite; passar dele custa velocidade.",
-        "Na grama (sai poeira) o carro não passa de 75 km/h. Touchpad (PlayStation) ou C: câmera perto, média ou longe.",
+        "Na grama (sai poeira) o carro não passa de 75 km/h; no escape asfaltado, de 150. Touchpad (PlayStation) ou C: câmera perto, média ou longe.",
         "Colado atrás de alguém você pega vácuo. Os carros são sólidos: batendo na quina ou de lado, quem toma a batida roda.",
     };
     float y = topo + 72;
