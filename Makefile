@@ -28,7 +28,7 @@ ifeq ($(OS),Windows_NT)
     # Windows com MinGW (raylib em C:/raylib/raylib/src, padrão do instalador)
     RAYLIB_DIR ?= C:/raylib/raylib/src
     CFLAGS  += -I$(RAYLIB_DIR)
-    LIBS     = -L$(RAYLIB_DIR) -lraylib -lopengl32 -lgdi32 -lwinmm -lpthread
+    LIBS     = -L$(RAYLIB_DIR) -lraylib -lglfw3 -lopengl32 -lgdi32 -lwinmm -lpthread
     EXE      = $(NOME).exe
 else
     SISTEMA := $(shell uname -s)

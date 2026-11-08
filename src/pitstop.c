@@ -119,6 +119,32 @@ void lugarDaVaga(Pista *pista, const Carro *carro, PosicaoNaPista *lugar, float 
  * Devolve: 1 se ele acabou de entrar na zona de entrada do pit lane.
  */
 #define FRACAO_PARA_ENTRAR 0.6f   /* da largura do lado do pit, onde ela é menor que paraEntrar */
+#define PIT_LANE_ABERTO    4.5f   /* metros além da borda da pista em que o limite do lado do pit ainda deixa andar */
+#define FORA_DA_PISTA      0.5f   /* metros: o meio do carro já passou da borda da pista, para o lado do pit */
+#define DENTRO_DO_PIT_LANE 4.0f   /* metros além da borda: em cima do pit lane, sem dúvida (quem já parou) */
+
+/*
+ * foraDaPistaNoPitLane
+ * Depois do funil da entrada, o asfalto do pit lane continua aberto ao lado da pista até as
+ * faixas o separarem. Quem passou do funil e está ali, fora da pista, já está no pit lane: se
+ * seguisse pilotando, quando o pit lane se fecha o limite da pista o jogaria de volta nela, como
+ * se tivesse batido no muro. Então entra também.
+ * Recebe: a pista, o carro e quantos metros ele está depois da entrada.
+ * Devolve: 1 se ele está fora da pista, em cima do pit lane ainda aberto.
+ */
+static int foraDaPistaNoPitLane(const Pista *pista, const Carro *carro, float depoisDaEntrada) {
+    const Segmento *aqui = carro->posicao.segmento;
+    if (aqui->limiteDireita <= 0.0f || depoisDaEntrada >= metrosDesdeAEntrada(pista, pista->pit.inicioDoLimite)) {
+        return 0;   /* pista sem limites medidos, ou já perto das garagens */
+    }
+    float largura = (pista->pit.lado < 0) ? aqui->larguraEsquerda : aqui->larguraDireita;
+    float limite = (pista->pit.lado < 0) ? aqui->limiteEsquerda : aqui->limiteDireita;
+    if (limite < largura + PIT_LANE_ABERTO) {
+        return 0;   /* aqui o pit lane já está separado da pista */
+    }
+    float paraOLado = pista->pit.lado * carro->deslocamentoLateral * largura;
+    return paraOLado > largura + (carro->pitFeito ? DENTRO_DO_PIT_LANE : FORA_DA_PISTA);
+}
 
 int querEntrarNoPit(const Pista *pista, const Carro *carro) {
     if (!pista->temPit || carroNoPit(carro)) {
@@ -127,7 +153,7 @@ int querEntrarNoPit(const Pista *pista, const Carro *carro) {
     float metros = metrosNaVolta(carro);
     float depoisDaEntrada = metrosDesdeAEntrada(pista, metros);
     if (depoisDaEntrada > metrosDesdeAEntrada(pista, pista->pit.fimDaZona)) {
-        return 0;
+        return foraDaPistaNoPitLane(pista, carro, depoisDaEntrada);
     }
     if (carro->querParar) {
         return 1;
