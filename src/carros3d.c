@@ -268,8 +268,10 @@ typedef struct {
     double hora;                   /* do último desenho (para saber quanto tempo passou) */
 } CaraDoCarro;
 
-static OlhosDoCarro olhos[TOTAL_CARROS];
-static CaraDoCarro caras[TOTAL_CARROS];
+/* Um lugar a mais, depois dos carros: os olhos de um modelo que não é carro (o Mack, darOlhosAoModelo) */
+#define CARA_DE_OUTRO_MODELO  TOTAL_CARROS
+static OlhosDoCarro olhos[TOTAL_CARROS + 1];
+static CaraDoCarro caras[TOTAL_CARROS + 1];
 static float reflexos[TOTAL_CARROS];    /* quanto o céu se reflete na pintura de cada carro */
 static Shader shaderDosOlhos;
 static int locDoDesvio, locDosMeios, locDoTamanho, locDaForma;
@@ -1534,23 +1536,15 @@ static Texture2D medirBordasDaPalpebra(const char *mascara, int ladoDaPalpebra) 
 }
 
 /*
- * carregarOlhos
- * Procura o carro na tabela dos olhos (recursos/modelos/carros/olhos/olhos.txt) e troca
- * a textura dos olhos dele pelas três camadas: o fundo, as íris e a máscara do branco.
- * Sem a tabela ou sem as imagens, o carro fica com os olhos parados, como vieram.
- * Recebe: o número do carro e o texto da tabela (NULL se não há).
- * Devolve: nada.
+ * acharOlhosNaTabela
+ * Procura um nome na tabela dos olhos (recursos/modelos/carros/olhos/olhos.txt).
+ * Recebe: o texto da tabela (NULL se não há), o nome e onde pôr o que achou.
+ * Devolve: o material dos olhos, no modelo da raylib (-1 se não achou).
  */
-static void carregarOlhos(int numero, const char *tabela) {
-    olhos[numero].tem = 0;
+static int acharOlhosNaTabela(const char *tabela, const char *nome, OlhosDoCarro *achados) {
     if (tabela == NULL) {
-        return;
+        return -1;
     }
-    char nome[64];
-    strncpy(nome, GetFileNameWithoutExt(MODELOS[numero].arquivo), sizeof(nome) - 1);
-    nome[sizeof(nome) - 1] = '\0';
-    int material = -1;
-    OlhosDoCarro achados = { 0 };
     for (const char *linha = tabela; *linha != '\0'; ) {
         char carro[64];
         int noGlb, ladoDaPalpebra;
@@ -1559,10 +1553,9 @@ static void carregarOlhos(int numero, const char *tabela) {
             && sscanf(linha, "%63s %d %f %d %f %f %f %f %f %f", carro, &noGlb, &lidos.anda, &ladoDaPalpebra,
                       &lidos.linha, &lidos.raio, &lidos.meios.x, &lidos.meios.y, &lidos.meios.z, &lidos.meios.w) == 10
             && strcmp(carro, nome) == 0) {
-            material = noGlb + 1;   /* a raylib põe um material padrão antes dos do .glb */
             lidos.ladoDaPalpebra = (float) ladoDaPalpebra;
-            achados = lidos;
-            break;
+            *achados = lidos;
+            return noGlb + 1;   /* a raylib põe um material padrão antes dos do .glb */
         }
         const char *fim = strchr(linha, '\n');
         if (fim == NULL) {
@@ -1570,9 +1563,19 @@ static void carregarOlhos(int numero, const char *tabela) {
         }
         linha = fim + 1;
     }
-    Model *modelo = &modelos[numero];
+    return -1;
+}
+
+/*
+ * trocarPelasCamadas
+ * Troca a textura dos olhos do modelo pelas três camadas (recursos/modelos/carros/olhos/):
+ * o fundo, as íris e a máscara do branco, e mais as bordas da pálpebra medidas na máscara.
+ * Recebe: o modelo, o material dos olhos, o nome (das imagens) e o lado da pálpebra.
+ * Devolve: 1 se trocou; 0 se faltou alguma imagem ou o tamanho não bate (o modelo fica como estava).
+ */
+static int trocarPelasCamadas(Model *modelo, int material, const char *nome, float ladoDaPalpebra) {
     if (material < 1 || material >= modelo->materialCount) {
-        return;
+        return 0;
     }
     static const char *CAMADAS[3] = { "fundo", "iris", "mascara" };
     char caminhos[3][256];
@@ -1580,7 +1583,7 @@ static void carregarOlhos(int numero, const char *tabela) {
         snprintf(caminhos[i], sizeof(caminhos[i]), "%s%s_%s.png", PASTA_DOS_OLHOS, nome, CAMADAS[i]);
         if (!FileExists(caminhos[i])) {
             TraceLog(LOG_WARNING, "CARRO: falta %s, os olhos de %s ficam parados", caminhos[i], nome);
-            return;
+            return 0;
         }
     }
     Texture2D original = modelo->materials[material].maps[MATERIAL_MAP_ALBEDO].texture;
@@ -1594,7 +1597,7 @@ static void carregarOlhos(int numero, const char *tabela) {
         for (int i = 0; i < 3; i++) {
             UnloadTexture(camadas[i]);
         }
-        return;
+        return 0;
     }
     /* o fundo ganha mipmaps em prepararTexturas, como as outras texturas de cor */
     for (int i = 1; i < 3; i++) {
@@ -1605,38 +1608,53 @@ static void carregarOlhos(int numero, const char *tabela) {
     trocarTextura(olho, MATERIAL_MAP_ALBEDO, camadas[0]);
     trocarTextura(olho, MATERIAL_MAP_METALNESS, camadas[1]);   /* o texture1 do shader */
     trocarTextura(olho, MATERIAL_MAP_NORMAL, camadas[2]);      /* o texture2 */
-    trocarTextura(olho, MATERIAL_MAP_ROUGHNESS, medirBordasDaPalpebra(caminhos[2], (int) achados.ladoDaPalpebra));   /* o texture3 */
+    trocarTextura(olho, MATERIAL_MAP_ROUGHNESS, medirBordasDaPalpebra(caminhos[2], (int) ladoDaPalpebra));   /* o texture3 */
+    return 1;
+}
+
+/*
+ * carregarOlhos
+ * Procura o carro na tabela dos olhos e troca a textura dos olhos dele pelas três camadas.
+ * Sem a tabela ou sem as imagens, o carro fica com os olhos parados, como vieram.
+ * Recebe: o número do carro e o texto da tabela (NULL se não há).
+ * Devolve: nada.
+ */
+static void carregarOlhos(int numero, const char *tabela) {
+    olhos[numero].tem = 0;
+    char nome[64];
+    strncpy(nome, GetFileNameWithoutExt(MODELOS[numero].arquivo), sizeof(nome) - 1);
+    nome[sizeof(nome) - 1] = '\0';
+    OlhosDoCarro achados = { 0 };
+    int material = acharOlhosNaTabela(tabela, nome, &achados);
+    if (!trocarPelasCamadas(&modelos[numero], material, nome, achados.ladoDaPalpebra)) {
+        return;
+    }
     achados.tem = 1;
     achados.material = material;
     olhos[numero] = achados;   /* o lado é medido depois, com o carro normalizado */
 }
 
 /*
- * medirLadoDosOlhos
- * Para que lado da textura dos olhos fica a direita do carro: compara, nos vértices da
- * peça dos olhos, a coordenada da textura com a posição de lado no carro normalizado
- * (frente em +z e y para cima: a direita do carro é o -x).
- * Recebe: o número do carro (já normalizado).
- * Devolve: nada.
+ * medirLadoDosOlhosDoModelo
+ * Para que lado da textura dos olhos fica a direita do modelo: compara, nos vértices da
+ * peça dos olhos, a coordenada da textura com a posição de lado no modelo normalizado
+ * (frente em +z e y para cima: a direita é o -x). E o mesmo na altura.
+ * Recebe: o modelo, a matriz que o normaliza e os olhos dele (o material já achado).
+ * Devolve: 1 se mediu (e põe o lado nos olhos); 0 se não deu.
  */
-static void medirLadoDosOlhos(int numero) {
-    /* (e o mesmo na altura: para que lado da textura fica o alto do carro) */
-    if (!olhos[numero].tem) {
-        return;
-    }
-    Model modelo = modelos[numero];
+static int medirLadoDosOlhosDoModelo(Model modelo, Matrix ajusteDoModelo, OlhosDoCarro *o) {
     double somaX = 0.0, somaU = 0.0, somaXU = 0.0, somaXX = 0.0;
     double somaY = 0.0, somaV = 0.0, somaYV = 0.0;
     long total = 0;
     for (int i = 0; i < modelo.meshCount; i++) {
         Mesh malha = modelo.meshes[i];
-        if (modelo.meshMaterial[i] != olhos[numero].material || malha.texcoords == NULL) {
+        if (modelo.meshMaterial[i] != o->material || malha.texcoords == NULL) {
             continue;
         }
         for (int v = 0; v < malha.vertexCount; v++) {
-            double x = verticeNormalizado(malha, v, ajuste[numero]).x;
+            double x = verticeNormalizado(malha, v, ajusteDoModelo).x;
             double u = malha.texcoords[v * 2];
-            double y = verticeNormalizado(malha, v, ajuste[numero]).y;
+            double y = verticeNormalizado(malha, v, ajusteDoModelo).y;
             double altura = malha.texcoords[v * 2 + 1];
             somaY += y;
             somaV += altura;
@@ -1651,14 +1669,82 @@ static void medirLadoDosOlhos(int numero) {
     double variacao = (total > 0) ? somaXX - somaX * somaX / total : 0.0;
     double junto = (total > 0) ? somaXU - somaX * somaU / total : 0.0;
     if (total < 3 || variacao <= 0.0 || fabs(junto) < 1e-9) {
+        return 0;
+    }
+    o->lado = (junto > 0.0) ? -1.0f : 1.0f;   /* andar para -x é andar para a direita */
+    o->ladoDeCima = (somaYV - somaY * somaV / total > 0.0) ? 1.0f : -1.0f;
+    return 1;
+}
+
+/*
+ * medirLadoDosOlhos
+ * O lado dos olhos de um carro (já normalizado). Sem dar para medir, os olhos ficam parados.
+ * Recebe: o número do carro.
+ * Devolve: nada.
+ */
+static void medirLadoDosOlhos(int numero) {
+    if (!olhos[numero].tem) {
+        return;
+    }
+    if (!medirLadoDosOlhosDoModelo(modelos[numero], ajuste[numero], &olhos[numero])) {
         olhos[numero].tem = 0;
         TraceLog(LOG_WARNING, "CARRO: nao deu para medir os olhos de %s", MODELOS[numero].arquivo);
         return;
     }
-    olhos[numero].lado = (junto > 0.0) ? -1.0f : 1.0f;   /* andar para -x é andar para a direita */
-    olhos[numero].ladoDeCima = (somaYV - somaY * somaV / total > 0.0) ? 1.0f : -1.0f;
     TraceLog(LOG_INFO, "CARRO: olhos de %s no material %d, a direita fica no %s da textura",
              MODELOS[numero].arquivo, olhos[numero].material, (olhos[numero].lado < 0.0f) ? "u menor" : "u maior");
+}
+
+/*
+ * darOlhosAoModelo
+ * Os olhos vivos dos carros num modelo que não é carro (o Mack): as mesmas três camadas, o mesmo
+ * shader e a mesma cara (as molas, as piscadas e as olhadelas). O modelo já deve estar com a
+ * frente em +z, y para cima e as rodas em y = 0; a linha dele na tabela dos olhos tem o nome dado.
+ * Recebe: o modelo e o nome (na tabela e nas imagens).
+ * Devolve: 1 se deu; 0 se não (os olhos ficam como vieram no modelo).
+ */
+int darOlhosAoModelo(Model *modelo, const char *nome) {
+    olhos[CARA_DE_OUTRO_MODELO].tem = 0;
+    char *tabela = FileExists(PASTA_DOS_OLHOS "olhos.txt") ? LoadFileText(PASTA_DOS_OLHOS "olhos.txt") : NULL;
+    OlhosDoCarro achados = { 0 };
+    int material = acharOlhosNaTabela(tabela, nome, &achados);
+    if (tabela != NULL) {
+        UnloadFileText(tabela);
+    }
+    if (!trocarPelasCamadas(modelo, material, nome, achados.ladoDaPalpebra)) {
+        return 0;
+    }
+    achados.material = material;
+    if (!medirLadoDosOlhosDoModelo(*modelo, MatrixIdentity(), &achados)) {
+        TraceLog(LOG_WARNING, "CARRO: nao deu para medir os olhos de %s", nome);
+        return 0;
+    }
+    Texture2D *fundo = &modelo->materials[material].maps[MATERIAL_MAP_ALBEDO].texture;
+    GenTextureMipmaps(fundo);
+    SetTextureFilter(*fundo, TEXTURE_FILTER_TRILINEAR);
+    modelo->materials[material].shader = shaderDosOlhos;
+    achados.tem = 1;
+    olhos[CARA_DE_OUTRO_MODELO] = achados;
+    memset(&caras[CARA_DE_OUTRO_MODELO], 0, sizeof(caras[CARA_DE_OUTRO_MODELO]));
+    return 1;
+}
+
+/*
+ * prepararOlhosDoModelo
+ * A cara do modelo de darOlhosAoModelo no próximo desenho: para onde ele olha (como o volante
+ * nos carros: -1 todo à esquerda, +1 todo à direita), o aperto e o susto. Chamar logo antes
+ * de desenhá-lo.
+ * Recebe: o olhar, o aperto e o susto (0 a 1).
+ * Devolve: nada.
+ */
+void prepararOlhosDoModelo(float olhar, float aperto, float susto) {
+    if (!olhos[CARA_DE_OUTRO_MODELO].tem) {
+        return;
+    }
+    expressaoNoProximoDesenho(CARA_DE_OUTRO_MODELO, aperto, susto);
+    prepararOlhos(CARA_DE_OUTRO_MODELO, olhar);
+    float reflexo = 0.6f;
+    SetShaderValue(shaderDosOlhos, locsDoReflexo[2], &reflexo, SHADER_UNIFORM_FLOAT);
 }
 
 /*

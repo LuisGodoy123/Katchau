@@ -36,6 +36,10 @@ int rodaDoCanto(int numero, int canto, Vector3 *centro);
 void trocarRodaNoProximoDesenho(int roda, float andamento);
 void esconderRodaNoProximoDesenho(int roda);
 void definirOlhoDosCarros(Vector3 olho);
+
+/* Os olhos vivos dos carros num modelo que não é carro (o Mack, em passeio.c) */
+int darOlhosAoModelo(Model *modelo, const char *nome);
+void prepararOlhosDoModelo(float olhar, float aperto, float susto);
 void inclinarCorpoNoProximoDesenho(int numero, float rolagem, float arfagem);
 void moverGarfosNoProximoDesenho(float subida, float inclinacao);
 Vector3 pontaDosGarfos(void);

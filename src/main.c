@@ -2,9 +2,14 @@
  * main.c
  * ------------------------------------------------------------------
  * Ponto de entrada do KATCHAU.
- * Abre a janela e troca entre as telas: menu, garagem, como jogar,
- * corrida e resultado. A variável "tela" diz em qual delas o jogador
- * está; cada tela devolve para qual ir no quadro seguinte.
+ * Abre a janela e troca entre as telas: menu, garagem, como jogar, o
+ * mundo aberto (passeio.c), a escolha da corrida, a corrida e o
+ * resultado. A variável "tela" diz em qual delas o jogador está; cada
+ * tela devolve para qual ir no quadro seguinte.
+ *
+ * O jogo acontece no mundo aberto: JOGAR leva à cidade, a escolha da
+ * corrida abre no Mack, o Mack leva o carro até a pista, e no fim da
+ * corrida (ou saindo dela pela pausa) o carro volta para a cidade.
  *
  * O laço principal segue sempre a mesma ordem, uma vez por quadro:
  *   1) ler o teclado e atualizar a tela atual (lógica);
@@ -42,6 +47,7 @@
 #include "recordes.h"
 #include "controle.h"
 #include "passeio.h"
+#include <ctype.h>
 
 /* Na vitória, o painel de chegada espera um pouco para o jogador ver o
  * confete e o refrão entrando */
@@ -174,8 +180,8 @@ static Tela atualizarTelaDaCorrida(Corrida *corrida, EstadoMenu *menu, int *paus
             *pausada = 0;
             pausarSonsDaCorrida(0);
         } else if (escolha == PAUSA_SAIR) {
-            *pausada = 0;   /* os sons pausados somem sozinhos na volta ao menu */
-            return TELA_MENU;
+            *pausada = 0;   /* os sons pausados somem sozinhos na volta à cidade */
+            return TELA_PASSEIO;
         }
         return TELA_CORRIDA;
     }
@@ -183,7 +189,7 @@ static Tela atualizarTelaDaCorrida(Corrida *corrida, EstadoMenu *menu, int *paus
     if (IsKeyPressed(KEY_ESCAPE) || controleApertou(BOTAO_START)) {
         tocarSom(SOM_CONFIRMAR);
         *pausada = 1;
-        abrirPausa(menu);
+        abrirPausaDaCorrida(menu);
         pausarSonsDaCorrida(1);
         return TELA_CORRIDA;
     }
@@ -225,6 +231,32 @@ static Tela atualizarTelaDaCorrida(Corrida *corrida, EstadoMenu *menu, int *paus
         return TELA_RESULTADO;
     }
     return TELA_CORRIDA;
+}
+
+/*
+ * recadoDaCorrida
+ * O que aparece na volta à cidade: a pista e como o jogador foi.
+ * Recebe: a corrida.
+ * Devolve: o texto (guardado aqui dentro, até a próxima chamada).
+ */
+static const char *recadoDaCorrida(const Corrida *corrida) {
+    static char texto[96];
+    char pista[48];
+    int i = 0;
+    for (; corrida->pista->nome[i] != '\0' && i < (int) sizeof(pista) - 1; i++) {
+        pista[i] = (char) toupper((unsigned char) corrida->pista->nome[i]);
+    }
+    pista[i] = '\0';
+    if (!corrida->terminou) {
+        snprintf(texto, sizeof(texto), "%s: CORRIDA ABANDONADA", pista);
+    } else if (corrida->desclassificado) {
+        snprintf(texto, sizeof(texto), "%s: DESCLASSIFICADO", pista);
+    } else if (corrida->posicaoFinal == 1) {
+        snprintf(texto, sizeof(texto), "%s: VITÓRIA!", pista);
+    } else {
+        snprintf(texto, sizeof(texto), "%s: %dº LUGAR", pista, corrida->posicaoFinal);
+    }
+    return texto;
 }
 
 /*
@@ -376,7 +408,19 @@ int main(int argc, char *argv[]) {
                 break;
         }
 
-        /* Entrar na corrida (do menu ou do "correr de novo") sempre começa uma nova */
+        /* A escolha da corrida abre no Mack: escolhida, o carro entra na carreta e o Mack parte
+         * (o mundo aberto leva à corrida no fim da cena); desistindo, o carro fica na vaga */
+        if (tela == TELA_PISTAS && proxima == TELA_CORRIDA) {
+            partirComOMack(pistas[menu.pistaEscolhida]->nome);
+            proxima = TELA_PASSEIO;
+        } else if (tela == TELA_PISTAS && proxima == TELA_PASSEIO) {
+            voltarDaEscolhaDaCorrida();
+        }
+        /* Da corrida (pelo resultado ou pela pausa) de volta à cidade: o carro desce da carreta */
+        if ((tela == TELA_CORRIDA || tela == TELA_RESULTADO) && proxima == TELA_PASSEIO) {
+            voltarDaCorrida(menu.carroEscolhido, recadoDaCorrida(&corrida));
+        }
+        /* Entrar na corrida (pelo Mack ou pelo "correr de novo") sempre começa uma nova */
         if (proxima == TELA_CORRIDA && tela != TELA_CORRIDA) {
             iniciarCorrida(&corrida, pistas[menu.pistaEscolhida], menu.carroEscolhido, menu.nivelEscolhido);
             limparConfetes();
@@ -387,8 +431,8 @@ int main(int argc, char *argv[]) {
             iniciarEfeitosDaCorrida();
             iniciarApresentacao(&apresentacao);
         }
-        /* Entrar no passeio livre: o carro escolhido na garagem, na rua principal */
-        if (proxima == TELA_PASSEIO && tela != TELA_PASSEIO) {
+        /* JOGAR: o carro escolhido na garagem, na rua principal */
+        if (proxima == TELA_PASSEIO && tela == TELA_MENU) {
             iniciarPasseio(menu.carroEscolhido);
         }
         /* Troca de tela: o vídeo da tela nova recomeça do início; sair da entrada clareia até o menu */
@@ -461,7 +505,8 @@ int main(int argc, char *argv[]) {
             definirVolumeDaTrilha(1.0f);
         }
         atualizarAudio(tela == TELA_ENTRADA || tela == TELA_MENU || tela == TELA_GARAGEM || tela == TELA_PISTAS || tela == TELA_CONFIGURACOES || tela == TELA_COMO_JOGAR
-                       || apresentando);   /* na apresentação da largada, a música segue de trilha */
+                       || (tela == TELA_PASSEIO && cenaDoMackComMusica())   /* da escolha da corrida, a música segue na estrada com o Mack */
+                       || apresentando);   /* e na apresentação da largada */
 
         /* Sons da corrida:
          *  - antes do GO, o motor em marcha lenta (som provisório) e o "3... 2... 1... GO!",
