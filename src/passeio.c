@@ -138,7 +138,8 @@ static float treino[3] = { TREINO_X, 0.0f, TREINO_Z };
 #define ACELERACAO_DO_MACK    3.0f      /* m/s², partindo */
 #define LONGE_DA_RAMPA        3.0f      /* metros entre o pé da rampa e o carro, depois de descer */
 #define FUNDO_DA_CARRETA      1.5f      /* metros entre a porta e a traseira do carro, lá dentro */
-#define FUNDO_DO_ESCURO       12.0f     /* metros de carreta escura atrás da porta aberta */
+#define FUNDO_DO_ESCURO       12.0f     /* metros do lado de dentro da carreta, da porta para dentro (FUNDO_DO_BAU, em preparar_mack.py) */
+#define DESENHA_O_BAU_ATE     150.0f    /* metros: mais longe que isso, o lado de dentro da carreta não aparece */
 #define FAIXA_DE_CINEMA       0.11f     /* da altura da tela: as faixas pretas das cenas */
 /* Os olhos do Mack (os dos carros, carros3d.c): acompanham o carro do jogador */
 #define OLHA_ATE              70.0f     /* metros: mais longe que isso, ele olha à frente (e em volta) */
@@ -150,6 +151,7 @@ typedef enum { CENA_DIRIGINDO, CENA_ENTRANDO, CENA_NA_CARRETA, CENA_PARTINDO, CE
 static Model mack, rodasDoMack, modeloDaPorta;
 static int temMack = 0, temRodasDoMack = 0, temPortaDoMack = 0, temOlhosDoMack = 0;
 static Vector3 eixoDaRoda[MAIS_RODAS];   /* o meio de cada roda, no modelo (o eixo é o x dele) */
+static BoundingBox caixaDaRoda[MAIS_RODAS];
 static float raioDaRodaDoMack[MAIS_RODAS];
 static Matrix matrizesDoMack[MAIS_RODAS], matrizesDasRodas[MAIS_RODAS], matrizesDaPorta[MAIS_RODAS];   /* lidas no desenho */
 static float mackX = 0.0f, mackY = 0.0f, mackZ = 0.0f, mackRumo = 0.0f, mackInclinacao = 0.0f;
@@ -290,6 +292,7 @@ static void carregarMack(void) {
             for (int i = 0; i < rodasDoMack.meshCount; i++) {
                 BoundingBox roda = GetMeshBoundingBox(rodasDoMack.meshes[i]);
                 eixoDaRoda[i] = Vector3Scale(Vector3Add(roda.min, roda.max), 0.5f);
+                caixaDaRoda[i] = roda;
                 raioDaRodaDoMack[i] = fmaxf((roda.max.y - roda.min.y) / 2.0f, 0.1f);
             }
         }
@@ -1467,18 +1470,63 @@ static void quadrado(Vector3 a, Vector3 b, Vector3 c, Vector3 d, Color ca, Color
 }
 
 /*
- * desenharPortaAberta
- * Com a porta aberta: o lado de dentro da carreta (carreta.c) e o lado de dentro da porta, de chapa
- * de metal, que vira o piso da rampa.
+ * desenharCaixasDasRodas
+ * As rodas da carreta sobem acima do piso do baú: em cada lado, uma caixa cobrindo as rodas de lá (do
+ * meio delas até a parede, e 40 cm acima do pneu, o arco inteiro), no lado de dentro (carreta.c).
  */
-static void desenharPortaAberta(void) {
-    if (!temPortaDoMack || aberturaDaPorta <= 0.001f) {
+static void desenharCaixasDasRodas(Matrix deDentro) {
+    if (!temRodasDoMack) {
+        return;
+    }
+    Vector3 de[2], ate[2];
+    int total = 0;
+    float piso = dobradica.y + 0.005f, porta = dobradica.z + 0.04f, parede = (larguraDaPorta - 0.06f) / 2.0f;
+    for (int lado = -1; lado <= 1; lado += 2) {
+        float z0 = 1e9f, z1 = -1e9f, dentro = 1e9f, topo = -1e9f;
+        for (int i = 0; i < rodasDoMack.meshCount; i++) {
+            BoundingBox r = caixaDaRoda[i];
+            float meioZ = (r.min.z + r.max.z) / 2.0f;
+            if (eixoDaRoda[i].x * lado <= 0.0f || meioZ - porta < 0.0f || meioZ - porta > FUNDO_DO_ESCURO || r.max.y <= piso) {
+                continue;   /* do outro lado, fora do baú, ou embaixo do piso */
+            }
+            z0 = fminf(z0, r.min.z); z1 = fmaxf(z1, r.max.z);
+            dentro = fminf(dentro, fminf(fabsf(r.min.x), fabsf(r.max.x)));
+            topo = fmaxf(topo, r.max.y);
+        }
+        if (z1 < z0) {
+            continue;
+        }
+        de[total] = (Vector3){ lado * (dentro - 0.10f), 0.0f, z0 - 0.20f - porta };
+        /* até quase a parede de fora da carreta (passando da do lado de dentro): pelo arco, de fora, a
+         * primeira coisa que se vê é a face escura da caixa */
+        ate[total] = (Vector3){ lado * (parede + 0.12f), topo + 0.40f - piso, z1 + 0.20f - porta };   /* 40 cm acima do pneu: o arco inteiro */
+        total++;
+    }
+    desenharCaixasDeRoda(deDentro, de, ate, total);
+}
+
+/*
+ * desenharBauDoMack
+ * O lado de dentro da carreta (carreta.c), sempre que o Mack está perto: o modelo não tem nada dentro
+ * do baú (ferramentas/preparar_mack.py tira o que havia lá), então é ele que fecha o baú, visto de
+ * qualquer lado (pela porta aberta ou, de baixo, pelas caixas das rodas). Com a porta aberta, também
+ * o lado de dentro da porta, de chapa de metal, que vira o piso da rampa.
+ */
+static void desenharBauDoMack(Vector3 camera) {
+    if (!temPortaDoMack) {
+        return;
+    }
+    Matrix mack = matrizDoMack();
+    if (Vector3Distance(camera, (Vector3){ mack.m12, mack.m13, mack.m14 }) < DESENHA_O_BAU_ATE) {
+        Matrix deDentro = MatrixMultiply(MatrixTranslate(dobradica.x, dobradica.y + 0.005f, dobradica.z + 0.04f), mack);
+        desenharInteriorDaCarreta(deDentro, larguraDaPorta - 0.06f, alturaDaPorta - 0.04f, FUNDO_DO_ESCURO);
+        desenharCaixasDasRodas(deDentro);
+    }
+    if (aberturaDaPorta <= 0.001f) {
         return;
     }
     float x0 = dobradica.x - larguraDaPorta / 2.0f + 0.03f, x1 = dobradica.x + larguraDaPorta / 2.0f - 0.03f;
     float y0 = dobradica.y + 0.01f, y1 = dobradica.y + alturaDaPorta - 0.03f;
-    Matrix deDentro = MatrixMultiply(MatrixTranslate(dobradica.x, dobradica.y + 0.005f, dobradica.z + 0.04f), matrizDoMack());
-    desenharInteriorDaCarreta(deDentro, larguraDaPorta - 0.06f, alturaDaPorta - 0.04f, FUNDO_DO_ESCURO);
 
     /* O lado de dentro da porta (o piso da rampa): chapa cinza, com as bordas e umas faixas mais escuras */
     float meioX = (x0 + x1) / 2.0f, borda = 0.18f;
@@ -1562,7 +1610,7 @@ void desenharPasseio(EstadoMenu *menu) {
         prepararOlhosDoModelo(olharDoMack(camera), (cena == CENA_PARTINDO) ? 0.3f : 0.0f, (sustoDoMack > 0.0f) ? 1.0f : 0.0f);
     }
     desenharModelosNoMundoAberto();   /* o Mack, as rodas e a porta */
-    desenharPortaAberta();
+    desenharBauDoMack(camera.position);
     desenharMarcas();
     if (carroAparece) {
         if (cena == CENA_DIRIGINDO) {   /* na rampa e dentro da carreta, a sombra cairia na rua */

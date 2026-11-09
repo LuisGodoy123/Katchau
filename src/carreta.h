@@ -24,4 +24,8 @@ void descarregarInteriorDaCarreta(void);
  * meio; y para cima, com 0 no piso; z para dentro, com 0 na porta) até o mundo */
 void desenharInteriorDaCarreta(Matrix deDentro, float largura, float altura, float fundo);
 
+/* As caixas das rodas da carreta (os pneus sobem acima do piso): blocos de chapa escura com um friso de
+ * neon, de "de" até "ate" (os dois cantos opostos), nas mesmas medidas do lado de dentro */
+void desenharCaixasDeRoda(Matrix deDentro, const Vector3 *de, const Vector3 *ate, int total);
+
 #endif

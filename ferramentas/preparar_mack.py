@@ -36,7 +36,9 @@ O que ele faz:
      (pneu, disco e cubo de cada roda); as peças de cada roda viram uma
      malha, e as rodas vão para o outro arquivo.
   4. Separa a porta de trás da carreta (a arte do McQueen), que no jogo
-     desce até o chão e vira a rampa.
+     desce até o chão e vira a rampa. E tira o que o modelo tem dentro do
+     baú (as caixas das rodas da carreta e um painel inclinado): o lado de
+     dentro é o do jogo (carreta.c), e essas faces apareciam no meio dele.
   5. Deixa o modelo em metros (4,5 m de largura, uns 30 m de comprimento),
      com o meio do caminhão na origem, as rodas em y = 0 e a frente
      para +z (como os carros em carros3d.c).
@@ -58,6 +60,8 @@ LARGURA_EM_METROS = 4.5   # a cidade foi ampliada 4,5 vezes: menor que isso, o M
 LARGURA_DA_TEXTURA_DOS_OLHOS = 512   # os dois olhos, cada um numa metade
 ALTURA_DA_TEXTURA_DOS_OLHOS = 256
 ANDA_A_IRIS = 0.12                   # quanto a íris anda de lado olhando de canto (fração da textura)
+FUNDO_DO_BAU = 12.2                  # metros da porta para dentro que o lado de dentro do jogo ocupa
+                                     # (FUNDO_DO_ESCURO, em passeio.c, com uma folga)
 
 # O olho, em frações dele: x de 0 (lado do nariz) a 1 (lado de fora); y de 0 (em cima) a 1 (embaixo)
 PALPEBRA_NO_NARIZ = 0.28     # onde a pálpebra termina, no lado do nariz e no de fora (quase reta, como no filme)
@@ -304,6 +308,24 @@ for objeto, apagar_a_porta in ((corpo, True), (porta, False)):
 cantos = [v.co for v in porta.data.vertices]
 print(f"MACK: porta de {max(c.x for c in cantos) - min(c.x for c in cantos):.2f} x {max(c.z for c in cantos) - min(c.z for c in cantos):.2f} m,"
       f" com a dobradiça a {min(c.z for c in cantos):.2f} m do chão")
+
+# ---- 5b) O que o modelo tem dentro do baú sai: o lado de dentro é desenhado pelo jogo ----
+# A caixa é a da porta (a largura e a altura do vão), da porta até FUNDO_DO_BAU para dentro (y menor,
+# no Blender). Os batentes da porta (a 8 cm do vão), as paredes de fora e o teto ficam de fora dela
+porta_x0, porta_x1 = min(c.x for c in cantos), max(c.x for c in cantos)
+porta_baixo, porta_alto = min(c.z for c in cantos), max(c.z for c in cantos)
+porta_y = sum(c.y for c in cantos) / len(cantos)
+bm = bmesh.new()
+bm.from_mesh(corpo.data)
+de_dentro = [f for f in bm.faces
+             if porta_x0 + 0.05 < f.calc_center_median().x < porta_x1 - 0.05
+             and porta_baixo - 0.03 < f.calc_center_median().z < porta_alto - 0.05
+             and porta_y - FUNDO_DO_BAU < f.calc_center_median().y < porta_y - 0.08]
+area = sum(f.calc_area() for f in de_dentro)
+bmesh.ops.delete(bm, geom=de_dentro, context='FACES')
+bm.to_mesh(corpo.data)
+bm.free()
+print(f"MACK: {len(de_dentro)} faces de dentro do baú tiradas ({area:.1f} m²)")
 malhas = [o for o in cena.objects if o.type == 'MESH']
 
 # A frente do caminhão é -y no Blender, que vira +z no glTF (y para cima)

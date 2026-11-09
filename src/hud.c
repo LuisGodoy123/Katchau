@@ -874,7 +874,6 @@ void desenharHud(Corrida *corrida) {
 }
 
 /*
-<<<<<<< HEAD
  * desenharAvisoParaContinuar
  * Na festa do pódio, no lugar do painel de chegada: a colocação em letras grandes e, embaixo, o aviso piscando para
  * apertar qualquer botão (que leva à tela de resultado).
@@ -890,7 +889,9 @@ void desenharAvisoParaContinuar(Corrida *corrida) {
     caixaArredondada(caixa, raioDoTamanho(caixa.width, caixa.height), Fade(COR_GRAFITE, 0.88f));
     escreverCentralizado(FONTE_FORTE, aviso, centro, caixa.y + 9.0f, 20.0f, Fade(COR_TEXTO_CLARO, pisca));
     (void) corrida;
-=======
+}
+
+/*
  * desenharPainelDoMotor
  * Só o painel do motor da corrida (o mostrador com a velocidade, o conta-giros, a marcha e o
  * nitro), no mesmo canto: o mundo aberto usa o mesmo.
@@ -900,7 +901,6 @@ void desenharAvisoParaContinuar(Corrida *corrida) {
 void desenharPainelDoMotor(const Carro *carro, int kmh) {
     desenharVelocimetro(carro, kmh, 1);
     desenharNitro(carro);
->>>>>>> 7086cd4cc335abb91fdc295e92ee7834b529334c
 }
 
 /*

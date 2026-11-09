@@ -441,3 +441,43 @@ void desenharInteriorDaCarreta(Matrix deDentro, float largura, float altura, flo
     rlPopMatrix();
     rlDrawRenderBatchActive();
 }
+
+/*
+ * desenharCaixasDeRoda
+ * Cada caixa: as seis faces de chapa (um pouco mais clara em cima) e um friso de neon na beira de cima
+ * do lado do corredor. Fecham também o arco das rodas, visto de fora da carreta.
+ */
+void desenharCaixasDeRoda(Matrix deDentro, const Vector3 *de, const Vector3 *ate, int total) {
+    if (!carregado || total <= 0) {
+        return;
+    }
+    rlDrawRenderBatchActive();
+    rlPushMatrix();
+    rlMultMatrixf(MatrixToFloat(deDentro));
+    Color lado = { 120, 104, 142, 255 }, topo = { 150, 132, 172, 255 }, sombra = { 20, 18, 24, 255 };   /* sombra: o que se vê de fora, pelo arco */
+    for (int i = 0; i < total; i++) {
+        Vector3 a = { fminf(de[i].x, ate[i].x), fminf(de[i].y, ate[i].y), fminf(de[i].z, ate[i].z) };
+        Vector3 b = { fmaxf(de[i].x, ate[i].x), fmaxf(de[i].y, ate[i].y), fmaxf(de[i].z, ate[i].z) };
+        float u = (b.z - a.z) / 0.7f, v = (b.y - a.y) / 0.7f, w = (b.x - a.x) / 0.7f;
+        retangulo(chapa.id, (Vector3){ a.x, b.y, a.z }, (Vector3){ b.x, b.y, a.z }, (Vector3){ b.x, b.y, b.z }, (Vector3){ a.x, b.y, b.z },
+                  topo, topo, topo, topo, 0, 0, w, u);
+        Color ladoA = (fabsf(a.x) > fabsf(b.x)) ? sombra : lado, ladoB = (fabsf(b.x) > fabsf(a.x)) ? sombra : lado;   /* o da parede, escuro */
+        retangulo(chapa.id, (Vector3){ a.x, a.y, a.z }, (Vector3){ b.x, a.y, a.z }, (Vector3){ b.x, a.y, b.z }, (Vector3){ a.x, a.y, b.z },
+                  sombra, sombra, sombra, sombra, 0, 0, w, u);
+        retangulo(chapa.id, (Vector3){ a.x, a.y, a.z }, (Vector3){ a.x, a.y, b.z }, (Vector3){ a.x, b.y, b.z }, (Vector3){ a.x, b.y, a.z },
+                  ladoA, ladoA, ladoA, ladoA, 0, 0, u, v);
+        retangulo(chapa.id, (Vector3){ b.x, a.y, a.z }, (Vector3){ b.x, a.y, b.z }, (Vector3){ b.x, b.y, b.z }, (Vector3){ b.x, b.y, a.z },
+                  ladoB, ladoB, ladoB, ladoB, 0, 0, u, v);
+        retangulo(chapa.id, (Vector3){ a.x, a.y, a.z }, (Vector3){ b.x, a.y, a.z }, (Vector3){ b.x, b.y, a.z }, (Vector3){ a.x, b.y, a.z },
+                  lado, lado, lado, lado, 0, 0, w, v);
+        retangulo(chapa.id, (Vector3){ a.x, a.y, b.z }, (Vector3){ b.x, a.y, b.z }, (Vector3){ b.x, b.y, b.z }, (Vector3){ a.x, b.y, b.z },
+                  lado, lado, lado, lado, 0, 0, w, v);
+        /* o friso, na beira de cima do lado do corredor (o lado mais perto do meio) */
+        float x = (fabsf(a.x) < fabsf(b.x)) ? a.x : b.x;
+        float dentro = (x < 0.0f) ? 0.005f : -0.005f;
+        retanguloDeUmaCor((Vector3){ x - dentro, b.y - 0.06f, a.z }, (Vector3){ x - dentro, b.y - 0.06f, b.z },
+                          (Vector3){ x - dentro, b.y - 0.025f, b.z }, (Vector3){ x - dentro, b.y - 0.025f, a.z }, NEON);
+    }
+    rlPopMatrix();
+    rlDrawRenderBatchActive();
+}
