@@ -95,6 +95,67 @@ static void registrarTelemetria(const Corrida *corrida, const Comandos *comandos
 }
 
 /*
+ * medirQuadro
+ * Com a variável de ambiente KATCHAU_QUADROS ligada, guarda o tempo dos últimos quadros e
+ * escreve no log o tempo médio, o do 1% pior (o percentil 99) e o maior. Serve para comparar
+ * o desempenho antes e depois de uma mudança: o contador de FPS da tela mostra uma média
+ * suavizada, que esconde justamente os trancos.
+ *
+ * Só guarda na memória: gravar em arquivo a cada quadro entraria na conta do próprio quadro.
+ * Para medir de verdade, desligue o VSync e o limite de quadros nas configurações, senão o
+ * tempo medido é o do monitor, não o do jogo.
+ * Recebe: o tempo do quadro, e 1 para escrever o resumo agora (no fim do jogo).
+ * Devolve: nada.
+ */
+#define QUADROS_MEDIDOS   1800    /* uns 30 segundos a 60 quadros por segundo */
+#define SEGUNDOS_DO_RESUMO  5.0f
+
+static void medirQuadro(float tempoQuadro, int agora) {
+    static float tempos[QUADROS_MEDIDOS];
+    static int total = 0, proximo = 0, ligado = -1;
+    static float desdeOResumo = 0.0f;
+    if (ligado < 0) {
+        ligado = (getenv("KATCHAU_QUADROS") != NULL);
+    }
+    if (!ligado) {
+        return;
+    }
+    if (tempoQuadro > 0.0f) {
+        tempos[proximo] = tempoQuadro;
+        proximo = (proximo + 1) % QUADROS_MEDIDOS;
+        if (total < QUADROS_MEDIDOS) {
+            total++;
+        }
+        desdeOResumo += tempoQuadro;
+    }
+    if (total == 0 || (!agora && desdeOResumo < SEGUNDOS_DO_RESUMO)) {
+        return;
+    }
+    desdeOResumo = 0.0f;
+
+    /* Ordenar uma cópia: o percentil 99 é o quadro que só 1% dos quadros supera */
+    static float ordenados[QUADROS_MEDIDOS];
+    double soma = 0.0;
+    for (int i = 0; i < total; i++) {
+        ordenados[i] = tempos[i];
+        soma += tempos[i];
+    }
+    for (int i = 1; i < total; i++) {   /* inserção: poucos milhares de itens, uma vez a cada 5 segundos */
+        float guardado = ordenados[i];
+        int j = i - 1;
+        while (j >= 0 && ordenados[j] > guardado) {
+            ordenados[j + 1] = ordenados[j];
+            j--;
+        }
+        ordenados[j + 1] = guardado;
+    }
+    float media = (float) (soma / total);
+    TraceLog(LOG_INFO, "QUADROS: %d medidos | media %.2f ms (%.0f FPS) | 1%% pior %.2f ms | maior %.2f ms",
+             total, media * 1000.0f, media > 0.0f ? 1.0f / media : 0.0f,
+             ordenados[(int) (total * 0.99f)] * 1000.0f, ordenados[total - 1] * 1000.0f);
+}
+
+/*
  * atualizarTelaDaCorrida
  * Um quadro da corrida: o jogador dirige, a IA dirige os rivais.
  * ESC (ou START) pausa: a corrida e os sons congelam e o jogador escolhe
@@ -540,7 +601,9 @@ int main(int argc, char *argv[]) {
             transicaoAlfa -= tempoQuadro * 1.6f;
         }
         EndDrawing();
+        medirQuadro(tempoQuadro, 0);
     }
+    medirQuadro(0.0f, 1);   /* o resumo do que foi medido até aqui */
     encerrarIntro();   /* se a janela fechou no meio da dissolução */
 
     descarregarPasseio();

@@ -274,6 +274,7 @@ static float reflexos[TOTAL_CARROS];    /* quanto o céu se reflete na pintura d
 static Shader shaderDosOlhos;
 static int locDoDesvio, locDosMeios, locDoTamanho, locDaForma;
 static int locsDoReflexo[3];   /* reflexoDaPintura no opaco, no translúcido e no dos olhos */
+static int locsDoOlho[3];      /* "olho" nos mesmos três: procurar pelo nome a cada quadro é caro */
 
 /* ---------- Cores ----------
  * Um acerto na pintura de um carro, ao carregar: a cor (só nos pixels perto do tom
@@ -585,9 +586,9 @@ float alturaDoCarro3D(int numero) {
  * Devolve: nada.
  */
 void definirOlhoDosCarros(Vector3 olho) {
-    SetShaderValue(shaderOpaco, GetShaderLocation(shaderOpaco, "olho"), &olho, SHADER_UNIFORM_VEC3);
-    SetShaderValue(shaderTranslucido, GetShaderLocation(shaderTranslucido, "olho"), &olho, SHADER_UNIFORM_VEC3);
-    SetShaderValue(shaderDosOlhos, GetShaderLocation(shaderDosOlhos, "olho"), &olho, SHADER_UNIFORM_VEC3);
+    SetShaderValue(shaderOpaco, locsDoOlho[0], &olho, SHADER_UNIFORM_VEC3);
+    SetShaderValue(shaderTranslucido, locsDoOlho[1], &olho, SHADER_UNIFORM_VEC3);
+    SetShaderValue(shaderDosOlhos, locsDoOlho[2], &olho, SHADER_UNIFORM_VEC3);
 }
 
 /*
@@ -1686,6 +1687,7 @@ void carregarCarros3D(void) {
     float reflexoNormal = 1.0f;   /* sem isto o uniform começa em 0: nenhum carro refletiria */
     for (int i = 0; i < 3; i++) {
         locsDoReflexo[i] = GetShaderLocation(comReflexo[i], "reflexoDaPintura");
+        locsDoOlho[i] = GetShaderLocation(comReflexo[i], "olho");
         SetShaderValue(comReflexo[i], locsDoReflexo[i], &reflexoNormal, SHADER_UNIFORM_FLOAT);
     }
     char *tabelaDosOlhos = FileExists(PASTA_DOS_OLHOS "olhos.txt") ? LoadFileText(PASTA_DOS_OLHOS "olhos.txt") : NULL;

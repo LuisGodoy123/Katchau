@@ -13,6 +13,7 @@
 #include "marcas.h"
 #include "rlgl.h"
 #include "raymath.h"
+#include "corte.h"
 
 #define MAXIMO_DE_MARCAS      6000
 #define CARROS                16
@@ -25,11 +26,15 @@
 #define SUMINDO               12.0f    /* segundos finais, desbotando */
 #define ESCURIDAO             0.80f    /* o quanto a marca mais forte escurece o asfalto */
 #define COMPRIMENTO_DA_IMAGEM 1.6f     /* metros de rastro que a imagem cobre, antes de repetir */
+/* A folga do corte: a meia-diagonal de um pedaço (0,34 de largura por 0,6 de passo é 0,35),
+ * arredondada para cima — assim o teste é conservador e nunca corta uma marca que aparece */
+#define FOLGA_DO_CORTE        0.5f
 #define LARGURA_DA_IMAGEM     64
 #define ALTURA_DA_IMAGEM      256
 
 typedef struct {
     Vector3 cantos[4];
+    Vector3 centro;   /* o meio dos quatro cantos, para o corte pelo campo de visão (corte.c) */
     float v0, v1;     /* onde a imagem começa e termina, ao longo do rastro */
     float forca;
     float idade;
@@ -80,6 +85,8 @@ void deixarMarca(int carro, int roda, Vector3 ponto, Vector3 frente, float forca
     m->cantos[1] = r->ultimaDireita;
     m->cantos[2] = direita;
     m->cantos[3] = esquerda;
+    m->centro = Vector3Scale(Vector3Add(Vector3Add(m->cantos[0], m->cantos[1]),
+                                        Vector3Add(m->cantos[2], m->cantos[3])), 0.25f);
     m->v0 = r->v;
     r->v += andou / COMPRIMENTO_DA_IMAGEM;
     m->v1 = r->v;
@@ -134,6 +141,12 @@ void desenharMarcas(void) {
     for (int i = 0; i < total; i++) {
         Marca *m = &marcas[i];
         if (m->idade >= VIDA_DA_MARCA) {
+            continue;
+        }
+        /* Fora da tela não produz nenhum pixel. Com 45 segundos de vida, as marcas mais
+         * velhas estão a quilômetros de distância, atrás da câmera. A folga cobre a
+         * meia-diagonal do quadrilátero, então nenhuma marca que toque a tela é cortada. */
+        if (!pontoAVista(m->centro, FOLGA_DO_CORTE)) {
             continue;
         }
         float desbota = fminf((VIDA_DA_MARCA - m->idade) / SUMINDO, 1.0f);

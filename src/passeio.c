@@ -585,10 +585,10 @@ static void desenharChamas(Camera3D camera, Matrix noMundo) {
     Vector3 paraTras = { -noMundo.m8, -noMundo.m9, -noMundo.m10 };
     float atras = comprimentoDoCarro3D(numero) / 2.0f;
     float meiaDistancia = larguraDoCarro3D(numero) * LUGAR_DO_ESCAPAMENTO;
-    comecarChamas();
+    comecarChamas(camera);
     for (int lado = -1; lado <= 1; lado += 2) {
         Vector3 escape = Vector3Transform((Vector3){ lado * meiaDistancia, ALTURA_DO_ESCAPAMENTO, -atras }, noMundo);
-        desenharChamaDoNitro(camera, escape, paraTras);
+        desenharChamaDoNitro(escape, paraTras);
     }
     terminarChamas();
 }

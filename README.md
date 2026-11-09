@@ -41,9 +41,34 @@ cd raylib/src && make PLATFORM=PLATFORM_DESKTOP && sudo make install
 
 **Windows**
 Instale o pacote oficial (raylib + MinGW) de https://raysan5.itch.io/raylib.
-Ele coloca a raylib em `C:\raylib`. Compile pelo terminal do MinGW
-(`C:\raylib\w64devkit\w64devkit.exe`). Se estiver em outra pasta:
-`make RAYLIB_DIR=caminho/para/raylib/src`.
+Ele coloca a raylib em `C:\raylib`. Dá para compilar de qualquer terminal (cmd, PowerShell ou
+o `C:\raylib\w64devkit\w64devkit.exe`): o Makefile acha o gcc do w64devkit sozinho, sem
+precisar ajustar o PATH.
+
+Isso importa porque o `gcc` do PATH costuma ser o **MinGW 32-bit** de `C:\MinGW\bin`, que não
+tem `pthread.h` e não linka com a raylib de 64 bits — e como o MinGW não traz `make.exe` (só
+`mingw32-make.exe`), o `make` sai do w64devkit e o `gcc` sai do MinGW. O build então morre no
+meio, em `src/mjpeg.c`, parecendo problema desse arquivo. Se acontecer, rode `make clean`
+antes de compilar de novo: os objetos que ficaram são de 32 bits, e o link falharia com
+`undefined reference to sincos`.
+
+**Compile a raylib uma vez**, para a biblioteca vir da mesma árvore que os headers:
+
+```sh
+cd C:/raylib/raylib/src && make PLATFORM=PLATFORM_DESKTOP
+```
+
+Isso é obrigatório, e o Makefile falha com uma mensagem clara se faltar. O pacote oficial traz
+os headers em `C:/raylib/raylib/src` **sem** a `libraylib.a` ao lado; sem ela, o `-lraylib` cai
+numa cópia que o w64devkit traz, compilada de outra versão. O jogo então compila contra um
+`raylib.h` e roda contra outro: a struct `Mesh` tem os campos em posições diferentes dos dois
+lados, e o jogo quebra com SIGSEGV dentro do driver de vídeo ao subir uma malha que ele mesmo
+monta (`UploadMesh` em `separarRodas`, `carros3d.c`) — um erro que não parece em nada com a
+causa.
+
+Em outras pastas: `make RAYLIB_DIR=caminho/para/raylib/src` e, se o w64devkit não estiver em
+`C:/raylib/w64devkit/bin`, `make W64DEVKIT=caminho/para/w64devkit/bin` (ou `make W64DEVKIT=`
+para usar o gcc do PATH).
 
 ## 2. Compilar e rodar
 
@@ -156,6 +181,7 @@ src/
   config.h         constantes compartilhadas (TOTAL_VOLTAS, tamanho da tela...)
   pista.c/.h       lista circular duplamente encadeada de segmentos   (fase 1)
   render.c/.h      câmera, carros e sprites na corrida em 3D
+  corte.c/.h       o corte pelo campo de visão: não manda desenhar o que está fora da tela
   mundo.c/.h       cenário 3D: os modelos das pistas e o que o jogo põe em cima deles
   carros3d.c/.h    modelos 3D dos carros, sombras e fotos para os menus
   fumaca.c/.h      fumaça dos pneus e poeira da grama
@@ -197,7 +223,7 @@ recursos/
     sprites/       árvores, pórtico, pneus e placas
 ```
 
-Regra: só `render.c`, `mundo.c`, `carros3d.c`, `fumaca.c`, `noite.c`, `hud.c`, `menu.c`, `visual.c`, `audio.c`, `efeitos.c` e `controle.c` incluem `raylib.h` (além do `main.c`, que abre
+Regra: só `render.c`, `corte.c`, `mundo.c`, `carros3d.c`, `fumaca.c`, `noite.c`, `hud.c`, `menu.c`, `visual.c`, `audio.c`, `efeitos.c` e `controle.c` incluem `raylib.h` (além do `main.c`, que abre
 a janela). O resto é lógica pura e pode ser testado no terminal.
 
 ## Os carros
@@ -485,6 +511,17 @@ saber em que segmento ele está e a quantos metros da linha. O carro e a câmera
 
 Para investigar como o carro se comporta, `KATCHAU_TELEMETRIA=1 ./katchau` grava cada quadro da corrida em `telemetria.csv`.
 
+### Medir o desempenho
+
+`KATCHAU_QUADROS=1 ./katchau` escreve no log, a cada 5 segundos e no fim, o tempo médio de quadro, o do 1% pior
+(onde aparecem os trancos, que a média esconde) e o maior. Antes de medir, desligue a sincronia vertical e o limite
+de quadros em Configurações: com eles ligados, o que se mede é o monitor, não o jogo.
+
+Para saber **onde** está o tempo, o caminho confiável não é cronometrar blocos — num OpenGL emulado, parte do custo
+de uma chamada de desenho acontece dentro dela, na mesma thread, e parte fica para o fim do quadro. O que funciona é
+desligar um sistema de cada vez e comparar: `KATCHAU_SEM_CENARIO`, `KATCHAU_SEM_CARROS`, `KATCHAU_SEM_FUMACA`,
+`KATCHAU_SEM_MARCAS` (`render.c`), `KATCHAU_SEM_TELAO` (`telao.c`) e `KATCHAU_SEM_TORCIDA3D` (`torcida3d.c`).
+
 ### Efeitos de tela
 
 A cena 3D é desenhada numa imagem e passa por um último shader (`posprocesso.c`): brilho em volta das luzes (os faróis,
@@ -505,6 +542,12 @@ Nas outras pistas, o telão é uma estrutura 3D (`objetos/telao.glb` e `telao_ka
 `build/exp/gerar_telao3d.py`): duas torres de treliça com sapatas, o gabinete com a tela, a passarela de manutenção,
 as caixas de som e o letreiro KATCHAU com lâmpadas. A tela traz uma imagem de espera só dela; ao carregar, o jogo troca
 essa imagem pela transmissão (`ligarTeloesDoCenario` em `mundo.c`). A transmissão é desenhada sem as sombras do sol.
+
+Desenhar a transmissão é desenhar o mundo inteiro outra vez (o cenário e os 14 carros), numa imagem de 512x312. Como
+Interlagos tem 5 telões em 6 km de pista, isso só é feito quando alguma tela está no campo de visão do jogador: no
+resto da volta, o que apareceria nela é invisível. `teloesAVista` (`mundo.c`) guarda a caixa de cada tela no
+carregamento e `atualizarTelao` (`render.c`) pergunta antes de desenhar. `KATCHAU_SEM_TELAO=1 ./katchau` desliga a
+transmissão de vez, para comparar o desempenho.
 
 ### Torcida 3D
 
@@ -573,6 +616,12 @@ e o jogo usa ele 40% maior (`ESCALA_INTERLAGOS` em `pista.h`): na medida real o 
 com 14 carros, quase não dá para ultrapassar (um piloto perfeito, com carro 5% melhor, chegava em 10º). Para correr na
 medida real, é só pôr a escala em 1. Os pneus duram as mesmas ~5 voltas em qualquer escala (`escalaDoDesgaste` em
 `corrida.c`).
+
+O modelo tem 177 malhas, e o jogo só manda para a placa de vídeo as que podem aparecer na tela — em média umas 78
+(`corte.c`). Não é economia de triângulos: é economia de chamadas de desenho, porque cada malha custa uma troca de
+material, de shader e de buffers. As malhas são separadas por tipo de desenho no carregamento
+(`prepararCaixasDoMapa` em `mundo.c`), com a caixa de cada uma já em coordenadas do mundo. O mesmo corte vale para o
+mapa de sombra (que enxerga um quadrado de 330 m) e para a transmissão dos telões.
 
 O traçado foi **medido no modelo** por `ferramentas/medir_interlagos.c` (`make medir-interlagos`), que escreve
 `src/interlagos.h`. A ferramenta carrega o modelo com a raylib e:
