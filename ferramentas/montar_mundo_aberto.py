@@ -9,6 +9,9 @@ Junta os dois modelos de Radiator Springs num mapa só, para o passeio livre:
     lugar livre mais perto da cidade, ligada a ela por uma estrada.
 
 O que o script faz:
+  0. troca a torre de pneus do Luigi (cartões e discos achatados, no
+     original) por pneus 3D: um pneu deitado e uma roda de pneus em pé,
+     alternando, inclinada como a original;
   1. põe os dois em metros (Race-O-Rama x4,5, Cars 2 x37,5: as estradas dos
      dois ficam do mesmo tamanho e o carro do jogo fica pequeno na cidade);
   2. tira os painéis de horizonte do Cars 2 (planos azulados em pé);
@@ -22,7 +25,9 @@ O que o script faz:
   6. puxa as cores do Race-O-Rama para as do Cars 2 (areia laranja, rochas
      vermelhas). Só os pixels "cor de areia" mudam: asfalto, faixas, prédios
      e placas ficam como estão;
-  7. cria o chão de base (o deserto entre tudo) e a estrada de ligação;
+  7. cria o chão de base (o deserto entre tudo) e a rua da pista de treino
+     (de asfalto, saindo em "T" da rua da cidade mais perto, reta até a
+     curva de cima da pista de treino);
   8. exporta recursos/modelos/radiator_springs.glb (o desenho) e
      recursos/modelos/radiator_springs.col (a colisão, nos eixos do jogo: x,
      y para cima, z = -norte, com o tipo de chão e a cor de cada triângulo,
@@ -65,8 +70,20 @@ DISTANCIA_MINIMA = 350.0   # metros do meio da cidade ao meio da arena: ela não
 PELICULA = 4.0             # metros: o que está até isso acima (ou abaixo) do terreno do Cars 2 é película
 ACIMA_DO_TERRENO = 0.06    # metros: onde a película fica
 
-ESTRADA_ACIMA = 0.03       # metros: a estrada de ligação é pintura no chão, não uma laje
-LARGURA_DA_LIGACAO = 20.0  # metros, como a estrada do Race-O-Rama na escala nova (com o acostamento)
+# A rua da pista de treino: igual à rua principal (a mesma textura, a mesma largura e a mesma repetição)
+RUA_DA_CIDADE = 'ror_Image_61'       # o asfalto das ruas, com a faixa amarela
+PISTA_DE_TREINO = 'c2_Image_6'       # a terra da pista de treino (RAD_BOSS_Road)
+LARGURA_DA_RUA = 14.7                # metros, como a rua principal
+METROS_POR_VOLTA_DA_RUA = 31.4       # a textura da rua principal se repete a cada tanto, no comprimento
+BORDAS_DA_RUA = (0.065, 0.995)       # o u das duas beiras, como na rua principal
+ACOSTAMENTO = 3.0                    # metros de areia descendo da beira da rua até o chão
+RUA_ACIMA = 0.05                     # metros acima do ponto mais alto do chão embaixo de cada seção
+
+# A torre de pneus do Luigi (no Race-O-Rama: x, y do pé dela, em unidades do original)
+TORRE_DE_PNEUS = (107.8, -33.3)
+RAIO_DA_TORRE = 1.0                  # unidades: as peças dela cabem neste raio
+BASE_DA_TORRE = 0.5                  # unidades: abaixo disso é o pedestal (fica)
+PNEUS_EM_PE = 6                      # pneus em pé em cada roda
 MARGEM = 400.0             # metros de deserto além de tudo
 CELULA_DA_BASE = 30.0      # metros: a grade do chão de base
 BASE_ABAIXO = 0.3          # metros: o chão de base fica abaixo do chão dos modelos (pouco: na borda, é um degrau)
@@ -268,6 +285,149 @@ c2 = importar(ARQ_C2, 'c2')
 # 1. Escala (a posição da arena vem depois)
 aplicar_transformacao(ror, Matrix.Scale(ESCALA_ROR, 4))
 aplicar_transformacao(c2, Matrix.Scale(ESCALA_C2, 4))
+
+
+# 1b. A torre de pneus do Luigi, em 3D. No original ela é feita de discos achatados e cartões
+# com a imagem de pneus em pé: de perto, chapada. As peças dela saem (o pedestal fica) e entra
+# uma torre de pneus de verdade, com a mesma altura, a mesma largura e a mesma inclinação
+def textura_de_pneu():
+    """Duas faixas na mesma imagem: embaixo o pneu preto, em cima o de faixa branca. Em cada uma, o v
+    dá a volta na seção do pneu (0 = a banda de rodagem, por fora) e o u dá a volta no pneu"""
+    L, A = 512, 256
+    img = np.zeros((A, L, 4), dtype=np.float32); img[..., 3] = 1.0
+    u = (np.arange(L) + 0.5) / L
+    for metade in (0, 1):
+        fi = 2 * np.pi * ((np.arange(A // 2) + 0.5) / (A // 2))
+        F, U = np.meshgrid(fi, u, indexing='ij')
+        borracha = np.full(F.shape, 0.075)
+        banda = np.cos(F) > np.cos(0.62)                       # a banda de rodagem
+        lado = np.abs(np.sin(F))                                # 1 no meio dos lados
+        # sulcos em V na banda: blocos claros entre sulcos escuros
+        v_do_bloco = (U * 16 + np.abs(np.sin(F)) * 1.6) % 1.0
+        bloco = np.where(v_do_bloco < 0.72, 0.13, 0.035)
+        cor = np.where(banda, bloco, borracha + 0.02 * lado)
+        cor = np.where(np.cos(F) < -0.85, 0.045, cor)           # por dentro, mais escuro
+        rgb = np.stack([cor, cor * 0.97, cor * 0.93], -1)
+        if metade == 1:                                         # a faixa branca, no meio de cada lado
+            branca = (np.abs(np.sin(F)) > 0.80) & ~banda
+            rgb[branca] = (0.86, 0.85, 0.80)
+        img[metade * (A // 2):(metade + 1) * (A // 2), :, :3] = rgb
+    imagem = bpy.data.images.new('pneu_da_torre', L, A, alpha=False)
+    imagem.pixels = img.ravel()
+    imagem.file_format = 'PNG'
+    imagem.pack()
+    material = bpy.data.materials.new('pneu_da_torre')
+    material.use_nodes = True
+    no = material.node_tree.nodes.new('ShaderNodeTexImage'); no.image = imagem
+    bsdf = next(n for n in material.node_tree.nodes if n.type == 'BSDF_PRINCIPLED')
+    material.node_tree.links.new(no.outputs['Color'], bsdf.inputs['Base Color'])
+    return material
+
+
+def pneu(bm, uv, centro, eixo, raio_meio, meia_espessura, meia_largura, faixa_branca, giro, voltas=28, lados=10):
+    """Um pneu (um toro de seção quase quadrada) em volta do eixo dado"""
+    a = eixo.normalized(); u = a.orthogonal().normalized(); v = a.cross(u)
+    vs = []
+    for i in range(voltas):
+        t = 2 * math.pi * i / voltas + giro
+        para_fora = u * math.cos(t) + v * math.sin(t)
+        for j in range(lados):
+            f = 2 * math.pi * j / lados
+            c, s = math.cos(f), math.sin(f)
+            c, s = math.copysign(abs(c) ** 0.55, c), math.copysign(abs(s) ** 0.55, s)
+            vs.append(bm.verts.new(centro + para_fora * (raio_meio + meia_espessura * c) + a * (meia_largura * s)))
+    v0 = 0.5 if faixa_branca else 0.0
+    for i in range(voltas):
+        for j in range(lados):
+            i1, j1 = (i + 1) % voltas, (j + 1) % lados
+            face = bm.faces.new((vs[i * lados + j], vs[i1 * lados + j], vs[i1 * lados + j1], vs[i * lados + j1]))
+            for laco, (ii, jj) in zip(face.loops, ((i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1))):
+                laco[uv].uv = (2.0 * ii / voltas, v0 + 0.5 * jj / lados)
+
+
+def trocar_torre_de_pneus():
+    centro = Vector(TORRE_DE_PNEUS) * ESCALA_ROR
+    raio = RAIO_DA_TORRE * ESCALA_ROR
+    base = BASE_DA_TORRE * ESCALA_ROR
+    tirados = []
+    for o in ror:
+        bm = bmesh.new(); bm.from_mesh(o.data); bm.faces.ensure_lookup_table()
+        # as peças soltas inteiras dentro do cilindro, acima do pedestal (a busca começa só nas faces
+        # de dentro, mas segue a peça inteira: um prédio que encoste no cilindro não é cortado)
+        apagar = []
+        vistas = set()
+        for f in bm.faces:
+            if f.index in vistas or (f.calc_center_median().xy - centro).length > raio:
+                continue
+            peca, fila = set(), [f]
+            while fila:
+                g = fila.pop()
+                if g.index in peca:
+                    continue
+                peca.add(g.index)
+                for e in g.edges:
+                    for h in e.link_faces:
+                        if h.index not in peca:
+                            fila.append(h)
+            vistas |= peca
+            faces = [bm.faces[i] for i in peca]
+            pontos = [vv.co for g in faces for vv in g.verts]
+            if pontos and all((p.xy - centro).length < raio for p in pontos) and max(p.z for p in pontos) > base + 0.3:
+                apagar += faces
+        if apagar:
+            tirados += [vv.co.copy() for g in apagar for vv in g.verts]
+            bmesh.ops.delete(bm, geom=list(set(apagar)), context='FACES')
+            bm.to_mesh(o.data)
+        bm.free()
+    if len(tirados) < 50:
+        print('Torre de pneus: não achei a torre; fica a original')
+        return None
+    z0 = min(p.z for p in tirados)   # o topo do pedestal
+    z1 = max(p.z for p in tirados)
+    def meio_entre(za, zb):
+        sel = [p for p in tirados if za <= p.z <= zb]
+        return Vector(((min(p.x for p in sel) + max(p.x for p in sel)) / 2, (min(p.y for p in sel) + max(p.y for p in sel)) / 2))
+    pe = meio_entre(z0, z0 + (z1 - z0) * 0.15)
+    topo = meio_entre(z1 - (z1 - z0) * 0.15, z1)
+    raio_externo = sorted((p.xy - pe).length for p in tirados if p.z < z0 + (z1 - z0) * 0.3)[-1] * 0.92
+    eixo = Vector((topo.x - pe.x, topo.y - pe.y, z1 - z0)).normalized()
+    bm = bmesh.new(); uv = bm.loops.layers.uv.new()
+    # Um período: um pneu deitado e uma roda de pneus em pé. O tamanho deles é acertado para a
+    # torre fechar com um pneu deitado no alto
+    altura_deitado = 0.42 * raio_externo
+    raio_em_pe = 0.36 * raio_externo
+    periodo = altura_deitado + 2 * raio_em_pe
+    total = z1 - z0
+    n = max(1, int((total - altura_deitado) / periodo))
+    k = (total - altura_deitado) / (n * periodo)
+    altura_deitado *= k; raio_em_pe *= k; periodo *= k
+    base_do_eixo = Vector((pe.x, pe.y, z0))
+    def no_eixo(h):
+        return base_do_eixo + eixo * (h / eixo.z)
+    lado_x = eixo.orthogonal().normalized(); lado_y = eixo.cross(lado_x)
+    for camada in range(n + 1):
+        h = camada * periodo
+        pneu(bm, uv, no_eixo(h + altura_deitado / 2), eixo, raio_externo * 0.70, raio_externo * 0.30, altura_deitado / 2, False,
+             camada * 0.7)
+        if camada == n:
+            break
+        meio = no_eixo(h + altura_deitado + raio_em_pe)
+        largura = 0.30 * raio_externo
+        for i in range(PNEUS_EM_PE):
+            t = 2 * math.pi * i / PNEUS_EM_PE + (camada % 2) * math.pi / PNEUS_EM_PE
+            para_fora = lado_x * math.cos(t) + lado_y * math.sin(t)
+            pneu(bm, uv, meio + para_fora * (raio_externo - largura), para_fora, raio_em_pe * 0.66, raio_em_pe * 0.34, largura,
+                 True, 0.0, voltas=22, lados=8)
+    me = bpy.data.meshes.new('torre_de_pneus'); bm.to_mesh(me); bm.free()
+    me.materials.append(textura_de_pneu())
+    torre = bpy.data.objects.new('ror_torre_de_pneus', me); bpy.context.scene.collection.objects.link(torre)
+    print('Torre de pneus: %d pneus deitados e %d em pé, %.1f m de altura, %.1f m de largura' % (n + 1, n * PNEUS_EM_PE, total, 2 * raio_externo))
+    return torre
+
+
+torre_de_pneus = trocar_torre_de_pneus()
+if torre_de_pneus is not None:
+    ror.append(torre_de_pneus)
 
 # 2. Fora os painéis de horizonte do Cars 2
 for o in list(c2):
@@ -756,57 +916,113 @@ if fs:
     saias = bpy.data.objects.new('saias_do_chao', me); bpy.context.scene.collection.objects.link(saias)
 print('Saias: %d bordas de chão fechadas até o chão de baixo' % len(fs))
 
-# 7c. A estrada de ligação: da estrada do Race-O-Rama mais perto até a borda da arena, em linha
-# reta, se o caminho não atravessar nada
-estradas = [o for o in ror if imagens_do(o) & {'ror_' + n for n in ESTRADA_ROR}]
-inicio = min((v.co.copy() for o in estradas for v in o.data.vertices), key=lambda p: (p.xy - oval.xy).length)
-inicio.z = 0
-# o fim: andando do oval para a cidade, o último ponto que ainda é terreno da arena
-direcao = (inicio - oval); direcao.z = 0; direcao.normalize()
-fim = oval.copy()
-for k in range(1, 400):
-    p = oval + direcao * (k * 5.0)
-    if altura(arv_terreno, p.x, p.y) is None:
-        fim = oval + direcao * max(0.0, (k - 1) * 5.0 - 10.0)   # termina 10 m dentro do platô, não na fresta
-        break
-arv_c2_solidos = arvore([o for o in c2 if o not in vegetacao_c2 and o not in terreno_c2])
-livre = True
-comprimento = (fim - inicio).length
-for k in range(int(comprimento / 10.0)):
-    p = inicio.lerp(fim, k * 10.0 / comprimento)
-    if (fim - p).length < 80 or (p - inicio).length < 40:
-        continue
-    for a in (arv_obst, arv_c2_solidos):
-        h = altura(a, p.x, p.y)
-        if h is not None and h > chao_em(p.x, p.y) + 1.5:
-            livre = False
+# 7c. A rua da pista de treino: sai em "T" da rua da cidade mais perto da pista de treino, reta e
+# perpendicular a ela, até a beira da curva de cima da pista. É igual à rua principal (o mesmo asfalto
+# com a faixa amarela, a mesma largura). O leito acompanha o chão (cada seção na altura do ponto mais
+# alto embaixo dela, sem descer em nenhum ponto) e um acostamento de areia desce das beiras até o chão,
+# sem beirada no ar
+ruas_da_cidade = [o for o in ror if RUA_DA_CIDADE in imagens_do(o)]
+pistas_do_treino = [o for o in c2 if PISTA_DE_TREINO in imagens_do(o)]
 ligacao = None
-if livre and comprimento > 50:
-    n = int(comprimento / 6.0)
-    pts = [inicio.lerp(fim, k / n) for k in range(n + 1)]
-    zs = [chao_em(p.x, p.y) + ESTRADA_ACIMA for p in pts]
-    for _ in range(20):
-        zs = [zs[0]] + [(zs[k - 1] + zs[k] * 2 + zs[k + 1]) / 4 for k in range(1, len(zs) - 1)] + [zs[-1]]
-    t = (fim - inicio).normalized()
-    lado = Vector((t.y, -t.x, 0)) * (LARGURA_DA_LIGACAO / 2)
-    vs, fs, uvs = [], [], []
-    for k, p in enumerate(pts):
-        d = (p - inicio).length
-        vs += [(p.x - lado.x, p.y - lado.y, zs[k]), (p.x + lado.x, p.y + lado.y, zs[k])]
-        uvs += [(0.0, d / LARGURA_DA_LIGACAO), (1.0, d / LARGURA_DA_LIGACAO)]
-        if k:
-            fs.append((2 * k - 2, 2 * k - 1, 2 * k + 1, 2 * k))
-    me = bpy.data.meshes.new('ligacao'); me.from_pydata(vs, [], fs)
+if ruas_da_cidade and pistas_do_treino:
+    arv_rua = arvore(ruas_da_cidade)
+    arv_pista = arvore(pistas_do_treino)
+    melhor = None
+    for o in pistas_do_treino:
+        for v in o.data.vertices:
+            perto = arv_rua.find_nearest(v.co)
+            if perto[0] is not None:
+                d = (perto[0].xy - v.co.xy).length
+                if melhor is None or d < melhor[0]:
+                    melhor = (d, perto[0].copy(), v.co.copy())
+    _, inicio, fim = melhor
+    inicio.z = fim.z = 0.0
+    direcao = fim - inicio
+    comprimento = direcao.length
+    direcao.normalize()
+    normal = Vector((direcao.y, -direcao.x, 0.0))
+    meia = LARGURA_DA_RUA / 2
+    n = max(2, int(comprimento / 2.0))
+    centros = [inicio + direcao * (comprimento * k / n) for k in range(n + 1)]
+    chao = [max(chao_em(c.x + normal.x * t, c.y + normal.y * t) for t in (-meia, -meia / 2, 0.0, meia / 2, meia)) + RUA_ACIMA
+            for c in centros]
+    # Nas pontas, a altura da rua da cidade e a da pista (sem degrau), misturando nos primeiros e últimos 10 m
+    na_rua = altura(arv_rua, inicio.x, inicio.y)
+    na_pista = altura(arv_pista, fim.x, fim.y)
+    for k, c in enumerate(centros):
+        s_ = comprimento * k / n
+        if na_rua is not None and s_ < 10.0:
+            chao[k] = na_rua + (chao[k] - na_rua) * (s_ / 10.0)
+        if na_pista is not None and comprimento - s_ < 10.0:
+            chao[k] = na_pista + (chao[k] - na_pista) * ((comprimento - s_) / 10.0)
+    alturas = list(chao)
+    for _ in range(30):   # suaviza só subindo: a rua não afunda no chão em ponto nenhum
+        alturas = [alturas[0]] + [(alturas[k - 1] + 2 * alturas[k] + alturas[k + 1]) / 4 for k in range(1, n)] + [alturas[-1]]
+        alturas = [max(a, b) for a, b in zip(alturas, chao)]
+    vs, fs, uvs, mats = [], [], [], []
+    for k, c in enumerate(centros):
+        z = alturas[k]
+        fora_e = c - normal * (meia + ACOSTAMENTO); fora_d = c + normal * (meia + ACOSTAMENTO)
+        vs += [(fora_e.x, fora_e.y, chao_em(fora_e.x, fora_e.y) - 0.15),
+               (c.x - normal.x * meia, c.y - normal.y * meia, z),
+               (c.x + normal.x * meia, c.y + normal.y * meia, z),
+               (fora_d.x, fora_d.y, chao_em(fora_d.x, fora_d.y) - 0.15)]
+    for k in range(n):
+        a, b = 4 * k, 4 * (k + 1)
+        fs += [(a, a + 1, b + 1, b), (a + 1, a + 2, b + 2, b + 1), (a + 2, a + 3, b + 3, b + 2)]
+        mats += [1, 0, 1]
+    me = bpy.data.meshes.new('rua_do_treino'); me.from_pydata(vs, [], fs)
     uv = me.uv_layers.new()
-    for lp in me.loops:
-        uv.data[lp.index].uv = uvs[lp.vertex_index]
-    mat_estrada = next(m for m in bpy.data.materials if m.use_nodes and any(
-        n.type == 'TEX_IMAGE' and n.image and n.image.name == 'ror_Image_30' for n in m.node_tree.nodes))
-    me.materials.append(mat_estrada)
-    ligacao = bpy.data.objects.new('estrada_ligacao', me); bpy.context.scene.collection.objects.link(ligacao)
-    print('Estrada de ligação: %.0f m' % comprimento)
+    for p, m in zip(me.polygons, mats):
+        p.material_index = m
+        for laco in p.loop_indices:
+            vi = me.loops[laco].vertex_index
+            k, coluna = divmod(vi, 4)
+            if m == 0:
+                uv.data[laco].uv = (BORDAS_DA_RUA[0] if coluna == 1 else BORDAS_DA_RUA[1], -(comprimento * k / n) / METROS_POR_VOLTA_DA_RUA)
+            else:
+                x, y, _ = vs[vi]
+                uv.data[laco].uv = (x / 20.0, y / 20.0)
+    mat_rua = next(m for o in ruas_da_cidade for m in o.data.materials
+                   if m and m.use_nodes and any(x.type == 'TEX_IMAGE' and x.image and x.image.name == RUA_DA_CIDADE for x in m.node_tree.nodes))
+    me.materials.append(mat_rua)
+    me.materials.append(emenda.data.materials[0])
+    ligacao = bpy.data.objects.new('rua_do_treino', me); bpy.context.scene.collection.objects.link(ligacao)
+    print('Rua da pista de treino: %.0f m, de (%.0f, %.0f) a (%.0f, %.0f) no jogo' % (comprimento, inicio.x, -inicio.y, fim.x, -fim.y))
+    # Os matinhos e cactos da arena que caíram em cima da rua (no platô) saem, cada moita inteira
+    faixa = meia + ACOSTAMENTO + 1.5
+    def na_rua(p):
+        d = p - inicio
+        ao_longo = d.x * direcao.x + d.y * direcao.y
+        return -2.0 < ao_longo < comprimento + 2.0 and abs(d.x * normal.x + d.y * normal.y) < faixa
+    tiradas = 0
+    for o in vegetacao_c2:
+        bm = bmesh.new(); bm.from_mesh(o.data); bm.faces.ensure_lookup_table()
+        apagar, vistas = [], set()
+        for f in bm.faces:
+            if f.index in vistas or not na_rua(f.calc_center_median()):
+                continue
+            moita, fila = set(), [f]
+            while fila:
+                g = fila.pop()
+                if g.index in moita:
+                    continue
+                moita.add(g.index)
+                for e in g.edges:
+                    fila += [h for h in e.link_faces if h.index not in moita]
+            vistas |= moita
+            faces = [bm.faces[i] for i in moita]
+            meio = sum((v.co for g in faces for v in g.verts), Vector()) / sum(len(g.verts) for g in faces)
+            if na_rua(meio):
+                apagar += faces
+                tiradas += 1
+        if apagar:
+            bmesh.ops.delete(bm, geom=list(set(apagar)), context='FACES')
+            bm.to_mesh(o.data)
+        bm.free()
+    print('Rua da pista de treino: %d moitas da arena tiradas de cima dela' % tiradas)
 else:
-    print('Estrada de ligação: o caminho em linha reta atravessa alguma coisa; sem estrada')
+    print('Rua da pista de treino: faltou a rua da cidade ou a pista; sem rua')
 for m in bpy.data.materials:
     if m.use_nodes:
         for n in m.node_tree.nodes:

@@ -28,14 +28,14 @@ typedef enum {
     TELA_SAIR
 } Tela;
 
-#define TOTAL_OPCOES 6   /* CORRER, PASSEIO LIVRE, GARAGEM, COMO JOGAR, CONFIGURAÇÕES, SAIR */
-#define TOTAL_OPCOES_PAUSA 2   /* CONTINUAR, MENU PRINCIPAL */
+#define TOTAL_OPCOES 5   /* JOGAR, GARAGEM, COMO JOGAR, CONFIGURAÇÕES, SAIR */
+#define TOTAL_OPCOES_PAUSA 2   /* CONTINUAR e sair (MENU PRINCIPAL na cidade, VOLTAR À CIDADE na corrida) */
 
 /* O que o jogador escolheu na pausa neste quadro */
 typedef enum {
     PAUSA_NADA,        /* ainda escolhendo */
     PAUSA_CONTINUAR,   /* volta para a corrida, de onde parou */
-    PAUSA_SAIR         /* abandona a corrida e vai ao menu principal */
+    PAUSA_SAIR         /* sai: da corrida, de volta à cidade; da cidade, ao menu principal */
 } EscolhaDaPausa;
 
 /* O que as telas de menu precisam lembrar entre um quadro e outro. */
@@ -55,6 +55,7 @@ typedef struct {
     float giroDaVitrine;                        /* o carro da vitrine girando (radianos) */
     float destaqueOrdem;                        /* animação (0 a 1) do seletor de ordem */
     int opcaoPausa;                             /* item marcado na pausa */
+    const char *saidaDaPausa;                   /* o texto do segundo botão da pausa (abrirPausa põe MENU PRINCIPAL) */
     float destaquePausa[TOTAL_OPCOES_PAUSA];    /* animação (0 a 1) de cada botão da pausa */
     int abaConfig;                              /* a aba das configurações: 0 = controles, 1 = exibição */
     float segundosParaAplicar;                  /* > 0: a resolução ou o modo de tela mudou e a janela muda quando chegar a zero */
@@ -93,6 +94,7 @@ Tela atualizarComoJogar(void);
 void desenharComoJogar(void);
 
 void abrirPausa(EstadoMenu *menu);
+void abrirPausaDaCorrida(EstadoMenu *menu);   /* a saída é VOLTAR À CIDADE */
 EscolhaDaPausa atualizarPausa(EstadoMenu *menu);
 void desenharPausa(EstadoMenu *menu);
 

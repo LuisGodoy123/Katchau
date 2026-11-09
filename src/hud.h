@@ -18,6 +18,7 @@
 #include "corrida.h"
 
 void desenharHud(Corrida *corrida);
+void desenharPainelDoMotor(const Carro *carro, int kmh);   /* o velocímetro da corrida, sozinho (o mundo aberto usa) */
 const char *codigoDoCarro(int numero);
 Color corDoCarro(int numero);
 void desenharFimDeCorrida(Corrida *corrida);

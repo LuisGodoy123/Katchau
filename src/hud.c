@@ -643,11 +643,11 @@ static void desenharMarcha(Vector2 centro, const Motor *motor, int largou, int d
  * O painel do motor, no canto inferior direito, tudo dentro de um
  * mostrador redondo: o conta-giros com ponteiro em volta, a velocidade
  * grande no meio e a marcha no vão de baixo do arco.
- * Recebe: a corrida e o motor do jogador.
+ * Recebe: o carro do jogador, a velocidade a mostrar e se a corrida já largou.
  * Devolve: nada.
  */
-static void desenharVelocimetro(Corrida *corrida, const Motor *motor) {
-    Carro *jogador = &corrida->jogador;
+static void desenharVelocimetro(const Carro *jogador, int velocidade, int largou) {
+    const Motor *motor = &jogador->motor;
     Vector2 centro = centroDoMostrador();
     float raio = RAIO_VELOCIMETRO;
 
@@ -655,7 +655,7 @@ static void desenharVelocimetro(Corrida *corrida, const Motor *motor) {
     desenharContaGiros(centro, raio, motor->giro);
 
     /* Velocidade no meio: amarela no vácuo, quando passa da máxima da ficha */
-    const char *kmh = TextFormat("%d", velocidadeEmKmh(jogador));
+    const char *kmh = TextFormat("%d", velocidade);
     Color cor = (jogador->vacuo > 0.3f) ? COR_AMARELO : COR_TEXTO_CLARO;
     float y = centro.y - TAMANHO_VELOCIDADE * 0.62f;
     escreverCentralizado(FONTE_TITULO, kmh, centro.x + 1.5f, y + 1.5f, TAMANHO_VELOCIDADE, Fade(BLACK, 0.5f));
@@ -663,7 +663,7 @@ static void desenharVelocimetro(Corrida *corrida, const Motor *motor) {
     escreverCentralizado(FONTE_FORTE, "KM/H", centro.x, centro.y + 12.0f, 11.0f, Fade(COR_TEXTO_CLARO, 0.7f));
 
     Vector2 marcha = { centro.x, centro.y + raio * 0.72f };
-    desenharMarcha(marcha, motor, corrida->contagemRegressiva <= 0.0f, jogador->re > 0.0f);
+    desenharMarcha(marcha, motor, largou, jogador->re > 0.0f);
 }
 
 /*
@@ -688,11 +688,10 @@ static void desenharArcoDoNitro(Vector2 centro, float raio, float de, float ate,
  * O nitro, colado no mostrador: um arco fino do lado direito, que enche de baixo
  * para cima, com um losango e um raio no meio. Queimando, ele acende; sem
  * o mínimo para ligar, fica apagado.
- * Recebe: a corrida.
+ * Recebe: o carro do jogador.
  * Devolve: nada.
  */
-static void desenharNitro(Corrida *corrida) {
-    Carro *jogador = &corrida->jogador;
+static void desenharNitro(const Carro *jogador) {
     Vector2 centro = centroDoMostrador();
     float raio = RAIO_VELOCIMETRO + DISTANCIA_DO_ARCO_NITRO;
 
@@ -862,9 +861,9 @@ void desenharHud(Corrida *corrida) {
     desenharPainelDePosicoes(corrida);
     desenharPainelDaVolta(corrida);
     desenharMiniMapa(corrida);
-    desenharVelocimetro(corrida, &corrida->jogador.motor);
+    desenharVelocimetro(&corrida->jogador, velocidadeEmKmh(&corrida->jogador), corrida->contagemRegressiva <= 0.0f);
     desenharVacuo(corrida);
-    desenharNitro(corrida);
+    desenharNitro(&corrida->jogador);
 
     if (estaForaDaPista(&corrida->jogador)) {
         escreverCentralizado(FONTE_FORTE, "FORA DA PISTA", larguraVirtual() / 2.0f, alturaVirtual() * 0.30f,
@@ -875,6 +874,7 @@ void desenharHud(Corrida *corrida) {
 }
 
 /*
+<<<<<<< HEAD
  * desenharAvisoParaContinuar
  * Na festa do pódio, no lugar do painel de chegada: a colocação em letras grandes e, embaixo, o aviso piscando para
  * apertar qualquer botão (que leva à tela de resultado).
@@ -890,6 +890,17 @@ void desenharAvisoParaContinuar(Corrida *corrida) {
     caixaArredondada(caixa, raioDoTamanho(caixa.width, caixa.height), Fade(COR_GRAFITE, 0.88f));
     escreverCentralizado(FONTE_FORTE, aviso, centro, caixa.y + 9.0f, 20.0f, Fade(COR_TEXTO_CLARO, pisca));
     (void) corrida;
+=======
+ * desenharPainelDoMotor
+ * Só o painel do motor da corrida (o mostrador com a velocidade, o conta-giros, a marcha e o
+ * nitro), no mesmo canto: o mundo aberto usa o mesmo.
+ * Recebe: o carro (o da corrida que dirige o carro livre) e a velocidade a mostrar, em km/h.
+ * Devolve: nada.
+ */
+void desenharPainelDoMotor(const Carro *carro, int kmh) {
+    desenharVelocimetro(carro, kmh, 1);
+    desenharNitro(carro);
+>>>>>>> 7086cd4cc335abb91fdc295e92ee7834b529334c
 }
 
 /*

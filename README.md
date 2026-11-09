@@ -13,6 +13,19 @@ lista circular duplamente encadeada de segmentos.
 - **Fase 5 (em parte):** Interlagos de verdade (o traçado de 2023, num modelo 3D medido para o jogo), mini-mapa, zebras e muros do modelo,
   linha de chegada quadriculada e objetos na beira da pista (`src/obstaculos.c`). Falta o turbo.
 - **Fase 6:** menu principal, garagem com Merge Sort, como jogar, contagem regressiva e tela de resultado (`src/menu.c`).
+- **O jogo no mundo aberto:** no menu, **JOGAR** leva a Radiator Springs, e é lá que tudo acontece. As
+  corridas começam no **Mack**, estacionado na rua principal, logo à frente da largada. Na vaga atrás da
+  carreta, o jogador aperta **ENTER** (ou Y) para entrar: a porta de trás desce e vira rampa, o carro sobe e
+  entra, a porta sobe, e aí vem a escolha da corrida. Escolhida, o Mack parte pela rua (uma cena curta, com a
+  música do menu seguindo até a apresentação da pista); desistindo, o carro desce de ré pela rampa. No fim
+  da corrida (ou saindo dela pela pausa), o carro desce do mesmo jeito, de volta na cidade, com o resultado
+  no alto da tela. Por dentro, a carreta é o "camarim" do carro (`src/carreta.c`): chapa escura com neon
+  roxo, prateleiras com troféus e miniaturas, quadros, teto estrelado e um telão. Os olhos do Mack são vivos
+  como os dos carros (o mesmo shader e a mesma cara de `src/carros3d.c`): ele pisca, olha em volta,
+  acompanha o carro do jogador e se assusta se bater nele. O modelo (`recursos/modelos/mack.glb`, as 10
+  rodas em `mack_rodas.glb`, que giram quando ele anda, e a porta em `mack_porta.glb`) e as camadas dos
+  olhos saem de `ferramentas/preparar_mack.py`, que redesenha os olhos como os do filme, amplia 4 vezes as
+  texturas (filtro xBR do ffmpeg), separa as rodas e a porta e põe o caminhão em metros (30 m).
 - **Passeio livre:** um mundo aberto de Radiator Springs (a cidade, o Willy's Butte, os cânions e, colada na
   cidade, a pista de treino de terra que veio do Cars 2), sem pista: o carro anda em qualquer direção
   (`src/livre.c`, que dirige com a direção livre da corrida, `dirigirSemPista` em `src/carro.c`) e o "para
@@ -83,7 +96,7 @@ make clean    # apaga os arquivos gerados
 Para ver cada segmento da pista no teste: `./build/teste_pista -v`.
 
 O jogo abre em **tela cheia, na resolução do monitor**. Para abrir numa janela
-800×600 (útil para testar e depurar): `./katchau --janela`. Para abrir direto no passeio livre:
+800×600 (útil para testar e depurar): `./katchau --janela`. Para abrir direto na cidade, sem o menu:
 `./katchau --passeio` (dá para juntar as duas).
 
 O mapa do passeio (`recursos/modelos/radiator_springs.glb` e `.col`) é gerado no Blender, a partir dos
@@ -91,10 +104,12 @@ dois modelos de Radiator Springs do PS3, por `ferramentas/montar_mundo_aberto.py
 do arquivo). Ele põe os dois na mesma escala, puxa as cores do Race-O-Rama para as do Cars 2 e exporta
 também os triângulos da colisão.
 
-**No passeio livre**, os comandos são os da corrida, mais: **R** (ou Y) volta para a rua principal,
+**Na cidade**, os comandos são os da corrida, mais: **R** (ou Y) volta para a rua principal,
 **T** vai para a pista de treino, **M** (ou LB) abre o mapa (lá, **Z**/RB aproxima e **ENTER**/A leva à pista
-de treino), **C** troca a câmera e **ESC** pausa. No canto fica o minimapa; no alto, uma seta para a pista de
-treino. No chão, o carro dirige com a mesma conta da corrida (a direção livre, sem assistência): o volante, a
+de treino), **C** troca a câmera e **ESC** pausa. O velocímetro é o mesmo da corrida; no canto de baixo à
+esquerda fica o minimapa (redondo, com o Mack marcado em laranja). Na vaga atrás do Mack, **ENTER** (ou Y)
+entra nele. Nas cenas do Mack, **ENTER** (ou A) pula. Da rua principal sai, em "T", a rua de asfalto que leva
+à pista de treino; na frente da loja do Luigi, a torre de pneus é de pneus 3D. No chão, o carro dirige com a mesma conta da corrida (a direção livre, sem assistência): o volante, a
 curva, o freio, a ré, o nitro e o drift são iguais, em qualquer piso (a areia só segura um pouco a velocidade).
 **Wallride:** encoste numa parede rápido (mais de ~40 km/h), de raspão, e vire o volante para o lado dela: o carro
 sobe e anda nela enquanto tiver velocidade (abaixo de ~30 km/h ele solta). Na parede o controle é arcade: a câmera
@@ -122,7 +137,7 @@ tamanho real (`comecarInterface()` em `hud.c`).
 | ← → ou A D | analógico esquerdo ou direcional | Virar (o volante gira aos poucos e volta sozinho ao centro) |
 | | analógico direito | Câmera livre: gira em volta do carro; todo para cima olha para o alto e todo para baixo olha para trás num giro rápido (soltando, volta) |
 | ENTER | Cruz | Ver o resultado (depois da chegada) |
-| ESC   | Options | Pausar: a corrida e os sons congelam; escolha CONTINUAR ou MENU PRINCIPAL (ESC de novo continua) |
+| ESC   | Options | Pausar: a corrida e os sons congelam; escolha CONTINUAR ou VOLTAR À CIDADE (ESC de novo continua) |
 
 O controle (Xbox, PlayStation ou parecido, por USB ou Bluetooth) funciona junto com o
 teclado, sem configurar nada. Os nomes da tabela são os do controle de Xbox; no de
@@ -163,11 +178,15 @@ chama a função `atualizar...()` dela, que devolve para qual tela ir, e depois 
 ```
 MENU ──> GARAGEM ──> MENU
   │──> COMO JOGAR ──> MENU
-  └──> PISTA ──(ESC)──> MENU
-         └──(ENTER)──> CORRIDA ──(chegada + ENTER)──> RESULTADO ──(ENTER)──> CORRIDA
-          └──(ESC)──> PAUSA                  └──(ESC)──> MENU
-                        ├──(CONTINUAR ou ESC)──> CORRIDA, de onde parou
-                        └──(MENU PRINCIPAL)───> MENU
+  └──(JOGAR)──> CIDADE (passeio.c) ──(pausa: MENU PRINCIPAL)──> MENU
+                  │  └──(ENTER na vaga do Mack: o carro sobe a rampa)──> PISTA ──(VOLTAR: desce a rampa)──> CIDADE
+                  │                         └──(IR COM O MACK)──> CIDADE: o Mack parte ──> CORRIDA
+                  └──(o carro desce da carreta)<──┐
+CORRIDA ──(chegada + ENTER)──> RESULTADO ──(ENTER)──┤
+   │                              └──(R)──> CORRIDA │
+   └──(ESC)──> PAUSA                                │
+                 ├──(CONTINUAR ou ESC)──> CORRIDA, de onde parou
+                 └──(VOLTAR À CIDADE)───────────────┘
 ```
 
 Na tela de resultado a corrida continua ao fundo, e a tabela se completa conforme
@@ -198,6 +217,8 @@ src/
   obstaculos.c/.h  objetos da beira: lista simples por segmento       (fase 5)
   hud.c/.h         posições, volta e setores, mini-mapa e velocímetro  (fases 3 a 6)
   menu.c/.h        menu, garagem, como jogar e tela de resultado       (fase 6)
+  passeio.c/.h     a cidade (o mundo aberto), o Mack e as cenas da ida e da volta das corridas
+  carreta.c/.h     o lado de dentro da carreta do Mack (neon, troféus, quadros, telão)
   visual.c/.h      identidade visual: cores, fontes, logo e formas     (fase 6)
   olhar.c/.h       câmera livre: transforma o analógico direito em ângulos
   motor.c/.h       rotação, marcha e carga do motor (câmbio de cada carro; também comanda o som)
@@ -343,7 +364,7 @@ A raylib não tem vibração no macOS, então o jogo fala direto com o sistema d
 
 ## Níveis, pneus e drift
 
-Na tela CORRIDA se escolhe a pista e o nível (`NIVEIS` em `corrida.c`). O vermelho marca o que está escolhido, e o contorno amarelo, onde o cursor está; confirmar passa para a linha seguinte, e só o CORRER larga:
+Na escolha da corrida (no Mack) se escolhe a pista e o nível (`NIVEIS` em `corrida.c`). O vermelho marca o que está escolhido, e o contorno amarelo, onde o cursor está; confirmar passa para a linha seguinte, e só o IR COM O MACK larga:
 
 | Nível | Voltas | Rivais (habilidade) | Pitstop | Pneus gastam |
 |---|---|---|---|---|
@@ -469,7 +490,7 @@ em um ponto 3D. O desenho usa isso:
 
 ## As pistas
 
-Escolhidas numa tela depois de CORRER (`IdPista` em `pista.h`).
+Escolhidas no Mack, na cidade (`IdPista` em `pista.h`).
 
 ### Copa Pistão
 

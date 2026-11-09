@@ -57,7 +57,7 @@
 #define ALTURA_BOTAO_MENU     44.0f
 #define ESPACO_BOTOES_MENU    54.0f
 #define LARGURA_LOGO_MENU     300.0f
-#define ITENS_PRINCIPAIS      2        /* os dois primeiros itens são grandes; o resto, menor, depois de um fio */
+#define ITENS_PRINCIPAIS      1        /* o primeiro item (JOGAR) é grande; o resto, menor, depois de um fio */
 #define LARGURA_DA_FAIXA_ESCURA 520.0f  /* o degradê escuro atrás dos botões, para lerem sobre o vídeo */
 
 /* ---------- Pausa ---------- */
@@ -101,8 +101,9 @@
 #define X_COLUNA_TEMPO        470.0f
 #define X_COLUNA_MELHOR       620.0f
 
-static const char *TEXTOS_OPCOES[TOTAL_OPCOES] = { "CORRER", "PASSEIO LIVRE", "GARAGEM", "COMO JOGAR", "CONFIGURAÇÕES", "SAIR" };
-static const Tela DESTINOS_OPCOES[TOTAL_OPCOES] = { TELA_PISTAS, TELA_PASSEIO, TELA_GARAGEM, TELA_COMO_JOGAR, TELA_CONFIGURACOES, TELA_SAIR };
+/* O jogo acontece no mundo aberto: JOGAR leva à cidade, e as corridas começam no Mack (passeio.c) */
+static const char *TEXTOS_OPCOES[TOTAL_OPCOES] = { "JOGAR", "GARAGEM", "COMO JOGAR", "CONFIGURAÇÕES", "SAIR" };
+static const Tela DESTINOS_OPCOES[TOTAL_OPCOES] = { TELA_PASSEIO, TELA_GARAGEM, TELA_COMO_JOGAR, TELA_CONFIGURACOES, TELA_SAIR };
 static const char *TEXTOS_PAUSA[TOTAL_OPCOES_PAUSA] = { "CONTINUAR", "MENU PRINCIPAL" };
 static const EscolhaDaPausa ESCOLHAS_PAUSA[TOTAL_OPCOES_PAUSA] = { PAUSA_CONTINUAR, PAUSA_SAIR };
 
@@ -371,7 +372,7 @@ static int numeroDaFicha(const FichaTecnica *ficha) {
 
 /*
  * iniciarMenu
- * Estado inicial: "CORRER" marcado, carro 0 escolhido e a garagem
+ * Estado inicial: "JOGAR" marcado, carro 0 escolhido e a garagem
  * ordenada por velocidade.
  * Recebe: o estado do menu.
  * Devolve: nada.
@@ -591,8 +592,7 @@ static void desenharItemDoMenu(const char *texto, int item, float destaque) {
  */
 static const char *descricaoDoItem(int item) {
     static const char *DESCRICOES[TOTAL_OPCOES] = {
-        "Escolha a pista e a dificuldade e largue em último contra 13 rivais.",
-        "Dirija à vontade por Radiator Springs, o Willy's Butte, os cânions e a arena do deserto.",
+        "Dirija por Radiator Springs, o Willy's Butte, os cânions e a arena do deserto. Para correr, encontre o Mack na rua principal.",
         "Compare a velocidade, a aceleração e a aderência dos carros e escolha o seu.",
         "Veja os controles e as dicas de pilotagem.",
         "Ajuste os comandos, a vibração, a direção e os gráficos.",
@@ -1185,7 +1185,7 @@ Tela atualizarEscolhaDePista(EstadoMenu *menu) {
     if (apertouVoltar() || (voltar && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))) {
         tocarSom(SOM_VOLTAR);
         menu->focoDaCorrida = FOCO_NA_PISTA;   /* na próxima vez, começa pela primeira linha */
-        return TELA_MENU;
+        return TELA_PASSEIO;   /* a escolha abre no Mack: voltar é voltar à cidade */
     }
     if (sobreCorrer && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
         tocarSom(SOM_CONFIRMAR);
@@ -1374,7 +1374,7 @@ static void desenharBotaoCorrer(int comCursor) {
     if (comCursor) {
         contornoArredondado(r, raio, 2.5f, corDoCursor());
     }
-    escreverCentralizado(FONTE_TITULO, "CORRER", X_BOTAO_CORRER + LARGURA_BOTAO_CORRER / 2.0f, noMeio(FONTE_TITULO, 32.0f, Y_BOTAO_CORRER + ALTURA_BOTAO_CORRER / 2.0f), 32.0f,
+    escreverCentralizado(FONTE_TITULO, "IR COM O MACK", X_BOTAO_CORRER + LARGURA_BOTAO_CORRER / 2.0f, noMeio(FONTE_TITULO, 32.0f, Y_BOTAO_CORRER + ALTURA_BOTAO_CORRER / 2.0f), 32.0f,
                          comCursor ? WHITE : Fade(WHITE, 0.78f));
 }
 
@@ -1416,7 +1416,7 @@ void desenharEscolhaDePista(EstadoMenu *menu, Pista *pistas[]) {
     Pista *marcada = pistas[menu->pistaEscolhida];
     char nome[48];
     maiusculas(nome, sizeof(nome), marcada->nome);
-    desenharCabecalhoDeEvento("CORRIDA", "ESCOLHER EVENTO");
+    desenharCabecalhoDeEvento("MACK", "ESCOLHER A CORRIDA");
     desenharBotaoVoltar(menu->destaqueVoltar);
 
     int foco = menu->focoDaCorrida;
@@ -2123,7 +2123,7 @@ void desenharComoJogar(void) {
     desenharTituloDePainel("DICAS", x + 20, topo + 14);
 
     const char *dicas[] = {
-        TextFormat("Você larga em último, contra %d rivais. O nível muda as voltas e os rivais; no difícil, os pneus gastam.", TOTAL_RIVAIS),
+        TextFormat("As corridas começam no Mack, na rua principal: pare atrás da carreta e escolha a pista. Você larga em último, contra %d rivais.", TOTAL_RIVAIS),
         "Em Interlagos, no médio e no difícil, a parada é obrigatória: no fim da Subida dos Boxes, encoste na linha da esquerda. Quem não para é desclassificado.",
         "Freio de mão com o volante virado: a traseira solta e o carro entra em drift. Vira mais, mas perde velocidade e gasta pneu.",
         "Freie antes das curvas e alivie no meio: acelerando, o carro sai de frente. Fumaça = pneu no limite; passar dele custa velocidade.",
@@ -2154,9 +2154,16 @@ void desenharComoJogar(void) {
  */
 void abrirPausa(EstadoMenu *menu) {
     menu->opcaoPausa = 0;
+    menu->saidaDaPausa = TEXTOS_PAUSA[1];
     for (int i = 0; i < TOTAL_OPCOES_PAUSA; i++) {
         menu->destaquePausa[i] = (i == 0) ? 1.0f : 0.0f;
     }
+}
+
+/* Na corrida, sair da pausa leva de volta à cidade (o Mack traz o carro) */
+void abrirPausaDaCorrida(EstadoMenu *menu) {
+    abrirPausa(menu);
+    menu->saidaDaPausa = "VOLTAR À CIDADE";
 }
 
 /*
@@ -2216,7 +2223,8 @@ void desenharPausa(EstadoMenu *menu) {
     desenharQuadriculado(centro + meio + 20, Y_TITULO_PAUSA + 32, 76.0f, 10.0f, 5.0f);
 
     for (int i = 0; i < TOTAL_OPCOES_PAUSA; i++) {
-        desenharOpcao(TEXTOS_PAUSA[i], Y_PRIMEIRA_OPCAO_PAUSA + i * ESPACO_OPCOES, menu->destaquePausa[i]);
+        const char *texto = (i == 1 && menu->saidaDaPausa != NULL) ? menu->saidaDaPausa : TEXTOS_PAUSA[i];
+        desenharOpcao(texto, Y_PRIMEIRA_OPCAO_PAUSA + i * ESPACO_OPCOES, menu->destaquePausa[i]);
     }
 
     Dica dicas[] = {
@@ -2234,18 +2242,18 @@ void desenharPausa(EstadoMenu *menu) {
 
 /*
  * atualizarResultado
- * ENTER corre de novo (com o mesmo carro); ESC volta ao menu.
+ * ENTER (ou ESC) volta à cidade, com o Mack; R (ou Y) corre de novo, com o mesmo carro.
  * Recebe: nada.
  * Devolve: a próxima tela.
  */
 Tela atualizarResultado(void) {
-    if (apertouConfirmar()) {
+    if (apertouConfirmar() || apertouVoltar()) {
+        tocarSom(SOM_CONFIRMAR);
+        return TELA_PASSEIO;
+    }
+    if (IsKeyPressed(KEY_R) || controleApertou(BOTAO_LIMPAR)) {
         tocarSom(SOM_CONFIRMAR);
         return TELA_CORRIDA;
-    }
-    if (apertouVoltar()) {
-        tocarSom(SOM_VOLTAR);
-        return TELA_MENU;
     }
     return TELA_RESULTADO;
 }
@@ -2381,8 +2389,8 @@ void desenharResultado(Corrida *corrida) {
     }
 
     Dica dicas[] = {
-        { { "ENTER", NULL }, "CORRER DE NOVO" },
-        { { "ESC", NULL }, "MENU" },
+        { { "ENTER", NULL }, "VOLTAR À CIDADE" },
+        { { "R", NULL }, "CORRER DE NOVO" },
     };
     desenharBarraDeDicas(dicas, 2);
 }

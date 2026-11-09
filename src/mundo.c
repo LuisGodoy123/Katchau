@@ -360,6 +360,8 @@ static int locLuzVP[MAXIMO_QUE_RECEBEM_SOMBRA];
 static Material material;   /* o mesmo material, trocando a textura a cada desenho */
 static Model mundoAberto;   /* o passeio livre: carregado na primeira vez (carregarMundoAberto) */
 static int temMundoAberto = 0;
+static const Model *modelosNoMundoAberto[MODELOS_NO_MUNDO_ABERTO];   /* o Mack e as rodas (colocarNoMundoAberto) */
+static const Matrix *matrizesNoMundoAberto[MODELOS_NO_MUNDO_ABERTO];
 static Model estadio;
 static BoundingBox *caixasDoEstadio = NULL;
 static Mesh pinturaDoEstadio;
@@ -2174,6 +2176,55 @@ void desenharMapaDoMundoAberto(void) {
     }
 }
 
+/*
+ * prepararModeloDoMundoAberto
+ * Um modelo que vai andar pelo mundo aberto (o Mack) ganha a mesma luz e a mesma sombra do mapa.
+ * Recebe: o modelo.
+ * Devolve: nada.
+ */
+void prepararModeloDoMundoAberto(Model *modelo) {
+    for (int i = 0; i < modelo->materialCount; i++) {
+        modelo->materials[i].shader = shaderDosMapasDeDia;
+        Texture2D *textura = &modelo->materials[i].maps[MATERIAL_MAP_ALBEDO].texture;
+        if (textura->id != 0 && textura->id != rlGetTextureIdDefault()) {
+            GenTextureMipmaps(textura);
+            SetTextureFilter(*textura, TEXTURE_FILTER_TRILINEAR);
+        }
+    }
+}
+
+/*
+ * colocarNoMundoAberto / desenharModelosNoMundoAberto
+ * Onde cada malha do modelo está agora: ele faz sombra no mapa (desenharQuemFazSombra) e é
+ * desenhado aqui. As matrizes são lidas na hora do desenho: quem chama as mantém vivas.
+ * Recebe: o lugar (0 a MODELOS_NO_MUNDO_ABERTO - 1), o modelo (NULL tira) e uma matriz por malha.
+ */
+void colocarNoMundoAberto(int qual, const Model *modelo, const Matrix *matrizDeCadaMalha) {
+    if (qual < 0 || qual >= MODELOS_NO_MUNDO_ABERTO) {
+        return;
+    }
+    modelosNoMundoAberto[qual] = (matrizDeCadaMalha != NULL) ? modelo : NULL;
+    matrizesNoMundoAberto[qual] = matrizDeCadaMalha;
+}
+
+/* Desenha os modelos colocados; com um material dado (a sombra), todos com ele */
+static void desenharModelosColocados(const Material *trocado) {
+    for (int qual = 0; qual < MODELOS_NO_MUNDO_ABERTO; qual++) {
+        const Model *modelo = modelosNoMundoAberto[qual];
+        if (modelo == NULL) {
+            continue;
+        }
+        for (int i = 0; i < modelo->meshCount; i++) {
+            Material usado = (trocado != NULL) ? *trocado : modelo->materials[modelo->meshMaterial[i]];
+            DrawMesh(modelo->meshes[i], usado, MatrixMultiply(modelo->transform, matrizesNoMundoAberto[qual][i]));
+        }
+    }
+}
+
+void desenharModelosNoMundoAberto(void) {
+    desenharModelosColocados(NULL);
+}
+
 int carregarMundoAberto(void) {
     if (temMundoAberto) {
         return 1;
@@ -2391,6 +2442,7 @@ static void desenharQuemFazSombra(IdPista id) {
                 mundoAberto.materials[i].shader = originais[i];
             }
         }
+        desenharModelosColocados(&material);   /* o Mack também faz sombra */
     } else if (mapasDeDia[id].existe) {
         MapaDeDia *mapa = &mapasDeDia[id];
         if (id == PISTA_INTERLAGOS) {

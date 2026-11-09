@@ -27,6 +27,12 @@
 void carregarMundo(Pista *pistas[]);
 int carregarMundoAberto(void);
 void desenharMapaDoMundoAberto(void);
+/* Modelos a mais no mundo aberto (o Mack e as rodas dele): com a luz e a sombra do mapa, e fazendo
+ * sombra nele. Cada malha tem a sua matriz (as rodas giram cada uma em volta do próprio eixo) */
+#define MODELOS_NO_MUNDO_ABERTO 3   /* o Mack, as rodas e a porta da carreta */
+void prepararModeloDoMundoAberto(Model *modelo);
+void colocarNoMundoAberto(int qual, const Model *modelo, const Matrix *matrizDeCadaMalha);   /* modelo NULL tira */
+void desenharModelosNoMundoAberto(void);
 void descarregarMundo(void);
 void desenharCenario(IdPista id, Vector3 camera);
 void prepararPlanosDaCamera(void);
