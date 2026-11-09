@@ -196,6 +196,8 @@ Superficie superficieDoCarro(Carro *carro);
 float aceleracaoDeCurva(const Carro *carro);
 void atualizarSuspensao(Carro *carro, float tempoQuadro);
 int velocidadeEmKmh(Carro *carro);
+float dirigirSemPista(Carro *carro, Comandos comandos, float tempoQuadro, float aderenciaDoChao, float *deLado, int *deRe);
+void girarVolante(Carro *carro, Comandos comandos, float tempoQuadro);
 void estourarPneu(Carro *carro);
 int quantosPneusEstourados(const Carro *carro);
 int converterParaKmh(float velocidade);

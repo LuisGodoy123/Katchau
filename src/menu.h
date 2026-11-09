@@ -24,10 +24,11 @@ typedef enum {
     TELA_CONFIGURACOES,
     TELA_CORRIDA,
     TELA_RESULTADO,
+    TELA_PASSEIO,      /* o passeio livre pelo mundo aberto (passeio.c) */
     TELA_SAIR
 } Tela;
 
-#define TOTAL_OPCOES 5   /* CORRER, GARAGEM, COMO JOGAR, CONFIGURAÇÕES, SAIR */
+#define TOTAL_OPCOES 6   /* CORRER, PASSEIO LIVRE, GARAGEM, COMO JOGAR, CONFIGURAÇÕES, SAIR */
 #define TOTAL_OPCOES_PAUSA 2   /* CONTINUAR, MENU PRINCIPAL */
 
 /* O que o jogador escolheu na pausa neste quadro */

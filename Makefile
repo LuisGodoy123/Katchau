@@ -14,10 +14,10 @@ CFLAGS = -std=c99 -O2 -Wall -Wextra -g -Isrc
 
 # Módulos de lógica: não usam a raylib (regra 2 do roadmap)
 LOGICA = src/pista.c src/obstaculos.c src/carro.c src/ia.c \
-         src/ordenacao.c src/corrida.c src/motor.c src/motorgranular.c src/recordes.c src/olhar.c src/pitstop.c src/vibracao.c src/configuracoes.c src/mjpeg.c
+         src/ordenacao.c src/corrida.c src/motor.c src/motorgranular.c src/recordes.c src/olhar.c src/pitstop.c src/vibracao.c src/configuracoes.c src/mjpeg.c src/colisao.c src/livre.c
 
 # Módulos que desenham na tela
-DESENHO = src/render.c src/mundo.c src/construcao.c src/carros3d.c src/fumaca.c src/faiscas.c src/fogos.c src/marcas.c src/torcida3d.c src/telao.c src/posprocesso.c src/noite.c src/hud.c src/menu.c src/visual.c src/audio.c src/efeitos.c src/exibicao.c src/apresentacao.c src/intro.c src/videofundo.c src/controle.c
+DESENHO = src/render.c src/mundo.c src/construcao.c src/carros3d.c src/fumaca.c src/faiscas.c src/fogos.c src/marcas.c src/torcida3d.c src/telao.c src/posprocesso.c src/noite.c src/hud.c src/menu.c src/visual.c src/audio.c src/efeitos.c src/exibicao.c src/apresentacao.c src/intro.c src/videofundo.c src/controle.c src/passeio.c
 
 FONTES = src/main.c $(LOGICA) $(DESENHO)
 OBJETOS = $(FONTES:src/%.c=build/%.o)
@@ -77,11 +77,21 @@ run: $(EXE)
 	./$(EXE)
 
 # Os testes usam só a lógica, então compilam sem a raylib
-testes: build/teste_pista
+testes: build/teste_pista build/teste_livre
 	./build/teste_pista
+	./build/teste_livre
+
+build/teste_livre: testes/teste_livre.c $(LOGICA) $(wildcard src/*.h) | build
+	$(CC) $(CFLAGS) testes/teste_livre.c $(LOGICA) -o $@ -lm -lpthread
 
 build/teste_pista: testes/teste_pista.c $(LOGICA) $(wildcard src/*.h) | build
 	$(CC) $(CFLAGS) testes/teste_pista.c $(LOGICA) -o $@ -lm -lpthread
+
+# Procura buracos, degraus e lugares onde o carro do passeio livre enrosca
+sondar-colisao: build/sondar_colisao
+
+build/sondar_colisao: ferramentas/sondar_colisao.c $(LOGICA) $(wildcard src/*.h) | build
+	$(CC) $(CFLAGS) ferramentas/sondar_colisao.c $(LOGICA) -o $@ -lm -lpthread
 
 # Corre muitas provas sem gráficos e mede o quanto cada dificuldade é competitiva
 simulacao: build/simular_dificuldade

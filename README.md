@@ -13,6 +13,15 @@ lista circular duplamente encadeada de segmentos.
 - **Fase 5 (em parte):** Interlagos de verdade (o traçado de 2023, num modelo 3D medido para o jogo), mini-mapa, zebras e muros do modelo,
   linha de chegada quadriculada e objetos na beira da pista (`src/obstaculos.c`). Falta o turbo.
 - **Fase 6:** menu principal, garagem com Merge Sort, como jogar, contagem regressiva e tela de resultado (`src/menu.c`).
+- **Passeio livre:** um mundo aberto de Radiator Springs (a cidade, o Willy's Butte, os cânions e, colada na
+  cidade, a pista de treino de terra que veio do Cars 2), sem pista: o carro anda em qualquer direção
+  (`src/livre.c`, que dirige com a direção livre da corrida, `dirigirSemPista` em `src/carro.c`) e o "para
+  cima" dele é o do chão embaixo das rodas, então ele sobe barrancos e, rápido,
+  anda nas paredes (wallride). O chão e as paredes vêm de uma malha de colisão em grade (`src/colisao.c`), que
+  também diz o tipo de chão (asfalto, areia, terra, rocha): a aderência, a poeira e o som saem daí. A tela,
+  com o minimapa e o mapa grande, fica em `src/passeio.c`. A pista de treino fica a ~530 m da rua principal,
+  ligada por uma planície de areia plana (o mapa costura os dois com uma "emenda") e por uma estrada; a areia
+  da cidade tem os mesmos matinhos e cactos da arena do Cars 2.
 
 ## 1. Instalar a raylib
 
@@ -49,7 +58,26 @@ make clean    # apaga os arquivos gerados
 Para ver cada segmento da pista no teste: `./build/teste_pista -v`.
 
 O jogo abre em **tela cheia, na resolução do monitor**. Para abrir numa janela
-800×600 (útil para testar e depurar): `./katchau --janela`.
+800×600 (útil para testar e depurar): `./katchau --janela`. Para abrir direto no passeio livre:
+`./katchau --passeio` (dá para juntar as duas).
+
+O mapa do passeio (`recursos/modelos/radiator_springs.glb` e `.col`) é gerado no Blender, a partir dos
+dois modelos de Radiator Springs do PS3, por `ferramentas/montar_mundo_aberto.py` (o uso está no começo
+do arquivo). Ele põe os dois na mesma escala, puxa as cores do Race-O-Rama para as do Cars 2 e exporta
+também os triângulos da colisão.
+
+**No passeio livre**, os comandos são os da corrida, mais: **R** (ou Y) volta para a rua principal,
+**T** vai para a pista de treino, **M** (ou LB) abre o mapa (lá, **Z**/RB aproxima e **ENTER**/A leva à pista
+de treino), **C** troca a câmera e **ESC** pausa. No canto fica o minimapa; no alto, uma seta para a pista de
+treino. No chão, o carro dirige com a mesma conta da corrida (a direção livre, sem assistência): o volante, a
+curva, o freio, a ré, o nitro e o drift são iguais, em qualquer piso (a areia só segura um pouco a velocidade).
+**Wallride:** encoste numa parede rápido (mais de ~40 km/h), de raspão, e vire o volante para o lado dela: o carro
+sobe e anda nela enquanto tiver velocidade (abaixo de ~30 km/h ele solta). Na parede o controle é arcade: a câmera
+deita junto com o carro (a parede vira chão na tela), o volante gira o carro na hora e ainda o empurra para o lado,
+e a gravidade pesa só um terço. Virando para o chão, ele volta para o chão sozinho.
+
+Para conferir a colisão de uma região do mapa (buracos, degraus, lugares onde o carro enrosca):
+`make sondar-colisao` e `./build/sondar_colisao recursos/modelos/radiator_springs.col x0 z0 x1 z1`.
 
 A pista e os carros são desenhados na resolução real da tela; em monitores largos
 (16:9), a pista não estica, só mostra mais dos lados. O HUD e os menus são

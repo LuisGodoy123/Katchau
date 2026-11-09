@@ -23,6 +23,7 @@ void carregarFumaca(void);
 void descarregarFumaca(void);
 void limparFumaca(void);
 void soltarNuvem(Vector3 roda, Vector3 velocidadeDoCarro, float forca, TipoDeNuvem tipo);
+void soltarNuvemColorida(Vector3 roda, Vector3 velocidadeDoCarro, float forca, TipoDeNuvem tipo, Color cor);
 void atualizarFumaca(float tempoQuadro);
 void desenharFumaca3D(Camera3D camera);
 void comecarChamas(void);

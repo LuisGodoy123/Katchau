@@ -54,6 +54,7 @@ typedef struct {
     float giroPorSegundo;
     int imagem;
     TipoDeNuvem tipo;
+    Color cor;
 } Nuvem;
 
 static Nuvem nuvens[MAXIMO_DE_NUVENS];
@@ -163,6 +164,19 @@ void soltarNuvem(Vector3 roda, Vector3 velocidadeDoCarro, float forca, TipoDeNuv
     nuvem->giroPorSegundo = sortear(-40.0f, 40.0f);
     nuvem->imagem = GetRandomValue(0, VARIACOES_DE_IMAGEM - 1);
     nuvem->tipo = tipo;
+    nuvem->cor = (tipo == NUVEM_DE_POEIRA) ? COR_DA_POEIRA : COR_DO_PNEU;
+}
+
+/*
+ * soltarNuvemColorida
+ * Uma nuvem como soltarNuvem, mas da cor pedida (a poeira da areia, da cor do chão).
+ * Recebe: o mesmo que soltarNuvem, mais a cor.
+ * Devolve: nada.
+ */
+void soltarNuvemColorida(Vector3 roda, Vector3 velocidadeDoCarro, float forca, TipoDeNuvem tipo, Color cor) {
+    soltarNuvem(roda, velocidadeDoCarro, forca, tipo);
+    int ultima = (proximaNuvem + MAXIMO_DE_NUVENS - 1) % MAXIMO_DE_NUVENS;
+    nuvens[ultima].cor = cor;
 }
 
 /*
@@ -229,7 +243,7 @@ void desenharFumaca3D(Camera3D camera) {
         Vector2 meio = { tamanho / 2.0f, tamanho / 2.0f };
         Vector3 cima = { 0.0f, 1.0f, 0.0f };
         DrawBillboardPro(camera, imagem, origem, nuvem->posicao, cima, medida, meio, nuvem->giro,
-                         Fade(ehPneu ? COR_DO_PNEU : COR_DA_POEIRA, opacidade));
+                         Fade(nuvem->cor, opacidade));
     }
     rlDrawRenderBatchActive();
     rlEnableDepthMask();

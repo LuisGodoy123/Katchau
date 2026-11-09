@@ -1334,3 +1334,25 @@ void atualizarEfeitosDaCorrida(Corrida *corrida, int ativo, float tempoQuadro) {
         dispararEfeitosCurtos(jogador);
     }
 }
+
+/*
+ * atualizarEfeitosDoPasseio
+ * Os sons do modo livre: o motor do jogador, o vento, o pneu escorregando, a areia e a parede.
+ * Não há pista nem rivais: os loops seguem o que o carro livre conta.
+ * Recebe: o carro (motor, velocidade e nitro; a velocidade nas unidades da corrida),
+ *         o quanto ele escorrega (0 a 1), se raspa numa parede, o quanto o chão é de terra solta (0 a 1),
+ *         se os sons valem e o tempo do quadro.
+ * Devolve: nada.
+ */
+void atualizarEfeitosDoPasseio(const Carro *carro, float escorrega, int raspando, float naTerra, int ativo, float tempoQuadro) {
+    atualizarMotorDoJogador(ativo, carro, tempoQuadro);
+    float f = ativo ? limitar(carro->velocidade / carro->velocidadeMaxima, 0.0f, 1.0f) : 0.0f;
+    float vento = VOLUME_VENTO * f * f * (1.0f + (carro->nitroLigado ? 0.25f : 0.0f));
+    atualizarLoop(&loops[LOOP_VENTO], ativo ? vento : 0.0f, 0.75f + 0.55f * f, tempoQuadro);
+    float pneu = VOLUME_PNEU * limitar(escorrega, 0.0f, 1.0f) * limitar(f / 0.2f, 0.0f, 1.0f);
+    atualizarLoop(&loops[LOOP_PNEU], ativo ? pneu : 0.0f, 0.85f + 0.35f * f, tempoQuadro);
+    atualizarLoop(&loops[LOOP_GRAMA], (ativo && f > 0.04f) ? VOLUME_GRAMA * limitar(naTerra, 0.0f, 1.0f) * powf(f, 0.7f) : 0.0f, 0.7f + 0.7f * f, tempoQuadro);
+    atualizarLoop(&loops[LOOP_ZEBRA], 0.0f, 1.0f, tempoQuadro);
+    atualizarLoop(&loops[LOOP_MURO], (ativo && raspando && f > 0.03f) ? VOLUME_MURO * powf(f, 0.6f) : 0.0f, 0.8f + 0.4f * f, tempoQuadro);
+    atualizarLoop(&loops[LOOP_NITRO], (ativo && carro->nitroLigado) ? VOLUME_NITRO : 0.0f, 0.9f + 0.3f * f, tempoQuadro);
+}

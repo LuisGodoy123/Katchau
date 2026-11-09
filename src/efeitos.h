@@ -35,6 +35,7 @@ void iniciarEfeitosDaCorrida(void);
 void atualizarEfeitosDaCorrida(Corrida *corrida, int ativo, float tempoQuadro);
 void pausarEfeitosDaCorrida(int pausar);
 void descarregarEfeitos(void);
+void atualizarEfeitosDoPasseio(const Carro *carro, float escorrega, int raspando, float naTerra, int ativo, float tempoQuadro);
 void tocarSomDeFogos(int explosao, float volume, float lado);
 
 #endif

@@ -49,6 +49,7 @@
 #define ARQUIVO_DO_OVAL       "recursos/modelos/oval.glb"
 #define ARQUIVO_DO_SPLAT      "recursos/modelos/splat.glb"
 #define ARQUIVO_DE_INTERLAGOS "recursos/modelos/interlagos.glb"
+#define ARQUIVO_DO_MUNDO_ABERTO "recursos/modelos/radiator_springs.glb"
 #define FIGURA_DE_INTERLAGOS  1.2f      /* os assentos do modelo têm o tamanho de verdade */
 #define LADRILHO_DO_ASFALTO   6.0f      /* metros: a imagem do asfalto se repete a cada tanto */
 #define LADRILHO_DA_GRAMA     9.0f
@@ -349,6 +350,8 @@ static Shader recebemSombra[MAXIMO_QUE_RECEBEM_SOMBRA];
 static int totalQueRecebemSombra = 0;
 
 static Material material;   /* o mesmo material, trocando a textura a cada desenho */
+static Model mundoAberto;   /* o passeio livre: carregado na primeira vez (carregarMundoAberto) */
+static int temMundoAberto = 0;
 static Model estadio;
 static Mesh pinturaDoEstadio;
 static Mesh ceuDeDia, tampaDoCeu, ceuDeNoite;
@@ -1978,7 +1981,57 @@ void carregarMundo(Pista *pistas[]) {
  * Recebe: nada.
  * Devolve: nada.
  */
+/*
+ * carregarMundoAberto
+ * Carrega o mapa do passeio livre na primeira vez que ele é pedido (são dezenas de MB: quem
+ * só corre não paga por ele). Todas as malhas usam o sol e a sombra dos mapas de dia.
+ * Recebe: nada.
+ * Devolve: 1 se o mapa está pronto, 0 se o arquivo não existe.
+ */
+/*
+ * desenharMapaDoMundoAberto
+ * Só o mapa do passeio, sem céu (para fotografá-lo de cima, no minimapa). Chamar entre
+ * BeginMode3D e EndMode3D.
+ * Recebe: nada.
+ * Devolve: nada.
+ */
+void desenharMapaDoMundoAberto(void) {
+    if (temMundoAberto) {
+        DrawModel(mundoAberto, (Vector3){ 0.0f, 0.0f, 0.0f }, 1.0f, WHITE);
+    }
+}
+
+int carregarMundoAberto(void) {
+    if (temMundoAberto) {
+        return 1;
+    }
+    if (!FileExists(ARQUIVO_DO_MUNDO_ABERTO)) {
+        TraceLog(LOG_WARNING, "MUNDO: falta %s (gere com ferramentas/montar_mundo_aberto.py)", ARQUIVO_DO_MUNDO_ABERTO);
+        return 0;
+    }
+    mundoAberto = LoadModel(ARQUIVO_DO_MUNDO_ABERTO);
+    for (int i = 0; i < mundoAberto.materialCount; i++) {
+        mundoAberto.materials[i].shader = shaderDosMapasDeDia;
+        Texture2D *textura = &mundoAberto.materials[i].maps[MATERIAL_MAP_ALBEDO].texture;
+        if (textura->id != 0 && textura->id != rlGetTextureIdDefault()) {
+            GenTextureMipmaps(textura);
+            SetTextureFilter(*textura, TEXTURE_FILTER_TRILINEAR);
+            SetTextureFilter(*textura, TEXTURE_FILTER_ANISOTROPIC_8X);
+            SetTextureWrap(*textura, TEXTURE_WRAP_REPEAT);
+        }
+    }
+    temMundoAberto = 1;
+    return 1;
+}
+
 void descarregarMundo(void) {
+    if (temMundoAberto) {
+        for (int i = 0; i < mundoAberto.materialCount; i++) {
+            mundoAberto.materials[i].shader.id = rlGetShaderIdDefault();   /* o shader é devolvido lá embaixo */
+        }
+        UnloadModel(mundoAberto);
+        temMundoAberto = 0;
+    }
     /* O shader é compartilhado: é devolvido uma vez só, aqui embaixo */
     for (int i = 0; i < estadio.materialCount; i++) {
         estadio.materials[i].shader.id = rlGetShaderIdDefault();
@@ -2141,7 +2194,20 @@ static void desenharQuemFazSombra(IdPista id) {
     Matrix origem = MatrixIdentity();
     Shader antes = material.shader;
     material.shader = shaderDaProfundidade;
-    if (mapasDeDia[id].existe) {
+    if ((int) id == (int) CENARIO_DO_MUNDO_ABERTO) {
+        if (temMundoAberto) {
+            Shader originais[256];
+            int total = mundoAberto.materialCount < 256 ? mundoAberto.materialCount : 256;
+            for (int i = 0; i < total; i++) {
+                originais[i] = mundoAberto.materials[i].shader;
+                mundoAberto.materials[i].shader = shaderDaProfundidade;
+            }
+            DrawModel(mundoAberto, (Vector3){ 0.0f, 0.0f, 0.0f }, 1.0f, WHITE);
+            for (int i = 0; i < total; i++) {
+                mundoAberto.materials[i].shader = originais[i];
+            }
+        }
+    } else if (mapasDeDia[id].existe) {
         MapaDeDia *mapa = &mapasDeDia[id];
         if (id == PISTA_INTERLAGOS) {
             desenharSombraDeInterlagos(mapa);
@@ -2241,6 +2307,15 @@ void desenharCenario(IdPista id, Vector3 camera) {
     Texture2D semTextura = { 0 };
     Matrix origem = MatrixIdentity();
     Matrix naCamera = MatrixTranslate(camera.x, camera.y, camera.z);
+
+    if ((int) id == (int) CENARIO_DO_MUNDO_ABERTO) {
+        desenharMalha(ceuDeDia, texturaCeu, naCamera);
+        desenharMalha(tampaDoCeu, semTextura, naCamera);
+        if (temMundoAberto) {
+            DrawModel(mundoAberto, (Vector3){ 0.0f, 0.0f, 0.0f }, 1.0f, WHITE);
+        }
+        return;
+    }
 
     if (id == PISTA_COPA_PISTAO) {
         desenharMalha(ceuDeNoite, texturaDoCeuNoturno(), naCamera);

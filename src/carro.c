@@ -270,7 +270,7 @@ Carro criarCarro(const char *nome, int numero, Segmento *largada, float deslocam
     carro.tempoDeChegada = 0.0f;
     Comandos nenhumComando = { 0, 0, 0, 0, 0.0f, 0, 0 };
     carro.ultimosComandos = nenhumComando;
-    carro.linhaAlvo = deslocamentoLateral * larguraDoLado(largada, deslocamentoLateral);
+    carro.linhaAlvo = (largada != NULL) ? deslocamentoLateral * larguraDoLado(largada, deslocamentoLateral) : 0.0f;   /* sem pista: passeio livre */
 
     carro.velocidadeMaxima = velocidadeMaxima;
     carro.aceleracao = aceleracao;
@@ -399,7 +399,7 @@ static void atualizarVelocidade(Carro *carro, Comandos comandos, float tempoQuad
 
     /* Fora da pista o carro perde velocidade: muito na grama, menos na área de escape
      * asfaltada (senão cortar caminho por ela compensaria) */
-    Superficie embaixo = superficieDoCarro(carro);
+    Superficie embaixo = (carro->posicao.segmento != NULL) ? superficieDoCarro(carro) : SUPERFICIE_ASFALTO;   /* sem pista: passeio livre */
     if (embaixo == SUPERFICIE_GRAMA && carro->velocidade > VELOCIDADE_MAXIMA_GRAMA) {
         carro->velocidade -= ATRITO_GRAMA * tempoQuadro;
     } else if (embaixo == SUPERFICIE_ESCAPE && carro->velocidade > VELOCIDADE_MAXIMA_ESCAPE) {
@@ -911,16 +911,18 @@ static float erroAoLongo(const Segmento *a, float t, float x, float z) {
  * Recebe: o carro e o tempo do quadro.
  * Devolve: quantas vezes ele cruzou a linha de chegada.
  */
-static int andarNoMundo(Carro *carro, float tempoQuadro) {
-    PontoNoMundo aqui = pontoNoMundo(carro->posicao, carro->deslocamentoLateral);
-    if (!carro->temRumoNoMundo) {
-        carro->rumoNoMundo = aqui.rumo;
-        carro->temRumoNoMundo = 1;
-    }
-
+/*
+ * girarNoMundo
+ * Sem a direção guiada, o volante muda o rumo do carro no mundo, até onde o pneu segura; no limite,
+ * o pneu canta e o carro perde um pouco de velocidade. A corrida e o passeio livre usam esta mesma
+ * conta, para o volante responder igual nos dois.
+ * Recebe: o carro (velocidade negativa = de ré), o tempo do quadro e a aderência do chão (1 = asfalto).
+ * Devolve: metros por segundo para a direita que o drift soma ao caminho.
+ */
+static float girarNoMundo(Carro *carro, float tempoQuadro, float aderenciaDoChao) {
     /* O volante muda o rumo, até onde o pneu segura */
     float metrosPorSegundo = carro->velocidade / UNIDADES_POR_METRO;
-    float agarra = aceleracaoDeCurva(carro) * (1.0f + AGARRE_NO_DRIFT * carro->forcaDoDrift);
+    float agarra = aceleracaoDeCurva(carro) * aderenciaDoChao * (1.0f + AGARRE_NO_DRIFT * carro->forcaDoDrift);
     /* Volante todo é o máximo que dá nessa velocidade: devagar, o raio mínimo; rápido, o que o pneu segura */
     float maximo = fminf(metrosPorSegundo / RAIO_MINIMO_DA_DIRECAO, agarra / fmaxf(metrosPorSegundo, 1.0f));
     carro->rumoNoMundo += carro->volante * maximo * 57.2958f * tempoQuadro;
@@ -932,11 +934,23 @@ static int andarNoMundo(Carro *carro, float tempoQuadro) {
     float gastaNaCurva = PERDA_NO_LIMITE_DO_PNEU * noLimite;
     carro->velocidade = fmaxf(carro->velocidade - gastaNaCurva * (1.0f - carro->forcaDoDrift) * tempoQuadro, 0.0f);
 
+    /* De lado, o drift soma o seu pedaço ao caminho */
+    float anguloDoCaminho = limitar(carro->anguloDeDrift, -ANGULO_DO_CAMINHO, ANGULO_DO_CAMINHO);
+    return sinf(anguloDoCaminho * 0.0174533f) * metrosPorSegundo * CAMINHO_PELO_ANGULO * carro->forcaDoDrift;
+}
+
+static int andarNoMundo(Carro *carro, float tempoQuadro) {
+    PontoNoMundo aqui = pontoNoMundo(carro->posicao, carro->deslocamentoLateral);
+    if (!carro->temRumoNoMundo) {
+        carro->rumoNoMundo = aqui.rumo;
+        carro->temRumoNoMundo = 1;
+    }
+    float doDrift = girarNoMundo(carro, tempoQuadro, 1.0f);
+
     /* Anda para onde aponta. De lado, o drift e as batidas somam o seu pedaço */
     float rumo = carro->rumoNoMundo * 0.0174533f;
     float frenteX = sinf(rumo), frenteZ = -cosf(rumo), direitaX = cosf(rumo), direitaZ = sinf(rumo);
-    float anguloDoCaminho = limitar(carro->anguloDeDrift, -ANGULO_DO_CAMINHO, ANGULO_DO_CAMINHO);
-    float deLado = sinf(anguloDoCaminho * 0.0174533f) * metrosPorSegundo * CAMINHO_PELO_ANGULO * carro->forcaDoDrift + carro->velocidadeLateral;
+    float deLado = doDrift + carro->velocidadeLateral;
     carro->velocidadeLateral *= expf(-QUEDA_DO_TRANCO * tempoQuadro);
     float adiante = carro->velocidade * tempoQuadro / UNIDADES_POR_METRO + carro->empurraoPendente / UNIDADES_POR_METRO;
     carro->empurraoPendente = 0.0f;
@@ -1016,9 +1030,13 @@ void atualizarSuspensao(Carro *carro, float tempoQuadro) {
     if (tempoQuadro <= 0.0f) {
         return;
     }
-    PontoNoMundo aqui = pontoNoMundo(carro->posicao, carro->deslocamentoLateral);
-    float rumo = (carro->direcaoLivre && carro->temRumoNoMundo) ? carro->rumoNoMundo
-                                                                : aqui.rumo + carro->anguloDeFuga + carro->anguloDeDrift;
+    float rumo;
+    if (carro->direcaoLivre && carro->temRumoNoMundo) {
+        rumo = carro->rumoNoMundo;   /* (sem pista, no passeio livre, é sempre este) */
+    } else {
+        PontoNoMundo aqui = pontoNoMundo(carro->posicao, carro->deslocamentoLateral);
+        rumo = aqui.rumo + carro->anguloDeFuga + carro->anguloDeDrift;
+    }
     if (!carro->temSuspensao) {
         carro->rumoAnterior = rumo;
         carro->velocidadeAnterior = carro->velocidade;
@@ -1214,6 +1232,65 @@ int atualizarCarro(Carro *carro, Comandos comandos, float tempoQuadro) {
     carro->voltas += voltasGanhas;
     atualizarSuspensao(carro, tempoQuadro);
     return voltasGanhas;
+}
+
+/*
+ * dirigirSemPista
+ * A direção livre da corrida, sem pista embaixo: o passeio livre dirige com ela, para o carro
+ * responder igual nos dois modos. Faz, na mesma ordem da corrida, o nitro, o motor, a velocidade,
+ * o volante, o drift, a ré e o giro do rumo (girarNoMundo); quem anda com o carro e decide onde é o
+ * chão é quem chamou.
+ * Recebe: o carro (criado sem pista, com direcaoLivre e temRumoNoMundo ligados), os comandos, o
+ *         tempo do quadro e a aderência do chão (1 = asfalto); onde pôr os metros por segundo para a
+ *         direita que o drift soma ao caminho e se o carro está de ré.
+ * Devolve: graus que o rumo girou neste quadro (positivo = para a direita).
+ */
+float dirigirSemPista(Carro *carro, Comandos comandos, float tempoQuadro, float aderenciaDoChao, float *deLado, int *deRe) {
+    float antes = carro->rumoNoMundo;
+    *deLado = 0.0f;
+    *deRe = 0;
+    if (controlarRe(carro, comandos, tempoQuadro)) {
+        /* De ré, como em andarDeRe: o rumo gira ao contrário do volante */
+        carro->ultimosComandos = comandos;
+        carro->nitroLigado = 0;
+        carro->forcaDoDrift = 0.0f;
+        carro->anguloDeDrift = 0.0f;
+        atualizarMotor(&carro->motor, carro->re / carro->velocidadeMaxima, comandos.frear, 0, 0, tempoQuadro);
+        atualizarVolante(carro, comandos, tempoQuadro);
+        carro->velocidade = -carro->re;
+        girarNoMundo(carro, tempoQuadro, aderenciaDoChao);
+        carro->velocidade = 0.0f;
+        carro->derrapagem = 0.0f;
+        carro->anguloDasRodas = fmodf(carro->anguloDasRodas - rapidezDasRodas(carro->re, 0) * tempoQuadro + 2.0f * 3.14159265f,
+                                      2.0f * 3.14159265f);
+        *deRe = 1;
+        atualizarSuspensao(carro, tempoQuadro);
+        return carro->rumoNoMundo - antes;
+    }
+    carro->ultimosComandos = comandos;
+    atualizarNitro(carro, comandos, tempoQuadro);
+    atualizarMotor(&carro->motor, carro->velocidade / carro->velocidadeMaxima + ROTACAO_NO_DRIFT * carro->forcaDoDrift,
+                   (comandos.acelerar || carro->nitroLigado) && !comandos.frear && !comandos.freioDeMao,
+                   comandos.frear, carro->forcaDoDrift > SEGURA_A_MARCHA, tempoQuadro);
+    atualizarVelocidade(carro, comandos, tempoQuadro);
+    atualizarVolante(carro, comandos, tempoQuadro);
+    atualizarDrift(carro, comandos, tempoQuadro);
+    *deLado = girarNoMundo(carro, tempoQuadro, aderenciaDoChao);
+    carro->anguloDasRodas = fmodf(carro->anguloDasRodas
+                                  + rapidezDasRodas(carro->velocidade, comandos.acelerar || carro->nitroLigado) * tempoQuadro,
+                                  2.0f * 3.14159265f);
+    atualizarSuspensao(carro, tempoQuadro);
+    return carro->rumoNoMundo - antes;
+}
+
+/*
+ * girarVolante
+ * Só o volante, como na corrida (para o carro no ar e na parede).
+ * Recebe: o carro, os comandos e o tempo do quadro.
+ * Devolve: nada.
+ */
+void girarVolante(Carro *carro, Comandos comandos, float tempoQuadro) {
+    atualizarVolante(carro, comandos, tempoQuadro);
 }
 
 /*

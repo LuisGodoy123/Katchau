@@ -101,8 +101,8 @@
 #define X_COLUNA_TEMPO        470.0f
 #define X_COLUNA_MELHOR       620.0f
 
-static const char *TEXTOS_OPCOES[TOTAL_OPCOES] = { "CORRER", "GARAGEM", "COMO JOGAR", "CONFIGURAÇÕES", "SAIR" };
-static const Tela DESTINOS_OPCOES[TOTAL_OPCOES] = { TELA_PISTAS, TELA_GARAGEM, TELA_COMO_JOGAR, TELA_CONFIGURACOES, TELA_SAIR };
+static const char *TEXTOS_OPCOES[TOTAL_OPCOES] = { "CORRER", "PASSEIO LIVRE", "GARAGEM", "COMO JOGAR", "CONFIGURAÇÕES", "SAIR" };
+static const Tela DESTINOS_OPCOES[TOTAL_OPCOES] = { TELA_PISTAS, TELA_PASSEIO, TELA_GARAGEM, TELA_COMO_JOGAR, TELA_CONFIGURACOES, TELA_SAIR };
 static const char *TEXTOS_PAUSA[TOTAL_OPCOES_PAUSA] = { "CONTINUAR", "MENU PRINCIPAL" };
 static const EscolhaDaPausa ESCOLHAS_PAUSA[TOTAL_OPCOES_PAUSA] = { PAUSA_CONTINUAR, PAUSA_SAIR };
 
@@ -592,6 +592,7 @@ static void desenharItemDoMenu(const char *texto, int item, float destaque) {
 static const char *descricaoDoItem(int item) {
     static const char *DESCRICOES[TOTAL_OPCOES] = {
         "Escolha a pista e a dificuldade e largue em último contra 13 rivais.",
+        "Dirija à vontade por Radiator Springs, o Willy's Butte, os cânions e a arena do deserto.",
         "Compare a velocidade, a aceleração e a aderência dos carros e escolha o seu.",
         "Veja os controles e as dicas de pilotagem.",
         "Ajuste os comandos, a vibração, a direção e os gráficos.",

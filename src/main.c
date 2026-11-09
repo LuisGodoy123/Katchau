@@ -41,6 +41,7 @@
 #include "videofundo.h"
 #include "recordes.h"
 #include "controle.h"
+#include "passeio.h"
 
 /* Na vitória, o painel de chegada espera um pouco para o jogador ver o
  * confete e o refrão entrando */
@@ -197,7 +198,11 @@ static int abrirJanela(int emJanela) {
 }
 
 int main(int argc, char *argv[]) {
-    int emJanela = (argc > 1 && strcmp(argv[1], "--janela") == 0);
+    int emJanela = 0, diretoNoPasseio = 0;
+    for (int i = 1; i < argc; i++) {
+        emJanela |= (strcmp(argv[i], "--janela") == 0);
+        diretoNoPasseio |= (strcmp(argv[i], "--passeio") == 0);   /* abre direto no passeio livre (para testar) */
+    }
     /* As configurações (inclusive a exibição) são lidas antes de abrir a janela, para ela já abrir como o jogador quer */
     ChangeDirectory(GetApplicationDirectory());
     carregarConfiguracoes(configuracoesAtuais(), ARQUIVO_DE_CONFIGURACOES);
@@ -240,8 +245,11 @@ int main(int argc, char *argv[]) {
     iniciarVibracao();
 
     /* O vídeo de abertura: passa só quando o jogo abre (não a cada corrida); qualquer botão pula */
-    int naIntro = iniciarIntro();
-    if (!naIntro) {
+    int naIntro = diretoNoPasseio ? 0 : iniciarIntro();
+    if (diretoNoPasseio) {
+        tela = TELA_PASSEIO;
+        iniciarPasseio(menu.carroEscolhido);
+    } else if (!naIntro) {
         comecarAbertura();   /* sem o vídeo, a abertura toca no menu mesmo assim */
     }
 
@@ -293,6 +301,9 @@ int main(int argc, char *argv[]) {
             case TELA_CORRIDA:
                 proxima = atualizarTelaDaCorrida(&corrida, &menu, &pausada, &apresentacao, tempoQuadro);
                 break;
+            case TELA_PASSEIO:
+                proxima = atualizarPasseio(&menu, tempoQuadro);
+                break;
             case TELA_RESULTADO: {
                 /* A corrida continua ao fundo até todos os rivais chegarem */
                 Comandos nenhumComando = { 0, 0, 0, 0, 0.0f, 0, 0 };
@@ -314,6 +325,10 @@ int main(int argc, char *argv[]) {
             iniciarEstadoDaVibracao(&estadoDaVibracao);
             iniciarEfeitosDaCorrida();
             iniciarApresentacao(&apresentacao);
+        }
+        /* Entrar no passeio livre: o carro escolhido na garagem, na rua principal */
+        if (proxima == TELA_PASSEIO && tela != TELA_PASSEIO) {
+            iniciarPasseio(menu.carroEscolhido);
         }
         /* Troca de tela: o vídeo da tela nova recomeça do início; sair da entrada clareia até o menu */
         if (proxima != tela) {
@@ -338,7 +353,7 @@ int main(int argc, char *argv[]) {
 
         /* O mouse só aparece (e só funciona) no menu principal, na garagem e na pausa */
         int usaMouse = (tela == TELA_MENU || tela == TELA_GARAGEM || tela == TELA_PISTAS || tela == TELA_CONFIGURACOES
-                        || (tela == TELA_CORRIDA && pausada));
+                        || (tela == TELA_CORRIDA && pausada) || (tela == TELA_PASSEIO && passeioPausado()));
         if (usaMouse && IsCursorHidden()) {
             ShowCursor();
         } else if (!usaMouse && !IsCursorHidden()) {
@@ -500,6 +515,9 @@ int main(int argc, char *argv[]) {
                     terminarInterface();
                 }
                 break;
+            case TELA_PASSEIO:
+                desenharPasseio(&menu);
+                break;
             case TELA_RESULTADO:
                 desenharVisaoDoJogador(&corrida);   /* a corrida continua ao fundo */
                 comecarInterface(1);
@@ -525,6 +543,7 @@ int main(int argc, char *argv[]) {
     }
     encerrarIntro();   /* se a janela fechou no meio da dissolução */
 
+    descarregarPasseio();
     descarregarFumaca();
     descarregarMarcas();
     descarregarPosProcesso();
