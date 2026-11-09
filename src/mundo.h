@@ -22,6 +22,7 @@ void carregarMundo(Pista *pistas[]);
 void descarregarMundo(void);
 void desenharCenario(IdPista id, Vector3 camera);
 void prepararPlanosDaCamera(void);
+int teloesAVista(IdPista id);
 void desenharTelasQueBrilham(IdPista id);
 void prepararSombras(IdPista id, Camera3D camera, int ligadas);
 

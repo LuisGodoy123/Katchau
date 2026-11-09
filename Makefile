@@ -17,7 +17,7 @@ LOGICA = src/pista.c src/obstaculos.c src/carro.c src/ia.c \
          src/ordenacao.c src/corrida.c src/motor.c src/motorgranular.c src/recordes.c src/olhar.c src/pitstop.c src/vibracao.c src/configuracoes.c src/mjpeg.c
 
 # Módulos que desenham na tela
-DESENHO = src/render.c src/mundo.c src/construcao.c src/carros3d.c src/fumaca.c src/faiscas.c src/fogos.c src/marcas.c src/torcida3d.c src/telao.c src/posprocesso.c src/noite.c src/hud.c src/menu.c src/visual.c src/audio.c src/efeitos.c src/exibicao.c src/apresentacao.c src/intro.c src/videofundo.c src/controle.c
+DESENHO = src/render.c src/corte.c src/mundo.c src/construcao.c src/carros3d.c src/fumaca.c src/faiscas.c src/fogos.c src/marcas.c src/torcida3d.c src/telao.c src/posprocesso.c src/noite.c src/hud.c src/menu.c src/visual.c src/audio.c src/efeitos.c src/exibicao.c src/apresentacao.c src/intro.c src/videofundo.c src/controle.c
 
 FONTES = src/main.c $(LOGICA) $(DESENHO)
 OBJETOS = $(FONTES:src/%.c=build/%.o)
@@ -25,11 +25,38 @@ FRAMEWORKS_DA_VIBRACAO = -framework Foundation -framework GameController -framew
 
 # ---- Bibliotecas por sistema operacional ----
 ifeq ($(OS),Windows_NT)
+    # O gcc que vem primeiro no PATH costuma ser o MinGW 32-bit de C:/MinGW/bin, que não tem
+    # pthread.h e não linka com a raylib de 64 bits. Como o MinGW não traz make.exe (só
+    # mingw32-make.exe), o make sai do w64devkit e o gcc sai do MinGW: o build começa e morre
+    # no meio, em src/mjpeg.c. Fixar o compilador aqui faz o make funcionar de qualquer
+    # terminal, sem mexer no PATH.
+    #
+    # O -B é parte da mesma história: sem ele o gcc acha pelo PATH o assembler e o linker do
+    # MinGW (binutils 2.28, que não conhece o --gdwarf-5 que este gcc manda) em vez dos dele
+    # (binutils 2.46). O -B diz ao gcc onde estão as ferramentas da própria instalação.
+    #
+    # Quem não tem o w64devkit nesse caminho segue com o gcc do PATH; para forçar o do PATH,
+    # use "make W64DEVKIT=".
+    W64DEVKIT ?= C:/raylib/w64devkit/bin
+    ifneq ($(wildcard $(W64DEVKIT)/gcc.exe),)
+        CC := $(W64DEVKIT)/gcc.exe -B$(W64DEVKIT)
+    endif
     # Windows com MinGW (raylib em C:/raylib/raylib/src, padrão do instalador)
     RAYLIB_DIR ?= C:/raylib/raylib/src
     CFLAGS  += -I$(RAYLIB_DIR)
-    LIBS     = -L$(RAYLIB_DIR) -lraylib -lglfw3 -lopengl32 -lgdi32 -lwinmm -lpthread
+    # A libraylib.a do w64devkit já traz a GLFW dentro (o membro rglfw.o); outras instalações a
+    # têm separada, em libglfw3.a. O -print-file-name devolve o caminho quando acha a biblioteca
+    # e só o nome quando não acha, então o "/" diz se ela existe nesta máquina.
+    GLFW_SEPARADA := $(findstring /,$(shell $(CC) -print-file-name=libglfw3.a))
+    LIBS     = -L$(RAYLIB_DIR) -lraylib $(if $(GLFW_SEPARADA),-lglfw3) -lopengl32 -lgdi32 -lwinmm -lpthread
     EXE      = $(NOME).exe
+    # A libraylib.a TEM de vir da mesma árvore que os headers de RAYLIB_DIR. Se ela não estiver
+    # lá, o -lraylib cai numa cópia qualquer que o toolchain tenha (o w64devkit traz uma), e o
+    # jogo passa a compilar contra um raylib.h e a rodar contra outro. O erro que isso dá não
+    # parece nada com a causa: structs com campos em posições diferentes, ponteiros lidos
+    # errados, e um SIGSEGV dentro do driver de vídeo ao subir uma malha montada pelo jogo
+    # (UploadMesh em separarRodas). Conferido no link, para falhar com uma mensagem útil.
+    CONFERIR_RAYLIB = test -f "$(RAYLIB_DIR)/libraylib.a" || {         echo "";         echo "ERRO: nao achei $(RAYLIB_DIR)/libraylib.a";         echo "      Os headers vem de $(RAYLIB_DIR), e a biblioteca precisa vir dali tambem.";         echo "      Compile a raylib uma vez:";         echo "";         echo "          cd $(RAYLIB_DIR) && make PLATFORM=PLATFORM_DESKTOP";         echo "";         echo "      (ou aponte para outra arvore com make RAYLIB_DIR=caminho/para/raylib/src)";         echo "";         exit 1; }
 else
     SISTEMA := $(shell uname -s)
     EXE      = $(NOME)
@@ -46,6 +73,7 @@ else
         # Linux (raylib instalada em /usr/local)
         LIBS = -lraylib -lGL -lm -lpthread -ldl -lrt -lX11
     endif
+    CONFERIR_RAYLIB = true   # fora do Windows a raylib vem instalada no sistema
 endif
 
 # Fora do macOS o jogo não vibra (src/vibrar_outros.c não faz nada)
@@ -57,6 +85,7 @@ endif
 all: $(EXE)
 
 $(EXE): $(OBJETOS)
+	@$(CONFERIR_RAYLIB)
 	$(CC) $(OBJETOS) -o $@ $(LIBS)
 
 # -MMD -MP: o gcc anota de quais .h cada .o depende (arquivos build/*.d).

@@ -377,7 +377,13 @@ void prepararTorcida3D(int pista, Camera3D camera) {
     totalDeLonge = 0;
     conjuntoDoQuadro = NULL;
     Conjunto *c = (pista >= 0 && pista < TOTAL_PISTAS) ? &conjuntos[pista] : NULL;
-    int ativa = temCarrinho && c != NULL && c->total > 0 && getenv("KATCHAU_SEM_TORCIDA3D") == NULL;
+    /* As variáveis de ambiente são lidas uma vez: getenv percorre o ambiente comparando
+     * nomes, e isto é um caminho de desenho */
+    static int desligada = -1;
+    if (desligada < 0) {
+        desligada = (getenv("KATCHAU_SEM_TORCIDA3D") != NULL);
+    }
+    int ativa = temCarrinho && c != NULL && c->total > 0 && !desligada;
     esconderTorcidaPintada(camera.position, ativa ? RAIO_DE_LONGE : 0.0f);
     if (!ativa) {
         return;
@@ -477,7 +483,11 @@ void desenharTorcida3D(void) {
     if (conjuntoDoQuadro == NULL) {
         return;
     }
-    if (getenv("KATCHAU_DEPURAR_TORCIDA")) {
+    static int depurar = -1;
+    if (depurar < 0) {
+        depurar = (getenv("KATCHAU_DEPURAR_TORCIDA") != NULL);
+    }
+    if (depurar) {
         TraceLog(LOG_INFO, "TORCIDA 3D: %d trechos perto, %d longe", totalDePerto, totalDeLonge);
     }
     rlDrawRenderBatchActive();

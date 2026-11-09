@@ -14,6 +14,7 @@
 
 #include <math.h>
 #include <stddef.h>
+#include <stdlib.h>
 #include "raylib.h"
 #include "rlgl.h"
 #include "render.h"
@@ -30,6 +31,7 @@
 #include "posprocesso.h"
 #include "configuracoes.h"
 #include "noite.h"
+#include "corte.h"
 #include "raymath.h"
 
 /* ---------- Câmera ---------- */
@@ -53,8 +55,13 @@
 #define SEGUNDOS_POR_PISTA    14.0f    /* o fundo dos menus troca de pista depois disso */
 #define DURACAO_DA_TROCA_DE_PISTA 0.7f /* segundos escurecendo e clareando */
 
+/* Folga no campo de visão ao procurar os telões: 15% a mais de ângulo para cada lado, para
+ * absorver qualquer diferença entre a projeção montada aqui e a que a raylib vai montar */
+#define FOLGA_DO_TELAO        0.15f
+
 /* ---------- Distâncias do que é desenhado (metros) ---------- */
 #define DISTANCIA_DOS_RIVAIS  1500.0f
+#define RAIO_DO_CARRO         4.0f     /* a esfera que cerca um carro, com folga, para o corte */
 #define MENOR_DISTANCIA_SPRITE 1.5f    /* mais perto que isso da câmera, também não */
 #define DISTANCIA_DA_FUMACA   200.0f
 
@@ -94,6 +101,33 @@ static float aFrenteDaCamera(Camera3D camera, Vector3 ponto) {
     float tamanho = sqrtf(frente.x * frente.x + frente.y * frente.y + frente.z * frente.z);
     return ((ponto.x - camera.position.x) * frente.x + (ponto.y - camera.position.y) * frente.y
             + (ponto.z - camera.position.z) * frente.z) / tamanho;
+}
+
+/*
+ * desligadoPorFora
+ * As chaves de desempenho, para medir quanto cada parte do desenho custa: rodar o jogo com
+ * KATCHAU_SEM_FUMACA=1, KATCHAU_SEM_MARCAS=1, KATCHAU_SEM_CARROS=1 ou KATCHAU_SEM_CENARIO=1
+ * e comparar o tempo de quadro (veja medirQuadro, em main.c) diz onde está o tempo melhor que
+ * qualquer cronômetro: num OpenGL emulado o custo de uma chamada de desenho não aparece onde
+ * ela é feita. Veja também KATCHAU_SEM_TELAO (telao.c) e KATCHAU_SEM_TORCIDA3D (torcida3d.c).
+ * Recebe: o nome da variável de ambiente.
+ * Devolve: 1 se ela está ligada. A resposta é guardada: getenv é caro para um laço de desenho.
+ */
+static int desligadoPorFora(const char *chave) {
+    static const char *chaves[6];
+    static int respostas[6];
+    static int total = 0;
+    for (int i = 0; i < total; i++) {
+        if (chaves[i] == chave) {
+            return respostas[i];
+        }
+    }
+    if (total == (int) (sizeof(chaves) / sizeof(chaves[0]))) {
+        return 0;   /* chaves demais: aumente os vetores */
+    }
+    chaves[total] = chave;
+    respostas[total] = (getenv(chave) != NULL);
+    return respostas[total++];
 }
 
 static int cenaPausada = 0;
@@ -302,12 +336,13 @@ static void desenharSombraDoCarro(Camera3D camera, Carro *carro) {
     float lateral = carro->deslocamentoLateral * larguraDoLado(carro->posicao.segmento, carro->deslocamentoLateral);
     float rumoDaPista = pontoNoMundo(carro->posicao, carro->deslocamentoLateral).rumo;
     float giro = (rumoDesenhado(carro, rumoDaPista) - rumoDaPista + carro->giro + carro->anguloDeDrift + volanteDesenhado(carro) * GRAUS_DO_VOLANTE) * DEG2RAD;
+    float coseno = cosf(giro), seno = sinf(giro);   /* o giro é o mesmo nos 49 pontos da grade */
     for (int i = 0; i < PONTOS_DA_SOMBRA; i++) {
         for (int j = 0; j < PONTOS_DA_SOMBRA; j++) {
             float paraDireita = -meio + 2.0f * meio * i / (PONTOS_DA_SOMBRA - 1);
             float paraFrente = meio - 2.0f * meio * j / (PONTOS_DA_SOMBRA - 1);
-            float naPista = paraFrente * cosf(giro) - paraDireita * sinf(giro);
-            float aoLado = lateral + paraDireita * cosf(giro) + paraFrente * sinf(giro);
+            float naPista = paraFrente * coseno - paraDireita * seno;
+            float aoLado = lateral + paraDireita * coseno + paraFrente * seno;
 
             PosicaoNaPista lugar = carro->posicao;
             moverNaPista(&lugar, naPista * UNIDADES_POR_METRO);
@@ -322,19 +357,24 @@ static void desenharSombraDoCarro(Camera3D camera, Carro *carro) {
 
 /*
  * carroAVista
+ * O teste de distância (atrás e longe) continua primeiro: é mais barato e já tira a maioria.
+ * O corte pelo campo de visão é o que pega o carro que está perto mas fora da borda da tela
+ * — numa curva fechada, metade do pelotão está nessa situação.
  * Recebe: a câmera e o carro.
- * Devolve: 1 se ele está perto e à frente da câmera (vale a pena desenhar).
+ * Devolve: 1 se vale a pena desenhá-lo.
  */
 static int carroAVista(Camera3D camera, Carro *carro) {
     PontoNoMundo ponto = pontoNoMundo(carro->posicao, carro->deslocamentoLateral);
-    float distancia = aFrenteDaCamera(camera, (Vector3){ ponto.x, ponto.y, ponto.z });
-    return distancia >= -6.0f && distancia <= DISTANCIA_DOS_RIVAIS;
+    Vector3 lugar = { ponto.x, ponto.y, ponto.z };
+    float distancia = aFrenteDaCamera(camera, lugar);
+    if (distancia < -6.0f || distancia > DISTANCIA_DOS_RIVAIS) {
+        return 0;
+    }
+    return esferaAVista(lugar, RAIO_DO_CARRO);
 }
 
 static void desenharCarroNoMundo(Camera3D camera, Carro *carro) {
-    PontoNoMundo ponto = pontoNoMundo(carro->posicao, carro->deslocamentoLateral);
-    float distancia = aFrenteDaCamera(camera, (Vector3){ ponto.x, ponto.y, ponto.z });
-    if (distancia < -6.0f || distancia > DISTANCIA_DOS_RIVAIS) {
+    if (!carroAVista(camera, carro)) {
         return;
     }
     if (carro->estadoDoPit == PIT_TROCANDO && carro->duracaoDaTroca == DURACAO_DA_TROCA) {
@@ -546,7 +586,7 @@ static void desenharChamasDoCarro(Camera3D camera, Carro *carro) {
     float meiaDistancia = larguraDoCarro3D(carro->numero) * LUGAR_DO_ESCAPAMENTO;
     for (int lado = -1; lado <= 1; lado += 2) {
         Vector3 escape = Vector3Transform((Vector3){ lado * meiaDistancia, ALTURA_DO_ESCAPAMENTO, -atras }, noMundo);
-        desenharChamaDoNitro(camera, escape, paraTras);
+        desenharChamaDoNitro(escape, paraTras);
     }
 }
 
@@ -761,14 +801,17 @@ static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
 
     prepararPlanosDaCamera();
     BeginMode3D(camera);
+    prepararCorte();   /* daqui para baixo, o que está fora da tela não é mandado para a placa */
     rlDisableBackfaceCulling();
-    desenharCenario(pista->id, camera.position);
+    if (!desligadoPorFora("KATCHAU_SEM_CENARIO")) {
+        desenharCenario(pista->id, camera.position);
+    }
     if (!desenhandoOTelao) {
         desenharTorcida3D();   /* na tela pequena do telão a torcida pintada basta */
     }
 
     if (corrida != NULL) {
-        if (!desenhandoOTelao) {
+        if (!desenhandoOTelao && !desligadoPorFora("KATCHAU_SEM_MARCAS")) {
             desenharMarcas();
         }
         comecarSombrasNoChao();
@@ -781,19 +824,23 @@ static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
             desenharSombraDoCarro(camera, &corrida->jogador);
         }
         terminarSombrasNoChao();
-        for (int r = 0; r < TOTAL_RIVAIS; r++) {
-            desenharCarroNoMundo(camera, &corrida->rivais[r]);
+        if (!desligadoPorFora("KATCHAU_SEM_CARROS")) {
+            for (int r = 0; r < TOTAL_RIVAIS; r++) {
+                desenharCarroNoMundo(camera, &corrida->rivais[r]);
+            }
+            desenharCarroNoMundo(camera, &corrida->jogador);
         }
-        desenharCarroNoMundo(camera, &corrida->jogador);
         if (corrida->temParada) {
             desenharGuido(camera, pista, &corrida->jogador);
         }
         if (!desenhandoOTelao) {
-            desenharFumaca3D(camera);
+            if (!desligadoPorFora("KATCHAU_SEM_FUMACA")) {
+                desenharFumaca3D(camera);
+            }
             desenharFaiscas(camera);
             desenharFogos(camera);
         }
-        comecarChamas();
+        comecarChamas(camera);
         for (int r = 0; r < TOTAL_RIVAIS; r++) {
             desenharChamasDoCarro(camera, &corrida->rivais[r]);
         }
@@ -811,13 +858,14 @@ static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
         comecarLuzesDoPosProcesso();
         prepararPlanosDaCamera();
         BeginMode3D(camera);
+        prepararCorte();
         desenharTelasQueBrilham(pista->id);
         if (corrida != NULL) {
             rlDisableBackfaceCulling();
             desenharFaiscas(camera);   /* as faíscas também brilham (o halo nasce delas) */
             desenharFogos(camera);
             rlEnableBackfaceCulling();
-            comecarChamas();
+            comecarChamas(camera);
             for (int r = 0; r < TOTAL_RIVAIS; r++) {
                 desenharChamasDoCarro(camera, &corrida->rivais[r]);
             }
@@ -906,14 +954,24 @@ static Carro *carroDaTomada(Corrida *corrida, int tomada) {
 
 /*
  * atualizarTelao
- * Desenha mais um quadro da transmissão (umas 20 vezes por segundo): a corrida vista de uma
+ * Desenha mais um quadro da transmissão (15 vezes por segundo): a corrida vista de uma
  * câmera de TV presa a um carro. As tomadas trocam de carro e de câmera a cada poucos segundos.
- * Recebe: a corrida.
+ *
+ * Desenhar a transmissão é desenhar o mundo inteiro outra vez (cenário e os 14 carros), então
+ * só vale a pena quando alguma tela de telão está no campo de visão do jogador: no resto da
+ * volta, o que apareceria nela é invisível. Em Interlagos são 5 telões em 6 km de pista.
+ * Recebe: a corrida e a câmera do jogador.
  * Devolve: nada.
  */
-static void atualizarTelao(Corrida *corrida) {
+static void atualizarTelao(Corrida *corrida, Camera3D doJogador) {
     atualizarPlacar(corrida);
     if (!telaoPrecisaDeQuadro(GetFrameTime())) {
+        return;
+    }
+    float aspecto = (float) GetScreenWidth() / (float) GetScreenHeight();
+    prepararPlanosDaCamera();   /* os planos de perto e de longe do jogo, não os padrões da raylib */
+    prepararCorteDaCamera(doJogador, doJogador.fovy, aspecto, FOLGA_DO_TELAO);
+    if (!teloesAVista(corrida->pista->id)) {
         return;
     }
     int tomada = (int) (GetTime() / SEGUNDOS_POR_TOMADA);
@@ -989,7 +1047,6 @@ static DistanciaDaCamera distanciaParaOCarro(const Carro *carro, DistanciaDaCame
  */
 void desenharVisaoDoJogador(Corrida *corrida) {
     Carro *jogador = &corrida->jogador;
-    atualizarTelao(corrida);   /* os telões de todas as pistas passam a transmissão */
     /* A câmera acompanha o carro, não a pista: sem volante na curva, ela também não vira sozinha */
     Olhar olhar = olharDoJogador;
     int comRumoReal = jogador->direcaoLivre && jogador->temRumoNoMundo && jogador->estadoDoPit == PIT_FORA;
@@ -1078,6 +1135,7 @@ void desenharVisaoDoJogador(Corrida *corrida) {
     atualizarFogos(passou);
     atualizarMarcas(passou);
 
+    atualizarTelao(corrida, camera);   /* os telões de todas as pistas passam a transmissão */
     desenharMundo3D(camera, corrida->pista, corrida);
 
     if (festa) {

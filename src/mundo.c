@@ -27,6 +27,7 @@
 #include "rlgl.h"
 #include "obstaculos.h"
 #include "noite.h"
+#include "corte.h"
 
 #define PASTA_TEXTURAS        "recursos/texturas/"
 #define ARQUIVO_DO_ESTADIO    "recursos/modelos/copa_pistao.glb"
@@ -223,7 +224,8 @@ static const char *ARQUIVOS_DOS_OBJETOS[TOTAL_MODELOS_DE_OBJETO] = {
 typedef struct {
     Mesh malha;
     Texture2D textura;
-    int brilha;      /* 1: a tela de um telão, que emite luz */
+    int brilha;          /* 1: a tela de um telão, que emite luz */
+    BoundingBox caixa;   /* para o corte pelo campo de visão (corte.c) */
 } LoteDeObjetos;
 
 /* Um lote ainda sendo montado */
@@ -347,15 +349,52 @@ static Shader shadersDeInterlagos[TOTAL_DE_DESENHOS];
 #define MAXIMO_QUE_RECEBEM_SOMBRA 12
 static Shader recebemSombra[MAXIMO_QUE_RECEBEM_SOMBRA];
 static int totalQueRecebemSombra = 0;
+/* Onde cada um desses shaders guarda "sombraLigada" e "luzVP". Procurar pelo nome é uma
+ * consulta por texto dentro do driver de vídeo, e isso acontecia a cada quadro, para os dez
+ * shaders — mesmo com as sombras desligadas nas configurações. O lugar não muda: é achado
+ * uma vez, no carregamento. */
+static int locSombraLigada[MAXIMO_QUE_RECEBEM_SOMBRA];
+static int locLuzVP[MAXIMO_QUE_RECEBEM_SOMBRA];
 
 static Material material;   /* o mesmo material, trocando a textura a cada desenho */
 static Model estadio;
+static BoundingBox *caixasDoEstadio = NULL;
 static Mesh pinturaDoEstadio;
 static Mesh ceuDeDia, tampaDoCeu, ceuDeNoite;
 static Texture2D texturaCeu;
 static Texture2D texturaAsfalto[2], texturaGrama;
 static Texture2D texturaDoConcreto;   /* o concreto limpo dos muros de Interlagos (gerado) */
 static Model modelosDosObjetos[TOTAL_MODELOS_DE_OBJETO];
+
+/* Onde estão as telas dos telões de cada pista. A transmissão (telao.c) redesenha o mundo
+ * inteiro para caber nelas, e isso custa quase tanto quanto desenhar o jogo; quando nenhuma
+ * tela está no campo de visão, o que seria desenhado ali é invisível e não vale o preço. */
+#define MAXIMO_DE_TELAS  24
+static BoundingBox telasDoCenario[TOTAL_PISTAS][MAXIMO_DE_TELAS];
+static int totalDeTelas[TOTAL_PISTAS];
+static int telasDemais[TOTAL_PISTAS];   /* não couberam: a pista volta a desenhar sempre */
+static IdPista pistaEmCarregamento = PISTA_COPA_PISTAO;
+
+/*
+ * registrarTela
+ * Guarda a caixa de uma tela de telão da pista que está sendo carregada. Se não couber,
+ * a pista é marcada e passa a desenhar a transmissão sempre: é melhor pagar o preço do que
+ * deixar um telão com a imagem congelada à vista do jogador.
+ * Recebe: a caixa, em coordenadas do mundo.
+ * Devolve: nada.
+ */
+static void registrarTela(BoundingBox caixa) {
+    int id = (int) pistaEmCarregamento;
+    if (id < 0 || id >= TOTAL_PISTAS) {
+        return;
+    }
+    if (totalDeTelas[id] >= MAXIMO_DE_TELAS) {
+        telasDemais[id] = 1;
+        TraceLog(LOG_WARNING, "MUNDO: telões demais na pista %d; aumente MAXIMO_DE_TELAS", id);
+        return;
+    }
+    telasDoCenario[id][totalDeTelas[id]++] = caixa;
+}
 static LoteDeObjetos lotes[MAXIMO_DE_LOTES];
 static int totalDeLotes = 0;
 static int primeiroLoteDoEstadio = 0, fimDosLotesDoEstadio = 0;
@@ -369,12 +408,20 @@ typedef struct {
     Mesh torcida;
     Mesh saia;                       /* o chão além do terreno do modelo, até o horizonte (Interlagos) */
     int primeiroLote, fimDosLotes;   /* as árvores e as estruturas */
+    /* Para o corte pelo campo de visão (corte.c): a caixa de cada malha, já no mundo, e as
+     * malhas separadas por tipo de desenho — assim o laço de desenho não percorre o modelo
+     * inteiro três vezes procurando quem é de cada tipo */
+    BoundingBox *caixas;
+    int *opacas, totalOpacas;
+    int *deSombra, totalDeSombra;
+    int *deTela, totalDeTela;
 } MapaDeDia;
 static MapaDeDia mapasDeDia[TOTAL_PISTAS];
 static void prepararMaterialDeInterlagos(Material *material, DesenhoDoMaterial desenho);
 static void tirarParedesInvisiveis(Model *modelo);
 static Texture2D gerarConcretoLimpo(void);
 static void trocarImagensGastas(Model *modelo);
+static void prepararCaixasDoMapa(MapaDeDia *mapa, IdPista id);
 static void colocarTeloesDeInterlagos(Pista *pista, const Model *modelo);
 static void colocarTeloesDasArquibancadas(Pista *pista, const Model *modelo);
 static void definirAreaDoAutodromo(Pista *pista);
@@ -476,6 +523,8 @@ static void fecharLote(LoteAberto *aberto, Texture2D textura) {
     lotes[totalDeLotes].malha = malha;
     lotes[totalDeLotes].textura = textura;
     lotes[totalDeLotes].brilha = 0;
+    /* O lote já vem com os vértices no lugar deles no mundo (é desenhado com a matriz de origem) */
+    lotes[totalDeLotes].caixa = caixaDaMalha(malha, MatrixIdentity());
     totalDeLotes++;
     *aberto = (LoteAberto){ 0 };
 }
@@ -549,6 +598,16 @@ static void colocarModelo(ModeloDeObjeto qual, Vector3 pe, float giro, float tam
     Model modelo = modelosDosObjetos[qual];
     Matrix noMundo = MatrixMultiply(MatrixMultiply(MatrixScale(tamanho, tamanho, tamanho), MatrixRotateY(giro)),
                                     MatrixTranslate(pe.x, pe.y, pe.z));
+    if ((qual == MODELO_TELAO_KATCHAU || qual == MODELO_PRIMEIRO_DO_CENARIO + CENARIO_TELAO)
+        && modelo.meshCount > 0) {
+        BoundingBox tela = caixaDaMalha(modelo.meshes[0], noMundo);
+        for (int i = 1; i < modelo.meshCount; i++) {
+            BoundingBox peca = caixaDaMalha(modelo.meshes[i], noMundo);
+            tela.min = Vector3Min(tela.min, peca.min);
+            tela.max = Vector3Max(tela.max, peca.max);
+        }
+        registrarTela(tela);
+    }
     for (int i = 0; i < modelo.meshCount && i < MAXIMO_DE_PECAS; i++) {
         Material peca = modelo.materials[modelo.meshMaterial[i]];
         juntarCopia(&lotesAbertos[qual][i], modelo.meshes[i], peca.maps[MATERIAL_MAP_ALBEDO].color,
@@ -790,6 +849,7 @@ static void montarEquipeAoArLivre(Pista *pista) {
  * Devolve: nada.
  */
 static void carregarEstadio(Pista *pista) {
+    pistaEmCarregamento = PISTA_COPA_PISTAO;
     primeiroLoteDoEstadio = totalDeLotes;
     estadio = LoadModel(ARQUIVO_DO_ESTADIO);
     carregarNoite(estadio, MATERIAL_DOS_ASSENTOS, ESCALA_COPA_PISTAO);
@@ -812,6 +872,23 @@ static void carregarEstadio(Pista *pista) {
     fecharTodosOsLotes();
     fimDosLotesDoEstadio = totalDeLotes;
     carregarTelao(&estadio);
+    /* As caixas das malhas do estádio, para o corte: a mesma matriz que o desenho usa.
+     * As que receberam o shader da tela que brilha são o cubo e o placar: as telas daqui. */
+    if (estadio.meshCount > 0) {
+        Matrix noMundo = MatrixMultiply(estadio.transform,
+                                        MatrixScale(ESCALA_COPA_PISTAO, ESCALA_COPA_PISTAO, ESCALA_COPA_PISTAO));
+        caixasDoEstadio = malloc(estadio.meshCount * sizeof(BoundingBox));
+        unsigned int shaderDaTela = shaderDaTelaQueBrilha().id;
+        for (int i = 0; i < estadio.meshCount; i++) {
+            BoundingBox caixa = caixaDaMalha(estadio.meshes[i], noMundo);
+            if (caixasDoEstadio != NULL) {
+                caixasDoEstadio[i] = caixa;
+            }
+            if (estadio.materials[estadio.meshMaterial[i]].shader.id == shaderDaTela) {
+                registrarTela(caixa);
+            }
+        }
+    }
 }
 
 /*
@@ -908,6 +985,7 @@ static ModeloDeObjeto modeloDaCoisa(TipoDeCoisa tipo) {
 static void carregarMapaDeDia(Pista *pista, const char *arquivo, float escala, const LugarNaTorcida *lugares,
                               int totalDeLugares, float tamanho, const CoisaNoMapa *coisas, int totalDeCoisas) {
     MapaDeDia *mapa = &mapasDeDia[pista->id];
+    pistaEmCarregamento = pista->id;   /* para registrarTela saber de quem são os telões */
     mapa->existe = 1;
     mapa->escala = escala;
     mapa->modelo = LoadModel(arquivo);
@@ -956,6 +1034,8 @@ static void carregarMapaDeDia(Pista *pista, const char *arquivo, float escala, c
     }
     fecharTodosOsLotes();
     mapa->fimDosLotes = totalDeLotes;
+    prepararCaixasDoMapa(mapa, pista->id);   /* depois das arquibancadas: elas acrescentam malhas ao modelo */
+    TraceLog(LOG_INFO, "CORTE: pista %d com %d tela(s) de telão", pista->id, totalDeTelas[pista->id]);
 }
 
 /* ==================================================================
@@ -1104,6 +1184,78 @@ static DesenhoDoMaterial desenhoDaMalha(const Model *modelo, int malha) {
 }
 
 /*
+ * prepararCaixasDoMapa
+ * Mede cada malha do modelo da pista uma vez, no carregamento: a caixa que a cerca, já em
+ * coordenadas do mundo, para o corte pelo campo de visão (corte.c) poder descartá-la sem
+ * olhar os vértices. Em Interlagos, também separa as malhas por tipo de desenho.
+ * A matriz é a mesma que o desenho usa, então a caixa cai exatamente onde a malha aparece.
+ * Chamar depois de todas as malhas estarem no modelo.
+ * Recebe: o mapa e a pista.
+ * Devolve: nada.
+ */
+static void prepararCaixasDoMapa(MapaDeDia *mapa, IdPista id) {
+    int total = mapa->modelo.meshCount;
+    if (total <= 0) {
+        return;
+    }
+    Matrix noMundo = MatrixMultiply(mapa->modelo.transform, MatrixScale(mapa->escala, mapa->escala, mapa->escala));
+    mapa->caixas = malloc(total * sizeof(BoundingBox));
+    if (mapa->caixas == NULL) {
+        return;   /* sem as caixas, o desenho segue sem cortar nada */
+    }
+    for (int i = 0; i < total; i++) {
+        mapa->caixas[i] = caixaDaMalha(mapa->modelo.meshes[i], noMundo);
+    }
+    if (id != PISTA_INTERLAGOS) {
+        return;   /* as outras pistas são desenhadas num laço só, sem separar por tipo */
+    }
+    mapa->opacas = malloc(total * sizeof(int));
+    mapa->deSombra = malloc(total * sizeof(int));
+    mapa->deTela = malloc(total * sizeof(int));
+    if (mapa->opacas == NULL || mapa->deSombra == NULL || mapa->deTela == NULL) {
+        free(mapa->opacas);
+        free(mapa->deSombra);
+        free(mapa->deTela);
+        mapa->opacas = mapa->deSombra = mapa->deTela = NULL;
+        return;
+    }
+    for (int i = 0; i < total; i++) {
+        DesenhoDoMaterial desenho = desenhoDaMalha(&mapa->modelo, i);
+        if (desenho == DESENHO_SOMBRA) {
+            mapa->deSombra[mapa->totalDeSombra++] = i;
+        } else if (desenho == DESENHO_TELA) {
+            mapa->deTela[mapa->totalDeTela++] = i;
+        } else if (desenho != DESENHO_ESCONDIDO) {
+            mapa->opacas[mapa->totalOpacas++] = i;
+        }
+    }
+    TraceLog(LOG_INFO, "CORTE: Interlagos tem %d malhas (%d opacas, %d de sombra, %d de tela)",
+             total, mapa->totalOpacas, mapa->totalDeSombra, mapa->totalDeTela);
+}
+
+/*
+ * desenharModeloCortado
+ * O modelo inteiro de uma pista, malha por malha, deixando de fora as que não podem
+ * aparecer na tela. É o que o DrawModel faz (ele também chama DrawMesh por malha, com a
+ * matriz do modelo vezes a escala), menos as malhas fora do campo de visão.
+ * Recebe: o mapa.
+ * Devolve: nada.
+ */
+static void desenharModeloCortado(MapaDeDia *mapa) {
+    if (mapa->caixas == NULL) {
+        DrawModel(mapa->modelo, (Vector3){ 0.0f, 0.0f, 0.0f }, mapa->escala, WHITE);
+        return;
+    }
+    Matrix noMundo = MatrixMultiply(mapa->modelo.transform, MatrixScale(mapa->escala, mapa->escala, mapa->escala));
+    for (int i = 0; i < mapa->modelo.meshCount; i++) {
+        if (!caixaAVista(mapa->caixas[i])) {
+            continue;
+        }
+        DrawMesh(mapa->modelo.meshes[i], mapa->modelo.materials[mapa->modelo.meshMaterial[i]], noMundo);
+    }
+}
+
+/*
  * desenharModeloDeInterlagos
  * Primeiro tudo o que é sólido; depois, sem escrever na profundidade, o que só escurece
  * (a borracha do traçado em cima do asfalto) e os alambrados, transparentes. As faces valem dos dois lados, como no
@@ -1111,24 +1263,42 @@ static DesenhoDoMaterial desenhoDaMalha(const Model *modelo, int malha) {
  * Recebe: o mapa.
  * Devolve: nada.
  */
+static void desenharMalhasDoMapa(MapaDeDia *mapa, const int *quais, int quantas, Matrix noMundo) {
+    for (int k = 0; k < quantas; k++) {
+        int i = quais[k];
+        if (mapa->caixas != NULL && !caixaAVista(mapa->caixas[i])) {
+            continue;   /* fora da tela: nem vale a troca de material e de shader */
+        }
+        DrawMesh(mapa->modelo.meshes[i], mapa->modelo.materials[mapa->modelo.meshMaterial[i]], noMundo);
+    }
+}
+
 static void desenharModeloDeInterlagos(MapaDeDia *mapa) {
     Matrix noMundo = MatrixMultiply(mapa->modelo.transform, MatrixScale(mapa->escala, mapa->escala, mapa->escala));
     rlDisableBackfaceCulling();
-    for (int i = 0; i < mapa->modelo.meshCount; i++) {
-        DesenhoDoMaterial desenho = desenhoDaMalha(&mapa->modelo, i);
-        if (desenho != DESENHO_SOMBRA && desenho != DESENHO_TELA && desenho != DESENHO_ESCONDIDO) {
-            DrawMesh(mapa->modelo.meshes[i], mapa->modelo.materials[mapa->modelo.meshMaterial[i]], noMundo);
-        }
-    }
-    rlDrawRenderBatchActive();
-    rlDisableDepthMask();
-    DesenhoDoMaterial transparentes[2] = { DESENHO_SOMBRA, DESENHO_TELA };
-    for (int vez = 0; vez < 2; vez++) {
+    if (mapa->opacas == NULL) {   /* sem as listas prontas: o modelo inteiro, como antes */
         for (int i = 0; i < mapa->modelo.meshCount; i++) {
-            if (desenhoDaMalha(&mapa->modelo, i) == transparentes[vez]) {
+            DesenhoDoMaterial desenho = desenhoDaMalha(&mapa->modelo, i);
+            if (desenho != DESENHO_SOMBRA && desenho != DESENHO_TELA && desenho != DESENHO_ESCONDIDO) {
                 DrawMesh(mapa->modelo.meshes[i], mapa->modelo.materials[mapa->modelo.meshMaterial[i]], noMundo);
             }
         }
+        rlDrawRenderBatchActive();
+        rlDisableDepthMask();
+        DesenhoDoMaterial transparentes[2] = { DESENHO_SOMBRA, DESENHO_TELA };
+        for (int vez = 0; vez < 2; vez++) {
+            for (int i = 0; i < mapa->modelo.meshCount; i++) {
+                if (desenhoDaMalha(&mapa->modelo, i) == transparentes[vez]) {
+                    DrawMesh(mapa->modelo.meshes[i], mapa->modelo.materials[mapa->modelo.meshMaterial[i]], noMundo);
+                }
+            }
+        }
+    } else {
+        desenharMalhasDoMapa(mapa, mapa->opacas, mapa->totalOpacas, noMundo);
+        rlDrawRenderBatchActive();
+        rlDisableDepthMask();
+        desenharMalhasDoMapa(mapa, mapa->deSombra, mapa->totalDeSombra, noMundo);
+        desenharMalhasDoMapa(mapa, mapa->deTela, mapa->totalDeTela, noMundo);
     }
     rlDrawRenderBatchActive();
     rlEnableDepthMask();
@@ -1149,6 +1319,9 @@ static void desenharSombraDeInterlagos(MapaDeDia *mapa) {
         DesenhoDoMaterial desenho = desenhoDaMalha(&mapa->modelo, i);
         if (desenho != DESENHO_OPACO && desenho != DESENHO_RECORTE) {
             continue;
+        }
+        if (mapa->caixas != NULL && !caixaAVista(mapa->caixas[i])) {
+            continue;   /* fora do quadrado da luz: não escreve no mapa de sombra */
         }
         int qual = mapa->modelo.meshMaterial[i];
         if (qual < TOTAL_MATERIAIS_INTERLAGOS && MATERIAIS_INTERLAGOS[qual].chao != CHAO_NENHUM
@@ -1986,6 +2159,8 @@ void descarregarMundo(void) {
     descarregarTorcida3D();
     descarregarTelao();
     UnloadModel(estadio);
+    free(caixasDoEstadio);
+    caixasDoEstadio = NULL;
     for (int i = 0; i < TOTAL_PISTAS; i++) {
         if (mapasDeDia[i].existe) {
             for (int m = 0; m < mapasDeDia[i].modelo.materialCount; m++) {
@@ -2003,6 +2178,10 @@ void descarregarMundo(void) {
                 }
             }
             UnloadModel(mapasDeDia[i].modelo);
+            free(mapasDeDia[i].caixas);
+            free(mapasDeDia[i].opacas);
+            free(mapasDeDia[i].deSombra);
+            free(mapasDeDia[i].deTela);
             UnloadMesh(mapasDeDia[i].pintura);
             UnloadMesh(mapasDeDia[i].torcida);
             if (mapasDeDia[i].saia.vertexCount > 0) {
@@ -2067,6 +2246,9 @@ static void desenharMalha(Mesh malha, Texture2D textura, Matrix posicao) {
  * Devolve: nada (as telas dos telões vão sem luz: elas brilham sozinhas).
  */
 static void desenharLote(int i, Matrix origem) {
+    if (!caixaAVista(lotes[i].caixa)) {
+        return;
+    }
     if (lotes[i].brilha) {
         Shader antes = material.shader;
         material.shader = shaderDaTelaQueBrilha();
@@ -2128,6 +2310,8 @@ static void carregarSombras(void) {
     int slot = SLOT_DA_SOMBRA;
     for (int i = 0; i < totalQueRecebemSombra; i++) {
         SetShaderValue(recebemSombra[i], GetShaderLocation(recebemSombra[i], "mapaDeSombra"), &slot, SHADER_UNIFORM_INT);
+        locSombraLigada[i] = GetShaderLocation(recebemSombra[i], "sombraLigada");
+        locLuzVP[i] = GetShaderLocation(recebemSombra[i], "luzVP");
     }
 }
 
@@ -2152,7 +2336,7 @@ static void desenharQuemFazSombra(IdPista id) {
                 originais[i] = mapa->modelo.materials[i].shader;
                 mapa->modelo.materials[i].shader = shaderDaProfundidade;
             }
-            DrawModel(mapa->modelo, (Vector3){ 0.0f, 0.0f, 0.0f }, mapa->escala, WHITE);
+            desenharModeloCortado(mapa);
             for (int i = 0; i < total; i++) {
                 mapa->modelo.materials[i].shader = originais[i];
             }
@@ -2175,8 +2359,13 @@ static void desenharQuemFazSombra(IdPista id) {
 void prepararSombras(IdPista id, Camera3D camera, int ligadas) {
     sombraLigadaAgora = ligadas && temMapaDeSombra && id != PISTA_COPA_PISTAO;
     float ligada = sombraLigadaAgora ? 1.0f : 0.0f;
-    for (int i = 0; i < totalQueRecebemSombra; i++) {
-        SetShaderValue(recebemSombra[i], GetShaderLocation(recebemSombra[i], "sombraLigada"), &ligada, SHADER_UNIFORM_FLOAT);
+    /* O valor quase nunca muda: mandá-lo de novo não faz nada */
+    static float ultimaLigada = -1.0f;
+    if (ligada != ultimaLigada) {
+        ultimaLigada = ligada;
+        for (int i = 0; i < totalQueRecebemSombra; i++) {
+            SetShaderValue(recebemSombra[i], locSombraLigada[i], &ligada, SHADER_UNIFORM_FLOAT);
+        }
     }
     if (!sombraLigadaAgora) {
         return;
@@ -2214,6 +2403,7 @@ void prepararSombras(IdPista id, Camera3D camera, int ligadas) {
     BeginMode3D(luz);
     Matrix vista = rlGetMatrixModelview();
     Matrix projecao = rlGetMatrixProjection();
+    prepararCorte();   /* o mapa de sombra corta pelo quadrado da luz, não pela tela */
     rlDisableBackfaceCulling();
     desenharQuemFazSombra(id);
     rlEnableBackfaceCulling();
@@ -2222,7 +2412,7 @@ void prepararSombras(IdPista id, Camera3D camera, int ligadas) {
 
     Matrix luzVP = MatrixMultiply(vista, projecao);
     for (int i = 0; i < totalQueRecebemSombra; i++) {
-        SetShaderValueMatrix(recebemSombra[i], GetShaderLocation(recebemSombra[i], "luzVP"), luzVP);
+        SetShaderValueMatrix(recebemSombra[i], locLuzVP[i], luzVP);
     }
 }
 
@@ -2232,6 +2422,42 @@ void prepararSombras(IdPista id, Camera3D camera, int ligadas) {
  * Recebe: a pista e a posição da câmera (o céu e o fundo andam com ela).
  * Devolve: nada.
  */
+/*
+ * teloesAVista
+ * Recebe: a pista e a câmera do jogador.
+ * Devolve: 1 se alguma tela de telão pode aparecer na tela deste quadro — ou seja, se vale
+ *          desenhar mais um quadro da transmissão. Chamar depois de prepararCorteDaCamera.
+ */
+int teloesAVista(IdPista id) {
+    if ((int) id < 0 || (int) id >= TOTAL_PISTAS) {
+        return 1;
+    }
+    if (totalDeTelas[id] == 0 || telasDemais[id]) {
+        return 1;   /* não sabemos onde estão todos: na dúvida, desenha (como era antes) */
+    }
+    for (int i = 0; i < totalDeTelas[id]; i++) {
+        if (caixaAVista(telasDoCenario[id][i])) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void desenharEstadioCortado(void) {
+    if (caixasDoEstadio == NULL) {
+        DrawModel(estadio, (Vector3){ 0.0f, 0.0f, 0.0f }, ESCALA_COPA_PISTAO, WHITE);
+        return;
+    }
+    Matrix noMundo = MatrixMultiply(estadio.transform,
+                                    MatrixScale(ESCALA_COPA_PISTAO, ESCALA_COPA_PISTAO, ESCALA_COPA_PISTAO));
+    for (int i = 0; i < estadio.meshCount; i++) {
+        if (!caixaAVista(caixasDoEstadio[i])) {
+            continue;
+        }
+        DrawMesh(estadio.meshes[i], estadio.materials[estadio.meshMaterial[i]], noMundo);
+    }
+}
+
 void desenharCenario(IdPista id, Vector3 camera) {
     if (sombraLigadaAgora) {
         rlActiveTextureSlot(SLOT_DA_SOMBRA);
@@ -2244,7 +2470,7 @@ void desenharCenario(IdPista id, Vector3 camera) {
 
     if (id == PISTA_COPA_PISTAO) {
         desenharMalha(ceuDeNoite, texturaDoCeuNoturno(), naCamera);
-        DrawModel(estadio, (Vector3){ 0.0f, 0.0f, 0.0f }, ESCALA_COPA_PISTAO, WHITE);
+        desenharEstadioCortado();
         material.shader = shaderDaNoite();
         desenharMalha(pinturaDoEstadio, semTextura, origem);
         for (int i = primeiroLoteDoEstadio; i < fimDosLotesDoEstadio; i++) {
@@ -2262,7 +2488,7 @@ void desenharCenario(IdPista id, Vector3 camera) {
             desenharMalha(mapa->saia, texturaGrama, origem);
             desenharModeloDeInterlagos(mapa);
         } else {
-            DrawModel(mapa->modelo, (Vector3){ 0.0f, 0.0f, 0.0f }, mapa->escala, WHITE);
+            desenharModeloCortado(mapa);
         }
         desenharMalha(mapa->pintura, semTextura, origem);
         for (int i = mapa->primeiroLote; i < mapa->fimDosLotes; i++) {
