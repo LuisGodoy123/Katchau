@@ -21,6 +21,7 @@ void desenharHud(Corrida *corrida);
 const char *codigoDoCarro(int numero);
 Color corDoCarro(int numero);
 void desenharFimDeCorrida(Corrida *corrida);
+void desenharAvisoParaContinuar(Corrida *corrida);
 void formatarTempo(float segundos, char *texto, int tamanho);
 
 /* Tela virtual de 800x600 para o HUD e os menus (veja hud.c) */

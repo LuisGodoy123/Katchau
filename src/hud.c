@@ -875,6 +875,24 @@ void desenharHud(Corrida *corrida) {
 }
 
 /*
+ * desenharAvisoParaContinuar
+ * Na festa do pódio, no lugar do painel de chegada: a colocação em letras grandes e, embaixo, o aviso piscando para
+ * apertar qualquer botão (que leva à tela de resultado).
+ * Recebe: a corrida (o jogador já no pódio).
+ * Devolve: nada.
+ */
+void desenharAvisoParaContinuar(Corrida *corrida) {
+    float centro = larguraVirtual() / 2.0f;
+    float pisca = 0.65f + 0.35f * sinf((float) GetTime() * 4.0f);
+    const char *aviso = "APERTE QUALQUER BOTÃO PARA CONTINUAR";
+    float largura = larguraDoTexto(FONTE_FORTE, aviso, 20.0f) + 56.0f;
+    Rectangle caixa = { centro - largura / 2.0f, alturaVirtual() - 96.0f, largura, 38.0f };
+    caixaArredondada(caixa, raioDoTamanho(caixa.width, caixa.height), Fade(COR_GRAFITE, 0.88f));
+    escreverCentralizado(FONTE_FORTE, aviso, centro, caixa.y + 9.0f, 20.0f, Fade(COR_TEXTO_CLARO, pisca));
+    (void) corrida;
+}
+
+/*
  * desenharFimDeCorrida
  * Painel de chegada: posição, tempo total, tempo de cada volta e a
  * melhor volta. A tabela com todos os carros fica na tela de

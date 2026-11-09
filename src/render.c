@@ -743,7 +743,8 @@ static void puxarOndaDaTorcida(const Corrida *corrida) {
     }
 }
 
-static int desenhandoOTelao = 0;   /* 1 enquanto a transmissão dos telões é desenhada */
+static int desenhandoOTelao = 0;
+static int desenharOTracado = 0;   /* 1 só quando o mundo é desenhado para a visão do jogador: aí o traçado de corrida aparece */   /* 1 enquanto a transmissão dos telões é desenhada */
 
 /* O desfoque de velocidade: começa perto da máxima e cresce no nitro */
 #define DESFOQUE_DESDE        0.70f    /* da velocidade máxima */
@@ -756,7 +757,7 @@ static int desenhandoOTelao = 0;   /* 1 enquanto a transmissão dos telões é d
  * Devolve: o desfoque das bordas, de 0 a 1.
  */
 static float desfoqueDeVelocidade(Corrida *corrida) {
-    if (corrida == NULL || cenaPausada || jogadorVenceu(corrida)) {   /* na festa as câmeras são de TV: sem desfoque */
+    if (corrida == NULL || cenaPausada || jogadorNoPodio(corrida)) {   /* na festa as câmeras são de TV: sem desfoque */
         return 0.0f;
     }
     Carro *j = &corrida->jogador;
@@ -769,6 +770,103 @@ static float desfoqueDeVelocidade(Corrida *corrida) {
         d += DESFOQUE_NO_NITRO;
     }
     return fminf(d, 1.0f);
+}
+
+/*
+ * desenharTracadoDeCorrida
+ * A linha de corrida, como no F1 25: tracinhos de luz no asfalto, à frente do carro, pelo caminho ideal (por dentro das
+ * curvas), que mudam de cor com o que o piloto precisa fazer: verde, acelerar; amarelo, aliviar; vermelho, frear.
+ * A cor vem da velocidade segura da curva que vem ali, comparada com a velocidade de agora e com a distância que o
+ * carro precisa para frear até ela. Os tracinhos ficam presos à pista (não deslizam com o carro) e vão sumindo ao longe.
+ * Recebe: a câmera e a corrida.
+ * Devolve: nada.
+ */
+#define TRACADO_PASSO_M        8.0f     /* de um tracinho ao próximo, em metros */
+#define TRACADO_COMPRIMENTO_M  3.2f
+#define TRACADO_LARGURA_M      1.5f
+#define TRACADO_ALCANCE_M      260.0f
+#define TRACADO_ALTURA_M       0.07f    /* acima do asfalto, para não brigar com ele */
+
+static float linhaIdealNoPonto(PosicaoNaPista lugar) {
+    /* Por dentro da curva: a média da curvatura em volta empurra a linha para o lado de dentro (esquerda = negativo) */
+    float soma = 0.0f;
+    for (int k = -2; k <= 2; k++) {
+        PosicaoNaPista p = lugar;
+        moverNaPista(&p, (float) k * 9.0f * UNIDADES_POR_METRO);
+        soma += (p.segmento != NULL) ? p.segmento->curvatura : 0.0f;
+    }
+    float media = soma / 5.0f;
+    return fminf(fmaxf(media * 0.45f, -0.6f), 0.6f);
+}
+
+static void desenharTracadoDeCorrida(Camera3D camera, Corrida *corrida) {
+    (void) camera;
+    Carro *jogador = &corrida->jogador;
+    if (jogador->posicao.segmento == NULL) {
+        return;
+    }
+    float metros = jogador->distanciaPercorrida / UNIDADES_POR_METRO;
+    float ate = TRACADO_PASSO_M - fmodf(metros, TRACADO_PASSO_M);   /* o primeiro tracinho cai numa grade fixa da pista */
+    PosicaoNaPista lugar = jogador->posicao;
+    moverNaPista(&lugar, ate * UNIDADES_POR_METRO);
+
+    rlDrawRenderBatchActive();
+    rlDisableDepthMask();
+    BeginBlendMode(BLEND_ALPHA);
+    for (float d = ate; d < TRACADO_ALCANCE_M; d += TRACADO_PASSO_M) {
+        if (d > 6.0f) {
+            /* A cor: a velocidade segura aqui e a distância para frear até ela */
+            float curvaturaAqui = 0.0f;
+            for (int k = -1; k <= 1; k++) {
+                PosicaoNaPista p = lugar;
+                moverNaPista(&p, (float) k * 4.0f * UNIDADES_POR_METRO);
+                if (p.segmento != NULL && fabsf(p.segmento->curvatura) > fabsf(curvaturaAqui)) {
+                    curvaturaAqui = p.segmento->curvatura;
+                }
+            }
+            float segura = velocidadeSeguraAcelerando(jogador, curvaturaAqui);
+            float cabeFrear = velocidadeParaFrearAte(segura, d * UNIDADES_POR_METRO);
+            Color cor = { 70, 255, 110, 255 };                                   /* acelerar */
+            if (jogador->velocidade > cabeFrear) {
+                cor = (Color){ 255, 60, 50, 255 };                               /* frear */
+            } else if (jogador->velocidade > segura) {
+                cor = (Color){ 255, 214, 50, 255 };                              /* aliviar */
+            }
+            float vista = (d < 90.0f) ? 1.0f : fmaxf(0.0f, 1.0f - (d - 90.0f) / (TRACADO_ALCANCE_M - 90.0f));
+            cor.a = (unsigned char) (175.0f * vista);
+
+            float lado = linhaIdealNoPonto(lugar);
+            PosicaoNaPista fim = lugar;
+            moverNaPista(&fim, TRACADO_COMPRIMENTO_M * UNIDADES_POR_METRO);
+            PontoNoMundo a = pontoNoMundo(lugar, lado), b = pontoNoMundo(fim, linhaIdealNoPonto(fim));
+            float ra = a.rumo * DEG2RAD, rb = b.rumo * DEG2RAD;
+            Vector3 ea = { cosf(ra) * TRACADO_LARGURA_M * 0.5f, 0.0f, sinf(ra) * TRACADO_LARGURA_M * 0.5f };   /* a direita da pista (0 = -z, 90 = +x) */
+            Vector3 eb = { cosf(rb) * TRACADO_LARGURA_M * 0.5f, 0.0f, sinf(rb) * TRACADO_LARGURA_M * 0.5f };
+            Vector3 a0 = { a.x - ea.x, a.y + TRACADO_ALTURA_M, a.z - ea.z }, a1 = { a.x + ea.x, a.y + TRACADO_ALTURA_M, a.z + ea.z };
+            Vector3 b0 = { b.x - eb.x, b.y + TRACADO_ALTURA_M, b.z - eb.z }, b1 = { b.x + eb.x, b.y + TRACADO_ALTURA_M, b.z + eb.z };
+            Color ponta = cor;
+            ponta.a = (unsigned char) (cor.a * 0.35f);   /* a frente do tracinho some um pouco: parece de luz, e não de tinta */
+            rlBegin(RL_TRIANGLES);
+            rlColor4ub(cor.r, cor.g, cor.b, cor.a);
+            rlVertex3f(a0.x, a0.y, a0.z);
+            rlVertex3f(a1.x, a1.y, a1.z);
+            rlColor4ub(ponta.r, ponta.g, ponta.b, ponta.a);
+            rlVertex3f(b1.x, b1.y, b1.z);
+            rlColor4ub(cor.r, cor.g, cor.b, cor.a);
+            rlVertex3f(a0.x, a0.y, a0.z);
+            rlColor4ub(ponta.r, ponta.g, ponta.b, ponta.a);
+            rlVertex3f(b1.x, b1.y, b1.z);
+            rlVertex3f(b0.x, b0.y, b0.z);
+            rlEnd();
+        }
+        moverNaPista(&lugar, TRACADO_PASSO_M * UNIDADES_POR_METRO);
+        if (lugar.segmento == NULL) {
+            break;
+        }
+    }
+    rlDrawRenderBatchActive();
+    EndBlendMode();
+    rlEnableDepthMask();
 }
 
 /*
@@ -813,6 +911,9 @@ static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
     if (corrida != NULL) {
         if (!desenhandoOTelao && !desligadoPorFora("KATCHAU_SEM_MARCAS")) {
             desenharMarcas();
+        }
+        if (desenharOTracado && !desenhandoOTelao) {
+            desenharTracadoDeCorrida(camera, corrida);
         }
         comecarSombrasNoChao();
         for (int r = 0; r < TOTAL_RIVAIS; r++) {
@@ -1084,7 +1185,7 @@ void desenharVisaoDoJogador(Corrida *corrida) {
         camera = cameraDaTroca(camera, jogador);
     }
     /* A vitória: o jogo de câmeras da festa, com fogos de artifício, até a corrida acabar */
-    int festa = jogadorVenceu(corrida);
+    int festa = jogadorNoPodio(corrida);
     int cortou = 0;
     float escuro = 0.0f, desdeAChegada = 0.0f;
     if (festa) {
@@ -1136,7 +1237,9 @@ void desenharVisaoDoJogador(Corrida *corrida) {
     atualizarMarcas(passou);
 
     atualizarTelao(corrida, camera);   /* os telões de todas as pistas passam a transmissão */
+    desenharOTracado = configuracoesAtuais()->tracadoDeCorrida && !festa && jogador->estadoDoPit == PIT_FORA && corrida->contagemRegressiva <= 0.0f;
     desenharMundo3D(camera, corrida->pista, corrida);
+    desenharOTracado = 0;
 
     if (festa) {
         /* As tarjas de cinema entram no começo da festa e a imagem escurece um instante nos cortes */

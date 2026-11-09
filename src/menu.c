@@ -1457,6 +1457,7 @@ enum {
     LINHA_SINCRONIA,
     LINHA_LIMITE_DE_QUADROS,
     LINHA_MOSTRAR_FPS,
+    LINHA_TRACADO,
     LINHA_SOMBRAS,
     /* e esta vale nas duas abas */
     LINHA_PADRAO,
@@ -1632,6 +1633,9 @@ static void mudarOpcao(EstadoMenu *menu, int linha, int sentido) {
             break;
         case LINHA_MOSTRAR_FPS:
             config->mostrarFps = !config->mostrarFps;
+            break;
+        case LINHA_TRACADO:
+            config->tracadoDeCorrida = !config->tracadoDeCorrida;
             break;
         case LINHA_CAMERA_X:
             config->inverterCameraX = !config->inverterCameraX;
@@ -1972,13 +1976,14 @@ void desenharConfiguracoes(EstadoMenu *menu) {
         int fps = quadrosPorSegundoDoLimite(config->limiteDeQuadros);
         desenharLinhaDeOpcao(menu, LINHA_LIMITE_DE_QUADROS, "LIMITE DE QUADROS POR SEGUNDO", fps > 0 ? TextFormat("%d FPS", fps) : "SEM LIMITE", 0);
         desenharLinhaDeOpcao(menu, LINHA_MOSTRAR_FPS, "MOSTRAR O CONTADOR DE FPS", config->mostrarFps ? "SIM" : "NÃO", 0);
+        desenharLinhaDeOpcao(menu, LINHA_TRACADO, "TRAÇADO DE CORRIDA (LINHA NO ASFALTO)", config->tracadoDeCorrida ? "LIGADO" : "DESLIGADO", 0);
         desenharLinhaDeOpcao(menu, LINHA_SOMBRAS, "GRÁFICOS (SOMBRAS E EFEITOS)",
                              config->sombras ? "ALTO" : (config->efeitos ? "MÉDIO" : "BAIXO"), 0);
         desenharLinhaDeOpcao(menu, LINHA_PADRAO, "VOLTAR TUDO AO PADRÃO", (menu->confirmarPadrao > 0.0f) ? "APERTE DE NOVO" : "", 0);
         escrever(FONTE_FORTE, TextFormat("AGORA: %d x %d%s  |  A MAIOR RESOLUÇÃO É %d x %d", GetScreenWidth(), GetScreenHeight(),
                                          IsWindowFullscreen() ? " (TELA CHEIA)" : (IsWindowState(FLAG_BORDERLESS_WINDOWED_MODE) ? " (SEM BORDAS)" : " (JANELA)"),
                                          MAIOR_LARGURA, MAIOR_ALTURA),
-                 X_LINHAS_CONFIG + 12.0f, Y_LINHAS_EXIBICAO + 8.0f * ALTURA_LINHA_EXIBICAO + 8.0f, 13.0f, COR_TEXTO_FRACO);
+                 X_LINHAS_CONFIG + 12.0f, Y_LINHAS_EXIBICAO + 9.0f * ALTURA_LINHA_EXIBICAO + 8.0f, 13.0f, COR_TEXTO_FRACO);
         return;
     }
 
@@ -2342,8 +2347,19 @@ void desenharResultado(Corrida *corrida) {
         desenharCabecalho("DESCLASSIFICADO: SEM PARADA");
     } else if (corrida->posicaoFinal == 1) {
         desenharCabecalho("VOCÊ VENCEU!");
+    } else if (corrida->posicaoFinal <= 3) {
+        desenharCabecalho(TextFormat("PÓDIO: %dº LUGAR", corrida->posicaoFinal));
     } else {
         desenharCabecalho(TextFormat("VOCÊ CHEGOU EM %dº", corrida->posicaoFinal));
+    }
+    if (!corrida->desclassificado && corrida->posicaoFinal <= 3) {   /* a medalha: ouro, prata ou bronze, com a colocação */
+        static const Color MEDALHAS[3] = { { 255, 196, 40, 255 }, { 200, 206, 216, 255 }, { 205, 127, 70, 255 } };
+        Color cor = MEDALHAS[corrida->posicaoFinal - 1];
+        Vector2 centro = { LARGURA_TELA - 70.0f, 58.0f };
+        DrawCircleV(centro, 30.0f, Fade(BLACK, 0.35f));
+        DrawCircleV(centro, 27.0f, cor);
+        DrawCircleLinesV(centro, 27.0f, Fade(WHITE, 0.7f));
+        escreverCentralizado(FONTE_TITULO, TextFormat("%d", corrida->posicaoFinal), centro.x, centro.y - 18.0f, 34.0f, (Color){ 40, 30, 10, 255 });
     }
 
     escrever(FONTE_FORTE, "POS", X_TABELA + 22, Y_TITULOS_TABELA - 8, 14.0f, COR_TEXTO_FRACO);

@@ -84,6 +84,7 @@ typedef struct {
     int sincroniaVertical;    /* 1: cada quadro sai junto com a atualização do monitor (VSync) */
     int limiteDeQuadros;      /* índice na tabela de limites de quadros por segundo */
     int mostrarFps;           /* 1: mostra o contador de quadros por segundo no canto da tela */
+    int tracadoDeCorrida;     /* 1: a linha de corrida no asfalto: verde acelera, amarelo alivia, vermelho freia */
 } Configuracoes;
 
 Configuracoes *configuracoesAtuais(void);

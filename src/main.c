@@ -47,7 +47,7 @@
  * confete e o refrão entrando */
 #define SEGUNDOS_ANTES_DE_SEGUIR 1.5f   /* depois da bandeirada */
 #define FORCA_DO_TOQUE 0.7f   /* o toque de teste da vibração, nas configurações */
-#define ATRASO_DO_PAINEL_NA_VITORIA  9.6f   /* segundos depois de cruzar a linha: as duas primeiras câmeras da festa passam limpas */
+#define ATRASO_DO_AVISO_NA_FESTA  4.0f   /* segundos depois de cruzar a linha, no pódio, até aparecer o "aperte qualquer botão" (a festa passa limpa) */
 
 /*
  * lerComandos
@@ -219,8 +219,22 @@ static Tela atualizarTelaDaCorrida(Corrida *corrida, EstadoMenu *menu, int *paus
     /* Espera um pouco: o botão de confirmar é também o freio de mão, e quem o aperta
      * na bandeirada não pode pular a tela da chegada sem querer */
     int podeSeguir = corrida->tempoDeCorrida - corrida->jogador.tempoDeChegada > SEGUNDOS_ANTES_DE_SEGUIR;
-    if (corrida->terminou && podeSeguir && (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER) ||
-                                            controleApertou(BOTAO_CONFIRMAR))) {
+    if (jogadorNoPodio(corrida)) {
+        /* No pódio (1º, 2º ou 3º) a festa de câmeras e fogos passa sozinha; depois de uns segundos, qualquer botão leva ao resultado */
+        int apertou = 0;
+        while (GetKeyPressed() != 0) {
+            apertou = 1;
+        }
+        for (int botao = MOUSE_BUTTON_LEFT; botao <= MOUSE_BUTTON_BACK; botao++) {
+            apertou = apertou || IsMouseButtonPressed(botao);
+        }
+        apertou = apertou || botaoApertadoAgora() != 0;
+        if (apertou && corrida->tempoDeCorrida - corrida->jogador.tempoDeChegada > ATRASO_DO_AVISO_NA_FESTA) {
+            tocarSom(SOM_CONFIRMAR);
+            return TELA_RESULTADO;
+        }
+    } else if (corrida->terminou && podeSeguir && (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER) ||
+                                                   controleApertou(BOTAO_CONFIRMAR))) {
         tocarSom(SOM_CONFIRMAR);
         return TELA_RESULTADO;
     }
@@ -406,11 +420,12 @@ int main(int argc, char *argv[]) {
 
         /* Venceu: a festa começa no quadro em que o jogador cruza a linha */
         int naCorridaOuResultado = (tela == TELA_CORRIDA || tela == TELA_RESULTADO);
-        int venceu = naCorridaOuResultado && jogadorVenceu(&corrida);
-        if (venceu && !venceuAntes) {
+        int venceu = naCorridaOuResultado && jogadorVenceu(&corrida);          /* 1º lugar: a música da vitória */
+        int festa = naCorridaOuResultado && jogadorNoPodio(&corrida);          /* 1º, 2º ou 3º: confete, fogos e câmeras da festa */
+        if (festa && !venceuAntes) {
             soltarConfetes((float) larguraVirtual(), (float) alturaVirtual());
         }
-        venceuAntes = venceu;
+        venceuAntes = festa;
 
         /* O mouse só aparece (e só funciona) no menu principal, na garagem e na pausa */
         int usaMouse = (tela == TELA_MENU || tela == TELA_GARAGEM || tela == TELA_PISTAS || tela == TELA_CONFIGURACOES
@@ -484,7 +499,7 @@ int main(int argc, char *argv[]) {
             if (naCorrida) {
                 /* Os motores NASCAR (o do jogador e os dos rivais mais próximos), o vento, o pneu,
                  * a grama, o muro, o nitro, o câmbio, as voltas e o pit stop: do GO até a bandeirada */
-                atualizarEfeitosDaCorrida(&corrida, depoisDoGo && !venceu, tempoQuadro);
+                atualizarEfeitosDaCorrida(&corrida, depoisDoGo && !festa, tempoQuadro);
             }
         }
 
@@ -561,11 +576,14 @@ int main(int argc, char *argv[]) {
                 }
                 desenharVisaoDoJogador(&corrida);
                 comecarInterface(0);
-                if (!venceu) {   /* na festa da vitória a tela fica limpa: só a imagem, os fogos e o painel */
+                if (!festa) {   /* na festa do pódio a tela fica limpa: só a imagem, os fogos e o aviso */
                     desenharHud(&corrida);
                 }
-                if (corrida.terminou && (!venceu || corrida.tempoDeCorrida - corrida.jogador.tempoDeChegada
-                                                    > ATRASO_DO_PAINEL_NA_VITORIA)) {
+                if (festa) {
+                    if (corrida.tempoDeCorrida - corrida.jogador.tempoDeChegada > ATRASO_DO_AVISO_NA_FESTA) {
+                        desenharAvisoParaContinuar(&corrida);   /* o painel de chegada some: o resultado vem depois do botão */
+                    }
+                } else if (corrida.terminou) {
                     desenharFimDeCorrida(&corrida);
                 }
                 desenharConfetes(pausada ? 0.0f : tempoQuadro);   /* na pausa, o confete para no ar */

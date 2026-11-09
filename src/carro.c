@@ -46,6 +46,10 @@
 #define RETORNO_DO_VOLANTE         8.0f  /* sem seta, o volante volta ao centro em ~0,12 s */
 #define FORCA_CENTRIFUGA           6.0f  /* intensidade do empurrão para fora nas curvas */
 #define FORCA_DA_ARRANCADA         0.55f /* a aceleração parado é 55% da "aceleracao" da ficha (era 75%: rápido demais)... */
+#define VARIACAO_DO_TOPO           0.030f /* no topo a máxima de verdade vai e volta até 3% para cima e para baixo (~9 km/h): o ar, o vento e o motor no limite */
+#define VARIACAO_DO_NITRO          0.28f  /* e o empurrão do nitro pulsa até 28% para mais e para menos, em ondas */
+#define TOPO_COMECA                0.55f  /* a variação começa quando o carro passa dessa parte da máxima... */
+#define TOPO_CHEIO                 0.88f  /* ...e é inteira a partir daqui (na arrancada a aceleração fica como era) */
 #define PERDA_NA_MAXIMA            0.8f  /* ...e na velocidade máxima cai 80% (sobram 20%) */
 #define INICIO_DA_DERRAPAGEM       0.7f  /* a curva usando 70% do volante: começa a derrapar */
 #define LIMITE_LATERAL             2.5f  /* até onde o carro pode ir pela grama, onde a pista não mediu os muros */
@@ -253,6 +257,7 @@ Carro criarCarro(const char *nome, int numero, Segmento *largada, float deslocam
     carro.pneuEstourado = 0;
     carro.ladoDoPrimeiroEstouro = 0;
     carro.tempoDoEstouro = 0.0f;
+    carro.fasePulso = (float) numero * 1.7f;
     for (int i = 0; i < MAXIMO_DE_VOLTAS; i++) {
         carro.temposDeVolta[i] = 0.0f;
     }
@@ -386,7 +391,7 @@ static void atualizarVelocidade(Carro *carro, Comandos comandos, float tempoQuad
     } else if (comandos.acelerar || carro->nitroLigado) {
         carro->velocidade += forcaDoMotor(carro->velocidade, maxima, carro->aceleracao * carro->ritmoDoPelotao, &carro->motor) * tempoQuadro;
         if (carro->nitroLigado) {
-            carro->velocidade += carro->aceleracao * FORCA_DO_NITRO * tempoQuadro;
+            carro->velocidade += carro->aceleracao * FORCA_DO_NITRO * (1.0f + 0.25f * sinf(carro->fasePulso * 7.0f)) * tempoQuadro;   /* o nitro empurra em ondas */
         }
     } else if (comandos.frear) {
         carro->velocidade -= FORCA_FREIO * tempoQuadro;
@@ -405,6 +410,8 @@ static void atualizarVelocidade(Carro *carro, Comandos comandos, float tempoQuad
     } else if (embaixo == SUPERFICIE_ESCAPE && carro->velocidade > VELOCIDADE_MAXIMA_ESCAPE) {
         carro->velocidade -= ATRITO_ESCAPE * tempoQuadro;
     }
+
+    carro->fasePulso += tempoQuadro;   /* o relógio das variações da velocidade máxima (veja velocidadeMaximaAgora) */
 
     /* Acima da máxima (acabou de sair do vácuo): o ar tira o excesso aos
      * poucos, em vez de cortar de uma vez */
@@ -1374,9 +1381,15 @@ float velocidadeSeguraAcelerando(Carro *carro, float curvatura) {
  * Devolve: a velocidade máxima, em unidades por segundo.
  */
 float velocidadeMaximaAgora(Carro *carro) {
-    float ganho = 1.0f + GANHO_NO_VACUO * carro->vacuo;
+    /* A máxima não é um número parado: ela varia o tempo todo, para cima e para baixo, com três ondas de ritmos
+     * diferentes (rajadas, motor no limite e uma deriva lenta). Só vale com o carro andando rápido: na arrancada
+     * a aceleração é a de sempre. */
+    float f = carro->fasePulso;
+    float onda = 0.55f * sinf(f * 2.1f) + 0.30f * sinf(f * 5.3f + 1.3f) + 0.15f * sinf(f * 0.6f + 0.4f);   /* de -1 a 1 */
+    float p = limitar((carro->velocidade / carro->velocidadeMaxima - TOPO_COMECA) / (TOPO_CHEIO - TOPO_COMECA), 0.0f, 1.0f);
+    float ganho = 1.0f + GANHO_NO_VACUO * carro->vacuo + VARIACAO_DO_TOPO * onda * p;
     if (carro->nitroLigado) {
-        ganho += GANHO_DO_NITRO;
+        ganho += GANHO_DO_NITRO * (1.0f + VARIACAO_DO_NITRO * sinf(f * 7.0f + 0.5f) * (0.7f + 0.3f * sinf(f * 2.9f)));
     }
     return carro->velocidadeMaxima * ganho * carro->ritmoDoPelotao;
 }

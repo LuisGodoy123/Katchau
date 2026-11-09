@@ -128,6 +128,7 @@ typedef struct {
                                     * aos poucos, quando a vida passa de ~20% (veja estourarPneu) */
     int ladoDoPrimeiroEstouro;     /* 0 = o primeiro pneu a estourar foi o esquerdo, 1 = o direito (os outros seguem dele) */
     float tempoDoEstouro;          /* segundos desde o último estouro */
+    float fasePulso;               /* segundos andando no topo da velocidade: é a fase das oscilações da velocidade (veja atualizarVelocidade) */
 
     /* ---- Pitstop ---- */
     EstadoDoPit estadoDoPit;

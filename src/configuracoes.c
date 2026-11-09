@@ -79,6 +79,7 @@ void configuracoesPadrao(Configuracoes *config) {
     config->sincroniaVertical = 1;
     config->limiteDeQuadros = LIMITE_PADRAO_DE_QUADROS;
     config->mostrarFps = 0;
+    config->tracadoDeCorrida = 1;
 }
 
 /* A tabela de resoluções (a automática é a primeira) e a de limites de quadros */
@@ -219,10 +220,11 @@ int salvarConfiguracoes(const Configuracoes *config, const char *arquivo) {
         fprintf(saida, "comando %s %d %d %d %d\n", CHAVES_DAS_ACOES[a], config->comandos[a][0], config->comandos[a][1],
                 config->comandos[a][2], config->comandos[a][3]);
     }
-    fprintf(saida, "vibracao %d\nforca %d\ngatilhos %d\nzona_morta %d\nvolante %d\nsombras %d\nefeitos %d\ncamera_x %d\ncamera_y %d\nresolucao %d\nmodo_de_tela %d\nsincronia_vertical %d\nlimite_de_quadros %d\nmostrar_fps %d\n",
+    fprintf(saida, "vibracao %d\nforca %d\ngatilhos %d\nzona_morta %d\nvolante %d\nsombras %d\nefeitos %d\ncamera_x %d\ncamera_y %d\nresolucao %d\nmodo_de_tela %d\nsincronia_vertical %d\nlimite_de_quadros %d\nmostrar_fps %d\ntracado_de_corrida %d\n",
             config->vibracaoLigada, config->forcaDaVibracao, config->gatilhosAdaptativos, config->zonaMorta,
             config->respostaDoVolante, config->sombras, config->efeitos, config->inverterCameraX, config->inverterCameraY,
-            config->resolucao, config->modoDeTela, config->sincroniaVertical, config->limiteDeQuadros, config->mostrarFps);
+            config->resolucao, config->modoDeTela, config->sincroniaVertical, config->limiteDeQuadros, config->mostrarFps,
+            config->tracadoDeCorrida);
     fclose(saida);
     return 1;
 }
@@ -295,6 +297,8 @@ int carregarConfiguracoes(Configuracoes *config, const char *arquivo) {
                 valorValido(valor, 0, TOTAL_LIMITES_DE_QUADROS - 1, &config->limiteDeQuadros);
             } else if (strcmp(chave, "mostrar_fps") == 0) {
                 valorValido(valor, 0, 1, &config->mostrarFps);
+            } else if (strcmp(chave, "tracado_de_corrida") == 0) {
+                valorValido(valor, 0, 1, &config->tracadoDeCorrida);
             }
         }
     }

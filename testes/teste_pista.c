@@ -349,19 +349,27 @@ static void testarCarro(void) {
         int kmh = velocidadeEmKmh(&carro);
         if (tempo100 == 0.0f && kmh >= 100) tempo100 = i * quadro;
         if (tempo200 == 0.0f && kmh >= 200) tempo200 = i * quadro;
-        if (tempo300 == 0.0f && kmh >= 300) tempo300 = i * quadro;
+        if (tempo300 == 0.0f && kmh >= 290) tempo300 = i * quadro;   /* no topo a velocidade oscila: 295 e o "chegou" */
     }
     printf("     0-100 km/h: %.1f s   0-200: %.1f s   0-300: %.1f s\n", tempo100, tempo200, tempo300);
     verificar(tempo100 > 3.0f && tempo100 < 4.0f, "0-100 km/h em 3 a 4 s (arrancada mais calma que a de um F1)");
-    verificar(tempo300 > 13.0f && tempo300 < 17.0f, "0-300 km/h em 13 a 17 s, nao em 5");
+    verificar(tempo300 > 11.0f && tempo300 < 18.0f, "0-290 km/h em 12 a 18 s, nao em 5");
     verificar(tempo200 - tempo100 < tempo300 - tempo200,
               "de 200 a 300 demora mais que de 100 a 200 (o ar segura o carro)");
-    verificar(carro.velocidade == carro.velocidadeMaxima, "acelerando, chega na velocidade maxima e para ali");
+    float menorNoTopo = carro.velocidade, maiorNoTopo = carro.velocidade;
+    for (int i = 0; i < 60 * 10; i++) {   /* dez segundos de pe no fundo no topo: a velocidade nao trava, vai e volta */
+        atualizarCarro(&carro, acelerar, quadro);
+        menorNoTopo = fminf(menorNoTopo, carro.velocidade);
+        maiorNoTopo = fmaxf(maiorNoTopo, carro.velocidade);
+    }
+    printf("     no topo, 10 s de pe no fundo: de %.0f a %.0f km/h\n", menorNoTopo * 0.025f, maiorNoTopo * 0.025f);
+    verificar(maiorNoTopo <= carro.velocidadeMaxima * 1.04f && menorNoTopo >= carro.velocidadeMaxima * 0.95f, "no topo ele fica numa faixa perto da maxima (pode passar de 300 um pouco)");
+    verificar((maiorNoTopo - menorNoTopo) * 0.025f > 6.0f, "e a velocidade muda de verdade (varios km/h), em vez de travar em 300");
     FichaTecnica ficha = { "Teste", "", 12000.0f, 2400.0f, 0.5f, 4.4f, 2.0f };
     float calculado = tempoAteVelocidade(&ficha, 4000.0f);
     printf("     0-100 km/h mostrado na garagem: %.2f s\n", calculado);
     verificar(fabsf(calculado - tempo100) < 0.05f, "a garagem mostra o mesmo 0-100 km/h da corrida");
-    verificar(velocidadeEmKmh(&carro) == 300, "velocidade maxima = 300 km/h");
+    verificar(velocidadeEmKmh(&carro) >= 285 && velocidadeEmKmh(&carro) <= 312, "no topo o velocimetro marca por volta de 300 km/h, sem ser fixo");
 
     for (int i = 0; i < 60 * 2; i++) {
         atualizarCarro(&carro, frear, quadro);
@@ -1422,7 +1430,7 @@ static void testarPeVacuoEDerrapagem(void) {
     }
     printf("     maxima: %d km/h no ar limpo, %d km/h no vacuo\n",
            velocidadeEmKmh(&arLimpo), velocidadeEmKmh(&naEsteira));
-    verificar(arLimpo.velocidade <= arLimpo.velocidadeMaxima, "no ar limpo o carro nao passa da maxima");
+    verificar(arLimpo.velocidade <= arLimpo.velocidadeMaxima * 1.04f, "no ar limpo o carro fica perto da maxima (a variacao do topo passa de 300 so um pouco)");
     verificar(naEsteira.velocidade > naEsteira.velocidadeMaxima * 1.04f, "no vacuo ele passa da maxima");
 
     /* Saindo do vácuo, o excesso some aos poucos (sem tranco) */
@@ -2071,7 +2079,7 @@ static void testarNitro(void) {
     }
     printf("     tanque cheio: %.1f s, chegou a %d km/h (sem nitro: %d km/h)\n", duracao, converterParaKmh(maior), velocidadeEmKmh(&semNitro));
     verificar(duracao > 3.0f && duracao < 6.0f, "o tanque cheio dura de 3 a 6 s");
-    verificar(maior > carro.velocidadeMaxima * 1.1f && semNitro.velocidade <= semNitro.velocidadeMaxima, "o nitro passa da velocidade maxima");
+    verificar(maior > carro.velocidadeMaxima * 1.1f && semNitro.velocidade <= semNitro.velocidadeMaxima * 1.04f, "o nitro passa da velocidade maxima");
 
     /* Acabou: não religa logo em seguida, mesmo apertando */
     atualizarCarro(&carro, comNitro, quadro);

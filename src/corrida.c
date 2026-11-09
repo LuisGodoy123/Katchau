@@ -1097,6 +1097,15 @@ int jogadorVenceu(Corrida *corrida) {
 }
 
 /*
+ * jogadorNoPodio
+ * Recebe: a corrida.
+ * Devolve: 1 se o jogador já cruzou a linha final em 1º, 2º ou 3º lugar (e não foi desclassificado), 0 se não.
+ */
+int jogadorNoPodio(Corrida *corrida) {
+    return corrida->terminou && !corrida->desclassificado && corrida->posicaoFinal >= 1 && corrida->posicaoFinal <= 3;
+}
+
+/*
  * segundosAteAVitoria
  * Quanto falta para o jogador cruzar a linha final, se ele está na última
  * volta e em 1º lugar. É uma estimativa: a distância que falta dividida
