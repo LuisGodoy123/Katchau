@@ -12,8 +12,8 @@
 #include "faiscas.h"
 #include "fumaca.h"
 
-#define MAXIMO_DE_FAISCAS      900
-#define MAXIMO_DE_CLAROES      24
+#define MAXIMO_DE_FAISCAS      1800
+#define MAXIMO_DE_CLAROES      72
 #define GRAVIDADE              9.8f    /* m/s² */
 #define QUIQUE                 0.35f   /* quanto da velocidade vertical sobra quando a faísca bate no chão */
 #define ATRITO_NO_CHAO         0.55f   /* e da velocidade de lado */
@@ -25,10 +25,12 @@
 #define DESLIZE_PARA_FAISCAR   1.2f    /* m/s: abaixo disso as latas encostam sem faiscar */
 #define VIDA_MINIMA            0.22f   /* segundos */
 #define VIDA_MAXIMA            0.65f
-#define LARGURA_DO_RISCO       0.028f  /* metros */
-#define COMPRIMENTO_DO_RISCO   0.035f  /* segundos de caminho que o risco mostra (o rastro) */
+#define LARGURA_DO_RISCO       0.026f  /* metros */
+#define COMPRIMENTO_DO_RISCO   0.055f  /* segundos de caminho que o risco mostra (o rastro) */
 #define PARTE_DA_VELOCIDADE    0.55f   /* a faísca sai com parte da velocidade do carro */
-#define VIDA_DO_CLARAO         0.09f
+#define VIDA_DO_CLARAO         0.11f
+#define ARRASTO_DO_AR          0.9f    /* por segundo: o ar freia as faíscas mais leves */
+#define CHANCE_DE_ESTALAR      0.22f   /* parte das faíscas que, ao apagar, estala em faíscas menores */
 #define FAISCAS_ENTRE_CARROS   0.4f    /* batida de carro com carro: só essa parte das faíscas do muro
                                         * (os dois carros da batida soltam as suas, então já somam) */
 #define TAMANHO_DO_CLARAO      0.75f   /* metros, numa batida forte */
@@ -40,12 +42,16 @@ typedef struct {
     float duracao;       /* a vida que ela tinha ao nascer */
     float chao;          /* a altura do chão onde ela nasceu */
     float calor;         /* 0 a 1: as mais quentes são mais brancas e mais largas */
+    float espessura;     /* 0,6 a 1,4: umas são fios finos, outras riscos grossos */
+    int estala;          /* 1: ao apagar, solta 3 ou 4 faíscas pequenas (o estalinho de faísca de metal) */
 } Faisca;
 
 typedef struct {
     Vector3 posicao;
     float vida;
+    float duracao;
     float tamanho;
+    int espinhos;        /* 1: o clarão tem os quatro raios de luz (flare) */
 } Clarao;
 
 /* Os pedaços de borracha do pneu que estoura: cubinhos escuros que voam, quicam e somem */
@@ -166,13 +172,44 @@ static void soltarFaisca(Vector3 ponto, Vector3 velocidadeDoCarro, float forca) 
     f->vida = f->duracao;
     f->chao = ponto.y - ALTURA_DO_CHAO;
     f->calor = aleatorio(0.4f, 1.0f);
+    f->espessura = aleatorio(0.6f, 1.4f);
+    f->estala = aleatorio(0.0f, 1.0f) < CHANCE_DE_ESTALAR;
+    if (aleatorio(0.0f, 1.0f) < 0.12f) {   /* umas poucas saem bem mais rápidas, os fios longos */
+        f->velocidade = Vector3Scale(f->velocidade, 1.6f);
+        f->duracao *= 0.8f;
+        f->vida = f->duracao;
+    }
+}
+
+/* Uma faísca filha: pequena e curta, de um estalinho ou de um quique no chão */
+static void soltarFaiscaFilha(Vector3 ponto, Vector3 velocidade, float chao, float calor) {
+    if (totalDeFaiscas >= MAXIMO_DE_FAISCAS - 1) {
+        return;
+    }
+    Faisca *f = &faiscas[totalDeFaiscas++];
+    f->posicao = ponto;
+    f->velocidade = velocidade;
+    f->duracao = aleatorio(0.12f, 0.32f);
+    f->vida = f->duracao;
+    f->chao = chao;
+    f->calor = calor;
+    f->espessura = aleatorio(0.45f, 0.8f);
+    f->estala = 0;
 }
 
 static void soltarClarao(Vector3 ponto, float forca) {
     if (totalDeClaroes >= MAXIMO_DE_CLAROES) {
         return;
     }
-    claroes[totalDeClaroes++] = (Clarao){ ponto, VIDA_DO_CLARAO, TAMANHO_DO_CLARAO * (0.4f + 0.6f * forca) };
+    claroes[totalDeClaroes++] = (Clarao){ ponto, VIDA_DO_CLARAO, VIDA_DO_CLARAO, TAMANHO_DO_CLARAO * (0.4f + 0.6f * forca), forca > 0.45f };
+}
+
+/* O lampejo bem pequeno e curto de uma faísca que bate no asfalto */
+static void soltarClaraoDoChao(Vector3 ponto) {
+    if (totalDeClaroes >= MAXIMO_DE_CLAROES) {
+        return;
+    }
+    claroes[totalDeClaroes++] = (Clarao){ ponto, 0.07f, 0.07f, aleatorio(0.12f, 0.22f), 0 };
 }
 
 /*
@@ -307,20 +344,39 @@ void atualizarFaiscas(float tempoQuadro) {
         return;
     }
     for (int i = 0; i < totalDeFaiscas; i++) {
-        Faisca *f = &faiscas[i];
-        f->vida -= tempoQuadro;
-        if (f->vida <= 0.0f) {
+        Faisca f = faiscas[i];
+        f.vida -= tempoQuadro;
+        if (f.vida <= 0.0f) {
+            if (f.estala) {   /* o estalinho: a faísca se parte em três ou quatro bem pequenas */
+                int partes = 3 + GetRandomValue(0, 1);
+                for (int k = 0; k < partes; k++) {
+                    Vector3 sai = { f.velocidade.x * 0.25f + aleatorio(-1.6f, 1.6f), aleatorio(0.2f, 1.8f), f.velocidade.z * 0.25f + aleatorio(-1.6f, 1.6f) };
+                    soltarFaiscaFilha(f.posicao, sai, f.chao, f.calor);
+                }
+            }
             faiscas[i--] = faiscas[--totalDeFaiscas];
             continue;
         }
-        f->velocidade.y -= GRAVIDADE * tempoQuadro;
-        f->posicao = Vector3Add(f->posicao, Vector3Scale(f->velocidade, tempoQuadro));
-        if (f->posicao.y < f->chao) {
-            f->posicao.y = f->chao;
-            f->velocidade.y = -f->velocidade.y * QUIQUE;
-            f->velocidade.x *= ATRITO_NO_CHAO;
-            f->velocidade.z *= ATRITO_NO_CHAO;
+        f.velocidade = Vector3Scale(f.velocidade, expf(-ARRASTO_DO_AR * tempoQuadro));
+        f.velocidade.y -= GRAVIDADE * tempoQuadro;
+        f.posicao = Vector3Add(f.posicao, Vector3Scale(f.velocidade, tempoQuadro));
+        if (f.posicao.y < f.chao) {
+            float batida = -f.velocidade.y;
+            f.posicao.y = f.chao;
+            f.velocidade.y = -f.velocidade.y * QUIQUE;
+            f.velocidade.x *= ATRITO_NO_CHAO;
+            f.velocidade.z *= ATRITO_NO_CHAO;
+            if (batida > 1.6f) {   /* bateu forte: um lampejo no asfalto e, às vezes, uma faísca filha que pula */
+                if (aleatorio(0.0f, 1.0f) < 0.3f) {
+                    soltarClaraoDoChao(f.posicao);
+                }
+                if (aleatorio(0.0f, 1.0f) < 0.35f) {
+                    Vector3 sai = { f.velocidade.x * 0.6f + aleatorio(-0.8f, 0.8f), batida * 0.35f, f.velocidade.z * 0.6f + aleatorio(-0.8f, 0.8f) };
+                    soltarFaiscaFilha(f.posicao, sai, f.chao, f.calor);
+                }
+            }
         }
+        faiscas[i] = f;
     }
     for (int i = 0; i < totalDePedacos; i++) {
         Pedaco *p = &pedacos[i];
@@ -353,13 +409,67 @@ void atualizarFaiscas(float tempoQuadro) {
  */
 static Color corDaFaisca(float passou, float calor) {
     float brilho = 1.0f - passou;
-    Color quente = { 255, (unsigned char) (235 + 20 * calor), (unsigned char) (150 + 90 * calor), 255 };
-    Color laranja = { 255, 140, 30, 255 };
-    Color vermelho = { 200, 40, 10, 255 };
-    Color cor = (passou < 0.45f) ? ColorLerp(quente, laranja, passou / 0.45f)
-                                 : ColorLerp(laranja, vermelho, (passou - 0.45f) / 0.55f);
-    cor.a = (unsigned char) (255.0f * Clamp(brilho * 1.4f, 0.0f, 1.0f));
+    Color quente = { 255, (unsigned char) (240 + 15 * calor), (unsigned char) (170 + 80 * calor), 255 };
+    Color amarelo = { 255, 205, 80, 255 };
+    Color laranja = { 255, 120, 25, 255 };
+    Color vermelho = { 190, 35, 8, 255 };
+    Color cor;
+    if (passou < 0.2f) {
+        cor = ColorLerp(quente, amarelo, passou / 0.2f);
+    } else if (passou < 0.55f) {
+        cor = ColorLerp(amarelo, laranja, (passou - 0.2f) / 0.35f);
+    } else {
+        cor = ColorLerp(laranja, vermelho, (passou - 0.55f) / 0.45f);
+    }
+    cor.a = (unsigned char) (255.0f * Clamp(brilho * 1.5f, 0.0f, 1.0f));
     return cor;
+}
+
+/*
+ * riscoComRabo
+ * Um risco de luz virado para a câmera: a cabeça com a cor cheia e a largura toda, e o rabo afinando e sumindo
+ * (cada ponta tem a sua cor, e a placa degradê faz o rastro de uma faísca de verdade).
+ */
+static void riscoComRabo(Camera3D camera, Vector3 cabeca, Vector3 rabo, float largura, Color corDaCabeca, Color corDoRabo) {
+    Vector3 direcao = Vector3Subtract(cabeca, rabo);
+    Vector3 lado = Vector3CrossProduct(direcao, Vector3Subtract(camera.position, cabeca));
+    if (Vector3LengthSqr(lado) < 1e-12f) {
+        return;
+    }
+    lado = Vector3Scale(Vector3Normalize(lado), largura);
+    Vector3 a = Vector3Add(cabeca, lado), b = Vector3Subtract(cabeca, lado);
+    Vector3 c = Vector3Subtract(rabo, Vector3Scale(lado, 0.2f)), d = Vector3Add(rabo, Vector3Scale(lado, 0.2f));
+    rlBegin(RL_TRIANGLES);
+    rlColor4ub(corDaCabeca.r, corDaCabeca.g, corDaCabeca.b, corDaCabeca.a);
+    rlVertex3f(a.x, a.y, a.z);
+    rlVertex3f(b.x, b.y, b.z);
+    rlColor4ub(corDoRabo.r, corDoRabo.g, corDoRabo.b, corDoRabo.a);
+    rlVertex3f(c.x, c.y, c.z);
+    rlColor4ub(corDaCabeca.r, corDaCabeca.g, corDaCabeca.b, corDaCabeca.a);
+    rlVertex3f(a.x, a.y, a.z);
+    rlColor4ub(corDoRabo.r, corDoRabo.g, corDoRabo.b, corDoRabo.a);
+    rlVertex3f(c.x, c.y, c.z);
+    rlVertex3f(d.x, d.y, d.z);
+    rlEnd();
+}
+
+/*
+ * brilho
+ * Um brilho macio (losango que some nas pontas) com o centro na cor cheia: dá o halo de uma faísca e os raios do clarão.
+ * Recebe: o centro, os dois semieixos (vetores) e a cor do centro.
+ */
+static void brilho(Vector3 centro, Vector3 eixoA, Vector3 eixoB, Color cor) {
+    Vector3 pontas[4] = { Vector3Add(centro, eixoA), Vector3Add(centro, eixoB), Vector3Subtract(centro, eixoA), Vector3Subtract(centro, eixoB) };
+    for (int k = 0; k < 4; k++) {
+        Vector3 p0 = pontas[k], p1 = pontas[(k + 1) % 4];
+        rlBegin(RL_TRIANGLES);
+        rlColor4ub(cor.r, cor.g, cor.b, cor.a);
+        rlVertex3f(centro.x, centro.y, centro.z);
+        rlColor4ub(cor.r, cor.g, cor.b, 0);
+        rlVertex3f(p0.x, p0.y, p0.z);
+        rlVertex3f(p1.x, p1.y, p1.z);
+        rlEnd();
+    }
 }
 
 /*
@@ -382,35 +492,42 @@ void desenharFaiscas(Camera3D camera) {
     BeginBlendMode(BLEND_ADDITIVE);
     rlDisableDepthMask();
 
+    Vector3 frenteDaCamera = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
+    Vector3 direitaDaCamera = Vector3Normalize(Vector3CrossProduct(frenteDaCamera, camera.up));
+    Vector3 cimaDaCamera = Vector3CrossProduct(direitaDaCamera, frenteDaCamera);
     for (int i = 0; i < totalDeFaiscas; i++) {
         const Faisca *f = &faiscas[i];
         float passou = 1.0f - f->vida / f->duracao;
-        Color cor = corDaFaisca(passou, f->calor);
-        Vector3 rabo = Vector3Subtract(f->posicao, Vector3Scale(f->velocidade, COMPRIMENTO_DO_RISCO));
-        Vector3 direcao = Vector3Subtract(f->posicao, rabo);
-        if (Vector3LengthSqr(direcao) < 1e-6f) {
-            direcao = (Vector3){ 0.0f, 0.02f, 0.0f };
-            rabo = Vector3Subtract(f->posicao, direcao);
+        Color cabeca = corDaFaisca(passou, f->calor);
+        Color rabo = { 220, 60, 12, 0 };
+        float velocidade = Vector3Length(f->velocidade);
+        float comprimento = fmaxf(velocidade * COMPRIMENTO_DO_RISCO, 0.025f);
+        Vector3 direcao = (velocidade > 1e-3f) ? Vector3Scale(f->velocidade, 1.0f / velocidade) : (Vector3){ 0.0f, 1.0f, 0.0f };
+        Vector3 ponta = Vector3Subtract(f->posicao, Vector3Scale(direcao, comprimento));
+        float largura = LARGURA_DO_RISCO * f->espessura * (0.75f + 0.7f * f->calor) * (1.0f - 0.45f * passou);
+
+        /* o halo laranja, largo e fraco; o corpo; e o miolo branco, fino, no centro (a parte mais quente) */
+        Color halo = { 255, 120, 30, (unsigned char) (cabeca.a * 0.20f) };
+        riscoComRabo(camera, f->posicao, ponta, largura * 3.4f, halo, (Color){ halo.r, halo.g, halo.b, 0 });
+        riscoComRabo(camera, f->posicao, ponta, largura, cabeca, rabo);
+        if (passou < 0.65f) {
+            Color miolo = { 255, 250, 225, (unsigned char) (cabeca.a * (1.0f - passou / 0.65f)) };
+            riscoComRabo(camera, f->posicao, Vector3Lerp(f->posicao, ponta, 0.7f), largura * 0.38f, miolo, (Color){ 255, 240, 200, 0 });
         }
-        Vector3 paraACamera = Vector3Subtract(camera.position, f->posicao);
-        Vector3 lado = Vector3Normalize(Vector3CrossProduct(direcao, paraACamera));
-        float largura = LARGURA_DO_RISCO * (0.7f + 0.8f * f->calor) * (1.0f - 0.5f * passou);
-        lado = Vector3Scale(lado, largura);
-        Vector3 a = Vector3Add(f->posicao, lado), b = Vector3Subtract(f->posicao, lado);
-        Vector3 c = Vector3Subtract(rabo, lado), d = Vector3Add(rabo, lado);
-        DrawTriangle3D(a, b, c, cor);
-        DrawTriangle3D(a, c, d, cor);
+        if (passou < 0.5f) {   /* a cabeça incandescente: um pontinho de brilho */
+            float r = largura * 2.2f;
+            brilho(f->posicao, Vector3Scale(direitaDaCamera, r), Vector3Scale(cimaDaCamera, r), (Color){ 255, 220, 150, (unsigned char) (200 * (1.0f - passou * 2.0f)) });
+        }
     }
 
-    /* Os clarões: um disco virado para a câmera, que some em menos de um décimo de segundo */
-    Vector3 frente = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
-    Vector3 direita = Vector3Normalize(Vector3CrossProduct(frente, camera.up));
-    Vector3 cima = Vector3CrossProduct(direita, frente);
+    /* Os clarões: um disco virado para a câmera, um halo largo por trás e, nos fortes, quatro raios de luz */
+    Vector3 frente = frenteDaCamera, direita = direitaDaCamera, cima = cimaDaCamera;
     for (int i = 0; i < totalDeClaroes; i++) {
         const Clarao *c = &claroes[i];
-        float resta = c->vida / VIDA_DO_CLARAO;
+        float resta = c->vida / c->duracao;
         float raio = c->tamanho * (0.6f + 0.4f * (1.0f - resta));
-        Color centro = { 255, 240, 200, (unsigned char) (230 * resta) };
+        brilho(c->posicao, Vector3Scale(direita, raio * 2.6f), Vector3Scale(cima, raio * 2.6f), (Color){ 255, 120, 30, (unsigned char) (70 * resta) });
+        Color centro = { 255, 240, 200, (unsigned char) (235 * resta) };
         Color borda = { 255, 150, 40, 0 };
         const int lados = 14;
         for (int k = 0; k < lados; k++) {
@@ -425,7 +542,16 @@ void desenharFaiscas(Camera3D camera) {
             rlVertex3f(p1.x, p1.y, p1.z);
             rlEnd();
         }
+        if (c->espinhos) {   /* o flare: um raio na horizontal e um na vertical, finos, e dois na diagonal, mais curtos */
+            Color raioDeLuz = { 255, 235, 190, (unsigned char) (200 * resta) };
+            Vector3 d1 = Vector3Normalize(Vector3Add(direita, cima)), d2 = Vector3Normalize(Vector3Subtract(direita, cima));
+            brilho(c->posicao, Vector3Scale(direita, raio * 4.2f), Vector3Scale(cima, raio * 0.16f), raioDeLuz);
+            brilho(c->posicao, Vector3Scale(cima, raio * 3.4f), Vector3Scale(direita, raio * 0.14f), raioDeLuz);
+            brilho(c->posicao, Vector3Scale(d1, raio * 2.2f), Vector3Scale(d2, raio * 0.1f), raioDeLuz);
+            brilho(c->posicao, Vector3Scale(d2, raio * 2.2f), Vector3Scale(d1, raio * 0.1f), raioDeLuz);
+        }
     }
+    (void) frente;
 
     rlDrawRenderBatchActive();
     rlEnableDepthMask();
