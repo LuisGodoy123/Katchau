@@ -60,7 +60,8 @@ lista circular duplamente encadeada de segmentos.
   da cidade é a mesma da arena do Cars 2 (a textura, na mesma escala) e tem os mesmos matinhos e cactos. Do
   lado da cidade, a pista de treino tem a mesa de pedra da arena, inteira e com a lombada vermelha em volta
   descendo até o chão da cidade (`ferramentas/montar_mundo_aberto.py` guarda as rochas da arena por peça e
-  encaixa as beiradas baixas delas no chão; as texturas JPEG viram PNG, que a raylib do jogo não lê JPEG).
+  encaixa as beiradas baixas delas no chão, mas não a terra do oval nem o butte no meio dele; as texturas
+  JPEG viram PNG, que a raylib do jogo não lê JPEG).
 
 ## 1. Instalar a raylib
 

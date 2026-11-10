@@ -47,8 +47,6 @@
 #include "recordes.h"
 #include "controle.h"
 #include "passeio.h"
-#include "sala.h"
-#include "online.h"
 #include <ctype.h>
 
 /* Na vitória, o painel de chegada espera um pouco para o jogador ver o
@@ -183,21 +181,8 @@ static Tela atualizarTelaDaCorrida(Corrida *corrida, EstadoMenu *menu, int *paus
             pausarSonsDaCorrida(0);
         } else if (escolha == PAUSA_SAIR) {
             *pausada = 0;   /* os sons pausados somem sozinhos na volta à cidade */
-            if (corrida->emRede) {
-                acabouACorridaOnline();
-            }
             return TELA_PASSEIO;
         }
-        /* Numa corrida em rede o mundo NÃO congela: não há como parar a corrida dos
-         * outros, e fingir que parou só faria o jogador achar que o jogo travou. O painel
-         * da pausa fica por cima, e o carro dele segue com o acelerador solto (os comandos
-         * vazios abaixo) — a corrida continua acontecendo, porque para os outros continua. */
-        if (!corrida->emRede) {
-            return TELA_CORRIDA;
-        }
-        Comandos semNinguem = { 0, 0, 0, 0, 0.0f, 0, 0 };
-        atualizarCorrida(corrida, semNinguem, tempoQuadro);
-        atualizarOnline(corrida, semNinguem, tempoQuadro);
         return TELA_CORRIDA;
     }
 
@@ -205,9 +190,7 @@ static Tela atualizarTelaDaCorrida(Corrida *corrida, EstadoMenu *menu, int *paus
         tocarSom(SOM_CONFIRMAR);
         *pausada = 1;
         abrirPausaDaCorrida(menu);
-        if (!corrida->emRede) {
-            pausarSonsDaCorrida(1);   /* em rede os sons seguem: a corrida segue */
-        }
+        pausarSonsDaCorrida(1);
         return TELA_CORRIDA;
     }
 
@@ -228,10 +211,6 @@ static Tela atualizarTelaDaCorrida(Corrida *corrida, EstadoMenu *menu, int *paus
 
     Comandos comandos = lerComandos();
     atualizarCorrida(corrida, comandos, tempoQuadro);
-    /* A rede DEPOIS da física, nesta ordem de propósito: o convidado manda o comando
-     * DESTE quadro (e não o do anterior) e corrige o próprio carro com o retrato já
-     * aplicado; o dono manda o retrato do mundo já atualizado. */
-    atualizarOnline(corrida, comandos, tempoQuadro);
     /* O recorde da pista: quando o jogador termina, a melhor volta dele entra no recorde, se for a melhor de todas */
     static int recordeRegistrado = 0;
     if (corrida->contagemRegressiva > 0.0f) {
@@ -359,11 +338,7 @@ int main(int argc, char *argv[]) {
     carregarFumaca();
     carregarMarcas();
     carregarPosProcesso();
-    /* Zerada já na declaração, e isso não é zelo: atualizarSala() roda em TODA tela, desde o
-     * menu, e repassa a online.c os pacotes da corrida, que decidem o que fazer lendo
-     * corrida.emRede e corrida.souODono. Antes da primeira corrida esses campos seriam lixo
-     * da pilha, e um pacote chegando no menu cairia num caminho qualquer. */
-    Corrida corrida = { 0 };
+    Corrida corrida;
     EstadoMenu menu;
     iniciarMenu(&menu);
     carregarRecordes();
@@ -375,9 +350,6 @@ int main(int argc, char *argv[]) {
     EstadoDaVibracao estadoDaVibracao;
     iniciarEstadoDaVibracao(&estadoDaVibracao);
     iniciarVibracao();
-    /* A rede do modo online. Não abrindo (sem placa, firewall fechado na porta, pilha de
-     * rede quebrada), o jogo segue inteiro: só o botão CORRER ONLINE fica apagado. */
-    iniciarSala();
 
     /* O vídeo de abertura: passa só quando o jogo abre (não a cada corrida); qualquer botão pula */
     int naIntro = diretoNoPasseio ? 0 : iniciarIntro();
@@ -405,10 +377,6 @@ int main(int argc, char *argv[]) {
             continue;   /* quando acaba, a intro se dissolve por cima do menu (desenharSaidaDaIntro) */
         }
         atualizarControle();   /* acha o controle e lê o analógico, antes das telas perguntarem */
-        /* A rede antes das telas, para elas decidirem com o que ACABOU de chegar. Nada aqui
-         * bloqueia: o soquete é sem espera e no máximo PACOTES_POR_QUADRO datagramas são
-         * lidos por quadro (veja esvaziarACaixa, em sala.c). */
-        atualizarSala(&corrida, tempoQuadro);
         /* Os vídeos de fundo avançam só enquanto a tela deles está aberta */
         if (tela == TELA_ENTRADA) {
             atualizarVideoDeFundo(videoDaEntrada, tempoQuadro);
@@ -431,12 +399,6 @@ int main(int argc, char *argv[]) {
             case TELA_PISTAS:
                 proxima = atualizarEscolhaDePista(&menu);
                 break;
-            case TELA_SALAS:
-                proxima = atualizarListaDeSalas(&menu);
-                break;
-            case TELA_SALA_DE_ESPERA:
-                proxima = atualizarSalaDeEspera(&menu);
-                break;
             case TELA_CONFIGURACOES:
                 proxima = atualizarConfiguracoes(&menu);
                 break;
@@ -453,7 +415,6 @@ int main(int argc, char *argv[]) {
                 /* A corrida continua ao fundo até todos os rivais chegarem */
                 Comandos nenhumComando = { 0, 0, 0, 0, 0.0f, 0, 0 };
                 atualizarCorrida(&corrida, nenhumComando, tempoQuadro);
-                atualizarOnline(&corrida, nenhumComando, tempoQuadro);   /* o dono segue mandando o retrato */
                 proxima = atualizarResultado();
                 break;
             }
@@ -469,43 +430,20 @@ int main(int argc, char *argv[]) {
         } else if (tela == TELA_PISTAS && proxima == TELA_PASSEIO) {
             voltarDaEscolhaDaCorrida();
         }
-        /* Em rede a largada é a mesma para todos, no instante que o dono manda. A cena do
-         * Mack fica de fora de propósito: ela dura uns 5 s e dá para pular com ENTER, então
-         * quem pulasse chegaria na pista antes dos outros. Da sala vai-se direto ao grid. */
-        if (tela == TELA_SALA_DE_ESPERA && proxima == TELA_PASSEIO) {
-            voltarDaEscolhaDaCorrida();   /* desistiu da sala: o carro desce da carreta */
-        }
         /* Da corrida (pelo resultado ou pela pausa) de volta à cidade: o carro desce da carreta */
         if ((tela == TELA_CORRIDA || tela == TELA_RESULTADO) && proxima == TELA_PASSEIO) {
             voltarDaCorrida(menu.carroEscolhido, recadoDaCorrida(&corrida));
-            acabouACorridaOnline();   /* avisa a sala e volta a ser um jogador só */
-            encerrarOnline();
         }
         /* Entrar na corrida (pelo Mack ou pelo "correr de novo") sempre começa uma nova */
         if (proxima == TELA_CORRIDA && tela != TELA_CORRIDA) {
-            int emRede = emCorridaOnline();
-            if (emRede) {
-                /* Em rede, a pista e o nível são os da SALA (quem escolheu foi o dono), e a
-                 * formação diz o carro e o lugar de grid de cada um — igual em todas as
-                 * máquinas, para todas montarem exatamente o mesmo grid. */
-                menu.pistaEscolhida = pistaDaSala();
-                menu.nivelEscolhido = (NivelDaCorrida) nivelDaSala();
-                iniciarCorridaOnline(&corrida, pistas[menu.pistaEscolhida], menu.nivelEscolhido, formacaoDaSala());
-                prepararOnline(&corrida, pistas[menu.pistaEscolhida]);
-            } else {
-                iniciarCorrida(&corrida, pistas[menu.pistaEscolhida], menu.carroEscolhido, menu.nivelEscolhido);
-            }
+            iniciarCorrida(&corrida, pistas[menu.pistaEscolhida], menu.carroEscolhido, menu.nivelEscolhido);
             limparConfetes();
             limparFumaca();
             limparFogos();
             olhar = olharParaAFrente();
             iniciarEstadoDaVibracao(&estadoDaVibracao);
             iniciarEfeitosDaCorrida();
-            /* Em rede NÃO há apresentação da largada: o jogo de câmeras para a corrida de
-             * quem está vendo, e quem pulasse largaria antes dos outros. */
-            if (!emRede) {
-                iniciarApresentacao(&apresentacao);
-            }
+            iniciarApresentacao(&apresentacao);
         }
         /* JOGAR: o carro escolhido na garagem, na rua principal */
         if (proxima == TELA_PASSEIO && tela == TELA_MENU) {
@@ -535,7 +473,6 @@ int main(int argc, char *argv[]) {
 
         /* O mouse só aparece (e só funciona) no menu principal, na garagem e na pausa */
         int usaMouse = (tela == TELA_MENU || tela == TELA_GARAGEM || tela == TELA_PISTAS || tela == TELA_CONFIGURACOES
-                        || tela == TELA_SALAS || tela == TELA_SALA_DE_ESPERA
                         || (tela == TELA_CORRIDA && pausada) || (tela == TELA_PASSEIO && passeioPausado()));
         if (usaMouse && IsCursorHidden()) {
             ShowCursor();
@@ -617,7 +554,7 @@ int main(int argc, char *argv[]) {
          * comecarInterface() amplia para o tamanho da tela. */
         BeginDrawing();
         ClearBackground(BLACK);
-        congelarCena(tela == TELA_CORRIDA && pausada && !corrida.emRede);
+        congelarCena(tela == TELA_CORRIDA && pausada);
         usarFormasRetas(tela != TELA_CORRIDA);   /* os menus usam retângulos arredondados; o HUD da corrida, não */
 
         /* A câmera livre vale na corrida; na pausa ela fica onde está */
@@ -658,18 +595,6 @@ int main(int argc, char *argv[]) {
                 desenharPistaDeFundo(pistas[menu.pistaEscolhida]);
                 comecarInterface(1);
                 desenharEscolhaDePista(&menu, pistas);
-                terminarInterface();
-                break;
-            case TELA_SALAS:
-                desenharPistaDeFundo(pistas[menu.pistaEscolhida]);
-                comecarInterface(1);
-                desenharListaDeSalas(&menu, pistas);
-                terminarInterface();
-                break;
-            case TELA_SALA_DE_ESPERA:
-                desenharPistaDeFundo(pistas[pistaDaSala()]);
-                comecarInterface(1);
-                desenharSalaDeEspera(&menu, pistas);
                 terminarInterface();
                 break;
             case TELA_CONFIGURACOES:
@@ -755,9 +680,6 @@ int main(int argc, char *argv[]) {
         liberarPista(pistas[i]);
     }
     descarregarVisual();
-    encerrarOnline();
-    encerrarSala();
-    encerrarRede();
     fecharVideoDeFundo(videoDaEntrada);
     fecharVideoDeFundo(videoDoMenu);
     descarregarAudio();

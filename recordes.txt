@@ -1,2 +1,2 @@
-0 70.428 McQueen
+0 69.367 McQueen
 1 39.163 McQueen

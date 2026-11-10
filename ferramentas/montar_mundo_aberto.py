@@ -875,11 +875,17 @@ print('Rochas: %d cartões soltos e %d dentes tirados' % (cartoes, dentes))
 # enterrada), a rocha baixa desce (ou sobe) aos poucos até a altura que o chão da cidade tinha ali. Sem isso,
 # o chão vermelho em volta da mesa acabava num degrau, e do lado de lá, num buraco. A beirada que fica em
 # cima de outra rocha (a estrada pintada sobre o chão vermelho) não conta; a mesma conta vale para tudo o
-# que está no mesmo lugar, e a estrada continua colada no chão
+# que está no mesmo lugar, e a estrada continua colada no chão. A terra da pista de treino e o que sobrou do
+# butte no meio do oval (a pedra, o chão e a estrada dele) também não são o chão da arena, mas não são beirada:
+# ficam de fora. Embaixo do oval a cidade tinha um morro (até 26 m), e puxadas para ele as bordas da pista
+# viravam paredes em pé nas retas
 from mathutils.kdtree import KDTree
+NAO_ENCAIXAM = ('BOSS_Road', 'Butte')   # nos nomes dos materiais
+rochas_de_beirada = [o for o in rochas_c2
+                     if not any(m and any(n in m.name for n in NAO_ENCAIXAM) for m in o.data.materials)]
 arv_rochas_c2 = arvore(rochas_c2)
 beiradas = []
-for o in rochas_c2:
+for o in rochas_de_beirada:
     me = o.data
     def chave_v(i):
         c = me.vertices[i].co
@@ -914,7 +920,7 @@ if beiradas:
     for i, b in enumerate(beiradas):
         kd.insert(Vector((b.x, b.y, 0.0)), i)
     kd.balance()
-    for o in rochas_c2:
+    for o in rochas_de_beirada:
         for v in o.data.vertices:
             chao = altura(arv_chao_busca, v.co.x, v.co.y)
             chao = chao if chao is not None else z_ror
