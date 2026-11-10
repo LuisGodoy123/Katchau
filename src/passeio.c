@@ -22,6 +22,7 @@
 #include "passeio.h"
 #include "livre.h"
 #include "carreta.h"
+#include "moradores.h"
 #include "colisao.h"
 #include "corrida.h"
 #include "mundo.h"
@@ -49,7 +50,9 @@
 #define TREINO_Z              552.9f
 
 #define GRAUS_DE_VISAO        65.0f
-#define ATRASO_DA_CAMERA      0.22f     /* segundos: a câmera vem atrás do bico com este atraso */
+#define ATRASO_DA_CAMERA      0.22f     /* segundos: a câmera vem atrás do caminho do carro com este atraso */
+#define CAMINHO_DA_CAMERA_DE  2.0f      /* m/s: abaixo disso, a câmera vai atrás do rumo; acima de... */
+#define CAMINHO_DA_CAMERA_ATE 8.0f      /* ...isto, de para onde o carro está indo (como na corrida, carro.c) */
 #define ATRASO_DA_ALTURA      0.10f     /* segundos: e sobe e desce com o carro com este */
 #define VELOCIDADE_DA_DISTANCIA 7.0f    /* 1/s: a troca de distância da câmera */
 #define FOLGA_DA_CAMERA       1.2f      /* metros: a câmera nunca entra no chão */
@@ -140,6 +143,10 @@ static float treino[3] = { TREINO_X, 0.0f, TREINO_Z };
 #define FUNDO_DA_CARRETA      1.5f      /* metros entre a porta e a traseira do carro, lá dentro */
 #define FUNDO_DO_ESCURO       12.0f     /* metros do lado de dentro da carreta, da porta para dentro (FUNDO_DO_BAU, em preparar_mack.py) */
 #define DESENHA_O_BAU_ATE     150.0f    /* metros: mais longe que isso, o lado de dentro da carreta não aparece */
+#define DESENHA_MORADOR_ATE   320.0f    /* metros: mais longe que isso, os moradores não são desenhados */
+#define SOMBRA_DE_MORADOR_ATE 70.0f     /* e a sombra deles, só de perto */
+#define BATIDA_QUE_ASSUSTA    3.0f      /* m/s: batendo mais forte que isso num morador, ele se assusta */
+#define OUVE_ATE              26.0f     /* metros: a fala de um morador mais perto que isso aparece na tela */
 #define FAIXA_DE_CINEMA       0.11f     /* da altura da tela: as faixas pretas das cenas */
 /* Os olhos do Mack (os dos carros, carros3d.c): acompanham o carro do jogador */
 #define OLHA_ATE              70.0f     /* metros: mais longe que isso, ele olha à frente (e em volta) */
@@ -389,31 +396,33 @@ static Vector3 portaDoMack(void) {
 }
 
 /*
- * empurrarDoMack
- * O Mack parado é sólido: três círculos ao longo do carro (do bico à traseira) não entram na caixa
- * dele, vista de cima. Quem entra sai pelo lado mais perto, e a velocidade contra ele some.
+ * empurrarDaCaixa
+ * Uma caixa sólida (o Mack, um morador), vista de cima: três círculos ao longo do carro (do bico à
+ * traseira) não entram nela. Quem entra sai pelo lado mais perto, e a velocidade contra ela some.
+ * Recebe: o meio da caixa, o rumo dela, as meias medidas (comprimento e largura) e o alto dela.
+ * Devolve: a velocidade (m/s) com que o carro bateu nela (0 se não bateu).
  */
-static void empurrarDoMack(void) {
-    if (!temMack || carro.y > mackY + alturaDoMack) {
-        return;
+static float empurrarDaCaixa(float meioX, float meioZ, float rumo, float meioComprimento, float meiaLargura, float alto) {
+    if (carro.y > alto) {
+        return 0.0f;
     }
-    float fx, fz, dx, dz;
-    eixosDoMack(&fx, &fz, &dx, &dz);
+    float fx = sinf(rumo), fz = -cosf(rumo), dx = cosf(rumo), dz = sinf(rumo);
     float bicoX = carro.frente[0], bicoZ = carro.frente[2];
     float tamanho = hypotf(bicoX, bicoZ);
     if (tamanho < 1e-3f) {
-        return;
+        return 0.0f;
     }
     bicoX /= tamanho;
     bicoZ /= tamanho;
     float raio = carro.largura / 2.0f;
     float ate = fmaxf(carro.comprimento / 2.0f - raio, 0.0f);
+    float bateu = 0.0f;
     for (int i = -1; i <= 1; i++) {
         float px = carro.x + bicoX * ate * i, pz = carro.z + bicoZ * ate * i;
-        float aoLongo = (px - mackX) * fx + (pz - mackZ) * fz;
-        float deLado = (px - mackX) * dx + (pz - mackZ) * dz;
-        float sobraLongo = aoLongo - Clamp(aoLongo, -meioDoMack, meioDoMack);
-        float sobraLado = deLado - Clamp(deLado, -meiaLarguraDoMack, meiaLarguraDoMack);
+        float aoLongo = (px - meioX) * fx + (pz - meioZ) * fz;
+        float deLado = (px - meioX) * dx + (pz - meioZ) * dz;
+        float sobraLongo = aoLongo - Clamp(aoLongo, -meioComprimento, meioComprimento);
+        float sobraLado = deLado - Clamp(deLado, -meiaLargura, meiaLargura);
         float distancia = hypotf(sobraLongo, sobraLado);
         float paraLongo, paraLado, entrou;
         if (distancia > 1e-4f) {
@@ -423,14 +432,14 @@ static void empurrarDoMack(void) {
             paraLongo = sobraLongo / distancia;
             paraLado = sobraLado / distancia;
             entrou = raio - distancia;
-        } else if (meioDoMack - fabsf(aoLongo) < meiaLarguraDoMack - fabsf(deLado)) {
+        } else if (meioComprimento - fabsf(aoLongo) < meiaLargura - fabsf(deLado)) {
             paraLongo = (aoLongo >= 0.0f) ? 1.0f : -1.0f;   /* dentro: sai pela ponta mais perto */
             paraLado = 0.0f;
-            entrou = meioDoMack - fabsf(aoLongo) + raio;
+            entrou = meioComprimento - fabsf(aoLongo) + raio;
         } else {
             paraLongo = 0.0f;
             paraLado = (deLado >= 0.0f) ? 1.0f : -1.0f;   /* ou pelo lado */
-            entrou = meiaLarguraDoMack - fabsf(deLado) + raio;
+            entrou = meiaLargura - fabsf(deLado) + raio;
         }
         float nx = paraLongo * fx + paraLado * dx, nz = paraLongo * fz + paraLado * dz;
         carro.x += nx * entrou;
@@ -440,6 +449,23 @@ static void empurrarDoMack(void) {
             carro.vx -= contra * nx;
             carro.vz -= contra * nz;
             carro.pancada = fmaxf(carro.pancada, fminf(-contra / 25.0f, 1.0f));
+            bateu = fmaxf(bateu, -contra);
+        }
+    }
+    return bateu;
+}
+
+/* O Mack parado é sólido */
+static float empurrarDoMack(void) {
+    return temMack ? empurrarDaCaixa(mackX, mackZ, mackRumo, meioDoMack, meiaLarguraDoMack, mackY + alturaDoMack) : 0.0f;
+}
+
+/* Os moradores também; quem leva uma batida forte se assusta (os olhos arregalam) */
+static void empurrarDosMoradores(void) {
+    for (int i = 0; i < totalDeMoradores(); i++) {
+        Morador *m = morador(i);
+        if (empurrarDaCaixa(m->x, m->z, m->rumo, m->comprimento / 2.0f, m->largura / 2.0f, m->y + 2.5f) > BATIDA_QUE_ASSUSTA) {
+            m->susto = 0.9f;
         }
     }
 }
@@ -576,6 +602,7 @@ void iniciarPasseio(int numeroDoCarro) {
     numero = numeroDoCarro;
     iniciarCarroLivre(&carro, fichaDoCarro(numero), largada[0], largada[1], largada[2], largada[3]);
     voltarAoComeco(&carro, malha);
+    iniciarMoradores(malha, numero);   /* cada um em casa (menos quem tem o carro do jogador) */
     cena = CENA_DIRIGINDO;
     mackAndou = 0.0f;
     aberturaDaPorta = 0.0f;
@@ -930,6 +957,10 @@ Tela atualizarPasseio(EstadoMenu *menu, float tempoQuadro) {
         tempoDoRecado -= tempoQuadro;
     }
     sustoDoMack = fmaxf(sustoDoMack - tempoQuadro, 0.0f);
+    if (!pausado && !mapaAberto) {
+        /* a cidade segue, até nas cenas do Mack */
+        atualizarMoradores(malha, carro.x, carro.z, carro.rumo, velocidadeDoCarroLivre(&carro), tempoQuadro);
+    }
     if (cena != CENA_DIRIGINDO) {
         return atualizarCena(tempoQuadro);
     }
@@ -1000,10 +1031,10 @@ Tela atualizarPasseio(EstadoMenu *menu, float tempoQuadro) {
     int quedasAntes = carro.quedas;
     atualizarCarroLivre(&carro, comandos, malha, tempoQuadro);
     float pancadaAntes = carro.pancada;
-    empurrarDoMack();
-    if (carro.pancada > fmaxf(pancadaAntes, 0.15f)) {
+    if (empurrarDoMack() > BATIDA_QUE_ASSUSTA && carro.pancada > fmaxf(pancadaAntes, 0.15f)) {
         sustoDoMack = SEGUNDOS_DE_SUSTO;   /* bateram no Mack: ele se assusta */
     }
+    empurrarDosMoradores();
     if (carro.quedas != quedasAntes) {
         reiniciarCamera();   /* caiu do mundo e voltou ao começo: a câmera não fica lá embaixo */
     }
@@ -1028,8 +1059,30 @@ Tela atualizarPasseio(EstadoMenu *menu, float tempoQuadro) {
  * ------------------------------------------------------------------ */
 
 /*
+ * rumoDaViagem
+ * Para onde a câmera vai atrás: para onde o carro está indo (a velocidade, vista de cima), como nos
+ * jogos de corrida. No drift, o bico aponta para dentro da curva e o caminho (o rumo da física) vira
+ * para fora com o contraesterço; o carro vai entre os dois. Indo atrás do bico ou do rumo, a câmera
+ * olhava para o lado errado e o carro escorregava pela tela; indo atrás da velocidade, ela olha o
+ * caminho e o carro aparece de lado. Devagar (a velocidade dá pulos) ou de ré, ela vai atrás do rumo.
+ */
+static float rumoDaViagem(void) {
+    float rapidez = hypotf(carro.vx, carro.vz);
+    float peso = Clamp((rapidez - CAMINHO_DA_CAMERA_DE) / (CAMINHO_DA_CAMERA_ATE - CAMINHO_DA_CAMERA_DE), 0.0f, 1.0f);
+    if (carro.corrida.re > 0.0f || peso <= 0.0f) {
+        return carro.rumo;
+    }
+    float diferenca = atan2f(carro.vx, -carro.vz) - carro.rumo;
+    diferenca -= 2.0f * PI * roundf(diferenca / (2.0f * PI));
+    if (fabsf(diferenca) > PI * 0.6f) {
+        return carro.rumo;   /* a velocidade para trás do rumo: escorregando de ré, rodando */
+    }
+    return carro.rumo + diferenca * peso;
+}
+
+/*
  * montarCamera
- * Atrás do carro, para onde o bico aponta visto de cima (com um pequeno atraso), girando com
+ * Atrás do carro, para onde ele está indo visto de cima (com um pequeno atraso), girando com
  * o analógico direito; nunca dentro do chão. Numa parede, ela continua de pé, atrás e um pouco
  * para fora dela.
  */
@@ -1041,7 +1094,7 @@ static Camera3D montarCamera(void) {
     distanciaAtual.altura += (alvo.altura - distanciaAtual.altura) * passo;
 
     if (dt > 0.0f) {
-        float diferenca = carro.rumo - rumoDaCamera;
+        float diferenca = rumoDaViagem() - rumoDaCamera;
         diferenca -= 2.0f * PI * roundf(diferenca / (2.0f * PI));
         rumoDaCamera += diferenca * (1.0f - expf(-dt / ATRASO_DA_CAMERA));
         alturaDaCamera += (carro.y - alturaDaCamera) * (1.0f - expf(-dt / ATRASO_DA_ALTURA));
@@ -1216,10 +1269,10 @@ static Matrix matrizDoCarro(void) {
  * Uma grade de pontos no chão em volta do carro (como na corrida), procurados ao longo do
  * "para baixo" dele (numa parede, a sombra fica na parede), e puxados um pouco para a câmera.
  */
-static void desenharSombraDoCarro(Camera3D camera, Matrix noMundo) {
+static void desenharSombraDoModelo(int modelo, Camera3D camera, Matrix noMundo) {
     Vector3 grade[PONTOS_DA_SOMBRA * PONTOS_DA_SOMBRA];
     float alturas[PONTOS_DA_SOMBRA * PONTOS_DA_SOMBRA];
-    float meio = ladoDaSombra(numero) / 2.0f;
+    float meio = ladoDaSombra(modelo) / 2.0f;
     Vector3 cima = { noMundo.m4, noMundo.m5, noMundo.m6 };
     float baixo[3] = { -cima.x, -cima.y, -cima.z };
     for (int i = 0; i < PONTOS_DA_SOMBRA; i++) {
@@ -1249,7 +1302,57 @@ static void desenharSombraDoCarro(Camera3D camera, Matrix noMundo) {
             }
         }
     }
-    desenharSombraNoChao(numero, grade);
+    desenharSombraNoChao(modelo, grade);
+}
+
+static void desenharSombraDoCarro(Camera3D camera, Matrix noMundo) {
+    desenharSombraDoModelo(numero, camera, noMundo);
+}
+
+/* Um morador no mundo: de pé no chão, com o bico inclinado na ladeira */
+static Matrix matrizDoMorador(const Morador *m) {
+    Vector3 frente = { sinf(m->rumo) * cosf(m->inclinacao), sinf(m->inclinacao), -cosf(m->rumo) * cosf(m->inclinacao) };
+    Vector3 esquerda = Vector3Normalize((Vector3){ frente.z, 0.0f, -frente.x });   /* +x do modelo */
+    Vector3 cima = Vector3CrossProduct(frente, esquerda);
+    Matrix noMundo = { 0 };
+    noMundo.m0 = esquerda.x; noMundo.m1 = esquerda.y; noMundo.m2 = esquerda.z;
+    noMundo.m4 = cima.x;     noMundo.m5 = cima.y;     noMundo.m6 = cima.z;
+    noMundo.m8 = frente.x;   noMundo.m9 = frente.y;   noMundo.m10 = frente.z;
+    noMundo.m12 = m->x;      noMundo.m13 = m->y;      noMundo.m14 = m->z;
+    noMundo.m15 = 1.0f;
+    return noMundo;
+}
+
+/*
+ * desenharMoradores
+ * Os moradores que estão perto (e não atrás da câmera): o carro, com as rodas girando, o corpo
+ * deitando um pouco na curva e a cara viva (os olhos olham para onde o volante vira; batendo, o
+ * susto), e a sombra no chão, se estiverem bem perto.
+ */
+static void desenharMoradores(Camera3D camera) {
+    Vector3 olha = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
+    for (int i = 0; i < totalDeMoradores(); i++) {
+        const Morador *m = morador(i);
+        Vector3 onde = { m->x, m->y + 1.0f, m->z };
+        Vector3 ate = Vector3Subtract(onde, camera.position);
+        float distancia = Vector3Length(ate);
+        if (distancia > DESENHA_MORADOR_ATE || (distancia > 20.0f && Vector3DotProduct(ate, olha) < -0.2f * distancia)) {
+            continue;
+        }
+        Matrix noMundo = matrizDoMorador(m);
+        if (distancia < SOMBRA_DE_MORADOR_ATE) {
+            comecarSombrasNoChao();
+            desenharSombraDoModelo(m->modelo, camera, noMundo);
+            terminarSombrasNoChao();
+        }
+        float deita = -m->volante * fminf(fabsf(m->velocidade) / 9.0f, 1.0f) * 0.05f;
+        inclinarCorpoNoProximoDesenho(m->modelo, deita, m->aceno);
+        expressaoNoProximoDesenho(m->modelo, m->aperto, (m->susto > 0.0f) ? 1.0f : 0.0f);
+        if (m->olhaAlgo) {
+            olharNoProximoDesenho(m->modelo, m->olhar);   /* estacionado, olhando alguém */
+        }
+        desenharCarro3D(m->modelo, noMundo, m->anguloDasRodas, m->volante);
+    }
 }
 
 /*
@@ -1331,6 +1434,21 @@ static void atualizarMinimapa(void) {
         }
         DrawCircleV((Vector2){ meio + p.x, meio + p.y }, 9.0f, BLACK);
         DrawCircleV((Vector2){ meio + p.x, meio + p.y }, 7.0f, cores[k]);
+    }
+    /* Os moradores: pontinhos brancos (o xerife atrás do jogador, vermelho e maior) */
+    for (int i = 0; i < totalDeMoradores(); i++) {
+        const Morador *m = morador(i);
+        float dx = (m->x - carro.x) * pixelsPorMetro, dz = (m->z - carro.z) * pixelsPorMetro;
+        float c = cosf(-rumoDaCamera), s = sinf(-rumoDaCamera);
+        Vector2 p = { dx * c - dz * s, dx * s + dz * c };
+        if (m->perseguindo && Vector2Length(p) >= meio - 12.0f) {
+            p = Vector2Scale(p, (meio - 12.0f) / Vector2Length(p));   /* na borda, mostrando de onde ele vem */
+        }
+        if (Vector2Length(p) < meio - 8.0f) {
+            float raio = m->perseguindo ? 6.0f : 3.5f;
+            DrawCircleV((Vector2){ meio + p.x, meio + p.y }, raio + 1.5f, BLACK);
+            DrawCircleV((Vector2){ meio + p.x, meio + p.y }, raio, m->perseguindo ? (Color){ 235, 40, 40, 255 } : (Color){ 235, 235, 235, 255 });
+        }
     }
     desenharSeta((Vector2){ meio, meio }, carro.rumo - rumoDaCamera, 13.0f, BLACK);
     desenharSeta((Vector2){ meio, meio }, carro.rumo - rumoDaCamera, 10.0f, (Color){ 230, 40, 40, 255 });
@@ -1421,6 +1539,41 @@ static void desenharMinimapaRedondo(Vector2 centro, float raio) {
  * O painel do motor da corrida embaixo à direita e o minimapa (redondo, com o Mack marcado) embaixo
  * à esquerda. (O wallride não tem aviso: a câmera deitando com o carro já diz tudo.)
  */
+/*
+ * desenharFalasDosMoradores
+ * A fala de um morador, como legenda embaixo: a de quem fala com o jogador de longe (o xerife atrás
+ * dele) ou, senão, a de quem está mais perto, se estiver perto o bastante para ouvir. O nome em
+ * amarelo, a fala em branco, numa faixa escura; aparece e some aos poucos.
+ */
+static void desenharFalasDosMoradores(float centroX, float altura) {
+    const Morador *quem = NULL;
+    float menor = OUVE_ATE;
+    for (int i = 0; i < totalDeMoradores(); i++) {
+        const Morador *m = morador(i);
+        if (m->fala == NULL || m->falaRestante <= 0.0f) {
+            continue;
+        }
+        float d = (m->falaLonge) ? 0.0f : hypotf(m->x - carro.x, m->z - carro.z);
+        if (d < menor) {
+            menor = d;
+            quem = m;
+        }
+    }
+    if (quem == NULL) {
+        return;
+    }
+    char nome[64];
+    snprintf(nome, sizeof(nome), "%s:", quem->nome);
+    float alfa = Clamp(quem->falaRestante / 0.4f, 0.0f, 1.0f);
+    float tamanho = 21.0f;
+    float larguraDoNome = larguraDoTexto(FONTE_FORTE, nome, tamanho);
+    float larguraTotal = larguraDoNome + 10.0f + larguraDoTexto(FONTE_TEXTO, quem->fala, tamanho) + 40.0f;
+    Rectangle caixa = { centroX - larguraTotal / 2.0f, altura - 160.0f, larguraTotal, 40.0f };
+    caixaArredondada(caixa, 10.0f, Fade(COR_PAINEL, 0.85f * alfa));
+    escrever(FONTE_FORTE, nome, caixa.x + 20.0f, caixa.y + 8.0f, tamanho, Fade(COR_AMARELO, alfa));
+    escrever(FONTE_TEXTO, quem->fala, caixa.x + 30.0f + larguraDoNome, caixa.y + 8.0f, tamanho, Fade(WHITE, alfa));
+}
+
 static void desenharHudDoPasseio(void) {
     float largura = (float) larguraVirtual(), altura = (float) alturaVirtual();
 
@@ -1451,6 +1604,8 @@ static void desenharHudDoPasseio(void) {
         escreverCentralizado(FONTE_TITULO, tecla, caixa.x + 14.0f + larguraDaTecla / 2.0f, caixa.y + 11.0f, 18.0f, WHITE);
         escrever(FONTE_TITULO, texto, caixa.x + 26.0f + larguraDaTecla, caixa.y + 10.0f, 20.0f, WHITE);
     }
+
+    desenharFalasDosMoradores(x, altura);
 
     /* O resultado da corrida, na volta à cidade */
     if (tempoDoRecado > 0.0f && recado[0] != '\0') {
@@ -1612,6 +1767,7 @@ void desenharPasseio(EstadoMenu *menu) {
     desenharModelosNoMundoAberto();   /* o Mack, as rodas e a porta */
     desenharBauDoMack(camera.position);
     desenharMarcas();
+    desenharMoradores(camera);
     if (carroAparece) {
         if (cena == CENA_DIRIGINDO) {   /* na rampa e dentro da carreta, a sombra cairia na rua */
             comecarSombrasNoChao();

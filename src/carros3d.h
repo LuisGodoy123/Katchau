@@ -28,6 +28,8 @@ void desenharSombraNoChao(int numero, const Vector3 *grade);
 /* A cara do carro no próximo desenho: aperto (0 a 1, os olhos apertados em alta velocidade)
  * e susto (0 a 1, os olhos arregalados ao rodar). Ela muda aos poucos. */
 void expressaoNoProximoDesenho(int numero, float aperto, float susto);
+/* Para onde os olhos vão no próximo desenho (-1 a +1), no lugar do volante (as rodas seguem o volante) */
+void olharNoProximoDesenho(int numero, float olhar);
 void comecarSombrasNoChao(void);
 void terminarSombrasNoChao(void);
 float ladoDaSombra(int numero);

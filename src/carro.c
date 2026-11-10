@@ -119,6 +119,8 @@
 #define AMORTECE_O_GIRO           3.0f     /* por segundo */
 #define FRENTE_NO_DRIFT           1.00f    /* de lado, o volante vira menos o caminho: fração */
 #define CAMINHO_PELO_ANGULO       0.70f    /* o caminho vai para onde o bico aponta... */
+#define CAMINHO_DA_CAMERA_DE      2.0f     /* m/s: abaixo disso, a câmera segue o rumo; acima de... */
+#define CAMINHO_DA_CAMERA_ATE     8.0f     /* ...isto, segue para onde o carro está indo */
 #define ANGULO_DO_CAMINHO         28.0f    /* ...até este ângulo: mais de lado que isso é só estilo, e não joga o carro para fora da pista */
 #define EMPURRAO_NO_DRIFT         0.10f    /* e o quanto ele escorrega mais para fora */
 #define PERDA_NO_DRIFT            300.0f   /* o carro de lado gasta velocidade, mesmo acelerando */
@@ -958,6 +960,11 @@ static int andarNoMundo(Carro *carro, float tempoQuadro) {
     float rumo = carro->rumoNoMundo * 0.0174533f;
     float frenteX = sinf(rumo), frenteZ = -cosf(rumo), direitaX = cosf(rumo), direitaZ = sinf(rumo);
     float deLado = doDrift + carro->velocidadeLateral;
+    /* Para onde ele está indo de fato: no drift, o caminho entra na curva enquanto o rumo (com o contraesterço)
+     * vira para fora. Devagar, o pedaço de lado não conta (a direção ficaria aos pulos) */
+    float adianteEmMetros = carro->velocidade / UNIDADES_POR_METRO;
+    float pesoDoLado = limitar((adianteEmMetros - CAMINHO_DA_CAMERA_DE) / (CAMINHO_DA_CAMERA_ATE - CAMINHO_DA_CAMERA_DE), 0.0f, 1.0f);
+    carro->rumoDaViagem = carro->rumoNoMundo + atan2f(deLado, fmaxf(adianteEmMetros, 0.1f)) * 57.2958f * pesoDoLado;
     carro->velocidadeLateral *= expf(-QUEDA_DO_TRANCO * tempoQuadro);
     float adiante = carro->velocidade * tempoQuadro / UNIDADES_POR_METRO + carro->empurraoPendente / UNIDADES_POR_METRO;
     carro->empurraoPendente = 0.0f;

@@ -26,6 +26,29 @@ lista circular duplamente encadeada de segmentos.
   rodas em `mack_rodas.glb`, que giram quando ele anda, e a porta em `mack_porta.glb`) e as camadas dos
   olhos saem de `ferramentas/preparar_mack.py`, que redesenha os olhos como os do filme, amplia 4 vezes as
   texturas (filtro xBR do ffmpeg), separa as rodas e a porta e põe o caminhão em metros (30 m).
+- **Os moradores de Radiator Springs** (`src/moradores.c`, o mapa deles em `src/moradores_mapa.h`): o McQueen
+  (quando o jogador está com outro carro), o Mate, a Sally, o Doc, o Luigi, o Guido, o Ramone, a Flo, o Xerife,
+  o Sargento, o Fillmore, a Lizzie e o Ruivo, cada um no seu lugar (a loja do Luigi, o café da Flo, o Cozy
+  Cone, o ferro-velho, o quartel, o esconderijo do Xerife atrás do outdoor...) e com uma rotina de dia: vai a
+  outros lugares (quase todos passam no café da Flo), fica um tempo e volta. Andam pela faixa da direita,
+  seguindo o grafo das ruas, freiam atrás de quem vai para o mesmo lado na frente deles (cansando de esperar
+  outro morador, seguem; dois que se encostam se empurram de lado, e ninguém fica travado), esperam a vez de
+  sair para a rua, entram de ré nas vagas e são sólidos para o carro do jogador (batendo forte, eles se
+  assustam). Cada um sorteia os programas pelo gosto dele, com tempos que variam: o Ramone vive no café da
+  Flo, o xerife faz a ronda pela rua principal, o Doc chama o McQueen para treinar no oval, a Sally chama o
+  McQueen para passear pela rodovia, o Mate passa no Cozy Cone para buscar o McQueen, o Sargento chama o
+  Fillmore para o café, e o Guido vai sempre atrás do Luigi. Quem vai buscar alguém para na casa dele, os
+  dois conversam e saem juntos; acabado o programa, cada um volta para a sua casa. Estacionados perto, eles
+  conversam: olham um para o outro e falam na vez de cada um (o Luigi e o Guido, o Sargento e o Fillmore
+  discutindo, a Flo e o Ramone...), e o jogador lê a conversa embaixo da tela quando chega perto. Com o
+  jogador: olham para ele quando ele chega devagar, cumprimentam quando ele para do lado (o Ruivo, tímido, se
+  encolhe), se assustam e reclamam quando ele passa raspando rápido, e o xerife, no esconderijo atrás do
+  outdoor, vai atrás de quem passa a mais de 90 km/h (no minimapa, um ponto vermelho): parando, leva uma
+  bronca; fugindo para longe, ele desiste. A Flo, o Ruivo, o Xerife e a
+  Lizzie não correm: os modelos deles (`recursos/modelos/carros/flo.glb`, `ruivo.glb`, `xerife.glb`,
+  `lizzie.glb`) saem de `ferramentas/preparar_figurantes.py` (que passa as texturas JPEG para PNG, porque a
+  raylib do jogo não lê JPEG, separa os olhos pintados de cada um nas três camadas dos olhos vivos e redesenha
+  os do Ruivo como os do filme) e entram em `carros3d.c` depois dos carros da corrida.
 - **Passeio livre:** um mundo aberto de Radiator Springs (a cidade, o Willy's Butte, os cânions e, colada na
   cidade, a pista de treino de terra que veio do Cars 2), sem pista: o carro anda em qualquer direção
   (`src/livre.c`, que dirige com a direção livre da corrida, `dirigirSemPista` em `src/carro.c`) e o "para
@@ -33,8 +56,11 @@ lista circular duplamente encadeada de segmentos.
   anda nas paredes (wallride). O chão e as paredes vêm de uma malha de colisão em grade (`src/colisao.c`), que
   também diz o tipo de chão (asfalto, areia, terra, rocha): a aderência, a poeira e o som saem daí. A tela,
   com o minimapa e o mapa grande, fica em `src/passeio.c`. A pista de treino fica a ~530 m da rua principal,
-  ligada por uma planície de areia plana (o mapa costura os dois com uma "emenda") e por uma estrada; a areia
-  da cidade tem os mesmos matinhos e cactos da arena do Cars 2.
+  ligada por uma planície de areia plana (o mapa costura os dois com uma "emenda"); a areia
+  da cidade é a mesma da arena do Cars 2 (a textura, na mesma escala) e tem os mesmos matinhos e cactos. Do
+  lado da cidade, a pista de treino tem a mesa de pedra da arena, inteira e com a lombada vermelha em volta
+  descendo até o chão da cidade (`ferramentas/montar_mundo_aberto.py` guarda as rochas da arena por peça e
+  encaixa as beiradas baixas delas no chão; as texturas JPEG viram PNG, que a raylib do jogo não lê JPEG).
 
 ## 1. Instalar a raylib
 
@@ -108,8 +134,10 @@ também os triângulos da colisão.
 **T** vai para a pista de treino, **M** (ou LB) abre o mapa (lá, **Z**/RB aproxima e **ENTER**/A leva à pista
 de treino), **C** troca a câmera e **ESC** pausa. O velocímetro é o mesmo da corrida; no canto de baixo à
 esquerda fica o minimapa (redondo, com o Mack marcado em laranja). Na vaga atrás do Mack, **ENTER** (ou Y)
-entra nele. Nas cenas do Mack, **ENTER** (ou A) pula. Da rua principal sai, em "T", a rua de asfalto que leva
-à pista de treino; na frente da loja do Luigi, a torre de pneus é de pneus 3D. No chão, o carro dirige com a mesma conta da corrida (a direção livre, sem assistência): o volante, a
+entra nele. Nas cenas do Mack, **ENTER** (ou A) pula. A pista de treino fica além da planície de areia, ao sul
+da rua principal; na frente da loja do Luigi, a torre de pneus é de pneus 3D. A câmera vem atrás de para onde o
+carro está indo (a velocidade), como nos jogos de corrida: no drift, ela olha o caminho e o carro aparece de lado
+(devagar ou de ré, ela vem atrás do bico). Na corrida sem a direção guiada é igual (`rumoDaViagem` em `carro.c`). No chão, o carro dirige com a mesma conta da corrida (a direção livre, sem assistência): o volante, a
 curva, o freio, a ré, o nitro e o drift são iguais, em qualquer piso (a areia só segura um pouco a velocidade).
 **Wallride:** encoste numa parede rápido (mais de ~40 km/h), de raspão, e vire o volante para o lado dela: o carro
 sobe e anda nela enquanto tiver velocidade (abaixo de ~30 km/h ele solta). Na parede o controle é arcade: a câmera
@@ -219,6 +247,7 @@ src/
   menu.c/.h        menu, garagem, como jogar e tela de resultado       (fase 6)
   passeio.c/.h     a cidade (o mundo aberto), o Mack e as cenas da ida e da volta das corridas
   carreta.c/.h     o lado de dentro da carreta do Mack (neon, troféus, quadros, telão)
+  moradores.c/.h   os moradores andando pela cidade (lógica: rotina, caminho, fila); o mapa em moradores_mapa.h
   visual.c/.h      identidade visual: cores, fontes, logo e formas     (fase 6)
   olhar.c/.h       câmera livre: transforma o analógico direito em ângulos
   motor.c/.h       rotação, marcha e carga do motor (câmbio de cada carro; também comanda o som)

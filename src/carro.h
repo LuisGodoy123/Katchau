@@ -114,6 +114,8 @@ typedef struct {
     int temSuspensao;
     int temRumoNoMundo;            /* sem a direção guiada: 1 quando o campo abaixo já vale */
     float rumoNoMundo;             /* graus: para onde o carro aponta no mundo; é o volante que muda */
+    float rumoDaViagem;            /* graus: para onde ele está indo de fato (o rumo mais o pedaço de lado do
+                                    * drift e das batidas): a câmera vai atrás dele, como nos jogos de corrida */
     float anguloDeFuga;            /* graus: sem volante na curva, o carro segue reto, e o bico não acompanha a pista */
     float forcaDoDrift;            /* de 0 a 1: o quanto a traseira está solta */
     float anguloDeDrift;           /* graus: o quanto o carro está de lado por causa do drift */

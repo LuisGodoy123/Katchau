@@ -18,6 +18,7 @@
 #include "raymath.h"
 #include "rlgl.h"
 #include "corrida.h"
+#include "moradores.h"
 #include "noite.h"
 
 #define PASTA_DOS_MODELOS     "recursos/modelos/carros/"
@@ -71,7 +72,8 @@ typedef struct {
 } PecaDeRoda;
 
 /* Cada modelo, na ordem de FICHAS (corrida.c). O comprimento está
- * na ficha; "deitado" marca o modelo com a frente em +x. */
+ * na ficha; "deitado" marca o modelo com a frente em +x. Depois dos carros da corrida vêm os
+ * figurantes (moradores.h), que só andam pela cidade: o arquivo, o tamanho e a frente estão na ficha deles. */
 typedef struct {
     const char *arquivo;
     int deitado;
@@ -93,6 +95,27 @@ static const ModeloDoCarro MODELOS[TOTAL_CARROS] = {
     { "wingo.glb", 0 },
     { "snot_rod.glb", 0 },
 };
+
+/* O arquivo, a frente (em quartos de volta: 0 = +z, 1 = +x, 2 = -z, 3 = -x) e as medidas de cada modelo */
+static const char *arquivoDoModelo(int numero) {
+    return (numero < TOTAL_CARROS) ? MODELOS[numero].arquivo : fichaDoFigurante(numero - TOTAL_CARROS)->arquivo;
+}
+
+static int quartosDoModelo(int numero) {
+    return (numero < TOTAL_CARROS) ? MODELOS[numero].deitado : fichaDoFigurante(numero - TOTAL_CARROS)->quartos;
+}
+
+static float comprimentoDaFicha(int numero) {
+    float comprimento, largura;
+    medidasDoModelo(numero, &comprimento, &largura);
+    return comprimento;
+}
+
+static float larguraDaFicha(int numero) {
+    float comprimento, largura;
+    medidasDoModelo(numero, &comprimento, &largura);
+    return largura;
+}
 
 static const char *VERTICES_DO_SHADER =
     "#version 330\n"
@@ -264,15 +287,17 @@ typedef struct {
     float proximaPiscada;          /* segundos até a próxima */
     float proximaOlhadela;         /* segundos até mudar a olhadela */
     float olhadelaX, olhadelaY;
+    float olharPedido;             /* para onde olhar no próximo desenho, no lugar do volante... */
+    int temOlharPedido;            /* ...se pediram (olharNoProximoDesenho) */
     unsigned int sorteio;          /* para os sorteios do carro (não mexe no rand() do jogo) */
     double hora;                   /* do último desenho (para saber quanto tempo passou) */
 } CaraDoCarro;
 
 /* Um lugar a mais, depois dos carros: os olhos de um modelo que não é carro (o Mack, darOlhosAoModelo) */
-#define CARA_DE_OUTRO_MODELO  TOTAL_CARROS
-static OlhosDoCarro olhos[TOTAL_CARROS + 1];
-static CaraDoCarro caras[TOTAL_CARROS + 1];
-static float reflexos[TOTAL_CARROS];    /* quanto o céu se reflete na pintura de cada carro */
+#define CARA_DE_OUTRO_MODELO  TOTAL_DE_MODELOS
+static OlhosDoCarro olhos[TOTAL_DE_MODELOS + 1];
+static CaraDoCarro caras[TOTAL_DE_MODELOS + 1];
+static float reflexos[TOTAL_DE_MODELOS];    /* quanto o céu se reflete na pintura de cada carro */
 static Shader shaderDosOlhos;
 static int locDoDesvio, locDosMeios, locDoTamanho, locDaForma;
 static int locsDoReflexo[3];   /* reflexoDaPintura no opaco, no translúcido e no dos olhos */
@@ -295,17 +320,17 @@ static const AcertoDeCor ACERTOS_DE_COR[] = {
     { "luigi.glb", { 2, 3, -1, -1 }, 49.0f, 14.0f, -4.0f, 1.05f, 1.22f, 0.35f },
 };
 
-static Model modelos[TOTAL_CARROS];
-static Matrix ajuste[TOTAL_CARROS];     /* do modelo como veio para o modelo normalizado */
-static float larguras[TOTAL_CARROS];    /* largura de verdade, em metros */
+static Model modelos[TOTAL_DE_MODELOS];
+static Matrix ajuste[TOTAL_DE_MODELOS];     /* do modelo como veio para o modelo normalizado */
+static float larguras[TOTAL_DE_MODELOS];    /* largura de verdade, em metros */
 static RenderTexture2D miniaturas[TOTAL_CARROS];
-static BoundingBox caixasDosCarros[TOTAL_CARROS];   /* o volume de verdade, já com o ajuste do carro */
+static BoundingBox caixasDosCarros[TOTAL_DE_MODELOS];   /* o volume de verdade, já com o ajuste do carro */
 static Shader shaderOpaco, shaderTranslucido, shaderDaSombra;
-static Texture2D sombras[TOTAL_CARROS];
-static RodaDoCarro rodas[TOTAL_CARROS][MAXIMO_DE_RODAS];
-static int totalDeRodas[TOTAL_CARROS];
-static PecaDeRoda pecas[TOTAL_CARROS][MAXIMO_DE_PECAS_RODA * MAXIMO_DE_RODAS];
-static int totalDePecas[TOTAL_CARROS];
+static Texture2D sombras[TOTAL_DE_MODELOS];
+static RodaDoCarro rodas[TOTAL_DE_MODELOS][MAXIMO_DE_RODAS];
+static int totalDeRodas[TOTAL_DE_MODELOS];
+static PecaDeRoda pecas[TOTAL_DE_MODELOS][MAXIMO_DE_PECAS_RODA * MAXIMO_DE_RODAS];
+static int totalDePecas[TOTAL_DE_MODELOS];
 /* Os garfos do Guido (os doGuido dele) vêm num modelo à parte, nos mesmos eixos: assim sobem e inclinam */
 #define ARQUIVO_DOS_GARFOS    "guido_garfos.glb"
 #define CARRO_COM_GARFOS      7          /* o Guido, na ordem de FICHAS */
@@ -318,12 +343,12 @@ static int rodaEscondida = -1;           /* a roda que não está no carro no pr
 static Matrix corpoInclinado;            /* a suspensão: só o corpo inclina, as rodas não */
 static int temCorpoInclinado = 0;
 
-static unsigned char *translucidos[TOTAL_CARROS];   /* por material: 1 se tem algo translúcido */
+static unsigned char *translucidos[TOTAL_DE_MODELOS];   /* por material: 1 se tem algo translúcido */
 static unsigned char *translucidosDosGarfos = NULL;
 static int blocoDeSombras = 0;   /* 1: entre comecarSombrasNoChao e terminarSombrasNoChao */
 static int rodaEmTroca = -1;          /* a roda que está sendo trocada no próximo carro desenhado (-1 = nenhuma) */
 static float andamentoDaTroca = 0.0f;
-static float ladosDaSombra[TOTAL_CARROS];
+static float ladosDaSombra[TOTAL_DE_MODELOS];
 
 /*
  * desenharComShader
@@ -541,7 +566,7 @@ float ladoDaSombra(int numero) {
  * Devolve: nada.
  */
 static void prepararSombra(int numero) {
-    float lado = fichaDoCarro(numero)->comprimento * FOLGA_DA_SOMBRA;
+    float lado = comprimentoDaFicha(numero) * FOLGA_DA_SOMBRA;
     Camera3D camera = { 0 };
     camera.position = (Vector3){ 0.0f, 20.0f, 0.0f };
     camera.target = (Vector3){ 0.0f, 0.0f, 0.0f };
@@ -683,6 +708,18 @@ void expressaoNoProximoDesenho(int numero, float aperto, float susto) {
 }
 
 /*
+ * olharNoProximoDesenho
+ * Para onde os olhos do carro vão no próximo desenho, no lugar do volante (que continua virando as
+ * rodas): um morador estacionado olhando para quem conversa com ele, ou para o jogador.
+ * Recebe: o carro e o olhar (-1 todo à esquerda, +1 todo à direita).
+ * Devolve: nada.
+ */
+void olharNoProximoDesenho(int numero, float olhar) {
+    caras[numero].olharPedido = fmaxf(-1.0f, fminf(1.0f, olhar));
+    caras[numero].temOlharPedido = 1;
+}
+
+/*
  * sortear
  * Recebe: a cara (que guarda o sorteio dela), e o menor e o maior valor.
  * Devolve: um valor entre os dois.
@@ -792,7 +829,8 @@ static void prepararOlhos(int numero, float volante) {
     }
     float tempo = (c->hora > 0.0) ? (float) fmin(0.1, agora - c->hora) : 0.0f;
     c->hora = agora;
-    animarOlhos(numero, volante, tempo);
+    animarOlhos(numero, c->temOlharPedido ? c->olharPedido : volante, tempo);
+    c->temOlharPedido = 0;
 
     float piscada = fechamentoDaPiscada(c->piscada);
     Vector4 forma = { c->fechar.x + (1.08f - c->fechar.x) * piscada, c->inclinar.x * (1.0f - piscada),
@@ -871,7 +909,7 @@ float larguraDoCarro3D(int numero) {
  * Devolve: o comprimento dele, em metros.
  */
 float comprimentoDoCarro3D(int numero) {
-    return fichaDoCarro(numero)->comprimento;
+    return comprimentoDaFicha(numero);
 }
 
 /*
@@ -891,12 +929,13 @@ static void normalizarModelo(int numero) {
     }
     float dx = caixa.max.x - caixa.min.x;
     float dz = caixa.max.z - caixa.min.z;
-    int deitado = MODELOS[numero].deitado;
-    float escala = fichaDoCarro(numero)->comprimento / (deitado ? dx : dz);
+    int quartos = quartosDoModelo(numero);
+    int deitado = quartos % 2;   /* a frente em x: o comprimento é o x do modelo */
+    float escala = comprimentoDaFicha(numero) / (deitado ? dx : dz);
 
     Matrix centralizar = MatrixTranslate(-(caixa.min.x + caixa.max.x) / 2.0f, -caixa.min.y,
                                          -(caixa.min.z + caixa.max.z) / 2.0f);
-    Matrix girar = deitado ? MatrixRotateY(-90.0f * DEG2RAD) : MatrixIdentity();
+    Matrix girar = MatrixRotateY(-90.0f * quartos * DEG2RAD);   /* a frente vai para +z */
     ajuste[numero] = MatrixMultiply(MatrixMultiply(centralizar, girar), MatrixScale(escala, escala, escala));
     larguras[numero] = (deitado ? dz : dx) * escala;
 }
@@ -1448,7 +1487,7 @@ static void acertarCores(int numero) {
     reflexos[numero] = 1.0f;
     for (int a = 0; a < (int) (sizeof(ACERTOS_DE_COR) / sizeof(ACERTOS_DE_COR[0])); a++) {
         const AcertoDeCor *acerto = &ACERTOS_DE_COR[a];
-        if (strcmp(acerto->arquivo, MODELOS[numero].arquivo) != 0) {
+        if (strcmp(acerto->arquivo, arquivoDoModelo(numero)) != 0) {
             continue;
         }
         reflexos[numero] = acerto->reflexo;
@@ -1622,7 +1661,7 @@ static int trocarPelasCamadas(Model *modelo, int material, const char *nome, flo
 static void carregarOlhos(int numero, const char *tabela) {
     olhos[numero].tem = 0;
     char nome[64];
-    strncpy(nome, GetFileNameWithoutExt(MODELOS[numero].arquivo), sizeof(nome) - 1);
+    strncpy(nome, GetFileNameWithoutExt(arquivoDoModelo(numero)), sizeof(nome) - 1);
     nome[sizeof(nome) - 1] = '\0';
     OlhosDoCarro achados = { 0 };
     int material = acharOlhosNaTabela(tabela, nome, &achados);
@@ -1688,11 +1727,11 @@ static void medirLadoDosOlhos(int numero) {
     }
     if (!medirLadoDosOlhosDoModelo(modelos[numero], ajuste[numero], &olhos[numero])) {
         olhos[numero].tem = 0;
-        TraceLog(LOG_WARNING, "CARRO: nao deu para medir os olhos de %s", MODELOS[numero].arquivo);
+        TraceLog(LOG_WARNING, "CARRO: nao deu para medir os olhos de %s", arquivoDoModelo(numero));
         return;
     }
     TraceLog(LOG_INFO, "CARRO: olhos de %s no material %d, a direita fica no %s da textura",
-             MODELOS[numero].arquivo, olhos[numero].material, (olhos[numero].lado < 0.0f) ? "u menor" : "u maior");
+             arquivoDoModelo(numero), olhos[numero].material, (olhos[numero].lado < 0.0f) ? "u menor" : "u maior");
 }
 
 /*
@@ -1779,8 +1818,8 @@ void carregarCarros3D(void) {
     char *tabelaDosOlhos = FileExists(PASTA_DOS_OLHOS "olhos.txt") ? LoadFileText(PASTA_DOS_OLHOS "olhos.txt") : NULL;
     shaderDaSombra = LoadShaderFromMemory(VERTICES_DO_SHADER, PIXELS_DA_SOMBRA_TEXTO("0.82"));
 
-    for (int numero = 0; numero < TOTAL_CARROS; numero++) {
-        modelos[numero] = LoadModel(TextFormat("%s%s", PASTA_DOS_MODELOS, MODELOS[numero].arquivo));
+    for (int numero = 0; numero < TOTAL_DE_MODELOS; numero++) {
+        modelos[numero] = LoadModel(TextFormat("%s%s", PASTA_DOS_MODELOS, arquivoDoModelo(numero)));
         acertarCores(numero);
         carregarOlhos(numero, tabelaDosOlhos);
         prepararTexturas(modelos[numero]);
@@ -1806,12 +1845,14 @@ void carregarCarros3D(void) {
         }
         prepararSombra(numero);
         BoundingBox caixa = GetModelBoundingBox(modelos[numero]);
-        float escala = fichaDoCarro(numero)->comprimento / fmaxf(caixa.max.x - caixa.min.x, caixa.max.z - caixa.min.z);
+        float escala = comprimentoDaFicha(numero) / fmaxf(caixa.max.x - caixa.min.x, caixa.max.z - caixa.min.z);
         medirCaixaDoCarro(numero);
-        acharRodas(numero, fichaDoCarro(numero)->largura, (caixa.max.y - caixa.min.y) * escala);
+        acharRodas(numero, larguraDaFicha(numero), (caixa.max.y - caixa.min.y) * escala);
         separarRodas(numero);
-        TraceLog(LOG_INFO, "CARRO: %s tem %d rodas, em %d pecas", fichaDoCarro(numero)->nome, totalDeRodas[numero], totalDePecas[numero]);
-        prepararMiniatura(numero);
+        TraceLog(LOG_INFO, "CARRO: %s tem %d rodas, em %d pecas", nomeDoModelo(numero), totalDeRodas[numero], totalDePecas[numero]);
+        if (numero < TOTAL_CARROS) {
+            prepararMiniatura(numero);   /* a garagem só mostra os carros da corrida */
+        }
     }
     if (tabelaDosOlhos != NULL) {
         UnloadFileText(tabelaDosOlhos);
@@ -1825,7 +1866,7 @@ void carregarCarros3D(void) {
  * Devolve: nada.
  */
 void descarregarCarros3D(void) {
-    for (int numero = 0; numero < TOTAL_CARROS; numero++) {
+    for (int numero = 0; numero < TOTAL_DE_MODELOS; numero++) {
         /* Os shaders são compartilhados: são devolvidos uma vez só, aqui embaixo */
         for (int i = 0; i < modelos[numero].materialCount; i++) {
             modelos[numero].materials[i].shader.id = rlGetShaderIdDefault();
@@ -1842,7 +1883,9 @@ void descarregarCarros3D(void) {
         for (int i = 0; i < totalDePecas[numero]; i++) {
             UnloadMesh(pecas[numero][i].malha);
         }
-        UnloadRenderTexture(miniaturas[numero]);
+        if (numero < TOTAL_CARROS) {
+            UnloadRenderTexture(miniaturas[numero]);
+        }
         UnloadTexture(sombras[numero]);
     }
     UnloadShader(shaderOpaco);

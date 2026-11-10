@@ -1156,7 +1156,8 @@ void desenharVisaoDoJogador(Corrida *corrida) {
     int andandoNoPit = (jogador->estadoDoPit == PIT_CHEGANDO || jogador->estadoDoPit == PIT_SAINDO);
     float rumoNoPit = andandoNoPit ? pontoNoMundo(jogador->posicao, jogador->deslocamentoLateral).rumo + jogador->anguloDeFuga : 0.0f;
     int seguirORumo = comRumoReal || andandoNoPit;
-    float rumoSeguido = comRumoReal ? jogador->rumoNoMundo : rumoNoPit;
+    /* sem a guiada, a câmera vai atrás de para onde o carro está indo (no drift, ele aparece de lado) */
+    float rumoSeguido = comRumoReal ? jogador->rumoDaViagem : rumoNoPit;
     if (!seguirORumo) {
         olhar.giro += jogador->anguloDeFuga * CAMERA_NA_FUGA;
     }
