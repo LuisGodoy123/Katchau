@@ -158,8 +158,8 @@ static Image desenharQuadro(int qual) {
     }
     /* A moldura: dourada nuns, escura noutros */
     Color moldura = (qual % 2 == 0) ? OURO_ESCURO : (Color){ 30, 24, 28, 255 };
-    ImageDrawRectangleLinesEx(&imagem, (Rectangle){ 0, 0, (float) L, (float) A }, 8, moldura);
-    ImageDrawRectangleLinesEx(&imagem, (Rectangle){ 8, 8, (float) L - 16, (float) A - 16 }, 2, Fade(BLACK, 0.6f));
+    ImageDrawRectangleLines(&imagem, (Rectangle){ 0, 0, (float) L, (float) A }, 8, moldura);
+    ImageDrawRectangleLines(&imagem, (Rectangle){ 8, 8, (float) L - 16, (float) A - 16 }, 2, Fade(BLACK, 0.6f));
     return imagem;
 }
 
@@ -216,7 +216,7 @@ void carregarInteriorDaCarreta(void) {
     triangulo(&imagem, (Vector2){ 190, 46 }, (Vector2){ 190, 74 }, (Vector2){ 214, 60 }, WHITE);
     ImageDrawRectangle(&imagem, 14, 108, 228, 6, (Color){ 40, 92, 224, 255 });
     ImageDrawRectangle(&imagem, 14, 108, 140, 6, CIANO);
-    ImageDrawRectangleLinesEx(&imagem, (Rectangle){ 0, 0, 256, 128 }, 5, (Color){ 12, 12, 20, 255 });
+    ImageDrawRectangleLines(&imagem, (Rectangle){ 0, 0, 256, 128 }, 5, (Color){ 12, 12, 20, 255 });
     telao = virarTextura(imagem, 0);
 
     /* A caixa de som */
