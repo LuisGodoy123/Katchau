@@ -39,6 +39,18 @@ typedef struct {
     float variacao;             /* o quanto o ritmo dos rivais muda de uma volta para a outra */
 } FichaDoNivel;
 
+/* Quem é quem numa corrida online: uma vaga por humano, na ordem da sala. O resto
+ * dos 14 carros fica com a IA, como sempre. Quem monta isto é sala.c, a partir do
+ * pacote de largada; a corrida só obedece. */
+typedef struct {
+    int totalDeJogadores;                        /* 1 a MAXIMO_DE_JOGADORES */
+    int numeroDoCarro[MAXIMO_DE_JOGADORES];      /* o carro de cada um (nunca repetido) */
+    int lugarNoGrid[MAXIMO_DE_JOGADORES];
+    int euSou;                                   /* qual dos humanos é ESTA máquina */
+    int souODono;                                /* 1: é esta máquina que roda a física de todos */
+    unsigned int semente;                        /* o sorteio dos rivais, igual em todas as máquinas */
+} FormacaoOnline;
+
 typedef struct {
     Pista *pista;
     NivelDaCorrida nivel;
@@ -66,6 +78,20 @@ typedef struct {
     int totalSegmentos;                          /* tamanho da volta, para saber o setor de cada carro */
     float melhoresSetoresDaCorrida[TOTAL_SETORES];   /* o melhor de cada setor entre todos (0 = nenhum) */
     float voltaMaisRapida;                       /* a melhor volta entre todos (0 = nenhuma) */
+
+    /* ---- Corrida em rede (online.c). Numa corrida de um jogador, tudo isto fica em 0 ----
+     *
+     * Este módulo NÃO conhece a rede: não inclui rede.h nem online.h. Os dois caminhos
+     * novos de atualizarCorrida são escolhidos por DADO, e é online.c quem preenche os
+     * dados antes de chamar. Assim corrida.c continua compilando nos testes de terminal,
+     * que não linkam a rede. */
+    int emRede;                                  /* 1: esta corrida é em rede */
+    int souODono;                                /* 1: esta máquina roda a física de todos */
+    int totalDeHumanos;
+    int euSou;                                   /* qual dos humanos é o jogador desta máquina */
+    Carro *humanos[MAXIMO_DE_JOGADORES];         /* humanos[euSou] é sempre &corrida->jogador */
+    Comandos comandosDosHumanos[MAXIMO_DE_JOGADORES];   /* o dono preenche ANTES de atualizarCorrida */
+    float segundosSemComandos[MAXIMO_DE_JOGADORES];     /* passou do limite: a IA assume aquele carro */
 } Corrida;
 
 /* Como foi um setor da volta atual, para pintar no painel da volta */
@@ -86,7 +112,9 @@ typedef enum {
 const FichaTecnica *fichaDoCarro(int numero);
 const FichaDoNivel *fichaDoNivel(NivelDaCorrida nivel);
 void iniciarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador, NivelDaCorrida nivel);
+void iniciarCorridaOnline(Corrida *corrida, Pista *pista, NivelDaCorrida nivel, const FormacaoOnline *formacao);
 void atualizarCorrida(Corrida *corrida, Comandos comandosJogador, float tempoQuadro);
+int carroEDeHumano(const Corrida *corrida, const Carro *carro);
 int todosChegaram(Corrida *corrida);
 float batidaDoMcQueen(Corrida *corrida, int *contraCarro);
 float rodadaDoMcQueen(Corrida *corrida);

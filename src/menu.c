@@ -1018,7 +1018,7 @@ void desenharGaragem(EstadoMenu *menu) {
  * ================================================================== */
 
 /* As linhas da tela */
-enum { FOCO_NA_PISTA, FOCO_NO_NIVEL, FOCO_NO_CORRER, TOTAL_FOCOS };
+enum { FOCO_NA_PISTA, FOCO_NO_NIVEL, FOCO_NO_CORRER, FOCO_NO_ONLINE, TOTAL_FOCOS };
 
 #define Y_CARTAO_PISTA        452.0f   /* os cartões das pistas, em fila embaixo */
 #define LARGURA_CARTAO_PISTA  182.0f
@@ -1042,6 +1042,10 @@ enum { FOCO_NA_PISTA, FOCO_NO_NIVEL, FOCO_NO_CORRER, TOTAL_FOCOS };
 #define X_BOTAO_CORRER        326.0f
 #define LARGURA_BOTAO_CORRER  440.0f
 #define ALTURA_BOTAO_CORRER   58.0f
+/* O botão do modo online, no vão entre o IR COM O MACK (acaba em 314) e os cartões de pista
+ * (começam em 452). Mais baixo que o CORRER de propósito: é a opção secundária da tela. */
+#define Y_BOTAO_ONLINE        330.0f
+#define ALTURA_BOTAO_ONLINE   44.0f
 #define FOLGA_DO_CURSOR       5.0f     /* o contorno amarelo fica um pouco para fora do item */
 #define GROSSURA_DO_CURSOR    3.0f
 #define RAPIDEZ_DO_CURSOR     5.0f     /* a pulsação dele */
@@ -1154,9 +1158,11 @@ Tela atualizarEscolhaDePista(EstadoMenu *menu) {
     int cartao = cartaoSobOMouse(mouseX, mouseY);
     int nivel = nivelSobOMouse(mouseX, mouseY);
     int sobreCorrer = dentroDoRetangulo(mouseX, mouseY, X_BOTAO_CORRER, Y_BOTAO_CORRER, LARGURA_BOTAO_CORRER, ALTURA_BOTAO_CORRER);
+    int sobreOnline = dentroDoRetangulo(mouseX, mouseY, X_BOTAO_CORRER, Y_BOTAO_ONLINE, LARGURA_BOTAO_CORRER, ALTURA_BOTAO_ONLINE);
     int voltar = sobreOVoltar(mouseX, mouseY);
     if (mouseSeMexeu()) {
-        menu->focoDaCorrida = (cartao >= 0) ? FOCO_NA_PISTA : (nivel >= 0) ? FOCO_NO_NIVEL : sobreCorrer ? FOCO_NO_CORRER : menu->focoDaCorrida;
+        menu->focoDaCorrida = (cartao >= 0) ? FOCO_NA_PISTA : (nivel >= 0) ? FOCO_NO_NIVEL
+                              : sobreCorrer ? FOCO_NO_CORRER : sobreOnline ? FOCO_NO_ONLINE : menu->focoDaCorrida;
     }
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
         if (cartao >= 0) {
@@ -1180,6 +1186,7 @@ Tela atualizarEscolhaDePista(EstadoMenu *menu) {
         menu->destaqueNivel[i] = animarDestaque(menu->destaqueNivel[i], i == (int) menu->nivelEscolhido);
     }
     menu->destaqueCorrer = animarDestaque(menu->destaqueCorrer, menu->focoDaCorrida == FOCO_NO_CORRER);
+    menu->destaqueOnline = animarDestaque(menu->destaqueOnline, menu->focoDaCorrida == FOCO_NO_ONLINE);
     menu->destaqueVoltar = animarDestaque(menu->destaqueVoltar, voltar);
 
     if (apertouVoltar() || (voltar && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))) {
@@ -1191,11 +1198,28 @@ Tela atualizarEscolhaDePista(EstadoMenu *menu) {
         tocarSom(SOM_CONFIRMAR);
         return TELA_CORRIDA;
     }
-    if (apertouConfirmar()) {
+    if (sobreOnline && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && aRedeAbriu()) {
         tocarSom(SOM_CONFIRMAR);
+        comecarAProcurar();
+        return TELA_SALAS;
+    }
+    if (apertouConfirmar()) {
         if (menu->focoDaCorrida == FOCO_NO_CORRER) {
+            tocarSom(SOM_CONFIRMAR);
             return TELA_CORRIDA;
         }
+        if (menu->focoDaCorrida == FOCO_NO_ONLINE) {
+            /* Sem rede, o botão não leva a lugar nenhum: melhor não abrir uma tela que
+             * nunca vai achar sala do que deixar o jogador esperando sem saber por quê */
+            if (!aRedeAbriu()) {
+                tocarSom(SOM_VOLTAR);
+                return TELA_PISTAS;
+            }
+            tocarSom(SOM_CONFIRMAR);
+            comecarAProcurar();
+            return TELA_SALAS;
+        }
+        tocarSom(SOM_CONFIRMAR);
         menu->focoDaCorrida++;
     }
     return TELA_PISTAS;
@@ -1379,6 +1403,33 @@ static void desenharBotaoCorrer(int comCursor) {
 }
 
 /*
+ * desenharBotaoOnline
+ * O caminho para a corrida em rede, embaixo do IR COM O MACK. Cinza, e não vermelho,
+ * porque o vermelho é da ação principal da tela. Sem rede no computador ele aparece
+ * apagado, com o motivo escrito: é melhor mostrar a opção desligada do que esconder
+ * um modo do jogo e deixar o jogador sem saber que ele existe.
+ * Recebe: se o cursor está nele.
+ * Devolve: nada.
+ */
+static void desenharBotaoOnline(int comCursor) {
+    int temRede = aRedeAbriu();
+    Rectangle r = { X_BOTAO_CORRER, Y_BOTAO_ONLINE, LARGURA_BOTAO_CORRER, ALTURA_BOTAO_ONLINE };
+    float raio = raioDoTamanho(r.width, r.height);
+    float aceso = (comCursor && temRede) ? 1.0f : 0.0f;
+    caixaArredondada(r, raio, ColorLerp(Fade(COR_GRAFITE, 0.86f), Fade(COR_CROMO, 0.45f), aceso));
+    contornoArredondado(r, raio, 1.0f, Fade(COR_CROMO, 0.2f));
+    if (comCursor && temRede) {
+        contornoArredondado(r, raio, 2.5f, corDoCursor());
+    }
+    float meio = X_BOTAO_CORRER + LARGURA_BOTAO_CORRER / 2.0f;
+    Color cor = temRede ? (comCursor ? WHITE : COR_TEXTO_CLARO) : Fade(COR_TEXTO_FRACO, 0.6f);
+    escreverCentralizado(FONTE_TITULO, "CORRER ONLINE", meio, Y_BOTAO_ONLINE + 7.0f, 21.0f, cor);
+    escreverCentralizado(FONTE_TEXTO, temRede ? "corra a mesma prova com quem está no seu wi-fi"
+                                              : "a rede nao abriu neste computador",
+                         meio, Y_BOTAO_ONLINE + 29.0f, 12.0f, Fade(cor, 0.72f));
+}
+
+/*
  * desenharResumoDaCorrida
  * O que muda na corrida marcada, em uma linha, embaixo da dificuldade.
  * Recebe: o estado do menu.
@@ -1432,6 +1483,7 @@ void desenharEscolhaDePista(EstadoMenu *menu, Pista *pistas[]) {
     }
     desenharResumoDaCorrida(menu);
     desenharBotaoCorrer(foco == FOCO_NO_CORRER);
+    desenharBotaoOnline(foco == FOCO_NO_ONLINE);
 
     for (int i = 0; i < TOTAL_PISTAS; i++) {
         desenharCartaoDePista(i, pistas[i], menu->destaquePista[i], foco == FOCO_NA_PISTA && i == menu->pistaEscolhida);
@@ -2393,4 +2445,560 @@ void desenharResultado(Corrida *corrida) {
         { { "R", NULL }, "CORRER DE NOVO" },
     };
     desenharBarraDeDicas(dicas, 2);
+}
+
+/* ==================================================================
+ * Modo online: a lista de salas e a sala de espera
+ *
+ * As duas telas moram aqui, e não num arquivo próprio, pelo mesmo motivo que
+ * todas as outras: os ajudantes de desenho desta tela (desenharPainel,
+ * desenharBotaoPadrao, corDoCursor, animarDestaque, escurecerTela...) são
+ * static deste arquivo. Um telasala.c obrigaria a exportar uma dúzia deles.
+ * ================================================================== */
+
+/* ---------- A lista de salas ---------- */
+#define X_LISTA_DE_SALAS       28.0f
+#define Y_LISTA_DE_SALAS       96.0f
+#define LARGURA_LISTA_DE_SALAS 472.0f
+#define ALTURA_LISTA_DE_SALAS  372.0f
+#define ALTURA_LINHA_DE_SALA   52.0f
+#define FOLGA_DA_LISTA         10.0f
+#define SALAS_NA_TELA          7
+#define X_DETALHE_DA_SALA      520.0f
+#define LARGURA_DETALHE        252.0f
+#define Y_BOTAO_ENTRAR         392.0f
+#define Y_BOTAO_CRIAR          440.0f
+#define ALTURA_BOTAO_DA_LISTA  40.0f
+
+/* As colunas da tela da lista: as salas à esquerda, os dois botões à direita */
+enum { FOCO_NAS_SALAS, FOCO_NO_ENTRAR, FOCO_NO_CRIAR, TOTAL_FOCOS_DA_LISTA };
+
+/*
+ * yDaLinhaDeSala
+ * Recebe: a linha (0 é a primeira visível).
+ * Devolve: o y do topo dela.
+ */
+static float yDaLinhaDeSala(int linha) {
+    return Y_LISTA_DE_SALAS + FOLGA_DA_LISTA + linha * ALTURA_LINHA_DE_SALA;
+}
+
+/*
+ * linhaDeSalaSobOMouse
+ * Recebe: a posição do mouse na tela virtual.
+ * Devolve: a sala sob ele, ou -1.
+ */
+static int linhaDeSalaSobOMouse(float mouseX, float mouseY) {
+    int quantas = totalDeSalasAchadas();
+    for (int i = 0; i < quantas && i < SALAS_NA_TELA; i++) {
+        if (dentroDoRetangulo(mouseX, mouseY, X_LISTA_DE_SALAS + FOLGA_DA_LISTA, yDaLinhaDeSala(i),
+                              LARGURA_LISTA_DE_SALAS - 2.0f * FOLGA_DA_LISTA, ALTURA_LINHA_DE_SALA - 4.0f)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+/*
+ * atualizarListaDeSalas
+ * Cima e baixo andam nas salas; esquerda e direita vão para os botões. Confirmar numa
+ * sala entra nela; no CRIAR SALA, vira dono. Voltar devolve ao Mack.
+ *
+ * Quem procura e quem ouve os faróis é sala.c, no atualizarSala do laço principal: esta
+ * função só lê o resultado e desenha em cima dele.
+ * Recebe: o estado do menu.
+ * Devolve: a tela do próximo quadro.
+ */
+Tela atualizarListaDeSalas(EstadoMenu *menu) {
+    int quantas = totalDeSalasAchadas();
+    int focoAntes = menu->focoNaLista, marcadaAntes = menu->salaMarcada;
+
+    /* Entrou numa sala (ou criou uma): o estado da sala manda, não esta tela */
+    EstadoDaSala agora = estadoDaSala();
+    if (agora == SALA_SOU_DONO || agora == SALA_SOU_CONVIDADO) {
+        menu->focoNaSala = 0;
+        return TELA_SALA_DE_ESPERA;
+    }
+
+    /* Cima e baixo andam DENTRO da coluna em que o cursor está: nas salas, trocam de sala;
+     * nos botões, trocam de botão. Esquerda e direita trocam de coluna. */
+    if (menu->focoNaLista == FOCO_NAS_SALAS && quantas > 0) {
+        if (apertouParaCima()) {
+            menu->salaMarcada = (menu->salaMarcada - 1 + quantas) % quantas;
+        } else if (apertouParaBaixo()) {
+            menu->salaMarcada = (menu->salaMarcada + 1) % quantas;
+        }
+    } else if (menu->focoNaLista != FOCO_NAS_SALAS) {
+        if (apertouParaCima() || apertouParaBaixo()) {
+            menu->focoNaLista = (menu->focoNaLista == FOCO_NO_ENTRAR) ? FOCO_NO_CRIAR : FOCO_NO_ENTRAR;
+        }
+    }
+    if (menu->salaMarcada >= quantas) {
+        menu->salaMarcada = (quantas > 0) ? quantas - 1 : 0;
+    }
+    if (apertouParaDireita() && menu->focoNaLista == FOCO_NAS_SALAS) {
+        menu->focoNaLista = (quantas > 0) ? FOCO_NO_ENTRAR : FOCO_NO_CRIAR;
+    } else if (apertouParaEsquerda() && menu->focoNaLista != FOCO_NAS_SALAS) {
+        menu->focoNaLista = FOCO_NAS_SALAS;
+    }
+    /* Sem sala nenhuma na rede, o foco vai para o CRIAR: é a única coisa que dá para fazer */
+    if (quantas == 0 && menu->focoNaLista == FOCO_NO_ENTRAR) {
+        menu->focoNaLista = FOCO_NO_CRIAR;
+    }
+
+    float mouseX, mouseY;
+    posicaoDoMouseNaInterface(&mouseX, &mouseY);
+    int linha = linhaDeSalaSobOMouse(mouseX, mouseY);
+    int sobreEntrar = dentroDoRetangulo(mouseX, mouseY, X_DETALHE_DA_SALA, Y_BOTAO_ENTRAR, LARGURA_DETALHE, ALTURA_BOTAO_DA_LISTA);
+    int sobreCriar = dentroDoRetangulo(mouseX, mouseY, X_DETALHE_DA_SALA, Y_BOTAO_CRIAR, LARGURA_DETALHE, ALTURA_BOTAO_DA_LISTA);
+    int voltar = sobreOVoltar(mouseX, mouseY);
+    if (mouseSeMexeu()) {
+        menu->focoNaLista = (linha >= 0) ? FOCO_NAS_SALAS : sobreEntrar ? FOCO_NO_ENTRAR
+                            : sobreCriar ? FOCO_NO_CRIAR : menu->focoNaLista;
+        if (linha >= 0) {
+            menu->salaMarcada = linha;
+        }
+    }
+    if (menu->salaMarcada != marcadaAntes || menu->focoNaLista != focoAntes) {
+        tocarSom(SOM_CURSOR);
+    }
+    menu->voltarAnterior = voltar;
+    for (int i = 0; i < MAXIMO_DE_SALAS; i++) {
+        menu->destaqueSala[i] = animarDestaque(menu->destaqueSala[i],
+                                               i == menu->salaMarcada && menu->focoNaLista == FOCO_NAS_SALAS);
+    }
+    menu->destaqueEntrar = animarDestaque(menu->destaqueEntrar, menu->focoNaLista == FOCO_NO_ENTRAR);
+    menu->destaqueCriar = animarDestaque(menu->destaqueCriar, menu->focoNaLista == FOCO_NO_CRIAR);
+    menu->destaqueVoltar = animarDestaque(menu->destaqueVoltar, voltar);
+
+    if (apertouVoltar() || (voltar && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))) {
+        tocarSom(SOM_VOLTAR);
+        pararDeProcurar();
+        menu->focoDaCorrida = FOCO_NO_ONLINE;   /* volta com o cursor onde estava */
+        return TELA_PISTAS;
+    }
+
+    int confirmou = apertouConfirmar();
+    int clicouEntrar = sobreEntrar && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+    int clicouCriar = sobreCriar && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+    int clicouNaSala = linha >= 0 && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+
+    if (clicouCriar || (confirmou && menu->focoNaLista == FOCO_NO_CRIAR)) {
+        tocarSom(SOM_CONFIRMAR);
+        criarSala(menu->pistaEscolhida, (int) menu->nivelEscolhido, menu->carroEscolhido);
+        menu->focoNaSala = 0;
+        return TELA_SALA_DE_ESPERA;
+    }
+    if (quantas > 0 && (clicouEntrar || clicouNaSala
+                        || (confirmou && (menu->focoNaLista == FOCO_NAS_SALAS || menu->focoNaLista == FOCO_NO_ENTRAR)))) {
+        tocarSom(SOM_CONFIRMAR);
+        entrarNaSalaAchada(menu->salaMarcada, menu->carroEscolhido);
+    }
+    return TELA_SALAS;
+}
+
+/*
+ * desenharBarrinhasDoPing
+ * Três barrinhas, como as de sinal de celular: a primeira acende sempre, a segunda abaixo
+ * de 80 ms e a terceira abaixo de 30 ms. Um número em milissegundos não diz nada a quem
+ * não conhece ping; três barrinhas dizem na hora se a sala é jogável.
+ * Recebe: o canto esquerdo de baixo das barras e o ping (0 = ainda não mediu).
+ * Devolve: nada.
+ */
+static void desenharBarrinhasDoPing(float x, float base, unsigned int ping) {
+    int acesas = (ping == 0) ? 0 : (ping < 30u ? 3 : (ping < 80u ? 2 : 1));
+    for (int i = 0; i < 3; i++) {
+        float altura = 5.0f + i * 4.0f;
+        Color cor = (i < acesas) ? (acesas >= 3 ? COR_CROMO : (acesas == 2 ? COR_AMARELO : COR_VERMELHO))
+                                 : Fade(COR_TEXTO_FRACO, 0.25f);
+        DrawRectangleRec((Rectangle){ x + i * 5.0f, base - altura, 3.0f, altura }, cor);
+    }
+}
+
+/*
+ * desenharLinhaDeSala
+ * Uma sala na lista: nome, de quem é, a prova, quantos estão e o sinal.
+ * Recebe: a linha, a sala, a animação e se o cursor está nela.
+ * Devolve: nada.
+ */
+static void desenharLinhaDeSala(int linha, const SalaNaRede *sala, const char *nomeDaPista,
+                                float destaque, int comCursor) {
+    float suave = suavizar(destaque);
+    float x = X_LISTA_DE_SALAS + FOLGA_DA_LISTA;
+    float y = yDaLinhaDeSala(linha);
+    float largura = LARGURA_LISTA_DE_SALAS - 2.0f * FOLGA_DA_LISTA;
+    Rectangle r = { x, y, largura, ALTURA_LINHA_DE_SALA - 4.0f };
+    float raio = raioDoTamanho(r.width, r.height);
+    /* Sala de outra versão aparece apagada: é melhor mostrar que ela existe e dizer o
+     * motivo do que deixar o jogador olhando uma lista vazia sem entender */
+    float opacidade = sala->versaoDiferente ? 0.45f : 1.0f;
+    caixaArredondada(r, raio, Fade(ColorLerp(Fade(COR_GRAFITE, 0.8f), Fade(COR_CROMO, 0.3f), suave), opacidade));
+    if (comCursor && !sala->versaoDiferente) {
+        contornoArredondado(r, raio, 2.5f, corDoCursor());
+    }
+
+    escrever(FONTE_TITULO, sala->nome, x + 12.0f, y + 5.0f, 20.0f, Fade(WHITE, opacidade));
+    char prova[80];
+    snprintf(prova, sizeof(prova), "%s - %s - %d VOLTAS", nomeDaPista,
+             fichaDoNivel((NivelDaCorrida) sala->nivel)->nome, sala->voltas);
+    escrever(FONTE_FORTE, prova, x + 12.0f, y + 29.0f, 13.0f, Fade(COR_TEXTO_FRACO, opacidade));
+
+    if (sala->versaoDiferente) {
+        escreverADireita(FONTE_FORTE, "OUTRA VERSÃO", x + largura - 12.0f, y + 16.0f, 14.0f, COR_AMARELO);
+        return;
+    }
+    char gente[16];
+    snprintf(gente, sizeof(gente), "%d/%d", sala->jogadores, sala->limite);
+    escreverADireita(FONTE_TITULO, gente, x + largura - 12.0f, y + 6.0f, 19.0f,
+                     sala->jogadores >= sala->limite ? COR_VERMELHO : WHITE);
+    desenharBarrinhasDoPing(x + largura - 44.0f, y + 43.0f, sala->ping);
+    if (sala->ping > 0) {
+        char ms[16];
+        snprintf(ms, sizeof(ms), "%u ms", sala->ping);
+        escreverADireita(FONTE_FORTE, ms, x + largura - 12.0f, y + 31.0f, 11.0f, COR_TEXTO_FRACO);
+    }
+    if (sala->emCorrida) {
+        escreverADireita(FONTE_FORTE, "CORRENDO", x + largura - 60.0f, y + 31.0f, 11.0f, COR_AMARELO);
+    }
+}
+
+/*
+ * desenharListaDeSalas
+ * A tela da lista: as salas à esquerda, o detalhe da marcada e os botões à direita.
+ * Recebe: o estado do menu e as pistas (para o traçado da marcada).
+ * Devolve: nada.
+ */
+void desenharListaDeSalas(EstadoMenu *menu, Pista *pistas[]) {
+    escurecerTela(0.45f, 0.15f, 0.55f);
+    desenharCabecalhoDeEvento("MACK", "CORRER ONLINE");
+    desenharBotaoVoltar(menu->destaqueVoltar);
+
+    desenharPainel(X_LISTA_DE_SALAS, Y_LISTA_DE_SALAS, LARGURA_LISTA_DE_SALAS, ALTURA_LISTA_DE_SALAS);
+    int quantas = totalDeSalasAchadas();
+    for (int i = 0; i < quantas && i < SALAS_NA_TELA; i++) {
+        const SalaNaRede *aSala = salaAchada(i);
+        desenharLinhaDeSala(i, aSala, pistas[aSala->pista]->nome, menu->destaqueSala[i],
+                            i == menu->salaMarcada && menu->focoNaLista == FOCO_NAS_SALAS);
+    }
+    if (quantas == 0) {
+        float meio = X_LISTA_DE_SALAS + LARGURA_LISTA_DE_SALAS / 2.0f;
+        float centro = Y_LISTA_DE_SALAS + ALTURA_LISTA_DE_SALAS / 2.0f;
+        desenharBrilho(meio, centro - 10.0f, 90.0f, Fade(COR_VERMELHO, 0.10f));
+        escreverCentralizado(FONTE_TITULO, "PROCURANDO SALAS NO SEU WI-FI...", meio, centro - 44.0f, 22.0f, WHITE);
+        escreverCentralizado(FONTE_TEXTO, "nenhuma sala apareceu ainda", meio, centro - 12.0f, 15.0f, COR_TEXTO_FRACO);
+        escreverCentralizado(FONTE_TEXTO, "quem vai correr com voce precisa criar uma sala",
+                             meio, centro + 14.0f, 14.0f, Fade(COR_TEXTO_FRACO, 0.8f));
+        escreverCentralizado(FONTE_TEXTO, "e o KATCHAU precisa estar liberado no firewall,",
+                             meio, centro + 36.0f, 14.0f, Fade(COR_TEXTO_FRACO, 0.8f));
+        escreverCentralizado(FONTE_TEXTO, "em redes privadas",
+                             meio, centro + 56.0f, 14.0f, Fade(COR_TEXTO_FRACO, 0.8f));
+    }
+
+    /* O detalhe da sala marcada */
+    const SalaNaRede *marcada = (quantas > 0) ? salaAchada(menu->salaMarcada) : NULL;
+    desenharPainel(X_DETALHE_DA_SALA, Y_LISTA_DE_SALAS, LARGURA_DETALHE, 276.0f);
+    if (marcada != NULL) {
+        float meio = X_DETALHE_DA_SALA + LARGURA_DETALHE / 2.0f;
+        desenharTracado(pistas[marcada->pista], meio, Y_LISTA_DE_SALAS + 76.0f, 96.0f, COR_CROMO, 2.0f);
+        float y = Y_LISTA_DE_SALAS + 142.0f;
+        desenharLinhaDoCartaoDeInfo(X_DETALHE_DA_SALA + 14.0f, y, LARGURA_DETALHE - 28.0f, "PISTA",
+                                    pistas[marcada->pista]->nome);
+        desenharLinhaDoCartaoDeInfo(X_DETALHE_DA_SALA + 14.0f, y + 32.0f, LARGURA_DETALHE - 28.0f, "DIFICULDADE",
+                                    fichaDoNivel((NivelDaCorrida) marcada->nivel)->nome);
+        char gente[16];
+        snprintf(gente, sizeof(gente), "%d DE %d", marcada->jogadores, marcada->limite);
+        desenharLinhaDoCartaoDeInfo(X_DETALHE_DA_SALA + 14.0f, y + 64.0f, LARGURA_DETALHE - 28.0f, "PILOTOS", gente);
+        desenharLinhaDoCartaoDeInfo(X_DETALHE_DA_SALA + 14.0f, y + 96.0f, LARGURA_DETALHE - 28.0f, "DONO", marcada->dono);
+    } else {
+        escreverCentralizado(FONTE_TEXTO, "nenhuma sala marcada", X_DETALHE_DA_SALA + LARGURA_DETALHE / 2.0f,
+                             Y_LISTA_DE_SALAS + 130.0f, 14.0f, COR_TEXTO_FRACO);
+    }
+
+    desenharBotaoPadrao("ENTRAR", X_DETALHE_DA_SALA, Y_BOTAO_ENTRAR, LARGURA_DETALHE,
+                        (quantas > 0) ? menu->destaqueEntrar : 0.0f);
+    desenharBotaoPadrao("CRIAR SALA", X_DETALHE_DA_SALA, Y_BOTAO_CRIAR, LARGURA_DETALHE, menu->destaqueCriar);
+
+    /* O recado da sala (SALA CHEIA, OUTRA VERSÃO...) e quem eu sou na rede */
+    const char *oRecado = recadoDaSala();
+    if (oRecado[0] != '\0') {
+        escreverCentralizado(FONTE_TITULO, oRecado, LARGURA_TELA / 2.0f, 494.0f, 22.0f, COR_AMARELO);
+    }
+    char piloto[64];
+    snprintf(piloto, sizeof(piloto), "VOCE E: %s", meuApelido());
+    escreverADireita(FONTE_FORTE, piloto, LARGURA_TELA - 28.0f, 528.0f, 14.0f, COR_TEXTO_FRACO);
+}
+
+/* ---------- A sala de espera ---------- */
+#define X_VAGAS            28.0f
+#define Y_VAGAS            96.0f
+#define LARGURA_VAGAS      340.0f
+#define ALTURA_DA_VAGA     58.0f
+#define X_PROVA_DA_SALA    388.0f
+#define LARGURA_PROVA      384.0f
+#define Y_CARRO_DA_SALA    354.0f
+#define Y_BOTAO_PRONTO     402.0f
+#define Y_BOTAO_LARGAR     452.0f
+#define ALTURA_BOTAO_SALA  42.0f
+
+/* As linhas da sala de espera. O dono vê todas; o convidado só as duas primeiras. */
+enum { FOCO_NO_CARRO_DA_SALA, FOCO_NO_PRONTO, FOCO_NA_PISTA_DA_SALA, FOCO_NO_NIVEL_DA_SALA,
+       FOCO_NO_LARGAR, TOTAL_FOCOS_DA_SALA };
+
+/*
+ * proximoCarroLivre
+ * O carro seguinte (ou anterior) que ninguém na sala pegou. Pular os tomados aqui faz as
+ * setas nunca pararem num carro que o dono vai recusar.
+ * Recebe: o carro de agora e o sentido (+1 ou -1).
+ * Devolve: o número do próximo livre.
+ */
+static int proximoCarroLivre(int carro, int sentido) {
+    for (int passo = 1; passo <= TOTAL_CARROS; passo++) {
+        int tentativa = ((carro + sentido * passo) % TOTAL_CARROS + TOTAL_CARROS) % TOTAL_CARROS;
+        if (carroEstaLivreNaSala(tentativa)) {
+            return tentativa;
+        }
+    }
+    return carro;
+}
+
+/*
+ * atualizarSalaDeEspera
+ * Cima e baixo trocam de linha; esquerda e direita mudam o valor dela. O dono escolhe
+ * pista e nível e dá o LARGAR; o convidado escolhe o carro e dá o PRONTO.
+ * Recebe: o estado do menu.
+ * Devolve: a tela do próximo quadro.
+ */
+Tela atualizarSalaDeEspera(EstadoMenu *menu) {
+    EstadoDaSala agora = estadoDaSala();
+    int dono = souODonoDaSala();
+    int vaga = minhaVagaNaSala();
+
+    /* A sala acabou (o dono saiu, fui recusado, a rede caiu): volta para a lista com o
+     * recado na tela, em vez de ficar numa sala que já não existe */
+    if (agora == SALA_DEU_ERRADO || agora == SALA_DESLIGADA || agora == SALA_PROCURANDO) {
+        comecarAProcurar();
+        return TELA_SALAS;
+    }
+    /* Largou: o main.c monta a corrida (ele é quem tem as pistas e a Corrida) */
+    if (agora == SALA_NA_CORRIDA) {
+        return TELA_CORRIDA;
+    }
+
+    int focoAntes = menu->focoNaSala;
+    int totalDeLinhas = dono ? TOTAL_FOCOS_DA_SALA : FOCO_NA_PISTA_DA_SALA;
+    if (apertouParaCima()) {
+        menu->focoNaSala = (menu->focoNaSala - 1 + totalDeLinhas) % totalDeLinhas;
+    } else if (apertouParaBaixo()) {
+        menu->focoNaSala = (menu->focoNaSala + 1) % totalDeLinhas;
+    }
+    if (menu->focoNaSala >= totalDeLinhas) {
+        menu->focoNaSala = 0;
+    }
+
+    int mudou = apertouParaDireita() ? 1 : (apertouParaEsquerda() ? -1 : 0);
+    if (mudou != 0 && contagemParaLargar() < 0.0f) {
+        const JogadorDaSala *eu = jogadorDaSala(vaga);
+        if (menu->focoNaSala == FOCO_NO_CARRO_DA_SALA && eu != NULL) {
+            escolherCarroDaSala(proximoCarroLivre(eu->numeroDoCarro, mudou));
+        } else if (menu->focoNaSala == FOCO_NA_PISTA_DA_SALA) {
+            escolherPistaDaSala(pistaDaSala() + mudou + TOTAL_PISTAS);
+        } else if (menu->focoNaSala == FOCO_NO_NIVEL_DA_SALA) {
+            escolherNivelDaSala(nivelDaSala() + mudou + TOTAL_NIVEIS);
+        }
+        tocarSom(SOM_CURSOR);
+    }
+    if (menu->focoNaSala != focoAntes) {
+        tocarSom(SOM_CURSOR);
+    }
+
+    float mouseX, mouseY;
+    posicaoDoMouseNaInterface(&mouseX, &mouseY);
+    int sobrePronto = dentroDoRetangulo(mouseX, mouseY, X_PROVA_DA_SALA, Y_BOTAO_PRONTO, LARGURA_PROVA, ALTURA_BOTAO_SALA);
+    int sobreLargar = dono && dentroDoRetangulo(mouseX, mouseY, X_PROVA_DA_SALA, Y_BOTAO_LARGAR, LARGURA_PROVA, ALTURA_BOTAO_SALA);
+    int voltar = sobreOVoltar(mouseX, mouseY);
+    if (mouseSeMexeu()) {
+        menu->focoNaSala = sobrePronto ? FOCO_NO_PRONTO : sobreLargar ? FOCO_NO_LARGAR : menu->focoNaSala;
+    }
+    menu->destaquePronto = animarDestaque(menu->destaquePronto, menu->focoNaSala == FOCO_NO_PRONTO || sobrePronto);
+    menu->destaqueLargar = animarDestaque(menu->destaqueLargar, menu->focoNaSala == FOCO_NO_LARGAR || sobreLargar);
+    menu->destaqueVoltar = animarDestaque(menu->destaqueVoltar, voltar);
+    for (int i = 0; i < TOTAL_NIVEIS; i++) {
+        menu->destaqueNivelDaSala[i] = animarDestaque(menu->destaqueNivelDaSala[i], i == nivelDaSala());
+    }
+    for (int i = 0; i < TOTAL_PISTAS; i++) {
+        menu->destaquePistaDaSala[i] = animarDestaque(menu->destaquePistaDaSala[i], i == pistaDaSala());
+    }
+
+    if (apertouVoltar() || (voltar && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))) {
+        tocarSom(SOM_VOLTAR);
+        sairDaSala();
+        comecarAProcurar();
+        return TELA_SALAS;
+    }
+
+    int confirmou = apertouConfirmar();
+    if ((sobrePronto && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+        || (confirmou && menu->focoNaSala == FOCO_NO_PRONTO)) {
+        tocarSom(SOM_CONFIRMAR);
+        marcarProntoNaSala(!estouProntoNaSala());
+    } else if ((sobreLargar && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+               || (confirmou && menu->focoNaSala == FOCO_NO_LARGAR)) {
+        if (podeLargar()) {
+            tocarSom(SOM_CONFIRMAR);
+            mandarLargar();
+        } else {
+            tocarSom(SOM_VOLTAR);
+        }
+    }
+    return TELA_SALA_DE_ESPERA;
+}
+
+/*
+ * desenharVaga
+ * Uma vaga da sala: a cor do carro, o apelido, o carro e a etiqueta de estado.
+ * Recebe: a vaga, o jogador (NULL = vazia), se é a minha e se é a do dono.
+ * Devolve: nada.
+ */
+static void desenharVaga(int indice, const JogadorDaSala *quem, int souEu, int ehODono) {
+    float x = X_VAGAS + 10.0f;
+    float y = Y_VAGAS + 10.0f + indice * ALTURA_DA_VAGA;
+    float largura = LARGURA_VAGAS - 20.0f;
+    Rectangle r = { x, y, largura, ALTURA_DA_VAGA - 6.0f };
+    float raio = raioDoTamanho(r.width, r.height);
+
+    if (quem == NULL || !quem->ligado) {
+        caixaArredondada(r, raio, Fade(COR_GRAFITE, 0.5f));
+        escrever(FONTE_TEXTO, "esperando alguem entrar...", x + 14.0f,
+                 noMeio(FONTE_TEXTO, 15.0f, y + r.height / 2.0f), 15.0f, Fade(COR_TEXTO_FRACO, 0.55f));
+        return;
+    }
+    caixaArredondada(r, raio, Fade(COR_GRAFITE, souEu ? 0.95f : 0.78f));
+    if (souEu) {
+        contornoArredondado(r, raio, 2.0f, Fade(COR_CROMO, 0.45f));
+    }
+    /* O quadradinho com a cor do carro: é como o jogador vai reconhecer o outro na pista */
+    caixaArredondada((Rectangle){ x + 8.0f, y + 10.0f, 10.0f, r.height - 20.0f }, 2.0f,
+                     corDoCarro(quem->numeroDoCarro));
+    escrever(FONTE_TITULO, quem->nome, x + 26.0f, y + 6.0f, 19.0f, WHITE);
+    escrever(FONTE_FORTE, fichaDoCarro(quem->numeroDoCarro)->nome, x + 26.0f, y + 30.0f, 13.0f, COR_TEXTO_FRACO);
+    if (ehODono) {
+        escrever(FONTE_FORTE, "DONO", x + 26.0f + larguraDoTexto(FONTE_TITULO, quem->nome, 19.0f) + 10.0f,
+                 y + 10.0f, 12.0f, COR_VERMELHO);
+    }
+    const char *etiqueta = quem->pronto ? "PRONTO" : "ESCOLHENDO";
+    Color cor = quem->pronto ? COR_CROMO : COR_TEXTO_FRACO;
+    escreverADireita(FONTE_FORTE, etiqueta, x + largura - 12.0f, y + 8.0f, 14.0f, cor);
+    if (quem->ping > 0) {
+        char ms[16];
+        snprintf(ms, sizeof(ms), "%u ms", quem->ping);
+        escreverADireita(FONTE_FORTE, ms, x + largura - 12.0f, y + 30.0f, 11.0f, COR_TEXTO_FRACO);
+    }
+}
+
+/*
+ * desenharSalaDeEspera
+ * A tela da sala: as vagas à esquerda, a prova à direita, e os botões.
+ * Recebe: o estado do menu e as pistas.
+ * Devolve: nada.
+ */
+void desenharSalaDeEspera(EstadoMenu *menu, Pista *pistas[]) {
+    escurecerTela(0.45f, 0.15f, 0.55f);
+    int dono = souODonoDaSala();
+    int vaga = minhaVagaNaSala();
+    char titulo[48];
+    const JogadorDaSala *oDono = jogadorDaSala(0);
+    snprintf(titulo, sizeof(titulo), "SALA DE %s", (oDono != NULL && oDono->ligado) ? oDono->nome : meuApelido());
+    desenharCabecalhoDeEvento("ONLINE", titulo);
+    desenharBotaoVoltar(menu->destaqueVoltar);
+
+    desenharPainel(X_VAGAS, Y_VAGAS, LARGURA_VAGAS, 10.0f + MAXIMO_DE_JOGADORES * ALTURA_DA_VAGA + 4.0f);
+    for (int i = 0; i < MAXIMO_DE_JOGADORES; i++) {
+        desenharVaga(i, jogadorDaSala(i), i == vaga, i == 0);
+    }
+
+    /* A prova. No convidado a escolha é do dono, e o texto embaixo diz isso */
+    desenharPainel(X_PROVA_DA_SALA, Y_VAGAS, LARGURA_PROVA, 236.0f);
+    float meioDaProva = X_PROVA_DA_SALA + LARGURA_PROVA / 2.0f;
+    Pista *aPista = pistas[pistaDaSala()];
+    char nome[48];
+    maiusculas(nome, sizeof(nome), aPista->nome);
+    escreverCentralizado(FONTE_TITULO, nome, meioDaProva, Y_VAGAS + 12.0f, 26.0f, WHITE);
+    desenharTracado(aPista, meioDaProva, Y_VAGAS + 104.0f, 92.0f, COR_CROMO, 2.0f);
+    char prova[80];
+    snprintf(prova, sizeof(prova), "%s - %d VOLTAS", fichaDoNivel((NivelDaCorrida) nivelDaSala())->nome,
+             fichaDoNivel((NivelDaCorrida) nivelDaSala())->voltas);
+    escreverCentralizado(FONTE_FORTE, prova, meioDaProva, Y_VAGAS + 166.0f, 16.0f, COR_TEXTO_CLARO);
+    escreverCentralizado(FONTE_TEXTO, dono ? "use as setas para trocar a pista e a dificuldade"
+                                           : "quem escolhe a pista e a dificuldade e o dono da sala",
+                         meioDaProva, Y_VAGAS + 196.0f, 14.0f, Fade(COR_TEXTO_FRACO, dono ? 1.0f : 0.8f));
+    if (dono) {
+        for (int i = 0; i < 2; i++) {
+            const char *rotulo = (i == 0) ? "PISTA" : "DIFICULDADE";
+            int marcada = (menu->focoNaSala == (i == 0 ? FOCO_NA_PISTA_DA_SALA : FOCO_NO_NIVEL_DA_SALA));
+            escrever(FONTE_FORTE, rotulo, X_PROVA_DA_SALA + 14.0f, Y_VAGAS + 246.0f + i * 24.0f, 13.0f,
+                     marcada ? WHITE : COR_TEXTO_FRACO);
+            const char *valor = (i == 0) ? aPista->nome
+                                         : fichaDoNivel((NivelDaCorrida) nivelDaSala())->nome;
+            char comSetas[64];
+            snprintf(comSetas, sizeof(comSetas), marcada ? "< %s >" : "%s", valor);
+            escreverADireita(FONTE_TITULO, comSetas, X_PROVA_DA_SALA + LARGURA_PROVA - 14.0f,
+                             Y_VAGAS + 243.0f + i * 24.0f, 17.0f, marcada ? WHITE : COR_TEXTO_CLARO);
+        }
+    }
+
+    /* O meu carro */
+    const JogadorDaSala *eu = jogadorDaSala(vaga);
+    int marcadoNoCarro = menu->focoNaSala == FOCO_NO_CARRO_DA_SALA;
+    escrever(FONTE_FORTE, "O SEU CARRO", X_PROVA_DA_SALA + 14.0f, Y_CARRO_DA_SALA, 13.0f,
+             marcadoNoCarro ? WHITE : COR_TEXTO_FRACO);
+    if (eu != NULL && eu->ligado) {
+        char comSetas[64];
+        snprintf(comSetas, sizeof(comSetas), marcadoNoCarro ? "< %s >" : "%s",
+                 fichaDoCarro(eu->numeroDoCarro)->nome);
+        escreverADireita(FONTE_TITULO, comSetas, X_PROVA_DA_SALA + LARGURA_PROVA - 14.0f,
+                         Y_CARRO_DA_SALA - 3.0f, 19.0f, marcadoNoCarro ? WHITE : COR_TEXTO_CLARO);
+    }
+
+    desenharBotaoPadrao(estouProntoNaSala() ? "NAO ESTOU PRONTO" : "ESTOU PRONTO",
+                        X_PROVA_DA_SALA, Y_BOTAO_PRONTO, LARGURA_PROVA, menu->destaquePronto);
+    if (dono) {
+        int pode = podeLargar();
+        Rectangle r = { X_PROVA_DA_SALA, Y_BOTAO_LARGAR, LARGURA_PROVA, ALTURA_BOTAO_SALA };
+        float raio = raioDoTamanho(r.width, r.height);
+        caixaArredondada(r, raio, pode ? COR_VERMELHO : Fade(COR_GRAFITE, 0.8f));
+        if (menu->focoNaSala == FOCO_NO_LARGAR && pode) {
+            contornoArredondado(r, raio, 2.5f, corDoCursor());
+        }
+        int faltam = 0;
+        for (int i = 0; i < MAXIMO_DE_JOGADORES; i++) {
+            const JogadorDaSala *j = jogadorDaSala(i);
+            faltam += (j != NULL && j->ligado && !j->pronto) ? 1 : 0;
+        }
+        char texto[48];
+        if (pode) {
+            snprintf(texto, sizeof(texto), "LARGAR");
+        } else if (faltam == 1) {
+            snprintf(texto, sizeof(texto), "FALTA 1 PRONTO");
+        } else {
+            snprintf(texto, sizeof(texto), "FALTAM %d PRONTOS", faltam);
+        }
+        escreverCentralizado(FONTE_TITULO, texto, X_PROVA_DA_SALA + LARGURA_PROVA / 2.0f,
+                             noMeio(FONTE_TITULO, 24.0f, Y_BOTAO_LARGAR + ALTURA_BOTAO_SALA / 2.0f), 24.0f,
+                             pode ? WHITE : Fade(COR_TEXTO_FRACO, 0.8f));
+    }
+
+    /* A contagem para largar, grandona no meio: o aviso de "guarda o cafe" */
+    float conta = contagemParaLargar();
+    if (conta >= 0.0f) {
+        float meio = LARGURA_TELA / 2.0f;
+        desenharBrilho(meio, 300.0f, 150.0f, Fade(COR_VERMELHO, 0.18f));
+        char numero[8];
+        snprintf(numero, sizeof(numero), "%d", (int) conta + 1);
+        escreverCentralizado(FONTE_TITULO, numero, meio, 230.0f, 110.0f, WHITE);
+        escreverCentralizado(FONTE_TITULO, "TODOS PARA A PISTA!", meio, 352.0f, 30.0f, COR_AMARELO);
+    }
+
+    const char *oRecado = recadoDaSala();
+    if (oRecado[0] != '\0') {
+        escreverCentralizado(FONTE_TITULO, oRecado, LARGURA_TELA / 2.0f, 520.0f, 22.0f, COR_AMARELO);
+    }
 }
