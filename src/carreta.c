@@ -56,6 +56,18 @@ static void triangulo(Image *imagem, Vector2 a, Vector2 b, Vector2 c, Color cor)
     ImageDrawTriangle(imagem, a, c, b, cor);
 }
 
+/* A borda de um retângulo, por dentro dele, com a espessura dada. São quatro retângulos cheios:
+ * a função da raylib para isso mudou de nome e de argumentos entre as versões (na 5.x,
+ * ImageDrawRectangleLines recebe o retângulo e a espessura; na 6.x, essa é a ...LinesEx), e
+ * ImageDrawRectangleRec é igual nas duas */
+static void contornoNaImagem(Image *imagem, Rectangle r, int espessura, Color cor) {
+    float e = (float) espessura;
+    ImageDrawRectangleRec(imagem, (Rectangle){ r.x, r.y, r.width, e }, cor);
+    ImageDrawRectangleRec(imagem, (Rectangle){ r.x, r.y + r.height - e, r.width, e }, cor);
+    ImageDrawRectangleRec(imagem, (Rectangle){ r.x, r.y + e, e, r.height - 2.0f * e }, cor);
+    ImageDrawRectangleRec(imagem, (Rectangle){ r.x + r.width - e, r.y + e, e, r.height - 2.0f * e }, cor);
+}
+
 /* Um texto centralizado na imagem, com sombra */
 static void textoNaImagem(Image *imagem, TipoFonte fonte, const char *texto, float centroX, float y, float tamanho, Color cor, Color sombra) {
     Font f = fonteDoJogo(fonte);
@@ -158,8 +170,8 @@ static Image desenharQuadro(int qual) {
     }
     /* A moldura: dourada nuns, escura noutros */
     Color moldura = (qual % 2 == 0) ? OURO_ESCURO : (Color){ 30, 24, 28, 255 };
-    ImageDrawRectangleLines(&imagem, (Rectangle){ 0, 0, (float) L, (float) A }, 8, moldura);
-    ImageDrawRectangleLines(&imagem, (Rectangle){ 8, 8, (float) L - 16, (float) A - 16 }, 2, Fade(BLACK, 0.6f));
+    contornoNaImagem(&imagem, (Rectangle){ 0, 0, (float) L, (float) A }, 8, moldura);
+    contornoNaImagem(&imagem, (Rectangle){ 8, 8, (float) L - 16, (float) A - 16 }, 2, Fade(BLACK, 0.6f));
     return imagem;
 }
 
@@ -216,7 +228,7 @@ void carregarInteriorDaCarreta(void) {
     triangulo(&imagem, (Vector2){ 190, 46 }, (Vector2){ 190, 74 }, (Vector2){ 214, 60 }, WHITE);
     ImageDrawRectangle(&imagem, 14, 108, 228, 6, (Color){ 40, 92, 224, 255 });
     ImageDrawRectangle(&imagem, 14, 108, 140, 6, CIANO);
-    ImageDrawRectangleLines(&imagem, (Rectangle){ 0, 0, 256, 128 }, 5, (Color){ 12, 12, 20, 255 });
+    contornoNaImagem(&imagem, (Rectangle){ 0, 0, 256, 128 }, 5, (Color){ 12, 12, 20, 255 });
     telao = virarTextura(imagem, 0);
 
     /* A caixa de som */
