@@ -131,7 +131,6 @@ static int desligadoPorFora(const char *chave) {
 }
 
 static int cenaPausada = 0;
-static Olhar olharDoJogador = { 0.0f, 0.0f, 0.0f, 0.0f };
 
 /* As três distâncias da câmera do jogador: perto, médio (a de sempre) e longe */
 typedef struct {
@@ -145,8 +144,21 @@ static const DistanciaDaCamera DISTANCIAS_DA_CAMERA[TOTAL_DISTANCIAS_DA_CAMERA] 
     { 8.5f, 3.4f },
     { 13.0f, 5.0f },
 };
-static int distanciaEscolhida = DISTANCIA_MEDIA;
-static DistanciaDaCamera distanciaAtual = { 8.5f, 3.4f };   /* anda até a escolhida, sem pulo */
+
+/* A última visão do jogador 1 que passou por iniciarVisao ou atualizarVisao. A apresentação da
+ * largada termina na câmera do jogo (cameraDaVisaoDoJogador), e é daqui que ela tira a distância
+ * que o jogador escolheu — perto, médio ou longe. */
+static VisaoDoJogador visaoDoJogador1 = {
+    .distanciaEscolhida = DISTANCIA_MEDIA,
+    .atras = 8.5f, .altura = 3.4f,   /* a distância média, para a câmera não nascer andando */
+};
+
+/* O carro desta visão: de qual carro saem o traçado de corrida e o desfoque de velocidade.
+ * NULL = o jogador 1, que é o que o jogo sempre fez. */
+static Carro *carroDaVisao = NULL;
+/* 1 quando o mundo é desenhado mais de uma vez por quadro (a tela dividida): os efeitos mais
+ * caros saem, para o jogo não andar pela metade. Veja aliviarOsEfeitos. */
+static int efeitosAliviados = 0;
 
 /*
  * alturaEmVoltaDoCarro
@@ -179,12 +191,13 @@ static float rumoDesenhado(const Carro *carro, float rumoDaPista) {
  * a curva, ou para onde o jogador está olhando. De lado ela fica presa ao carro, que
  * por isso aparece no centro da tela, e não atravessa os muros do oval. Nas curvas
  * inclinadas ela inclina junto com o chão.
- * Recebe: a posição do carro, o deslocamento lateral dele, o olhar, a distância da câmera e,
- *         sem a direção guiada, o rumo real do carro (senão, NULL).
+ * Recebe: a posição do carro, o deslocamento lateral dele, o olhar, a distância da câmera, o
+ *         campo de visão vertical em graus e, sem a direção guiada, o rumo real do carro
+ *         (senão, NULL).
  * Devolve: a câmera.
  */
 static Camera3D montarCamera(PosicaoNaPista carro, float lateral, Olhar olhar, DistanciaDaCamera distancia,
-                             const float *rumoDoCarro) {
+                             float graus, const float *rumoDoCarro) {
     PosicaoNaPista atras = carro;
     moverNaPista(&atras, -distancia.atras * UNIDADES_POR_METRO);
     PontoNoMundo deCamera = pontoNoMundo(atras, lateral);
@@ -226,17 +239,61 @@ static Camera3D montarCamera(PosicaoNaPista carro, float lateral, Olhar olhar, D
     Camera3D camera = { 0 };
     camera.position = (Vector3){ doCarro.x - dx * atrasNaPista + direitaX * aoLado, chao + distancia.altura,
                                  doCarro.z - dz * atrasNaPista + direitaZ * aoLado };
+
+    /* A mira vertical acompanha o campo de visão. Numa faixa da tela dividida o fovy fecha de 65
+     * para ~35 graus, e com a mira parada o carro — que está uns 22 graus abaixo do eixo da câmera,
+     * por ela estar 3,4 m acima e 8,5 m atrás — passava a ocupar o DOBRO da fração do quadro e
+     * descia até ser cortado na borda de baixo. A conta devolve o carro à mesma fração de sempre:
+     * quanto mais fechado o ângulo, mais a câmera aponta para baixo (de 5 para ~14 graus na faixa).
+     * O ponto de referência é a BASE do carro, que é o mais baixo que se vê dele e era justamente o
+     * que sumia. Na tela cheia a proporção é 1 e a mira é exatamente a de antes. */
+    float proporcaoDoAngulo = tanf(graus * 0.5f * DEG2RAD) / tanf(GRAUS_DE_VISAO * 0.5f * DEG2RAD);
+    float miraCheia = ladeira + tanf((olhar.elevacao - OLHAR_PARA_BAIXO) * DEG2RAD);
+    float naBaseDoCarro = (comprimento > 0.01f) ? ladeira - distancia.altura / comprimento : miraCheia;
+    float mira = miraCheia + (naBaseDoCarro - miraCheia) * (1.0f - proporcaoDoAngulo);
+
     camera.target = (Vector3){ camera.position.x + olhaX,
-                               camera.position.y + ladeira + tanf((olhar.elevacao - OLHAR_PARA_BAIXO) * DEG2RAD),
+                               camera.position.y + mira,
                                camera.position.z + olhaZ };
 
     /* O "para cima" da câmera é perpendicular ao chão inclinado */
     float rumo = doCarro.rumo * DEG2RAD;
     float inclinacao = atanf(doCarro.inclinacao);
     camera.up = (Vector3){ -cosf(rumo) * sinf(inclinacao), cosf(inclinacao), -sinf(rumo) * sinf(inclinacao) };
-    camera.fovy = GRAUS_DE_VISAO;
+    camera.fovy = graus;
     camera.projection = CAMERA_PERSPECTIVE;
     return camera;
+}
+
+/*
+ * grausDeVisaoDaJanela
+ * O campo de visão vertical de uma janela que não é a tela toda. A raylib mede o fovy na
+ * VERTICAL e tira o ângulo horizontal da proporção da imagem, então mudar o tamanho da janela
+ * muda o que se vê para os lados. Na tela dividida em cima e embaixo, a faixa é o dobro mais
+ * larga que alta: manter os 65 graus na vertical abriria um horizonte deitado e esticado, de
+ * olho de peixe. O certo é guardar o ângulo HORIZONTAL da tela inteira e cortar o de cima e o
+ * de baixo:
+ *     tan(fovy'/2) = tan(fovy/2) * aspectoCheio / aspectoDaFaixa
+ * Numa faixa de metade da altura isso dá ~35 graus, e o resultado é exatamente o certo: a faixa
+ * mostra o MESMO tanto para os lados que a tela cheia mostraria, com a mesma quantidade de pixels
+ * por grau — o que ela perde é o céu e o asfalto de perto, que é o que sobra numa faixa larga.
+ * O piso só existe para janelas absurdas (uma fresta de poucos pixels de altura).
+ * Recebe: a janela da visão.
+ * Devolve: o fovy em graus.
+ */
+#define MENOR_GRAU_DE_VISAO  24.0f
+
+static float grausDeVisaoDaJanela(Janela janela) {
+    if (janela.largura <= 0 || janela.altura <= 0) {
+        return GRAUS_DE_VISAO;
+    }
+    float aspectoCheio = (float) GetScreenWidth() / (float) GetScreenHeight();
+    float aspectoDaFaixa = (float) janela.largura / (float) janela.altura;
+    if (fabsf(aspectoDaFaixa - aspectoCheio) < 0.01f) {
+        return GRAUS_DE_VISAO;   /* a tela inteira: os 65 de sempre, sem conta nenhuma */
+    }
+    float meio = tanf(GRAUS_DE_VISAO * 0.5f * DEG2RAD) * aspectoCheio / aspectoDaFaixa;
+    return fmaxf(2.0f * atanf(meio) * RAD2DEG, MENOR_GRAU_DE_VISAO);
 }
 
 /*
@@ -713,15 +770,6 @@ void congelarCena(int pausada) {
 }
 
 /*
- * definirOlhar
- * Recebe: para onde o jogador está olhando (o main.c lê o analógico).
- * Devolve: nada.
- */
-void definirOlhar(Olhar olhar) {
-    olharDoJogador = olhar;
-}
-
-/*
  * puxarOndaDaTorcida
  * Na metade da corrida, quando o líder chega lá, a torcida da Copa Pistão faz a onda com
  * os faróis. Ela começa um pouco à frente do jogador, para ele ver a onda vir e dar a volta.
@@ -753,14 +801,15 @@ static int desenharOTracado = 0;   /* 1 só quando o mundo é desenhado para a v
 
 /*
  * desfoqueDeVelocidade
- * Recebe: a corrida (pode ser NULL, no menu).
+ * Recebe: a corrida (pode ser NULL, no menu). O carro é o da visão que está sendo desenhada
+ *         (carroDaVisao): na tela dividida, cada metade desfoca com a velocidade do seu.
  * Devolve: o desfoque das bordas, de 0 a 1.
  */
 static float desfoqueDeVelocidade(Corrida *corrida) {
     if (corrida == NULL || cenaPausada || jogadorNoPodio(corrida)) {   /* na festa as câmeras são de TV: sem desfoque */
         return 0.0f;
     }
-    Carro *j = &corrida->jogador;
+    Carro *j = (carroDaVisao != NULL) ? carroDaVisao : &corrida->jogador;
     if (j->estadoDoPit != PIT_FORA) {
         return 0.0f;
     }
@@ -801,7 +850,8 @@ static float linhaIdealNoPonto(PosicaoNaPista lugar) {
 
 static void desenharTracadoDeCorrida(Camera3D camera, Corrida *corrida) {
     (void) camera;
-    Carro *jogador = &corrida->jogador;
+    /* O traçado é do carro desta visão: na tela dividida, cada metade mostra o caminho do seu */
+    Carro *jogador = (carroDaVisao != NULL) ? carroDaVisao : &corrida->jogador;
     if (jogador->posicao.segmento == NULL) {
         return;
     }
@@ -871,23 +921,23 @@ static void desenharTracadoDeCorrida(Camera3D camera, Corrida *corrida) {
 
 /*
  * desenharMundo3D
- * O cenário e os carros, vistos pela câmera.
+ * O cenário e os carros, vistos pela câmera. Só desenha: quem anda com o tempo do mundo (a
+ * torcida, a noite, a fumaça) é avancarCenario e avancarMundoDaCorrida, chamados uma vez por
+ * quadro — este aqui roda duas vezes na tela dividida, e mais uma para cada telão.
  * Recebe: a câmera, a pista e a corrida (NULL nos menus: sem carros).
  * Devolve: nada.
  */
 static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
     int ehNoite = (pista->id == PISTA_COPA_PISTAO);
-    if (ehNoite && corrida != NULL) {
-        puxarOndaDaTorcida(corrida);
-    }
-    animarTorcida(cenaPausada ? 0.0f : GetFrameTime());
-    if (ehNoite) {
-        atualizarNoite(cenaPausada ? 0.0f : GetFrameTime());
-    }
+    /* Na tela dividida, o mapa de sombra e a torcida 3D saem: cada um é uma passada a mais pelo
+     * mundo, e aqui o mundo já é desenhado duas vezes. A torcida pintada entra no lugar da 3D,
+     * pelo mesmo caminho que o telão usa */
+    int semSombras = desenhandoOTelao || efeitosAliviados;
+    int semTorcida3D = desenhandoOTelao || efeitosAliviados;
     prepararLuzes(ehNoite);
-    prepararSombras(pista->id, camera, configuracoesAtuais()->sombras && !desenhandoOTelao);
-    if (desenhandoOTelao) {
-        esconderTorcidaPintada(camera.position, 0.0f);   /* no telão a torcida pintada fica inteira */
+    prepararSombras(pista->id, camera, configuracoesAtuais()->sombras && !semSombras);
+    if (semTorcida3D) {
+        esconderTorcidaPintada(camera.position, 0.0f);   /* sem a 3D, a torcida pintada fica inteira */
     } else {
         prepararTorcida3D(pista->id, camera);
     }
@@ -904,8 +954,8 @@ static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
     if (!desligadoPorFora("KATCHAU_SEM_CENARIO")) {
         desenharCenario(pista->id, camera.position);
     }
-    if (!desenhandoOTelao) {
-        desenharTorcida3D();   /* na tela pequena do telão a torcida pintada basta */
+    if (!semTorcida3D) {
+        desenharTorcida3D();   /* na tela pequena do telão (e na metade da dividida) a pintada basta */
     }
 
     if (corrida != NULL) {
@@ -932,7 +982,12 @@ static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
             desenharCarroNoMundo(camera, &corrida->jogador);
         }
         if (corrida->temParada) {
-            desenharGuido(camera, pista, &corrida->jogador);
+            /* O Guido troca o pneu de qualquer um dos humanos: na tela dividida, o carro do
+             * jogador 2 nos boxes também tem a equipe em volta (a cena é do mundo, e as duas
+             * metades a enxergam) */
+            for (int h = 0; h < corrida->totalDeHumanos; h++) {
+                desenharGuido(camera, pista, corrida->humanos[h]);
+            }
         }
         if (!desenhandoOTelao) {
             if (!desligadoPorFora("KATCHAU_SEM_FUMACA")) {
@@ -954,8 +1009,9 @@ static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
 
     rlEnableBackfaceCulling();
     EndMode3D();
-    if (comEfeitos && configuracoesAtuais()->efeitos) {
-        /* As luzes de novo, sozinhas: é delas que nasce o halo */
+    if (comEfeitos && configuracoesAtuais()->efeitos && !efeitosAliviados) {
+        /* As luzes de novo, sozinhas: é delas que nasce o halo. Na tela dividida isto sai: é um
+         * desenho do mundo a mais, com quatro borrões em cima */
         comecarLuzesDoPosProcesso();
         prepararPlanosDaCamera();
         BeginMode3D(camera);
@@ -979,7 +1035,29 @@ static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
         EndMode3D();
     }
     if (comEfeitos) {
-        terminarPosProcesso(pista->id, desfoqueDeVelocidade(corrida), configuracoesAtuais()->efeitos);
+        AcabamentoDoPosProcesso acabamento = POSPROCESSO_SO_COPIA;
+        if (configuracoesAtuais()->efeitos) {
+            acabamento = efeitosAliviados ? POSPROCESSO_SEM_HALO : POSPROCESSO_COMPLETO;
+        }
+        terminarPosProcesso(pista->id, desfoqueDeVelocidade(corrida), acabamento);
+    }
+}
+
+/*
+ * avancarCenario
+ * A torcida se mexendo e o relógio da noite. O mundo é desenhado mais de uma vez por quadro
+ * (os telões, a tela dividida), então quem anda com o cenário é quem é chamado uma vez só.
+ * Recebe: a pista e a corrida (NULL nos menus: sem a onda da torcida).
+ * Devolve: nada.
+ */
+static void avancarCenario(Pista *pista, Corrida *corrida) {
+    int ehNoite = (pista->id == PISTA_COPA_PISTAO);
+    if (ehNoite && corrida != NULL) {
+        puxarOndaDaTorcida(corrida);
+    }
+    animarTorcida(cenaPausada ? 0.0f : GetFrameTime());
+    if (ehNoite) {
+        atualizarNoite(cenaPausada ? 0.0f : GetFrameTime());
     }
 }
 
@@ -1003,15 +1081,15 @@ static Camera3D cameraDaTroca(Camera3D normal, Carro *carro) {
 }
 
 /*
- * alternarDistanciaDaCamera
- * Passa a câmera da corrida para a próxima distância: perto, médio, longe e de volta
- * ao perto. A escolha vale também nas próximas corridas.
- * Recebe: nada.
+ * alternarDistanciaDaVisao
+ * Passa a câmera de uma visão para a próxima distância: perto, médio, longe e de volta ao perto.
+ * Na tela dividida cada jogador troca a dele sem mexer na do outro.
+ * Recebe: a visão.
  * Devolve: a distância escolhida (0 = perto, 1 = médio, 2 = longe).
  */
-int alternarDistanciaDaCamera(void) {
-    distanciaEscolhida = (distanciaEscolhida + 1) % TOTAL_DISTANCIAS_DA_CAMERA;
-    return distanciaEscolhida;
+int alternarDistanciaDaVisao(VisaoDoJogador *visao) {
+    visao->distanciaEscolhida = (visao->distanciaEscolhida + 1) % TOTAL_DISTANCIAS_DA_CAMERA;
+    return visao->distanciaEscolhida;
 }
 
 /* A transmissão dos telões: a cada tomada muda o carro e a câmera */
@@ -1064,12 +1142,15 @@ static Carro *carroDaTomada(Corrida *corrida, int tomada) {
  * Recebe: a corrida e a câmera do jogador.
  * Devolve: nada.
  */
-static void atualizarTelao(Corrida *corrida, Camera3D doJogador) {
+static void atualizarTelao(Corrida *corrida, Camera3D doJogador, Janela janela) {
     atualizarPlacar(corrida);
     if (!telaoPrecisaDeQuadro(GetFrameTime())) {
         return;
     }
-    float aspecto = (float) GetScreenWidth() / (float) GetScreenHeight();
+    /* O aspecto é o da janela da visão, e não o da tela: é ele que diz quanto se vê para os
+     * lados, e portanto quais telões estão no campo de visão */
+    float aspecto = (janela.altura > 0) ? (float) janela.largura / (float) janela.altura
+                                        : (float) GetScreenWidth() / (float) GetScreenHeight();
     prepararPlanosDaCamera();   /* os planos de perto e de longe do jogo, não os padrões da raylib */
     prepararCorteDaCamera(doJogador, doJogador.fovy, aspecto, FOLGA_DO_TELAO);
     if (!teloesAVista(corrida->pista->id)) {
@@ -1112,11 +1193,13 @@ static void atualizarTelao(Corrida *corrida, Camera3D doJogador) {
 
 /*
  * distanciaParaOCarro
- * Recebe: o carro e a distância escolhida (perto, médio ou longe), para o McQueen.
+ * Recebe: o carro, a distância escolhida (perto, médio ou longe, para o McQueen) e a respiração
+ *         desta visão, que é lida e atualizada aqui (uma por jogador: duas visões no mesmo
+ *         quadro têm pedais diferentes).
  * Devolve: a distância e a altura para este carro, agora.
  */
-static DistanciaDaCamera distanciaParaOCarro(const Carro *carro, DistanciaDaCamera base) {
-    static float respiracao = 0.0f;
+static DistanciaDaCamera distanciaParaOCarro(const Carro *carro, DistanciaDaCamera base, float *daVisao) {
+    float respiracao = *daVisao;
     float comprimento = comprimentoDoCarro3D(carro->numero) / comprimentoDoCarro3D(CARRO_DE_REFERENCIA);
     float altura = alturaDoCarro3D(carro->numero) / alturaDoCarro3D(CARRO_DE_REFERENCIA);
     comprimento = fminf(fmaxf(comprimento, MENOR_FATOR_DA_CAMERA), MAIOR_FATOR_DA_CAMERA);
@@ -1133,6 +1216,7 @@ static DistanciaDaCamera distanciaParaOCarro(const Carro *carro, DistanciaDaCame
         }
     }
     respiracao += (alvo - respiracao) * fminf(RESPIRACAO_DA_CAMERA * GetFrameTime(), 1.0f);
+    *daVisao = respiracao;
 
     DistanciaDaCamera d;
     d.atras = base.atras * comprimento * (1.0f + respiracao);                       /* a distância segue o comprimento */
@@ -1141,15 +1225,78 @@ static DistanciaDaCamera distanciaParaOCarro(const Carro *carro, DistanciaDaCame
 }
 
 /*
- * desenharVisaoDoJogador
- * Desenha o que o jogador vê: o mundo pela câmera atrás do carro.
- * Recebe: a corrida.
+ * iniciarVisao
+ * Uma visão nova, no começo de uma corrida: olhando para a frente, na distância média.
+ * Recebe: a visão e qual humano ela acompanha (0 = o jogador 1).
  * Devolve: nada.
  */
-void desenharVisaoDoJogador(Corrida *corrida) {
-    Carro *jogador = &corrida->jogador;
+void iniciarVisao(VisaoDoJogador *visao, int humano) {
+    VisaoDoJogador nova = { 0 };
+    nova.humano = humano;
+    nova.janela = (Janela){ 0, 0, GetScreenWidth(), GetScreenHeight() };
+    nova.olhar = olharParaAFrente();
+    nova.distanciaEscolhida = DISTANCIA_MEDIA;
+    nova.atras = DISTANCIAS_DA_CAMERA[DISTANCIA_MEDIA].atras;
+    nova.altura = DISTANCIAS_DA_CAMERA[DISTANCIA_MEDIA].altura;
+    *visao = nova;
+    if (humano == 0) {
+        visaoDoJogador1 = nova;
+    }
+}
+
+/*
+ * repartirJanelas
+ * Divide a tela entre as visões. Com um jogador é a tela inteira; com dois, uma faixa em cima
+ * e outra embaixo. Em cima e embaixo, e não lado a lado, porque numa corrida o que importa é
+ * ver para os lados — o carro que vem na porta — e é justamente isso que a divisão vertical
+ * tira. As duas faixas têm o MESMO tamanho (a sobra de um pixel em altura ímpar fica escondida
+ * sob o risco do meio), o que mantém as imagens do pós-processo e o cache do mini-mapa quietos
+ * de um quadro para o outro.
+ * Recebe: quantas visões e onde escrever as janelas.
+ * Devolve: nada.
+ */
+void repartirJanelas(int totalDeVisoes, Janela janelas[]) {
+    int largura = GetScreenWidth(), altura = GetScreenHeight();
+    if (totalDeVisoes < 2) {
+        janelas[0] = (Janela){ 0, 0, largura, altura };
+        return;
+    }
+    int metade = altura / 2;
+    for (int v = 0; v < totalDeVisoes && v < MAXIMO_DE_VISOES; v++) {
+        janelas[v] = (Janela){ 0, v * metade, largura, metade };
+    }
+}
+
+/*
+ * desenharRiscoDaDivisao
+ * O risco que separa as duas metades, por cima das duas. Também tapa a linha de sobra quando a
+ * altura da tela é ímpar.
+ * Recebe: quantas visões.
+ * Devolve: nada.
+ */
+#define GROSSURA_DA_DIVISAO 3
+
+void desenharRiscoDaDivisao(int totalDeVisoes) {
+    if (totalDeVisoes < 2) {
+        return;
+    }
+    int meio = GetScreenHeight() / 2;
+    DrawRectangle(0, meio - GROSSURA_DA_DIVISAO / 2, GetScreenWidth(), GROSSURA_DA_DIVISAO + 1, BLACK);
+}
+
+/*
+ * atualizarVisao
+ * Anda com a câmera de uma visão e guarda nela a câmera deste quadro: a distância indo até a
+ * escolhida, o rumo vindo atrás do carro com atraso, a respiração do pedal e, na festa do
+ * pódio, o jogo de câmeras de TV. Chamar uma vez por quadro para cada visão, antes de
+ * avancarMundoDaCorrida e de desenharVisao.
+ * Recebe: a corrida e a visão.
+ * Devolve: nada (preenche visao->camera e os campos da festa).
+ */
+void atualizarVisao(Corrida *corrida, VisaoDoJogador *visao) {
+    Carro *jogador = carroDoHumano(corrida, visao->humano);
     /* A câmera acompanha o carro, não a pista: sem volante na curva, ela também não vira sozinha */
-    Olhar olhar = olharDoJogador;
+    Olhar olhar = visao->olhar;
     int comRumoReal = jogador->direcaoLivre && jogador->temRumoNoMundo && jogador->estadoDoPit == PIT_FORA;
     /* No pit lane o caminho nem sempre acompanha a pista (em Interlagos, a saída corta por dentro
      * do S do Senna): a câmera vem atrás do carro, para onde o bico dele aponta */
@@ -1162,37 +1309,62 @@ void desenharVisaoDoJogador(Corrida *corrida) {
         olhar.giro += jogador->anguloDeFuga * CAMERA_NA_FUGA;
     }
     /* A distância anda aos poucos até a escolhida (perto, médio ou longe) */
-    DistanciaDaCamera alvo = distanciaParaOCarro(jogador, DISTANCIAS_DA_CAMERA[distanciaEscolhida]);
+    DistanciaDaCamera alvo = distanciaParaOCarro(jogador, DISTANCIAS_DA_CAMERA[visao->distanciaEscolhida],
+                                                 &visao->respiracao);
     float passo = fminf(VELOCIDADE_DA_TROCA_DE_CAMERA * GetFrameTime(), 1.0f);
-    distanciaAtual.atras += (alvo.atras - distanciaAtual.atras) * passo;
-    distanciaAtual.altura += (alvo.altura - distanciaAtual.altura) * passo;
+    visao->atras += (alvo.atras - visao->atras) * passo;
+    visao->altura += (alvo.altura - visao->altura) * passo;
+    DistanciaDaCamera distanciaAtual = { visao->atras, visao->altura };
     /* Sem a guiada, a câmera segue o rumo do carro com um pequeno atraso: virando, a gente vê o
      * carro girar na tela antes de a câmera vir atrás (presa ao bico, quem parecia girar era o mundo) */
-    static float rumoDaCamera = 0.0f;
-    static int cameraComRumo = 0;
     if (seguirORumo) {
-        float diferenca = rumoSeguido - rumoDaCamera;
+        float diferenca = rumoSeguido - visao->rumoDaCamera;
         diferenca -= 360.0f * roundf(diferenca / 360.0f);
-        if (!cameraComRumo || fabsf(diferenca) > 120.0f) {
-            rumoDaCamera = rumoSeguido;   /* começou agora (ou rodou): sem atraso */
+        if (!visao->cameraComRumo || fabsf(diferenca) > 120.0f) {
+            visao->rumoDaCamera = rumoSeguido;   /* começou agora (ou rodou): sem atraso */
         } else {
-            rumoDaCamera += diferenca * (1.0f - expf(-GetFrameTime() / ATRASO_DA_CAMERA_NO_RUMO));
+            visao->rumoDaCamera += diferenca * (1.0f - expf(-GetFrameTime() / ATRASO_DA_CAMERA_NO_RUMO));
         }
     }
-    cameraComRumo = seguirORumo;
+    visao->cameraComRumo = seguirORumo;
     Camera3D camera = montarCamera(jogador->posicao, jogador->deslocamentoLateral, olhar, distanciaAtual,
-                                   seguirORumo ? &rumoDaCamera : NULL);
+                                   grausDeVisaoDaJanela(visao->janela),
+                                   seguirORumo ? &visao->rumoDaCamera : NULL);
     if (jogador->estadoDoPit == PIT_TROCANDO) {
         camera = cameraDaTroca(camera, jogador);
     }
-    /* A vitória: o jogo de câmeras da festa, com fogos de artifício, até a corrida acabar */
-    int festa = jogadorNoPodio(corrida);
-    int cortou = 0;
-    float escuro = 0.0f, desdeAChegada = 0.0f;
-    if (festa) {
-        desdeAChegada = corrida->tempoDeCorrida - jogador->tempoDeChegada;
-        camera = cameraDaVitoria(corrida, desdeAChegada, &cortou, &escuro);
+    /* A vitória: o jogo de câmeras da festa, com fogos de artifício, até a corrida acabar. Na tela
+     * dividida ela não entra (jogadorNoPodio cuida disso) */
+    visao->festa = jogadorNoPodio(corrida);   /* na tela dividida ele já devolve 0 */
+    visao->cortou = 0;
+    visao->escuro = 0.0f;
+    visao->desdeAChegada = 0.0f;
+    if (visao->festa) {
+        visao->desdeAChegada = corrida->tempoDeCorrida - jogador->tempoDeChegada;
+        camera = cameraDaVitoria(corrida, visao->desdeAChegada, &visao->cortou, &visao->escuro);
     }
+    visao->camera = camera;
+    if (visao->humano == 0) {
+        visaoDoJogador1 = *visao;
+    }
+}
+
+/*
+ * avancarMundoDaCorrida
+ * Tudo o que ANDA no mundo da corrida, uma vez por quadro: a torcida, a noite, a fumaça, as
+ * faíscas, os fogos, as marcas de pneu e a transmissão dos telões.
+ *
+ * Isto ficava dentro de desenharVisaoDoJogador, e lá estava certo enquanto havia uma visão por
+ * quadro. Na tela dividida o mundo é desenhado duas vezes, e deixar o passo do tempo junto do
+ * desenho faria a fumaça nascer e envelhecer o dobro.
+ * Recebe: a corrida e a visão principal (a do jogador 1: é dela que a fumaça e os fogos são
+ *         medidos, e é a câmera dela que procura os telões).
+ * Devolve: nada.
+ */
+void avancarMundoDaCorrida(Corrida *corrida, const VisaoDoJogador *principal) {
+    Camera3D camera = principal->camera;
+    Carro *jogador = carroDoHumano(corrida, principal->humano);
+    avancarCenario(corrida->pista, corrida);
 
     /* A fumaça anda com o relógio da corrida: na pausa e na contagem, ele para.
      * Se ele voltou atrás, é uma corrida nova. */
@@ -1211,16 +1383,16 @@ void desenharVisaoDoJogador(Corrida *corrida) {
             soltarFumacaDoCarro(camera, &corrida->rivais[r], passou);
             marcarPneus(&corrida->rivais[r]);
         }
-        soltarFumacaDoCarro(camera, jogador, passou);
-        marcarPneus(jogador);
+        soltarFumacaDoCarro(camera, &corrida->jogador, passou);
+        marcarPneus(&corrida->jogador);
         soltarFaiscasDaCorrida(corrida, passou);
     }
-    if (festa) {
+    if (principal->festa) {
         /* A câmera anda? (a de perseguição sim): os fogos nascem adiantados o tanto que ela vai andar */
         static Vector3 posicaoAnterior;
         static int temAnterior = 0;
         Vector3 velocidadeDaCamera = { 0.0f, 0.0f, 0.0f };
-        if (temAnterior && passou > 0.0f && !cortou) {
+        if (temAnterior && passou > 0.0f && !principal->cortou) {
             velocidadeDaCamera = Vector3Scale(Vector3Subtract(camera.position, posicaoAnterior), 1.0f / passou);
             velocidadeDaCamera.y = 0.0f;
             if (Vector3Length(velocidadeDaCamera) > 160.0f) {
@@ -1230,27 +1402,54 @@ void desenharVisaoDoJogador(Corrida *corrida) {
         posicaoAnterior = camera.position;
         temAnterior = 1;
         PontoNoMundo chao = pontoNoMundo(jogador->posicao, jogador->deslocamentoLateral);
-        soltarFogosDaVitoria(camera, velocidadeDaCamera, chao.y, cortou, passou);
+        soltarFogosDaVitoria(camera, velocidadeDaCamera, chao.y, principal->cortou, passou);
     }
     atualizarFumaca(passou);
     atualizarFaiscas(passou);
     atualizarFogos(passou);
     atualizarMarcas(passou);
 
-    atualizarTelao(corrida, camera);   /* os telões de todas as pistas passam a transmissão */
-    desenharOTracado = configuracoesAtuais()->tracadoDeCorrida && !festa && jogador->estadoDoPit == PIT_FORA && corrida->contagemRegressiva <= 0.0f;
-    desenharMundo3D(camera, corrida->pista, corrida);
-    desenharOTracado = 0;
+    /* Os telões de todas as pistas passam a transmissão. Na tela dividida ela sai: desenhar a
+     * transmissão é desenhar o mundo inteiro uma terceira vez, e as telas ficam de poucos
+     * pixels numa faixa de meia altura */
+    if (corrida->totalDeHumanos == 1) {
+        atualizarTelao(corrida, camera, principal->janela);
+    }
+}
 
-    if (festa) {
+/*
+ * desenharVisao
+ * O mundo pela câmera de uma visão, no pedaço de tela dela. Só desenha: a câmera já veio pronta
+ * de atualizarVisao e o mundo já andou em avancarMundoDaCorrida.
+ * Recebe: a corrida e a visão.
+ * Devolve: nada.
+ */
+void desenharVisao(Corrida *corrida, const VisaoDoJogador *visao) {
+    Carro *jogador = carroDoHumano(corrida, visao->humano);
+    int dividida = (corrida->totalDeHumanos > 1);
+    definirAreaDoPosProcesso(visao->janela.x, visao->janela.y,
+                             dividida ? visao->janela.largura : 0, dividida ? visao->janela.altura : 0);
+    efeitosAliviados = dividida && !desligadoPorFora("KATCHAU_DIVIDIDA_COMPLETA");
+    carroDaVisao = jogador;
+    desenharOTracado = configuracoesAtuais()->tracadoDeCorrida && !visao->festa
+                       && jogador->estadoDoPit == PIT_FORA && corrida->contagemRegressiva <= 0.0f;
+    desenharMundo3D(visao->camera, corrida->pista, corrida);
+    desenharOTracado = 0;
+    carroDaVisao = NULL;
+    efeitosAliviados = 0;
+    /* A área volta para a tela cheia: quem desenha depois (a cidade ao sair da corrida, os menus)
+     * não sabe que houve faixas, e desenharia a tela inteira dentro de meia tela */
+    definirAreaDoPosProcesso(0, 0, 0, 0);
+
+    if (visao->festa) {
         /* As tarjas de cinema entram no começo da festa e a imagem escurece um instante nos cortes */
         float largura = (float) GetScreenWidth(), altura = (float) GetScreenHeight();
-        float entrada = fminf(desdeAChegada / 0.8f, 1.0f);
+        float entrada = fminf(visao->desdeAChegada / 0.8f, 1.0f);
         float tarja = altura * 0.095f * entrada * entrada * (3.0f - 2.0f * entrada);
         DrawRectangle(0, 0, (int) largura, (int) tarja, BLACK);
         DrawRectangle(0, (int) (altura - tarja), (int) largura, (int) tarja + 1, BLACK);
-        if (escuro > 0.0f) {
-            DrawRectangle(0, 0, (int) largura, (int) altura, Fade(BLACK, escuro));
+        if (visao->escuro > 0.0f) {
+            DrawRectangle(0, 0, (int) largura, (int) altura, Fade(BLACK, visao->escuro));
         }
     }
 }
@@ -1264,8 +1463,12 @@ void desenharVisaoDoJogador(Corrida *corrida) {
  */
 Camera3D cameraDaVisaoDoJogador(Corrida *corrida) {
     Carro *jogador = &corrida->jogador;
-    DistanciaDaCamera distancia = distanciaParaOCarro(jogador, DISTANCIAS_DA_CAMERA[distanciaEscolhida]);
-    return montarCamera(jogador->posicao, jogador->deslocamentoLateral, olharParaAFrente(), distancia, NULL);
+    float respiracao = visaoDoJogador1.respiracao;   /* uma cópia: esta função não anda com a câmera */
+    DistanciaDaCamera distancia = distanciaParaOCarro(jogador,
+                                                      DISTANCIAS_DA_CAMERA[visaoDoJogador1.distanciaEscolhida],
+                                                      &respiracao);
+    return montarCamera(jogador->posicao, jogador->deslocamentoLateral, olharParaAFrente(), distancia,
+                        GRAUS_DE_VISAO, NULL);
 }
 
 /*
@@ -1275,6 +1478,8 @@ Camera3D cameraDaVisaoDoJogador(Corrida *corrida) {
  * Devolve: nada.
  */
 void desenharCorridaVistaDe(Corrida *corrida, Camera3D camera) {
+    avancarCenario(corrida->pista, corrida);   /* é chamada uma vez por quadro: o cenário anda aqui */
+    definirAreaDoPosProcesso(0, 0, 0, 0);
     desenharMundo3D(camera, corrida->pista, corrida);
 }
 
@@ -1293,7 +1498,10 @@ void desenharPistaDeFundo(Pista *pista) {
         passeio->segmento = pista->largada;
     }
     moverNaPista(passeio, VELOCIDADE_CAMERA_MENU * GetFrameTime());
-    desenharMundo3D(montarCamera(*passeio, 0.0f, olharParaAFrente(), DISTANCIAS_DA_CAMERA[DISTANCIA_MEDIA], NULL),
+    avancarCenario(pista, NULL);   /* é chamada uma vez por quadro: a torcida e a noite andam aqui */
+    definirAreaDoPosProcesso(0, 0, 0, 0);
+    desenharMundo3D(montarCamera(*passeio, 0.0f, olharParaAFrente(), DISTANCIAS_DA_CAMERA[DISTANCIA_MEDIA],
+                                 GRAUS_DE_VISAO, NULL),
                     pista, NULL);
 }
 

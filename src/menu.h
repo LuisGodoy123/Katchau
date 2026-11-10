@@ -71,6 +71,12 @@ typedef struct {
     int focoDaCorrida;                          /* a linha marcada na tela da corrida: pista, nível ou CORRER */
     float destaqueCorrer;                       /* animação (0 a 1) do botão CORRER */
     float destaquePista[TOTAL_PISTAS];          /* animação (0 a 1) de cada cartão de pista */
+
+    /* ---- A tela dividida, escolhida no Mack ---- */
+    int telaDividida;                           /* 1: a próxima corrida é de dois no mesmo aparelho */
+    int carroDoJogador2;                        /* o carro do jogador 2 (sempre != carroEscolhido) */
+    float destaqueDividida;                     /* animação (0 a 1) do botão da tela dividida */
+    float destaqueCarro2;                       /* animação (0 a 1) da linha do carro do jogador 2 */
 } EstadoMenu;
 
 void iniciarMenu(EstadoMenu *menu);

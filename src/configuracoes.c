@@ -10,12 +10,21 @@
 
 #include "configuracoes.h"
 
+/* A versão do arquivo de configurações. Ela sobe quando o PADRÃO dos comandos muda de um jeito que
+ * um arquivo antigo não teria como adivinhar — e aí os comandos de um arquivo de versão menor voltam
+ * ao padrão novo (o resto das configurações é lido normalmente). Veja carregarConfiguracoes.
+ *   1: o jogo de um jogador só;
+ *   2: a tela dividida, com um teclado completo em cada coluna de teclas. */
+#define VERSAO_DAS_CONFIGURACOES 2
+
 /* Os códigos das teclas e dos botões, iguais aos da raylib */
 #define TECLA_A          65
 #define TECLA_D          68
+#define TECLA_Q          81
 #define TECLA_S          83
 #define TECLA_W          87
 #define TECLA_ESPACO     32
+#define TECLA_PONTO      46
 #define TECLA_DIREITA    262
 #define TECLA_ESQUERDA   263
 #define TECLA_BAIXO      264
@@ -54,14 +63,29 @@ Configuracoes *configuracoesAtuais(void) {
  */
 void configuracoesPadrao(Configuracoes *config) {
     /* No controle, como nos jogos de corrida: R2 acelera, L2 freia, Cruz é o freio de
-     * mão e Bola o nitro, um comando em cada botão. Os outros ficam livres para o jogador. */
+     * mão e Bola o nitro, um comando em cada botão. Os outros ficam livres para o jogador.
+     *
+     * No teclado, a coluna 1 é as setas e a coluna 2 é o WASD. Com um jogador as duas valem ao
+     * mesmo tempo, e é por isso que ninguém nunca notou: na TELA DIVIDIDA a coluna 1 passa a ser o
+     * jogador 1 e a coluna 2 o jogador 2, então cada coluna tem de ser um teclado completo, e com a
+     * tecla de cada comando do lado da mão que vai usá-la:
+     *
+     *            direção      nitro      freio de mão
+     *   coluna 1   setas        .         SHIFT direito
+     *   coluna 2   W A S D      Q         SHIFT esquerdo
+     *
+     * O nitro era o ESPAÇO na coluna 1, e o espaço fica no meio do teclado, debaixo da mão de quem
+     * está no WASD: os dois se batiam. Trocado pelo ponto, que fica ao lado das setas. Quem joga
+     * sozinho lê as duas colunas, então para ele o nitro é o ponto OU o Q (o espaço continua sendo
+     * o confirmar do jogo). A tela COMO JOGAR mostra as duas teclas de cada comando, então ela já
+     * conta isso sem código novo. */
     static const int PADRAO[TOTAL_ACOES][TOTAL_COLUNAS] = {
         { TECLA_CIMA,     TECLA_W,       BOTAO_GATILHO_D,           SEM_COMANDO },
         { TECLA_BAIXO,    TECLA_S,       BOTAO_GATILHO_E,           SEM_COMANDO },
         { TECLA_ESQUERDA, TECLA_A,       BOTAO_DIRECIONAL_ESQUERDA, SEM_COMANDO },
         { TECLA_DIREITA,  TECLA_D,       BOTAO_DIRECIONAL_DIREITA,  SEM_COMANDO },
-        { TECLA_ESPACO,   SEM_COMANDO,   BOTAO_FACE_DIREITA,        SEM_COMANDO },
-        { TECLA_SHIFT_E,  TECLA_SHIFT_D, BOTAO_FACE_BAIXO,          SEM_COMANDO },
+        { TECLA_PONTO,    TECLA_Q,       BOTAO_FACE_DIREITA,        SEM_COMANDO },
+        { TECLA_SHIFT_D,  TECLA_SHIFT_E, BOTAO_FACE_BAIXO,          SEM_COMANDO },
     };
     memcpy(config->comandos, PADRAO, sizeof(PADRAO));
     config->vibracaoLigada = 1;
@@ -216,6 +240,7 @@ int salvarConfiguracoes(const Configuracoes *config, const char *arquivo) {
         return 0;
     }
     fprintf(saida, "# Configuracoes do KATCHAU. Apague este arquivo para voltar ao padrao.\n");
+    fprintf(saida, "versao %d\n", VERSAO_DAS_CONFIGURACOES);
     for (int a = 0; a < TOTAL_ACOES; a++) {
         fprintf(saida, "comando %s %d %d %d %d\n", CHAVES_DAS_ACOES[a], config->comandos[a][0], config->comandos[a][1],
                 config->comandos[a][2], config->comandos[a][3]);
@@ -244,6 +269,9 @@ static void valorValido(int valor, int minimo, int maximo, int *destino) {
  * carregarConfiguracoes
  * Lê o arquivo. O que faltar ou vier estragado fica no padrão, para um arquivo mexido
  * à mão nunca impedir o jogo de abrir, nem deixar um comando sem tecla.
+ * Um arquivo de versão antiga tem os comandos de um jogador só (o nitro no espaço, que na tela
+ * dividida fica debaixo da mão do jogador 2): nesse caso os comandos voltam ao padrão novo e o
+ * resto das configurações — resolução, som, vibração, efeitos — é lido normalmente.
  * Recebe: onde guardar e o nome do arquivo.
  * Devolve: 1 se o arquivo existia.
  */
@@ -254,6 +282,7 @@ int carregarConfiguracoes(Configuracoes *config, const char *arquivo) {
         return 0;
     }
     Configuracoes padrao = *config;
+    int versao = 1;   /* sem a linha "versao", é um arquivo de antes da tela dividida */
     char linha[128], chave[32], acao[32];
     while (fgets(linha, sizeof(linha), entrada) != NULL) {
         int v[TOTAL_COLUNAS];
@@ -267,7 +296,9 @@ int carregarConfiguracoes(Configuracoes *config, const char *arquivo) {
                 }
             }
         } else if (sscanf(linha, "%31s %d", chave, &valor) == 2) {
-            if (strcmp(chave, "vibracao") == 0) {
+            if (strcmp(chave, "versao") == 0) {
+                valorValido(valor, 1, VERSAO_DAS_CONFIGURACOES, &versao);
+            } else if (strcmp(chave, "vibracao") == 0) {
                 valorValido(valor, 0, 1, &config->vibracaoLigada);
             } else if (strcmp(chave, "forca") == 0) {
                 valorValido(valor, MENOR_FORCA_DA_VIBRACAO, 100, &config->forcaDaVibracao);
@@ -312,6 +343,14 @@ int carregarConfiguracoes(Configuracoes *config, const char *arquivo) {
                 config->comandos[a][inicio + 1] = padrao.comandos[a][inicio + 1];
             }
         }
+    }
+    /* Arquivo de antes da tela dividida: os comandos dele são de um jogador só — o nitro no espaço,
+     * que na tela dividida fica debaixo da mão do jogador 2, e a coluna 2 sem nitro nenhum, o que
+     * deixaria o jogador 2 sem turbo. Não há como consertar isso tecla por tecla sem adivinhar o que
+     * o jogador escolheu de propósito, então a tabela inteira volta ao padrão novo, uma vez só. O
+     * resto das configurações, já lido acima, fica como estava. */
+    if (versao < VERSAO_DAS_CONFIGURACOES) {
+        memcpy(config->comandos, padrao.comandos, sizeof(config->comandos));
     }
     return 1;
 }

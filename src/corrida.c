@@ -173,15 +173,24 @@ static float escalaDoDesgaste(const Pista *pista) {
 }
 
 /*
- * iniciarCorrida
- * Prepara uma corrida nova: o jogador com o carro escolhido na garagem,
- * os outros carros como rivais, todos no grid, relógio zerado,
- * contagem regressiva armada e a classificação montada.
- * Serve também para correr de novo.
- * Recebe: a corrida a preparar, a pista e o número do carro do jogador.
+ * montarCorrida
+ * Prepara uma corrida nova: os humanos com os carros escolhidos, os outros carros como
+ * rivais de IA, todos no grid, relógio zerado, contagem regressiva armada e a classificação
+ * montada. Serve também para correr de novo.
+ *
+ * É a base das duas corridas do jogo, e a formação é o que as separa:
+ *   - formacao NULL: a corrida de um jogador, igual a sempre (1 humano + 16 da IA);
+ *   - formacao preenchida: a tela dividida, com MAXIMO_DE_JOGADORES_LOCAIS humanos ocupando
+ *     vagas de rivais[] e a IA preenchendo o resto do grid.
+ * Os humanos largam nos últimos lugares, lado a lado na última fila: o jogador 1 em último
+ * (como sempre) e o jogador 2 à frente dele, do outro lado da pista (lateralDoLugar alterna
+ * os lados a cada lugar).
+ * Recebe: a corrida a preparar, a pista, o carro do jogador (ignorado quando há formação,
+ *         que já diz o carro de cada um), o nível e a formação.
  * Devolve: nada.
  */
-void iniciarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador, NivelDaCorrida nivel) {
+static void montarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador, NivelDaCorrida nivel,
+                          const FormacaoLocal *formacao) {
     static unsigned int corridasIniciadas = 0;   /* cada corrida sorteia ritmos diferentes */
     corridasIniciadas++;
     const FichaDoNivel *ficha = fichaDoNivel(nivel);
@@ -202,7 +211,34 @@ void iniciarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador, NivelDaC
     corrida->desclassificado = 0;
     corrida->posicaoFinal = 0;
 
-    corrida->jogador = criarCarroDaFicha(FICHAS[carroDoJogador], carroDoJogador, pista);
+    /* ---- Quem é quem: os carros e os lugares do grid que os humanos tomaram ---- */
+    int humanos = (formacao != NULL) ? formacao->totalDeJogadores : 1;
+    corrida->totalDeHumanos = humanos;
+    for (int h = 0; h < MAXIMO_DE_JOGADORES_LOCAIS; h++) {
+        corrida->humanos[h] = NULL;
+        corrida->comandosDosHumanos[h] = (Comandos) { 0, 0, 0, 0, 0.0f, 0, 0 };
+        corrida->terminouPara[h] = 0;
+        corrida->posicaoFinalDosHumanos[h] = 0;
+        corrida->desclassificadoDosHumanos[h] = 0;
+    }
+
+    int carroTomado[TOTAL_CARROS], lugarTomado[TOTAL_CARROS];
+    for (int i = 0; i < TOTAL_CARROS; i++) {
+        carroTomado[i] = 0;
+        lugarTomado[i] = 0;
+    }
+    for (int h = 0; h < humanos; h++) {
+        int numero = (formacao != NULL) ? formacao->numeroDoCarro[h] : carroDoJogador;
+        carroTomado[numero % TOTAL_CARROS] = 1;
+        lugarTomado[LUGAR_DO_JOGADOR - h] = 1;
+    }
+
+    /* Sem direção guiada em nenhuma pista: o carro tem rumo próprio e quem faz a curva é o volante.
+     * (A guiada só existe para os testes automáticos, que dirigem o carro com comandos simples.) */
+    int semGuiada = pista->semDirecaoGuiada || !configuracoesAtuais()->direcaoGuiada;
+
+    int carroDoPrimeiro = (formacao != NULL) ? formacao->numeroDoCarro[0] % TOTAL_CARROS : carroDoJogador;
+    corrida->jogador = criarCarroDaFicha(FICHAS[carroDoPrimeiro], carroDoPrimeiro, pista);
     corrida->jogador.controladoPeloJogador = 1;
     colocarNoGrid(&corrida->jogador, pista, LUGAR_DO_JOGADOR);
     corrida->jogador.duracaoDaTroca = DURACAO_DA_TROCA;
@@ -211,34 +247,73 @@ void iniciarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador, NivelDaC
     corrida->jogador.gastaPneu = gastaPneu;
     corrida->jogador.metrosDeUmJogoDePneus *= escalaDoDesgaste(pista);
     corrida->jogador.pitFeito = !temParada;
-    /* Sem direção guiada em nenhuma pista: o carro tem rumo próprio e quem faz a curva é o volante.
-     * (A guiada só existe para os testes automáticos, que dirigem o carro com comandos simples.) */
-    corrida->jogador.direcaoLivre = pista->semDirecaoGuiada || !configuracoesAtuais()->direcaoGuiada;
+    corrida->jogador.direcaoLivre = semGuiada;
     corrida->classificacao[0] = &corrida->jogador;
+    corrida->humanos[0] = &corrida->jogador;
 
-    /* Rivais: todos os carros, menos o que o jogador pegou */
-    int rival = 0;
+    int rival = 0;   /* a vaga em rivais[] que está sendo preenchida */
+
+    /* ---- Os outros humanos: carros numa vaga de rivais[], mas dirigidos por gente ----
+     * Eles NÃO levam defesa, revide nem variação: nada de IA os toca enquanto estiverem
+     * correndo (veja atualizarCorrida e ajustarPelotao). */
+    for (int h = 1; h < humanos; h++) {
+        int numero = formacao->numeroDoCarro[h] % TOTAL_CARROS;
+        Carro *dele = &corrida->rivais[rival];
+        *dele = criarCarroDaFicha(FICHAS[numero], numero, pista);
+        colocarNoGrid(dele, pista, LUGAR_DO_JOGADOR - h);
+        dele->controladoPeloJogador = 1;
+        dele->voltasDaProva = ficha->voltas;
+        dele->gastaPneu = gastaPneu;
+        dele->metrosDeUmJogoDePneus *= escalaDoDesgaste(pista);
+        dele->pitFeito = !temParada;
+        dele->duracaoDaTroca = DURACAO_DA_TROCA;   /* a troca de um humano é a do jogador, não a dos rivais */
+        dele->voltaDoPit = 0;                      /* humano decide sozinho quando entrar no box */
+        dele->direcaoLivre = semGuiada;
+        /* A habilidade só vale depois da bandeirada dele, quando a IA leva o carro embora: fica no
+         * meio da tabela do nível, para o carro não virar uma pedra nem um foguete */
+        dele->habilidade = (ficha->habilidadeDaPole + ficha->habilidadeDoUltimo) / 2.0f;
+        dele->sorteio = 2654435761u * (unsigned int) (h + 1) + 40503u * corridasIniciadas;
+        corrida->humanos[h] = dele;
+        corrida->classificacao[rival + 1] = dele;
+        rival++;
+    }
+
+    /* ---- Os rivais de IA: todo carro que nenhum humano pegou ----
+     * Com um humano, totalDaIA é TOTAL_RIVAIS e a escala de habilidade sai exatamente igual
+     * à do código de antes (o teste de regressão confere isso). */
+    int totalDaIA = TOTAL_CARROS - humanos;
+    int ultimoDaIA = (totalDaIA > 1) ? totalDaIA - 1 : 1;   /* o divisor da escala de habilidade */
+    int ordemDaIA = 0;     /* 0 é o mais rápido da IA (a "pole" dela) */
+    int lugarDaIA = 0;     /* o primeiro lugar do grid que nenhum humano tomou */
     for (int numero = 0; numero < TOTAL_CARROS; numero++) {
-        if (numero == carroDoJogador) {
+        if (carroTomado[numero]) {
             continue;
         }
-        corrida->rivais[rival] = criarCarroDaFicha(FICHAS[numero], numero, pista);
-        colocarNoGrid(&corrida->rivais[rival], pista, rival);   /* rivais nos lugares 0 a TOTAL_RIVAIS - 1 */
-        corrida->rivais[rival].habilidade = ficha->habilidadeDaPole
-            - (ficha->habilidadeDaPole - ficha->habilidadeDoUltimo) * rival / (TOTAL_RIVAIS - 1);
-        corrida->rivais[rival].voltasDaProva = ficha->voltas;
-        corrida->rivais[rival].defesa = ficha->defesa;
-        corrida->rivais[rival].vontadeDeRevide = ficha->revide;
-        corrida->rivais[rival].variacao = ficha->variacao;
-        corrida->rivais[rival].sorteio = 2654435761u * (unsigned int) (rival + 1) + 40503u * corridasIniciadas;
-        corrida->rivais[rival].gastaPneu = gastaPneu;
-        corrida->rivais[rival].metrosDeUmJogoDePneus *= escalaDoDesgaste(pista);
+        while (lugarDaIA < TOTAL_CARROS && lugarTomado[lugarDaIA]) {
+            lugarDaIA++;
+        }
+        Carro *oRival = &corrida->rivais[rival];
+        *oRival = criarCarroDaFicha(FICHAS[numero], numero, pista);
+        colocarNoGrid(oRival, pista, lugarDaIA++);
+        oRival->habilidade = ficha->habilidadeDaPole
+            - (ficha->habilidadeDaPole - ficha->habilidadeDoUltimo) * ordemDaIA / ultimoDaIA;
+        oRival->voltasDaProva = ficha->voltas;
+        oRival->defesa = ficha->defesa;
+        oRival->vontadeDeRevide = ficha->revide;
+        oRival->variacao = ficha->variacao;
+        oRival->sorteio = 2654435761u * (unsigned int) (ordemDaIA + 1) + 40503u * corridasIniciadas;
+        oRival->gastaPneu = gastaPneu;
+        oRival->metrosDeUmJogoDePneus *= escalaDoDesgaste(pista);
+        /* De propósito SEM mexer em direcaoLivre: criarCarro deixa em 0, e a IA sempre dirigiu
+         * com a direção guiada — é o modelo para o qual ela foi acertada. Pôr a IA no rumo livre
+         * a faria sair da pista nas curvas. */
         /* Cada um para numa volta, para os boxes não lotarem; na troca, eles são mais lentos que o Guido */
-        corrida->rivais[rival].voltaDoPit = temParada ? 2 + rival * 5 % (ficha->voltas - 2) : 0;
-        corrida->rivais[rival].pitFeito = !temParada;
-        corrida->rivais[rival].duracaoDaTroca = TROCA_MAIS_RAPIDA_DOS_RIVAIS + (rival % 6) * PASSO_DA_TROCA_DOS_RIVAIS;
-        corrida->classificacao[rival + 1] = &corrida->rivais[rival];
+        oRival->voltaDoPit = temParada ? 2 + ordemDaIA * 5 % (ficha->voltas - 2) : 0;
+        oRival->pitFeito = !temParada;
+        oRival->duracaoDaTroca = TROCA_MAIS_RAPIDA_DOS_RIVAIS + (ordemDaIA % 6) * PASSO_DA_TROCA_DOS_RIVAIS;
+        corrida->classificacao[rival + 1] = oRival;
         rival++;
+        ordemDaIA++;
     }
 
     corrida->totalSegmentos = contarSegmentos(pista);
@@ -252,6 +327,110 @@ void iniciarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador, NivelDaC
     }
 
     ordenarCarrosPorDistancia(corrida->classificacao, TOTAL_CARROS);
+}
+
+/*
+ * iniciarCorrida
+ * A corrida de um jogador: ele com o carro escolhido na garagem e os outros 16 na IA.
+ * Recebe: a corrida a preparar, a pista, o número do carro do jogador e o nível.
+ * Devolve: nada.
+ */
+void iniciarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador, NivelDaCorrida nivel) {
+    montarCorrida(corrida, pista, carroDoJogador, nivel, NULL);
+}
+
+/*
+ * iniciarCorridaDividida
+ * A corrida de tela dividida: os humanos da formação largam nos últimos lugares e a IA pega
+ * os carros e as vagas que sobraram. Carros repetidos são separados aqui mesmo: dois carros
+ * iguais na tela dividida fariam cada um perder o próprio de vista no meio do pelotão.
+ * Recebe: a corrida a preparar, a pista, o nível e a formação (quem joga, com qual carro).
+ * Devolve: nada.
+ */
+void iniciarCorridaDividida(Corrida *corrida, Pista *pista, NivelDaCorrida nivel, const FormacaoLocal *formacao) {
+    FormacaoLocal minha = *formacao;
+    for (int h = 1; h < minha.totalDeJogadores; h++) {
+        for (int antes = 0; antes < h; antes++) {
+            if (minha.numeroDoCarro[h] == minha.numeroDoCarro[antes]) {
+                minha.numeroDoCarro[h] = (minha.numeroDoCarro[h] + 1) % TOTAL_CARROS;
+                antes = -1;   /* recomeça a conferência com o carro novo */
+            }
+        }
+    }
+    montarCorrida(corrida, pista, minha.numeroDoCarro[0], nivel, &minha);
+}
+
+/*
+ * carroEDeHumano
+ * Recebe: a corrida e um carro dela.
+ * Devolve: 1 se esse carro é de um humano (e portanto a IA não o dirige nem o ajusta), 0 se não.
+ */
+int carroEDeHumano(const Corrida *corrida, const Carro *carro) {
+    for (int h = 0; h < corrida->totalDeHumanos; h++) {
+        if (corrida->humanos[h] == carro) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/*
+ * carroDoHumano
+ * Recebe: a corrida e qual humano (0 = o jogador de sempre).
+ * Devolve: o carro dele (o do jogador 1 se o número pedido não existir nesta corrida).
+ */
+Carro *carroDoHumano(Corrida *corrida, int humano) {
+    if (humano <= 0 || humano >= corrida->totalDeHumanos || corrida->humanos[humano] == NULL) {
+        return &corrida->jogador;
+    }
+    return corrida->humanos[humano];
+}
+
+/*
+ * todosOsHumanosChegaram
+ * Recebe: a corrida.
+ * Devolve: 1 quando todos os jogadores de verdade já completaram as voltas. É isto, e não
+ *          corrida->terminou (que fala só do jogador 1), que libera a tela de resultado na
+ *          tela dividida: quem chega primeiro não tira o volante do outro.
+ */
+int todosOsHumanosChegaram(const Corrida *corrida) {
+    for (int h = 0; h < corrida->totalDeHumanos; h++) {
+        if (!corrida->terminouPara[h]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/*
+ * distanciaDeReferencia
+ * De quem um rival se ajusta no pelotão. Com um humano é a distância dele, como sempre. Com
+ * dois, o pelotão se ajusta à DUPLA: um rival à frente dos dois espera pelo que está mais
+ * adiantado, um rival atrás dos dois se esforça para alcançar o que está mais atrasado, e um
+ * rival no meio da dupla não se ajusta a ninguém — ele já está onde a corrida acontece. Olhar
+ * só para um dos dois deixaria o outro correndo sozinho, com a pista limpa ou com o pelotão
+ * inteiro em cima.
+ * Recebe: a corrida e o rival.
+ * Devolve: a distância percorrida de que o rival se ajusta.
+ */
+static float distanciaDeReferencia(const Corrida *corrida, const Carro *rival) {
+    float frente = corrida->humanos[0]->distanciaPercorrida;
+    float tras = frente;
+    for (int h = 1; h < corrida->totalDeHumanos; h++) {
+        if (corrida->humanos[h] == NULL) {
+            continue;
+        }
+        float dele = corrida->humanos[h]->distanciaPercorrida;
+        frente = fmaxf(frente, dele);
+        tras = fminf(tras, dele);
+    }
+    if (rival->distanciaPercorrida > frente) {
+        return frente;
+    }
+    if (rival->distanciaPercorrida < tras) {
+        return tras;
+    }
+    return rival->distanciaPercorrida;   /* entre os dois: nada a ajustar */
 }
 
 /*
@@ -861,21 +1040,29 @@ static int moverCarro(Corrida *corrida, Carro *carro, Comandos comandos, float t
 
 /*
  * ajustarPelotao
- * O esforço e o motor de cada rival: o pelotão (a distância até o jogador) e o revide (quem o
- * jogador acabou de passar). Depois da chegada do jogador, ninguém se ajusta.
+ * O esforço e o motor de cada rival: o pelotão (a distância até os humanos) e o revide (quem o
+ * jogador acabou de passar). Depois da chegada de todos os humanos, ninguém se ajusta.
+ * Os carros de humano ficam de fora: ritmoDoPelotao multiplica o motor (carro.c), então mexer
+ * nele seria mexer no carro de quem está com o volante na mão.
  * Recebe: a corrida e o tempo do quadro.
  * Devolve: nada.
  */
 static void ajustarPelotao(Corrida *corrida, float tempoQuadro) {
     const FichaDoNivel *ficha = fichaDoNivel(corrida->nivel);
-    float forca = corrida->terminou ? 0.0f : ficha->pelotao;
+    float forca = todosOsHumanosChegaram(corrida) ? 0.0f : ficha->pelotao;
     for (int i = 0; i < TOTAL_RIVAIS; i++) {
         Carro *rival = &corrida->rivais[i];
-        float diferenca = (rival->distanciaPercorrida - corrida->jogador.distanciaPercorrida) / UNIDADES_POR_METRO;
+        if (carroEDeHumano(corrida, rival)) {
+            continue;
+        }
+        float diferenca = (rival->distanciaPercorrida - distanciaDeReferencia(corrida, rival)) / UNIDADES_POR_METRO;
 
-        /* O revide: estava na frente, o jogador passou, e de perto */
-        int aFrente = diferenca > 0.0f;
-        if (rival->aFrenteDoJogador && !aFrente && diferenca > -PERTO_PARA_REVIDAR && !corrida->terminou
+        /* O revide: estava na frente, o jogador passou, e de perto. Fica medido no jogador 1,
+         * e não na dupla: aFrenteDoJogador é um campo só no Carro, e é a ultrapassagem DELE que
+         * o rival guarda para revidar. Na tela dividida, quem passa pelo jogador 2 não revida. */
+        float doJogador = (rival->distanciaPercorrida - corrida->jogador.distanciaPercorrida) / UNIDADES_POR_METRO;
+        int aFrente = doJogador > 0.0f;
+        if (rival->aFrenteDoJogador && !aFrente && doJogador > -PERTO_PARA_REVIDAR && !corrida->terminou
             && !carroNoPit(rival) && !carroNoPit(&corrida->jogador)) {
             rival->revide = SEGUNDOS_DE_REVIDE * rival->vontadeDeRevide;
         }
@@ -916,16 +1103,18 @@ static void ajustarPelotao(Corrida *corrida, float tempoQuadro) {
  * Avança a corrida um quadro:
  *   0) mede o vácuo de cada carro;
  *   1) move o jogador com os comandos do teclado;
+ *  1b) move os outros humanos da tela dividida, com os comandos que o main.c já deixou em
+ *      corrida->comandosDosHumanos;
  *   2) move cada rival com os comandos da IA;
  *   3) trata as batidas;
  *   4) reordena a classificação (Insertion Sort);
- *   5) verifica se o jogador terminou.
+ *   5) verifica quais humanos terminaram.
  * Antes disso, enquanto a contagem regressiva não acaba, ninguém sai
  * do lugar e o relógio não anda.
- * Depois do fim, em qualquer posição, a IA assume o carro do jogador para uma
+ * Depois da bandeirada de um humano, em qualquer posição, a IA assume o carro dele para uma
  * volta sem fim, e os rivais continuam correndo. O relógio também continua, para cada rival ter
- * o seu tempo de chegada; o do jogador fica guardado no carro dele.
- * Recebe: a corrida, os comandos do jogador e o tempo do quadro.
+ * o seu tempo de chegada; o de cada humano fica guardado no carro dele.
+ * Recebe: a corrida, os comandos do jogador 1 e o tempo do quadro.
  * Devolve: nada.
  */
 void atualizarCorrida(Corrida *corrida, Comandos comandosJogador, float tempoQuadro) {
@@ -934,6 +1123,13 @@ void atualizarCorrida(Corrida *corrida, Comandos comandosJogador, float tempoQua
         /* Parado no grid: acelerar só sobe o conta-giros (e acende as lanternas) */
         corrida->jogador.ultimosComandos = comandosJogador;
         atualizarMotor(&corrida->jogador.motor, 0.0f, comandosJogador.acelerar && !comandosJogador.frear, 0, 0, tempoQuadro);
+        /* O mesmo para o conta-giros do jogador 2, no painel dele */
+        for (int h = 1; h < corrida->totalDeHumanos; h++) {
+            Carro *dele = corrida->humanos[h];
+            Comandos comandos = corrida->comandosDosHumanos[h];
+            dele->ultimosComandos = comandos;
+            atualizarMotor(&dele->motor, 0.0f, comandos.acelerar && !comandos.frear, 0, 0, tempoQuadro);
+        }
         return;
     }
 
@@ -963,10 +1159,31 @@ void atualizarCorrida(Corrida *corrida, Comandos comandosJogador, float tempoQua
         registrarVolta(corrida, &corrida->jogador);
     }
 
-    /* 2) Rivais: o pelotão se ajusta ao jogador, e a IA olha o carro logo à frente de cada um */
+    /* 1b) Os outros humanos da tela dividida. Depois da bandeirada de um deles, a IA leva o
+     * carro embora, igual ao que acontece com o do jogador 1 */
+    for (int h = 1; h < corrida->totalDeHumanos; h++) {
+        Carro *dele = corrida->humanos[h];
+        Comandos comandos = corrida->comandosDosHumanos[h];
+        if (dele->tempoDeChegada > 0.0f) {
+            dele->controladoPeloJogador = 0;
+            dele->re = 0.0f;
+            comandos = atualizarIA(dele, corrida->pista);
+        }
+        cruzou = moverCarro(corrida, dele, comandos, tempoQuadro);
+        atualizarSetores(corrida, dele, cruzou);
+        if (cruzou) {
+            registrarVolta(corrida, dele);
+        }
+    }
+
+    /* 2) Rivais: o pelotão se ajusta aos humanos, e a IA olha o carro logo à frente de cada um.
+     * Os carros de humano já andaram em 1 e 1b: a IA não os toca */
     ajustarPelotao(corrida, tempoQuadro);
     for (int i = 0; i < TOTAL_RIVAIS; i++) {
         Carro *rival = &corrida->rivais[i];
+        if (carroEDeHumano(corrida, rival)) {
+            continue;
+        }
         Comandos comandosIA = atualizarIA(rival, corrida->pista);
         cruzou = moverCarro(corrida, rival, comandosIA, tempoQuadro);
         atualizarSetores(corrida, rival, cruzou);
@@ -981,13 +1198,24 @@ void atualizarCorrida(Corrida *corrida, Comandos comandosJogador, float tempoQua
     /* 4) Classificação */
     ordenarCarrosPorDistancia(corrida->classificacao, TOTAL_CARROS);
 
-    /* 5) Fim de corrida */
-    if (!corrida->terminou && corrida->jogador.voltas >= corrida->totalVoltas) {
-        corrida->terminou = 1;
-        corrida->posicaoFinal = posicaoDoCarro(corrida, &corrida->jogador);
-        if (!corrida->jogador.pitFeito) {
-            corrida->desclassificado = 1;   /* não fez a parada obrigatória */
-            corrida->posicaoFinal = TOTAL_CARROS;
+    /* 5) Fim de corrida, de cada humano. O do jogador 1 também vai para corrida->terminou,
+     * corrida->posicaoFinal e corrida->desclassificado, que é onde o resto do jogo (o HUD, o
+     * recorde, a vibração) sempre olhou */
+    for (int h = 0; h < corrida->totalDeHumanos; h++) {
+        Carro *dele = corrida->humanos[h];
+        if (corrida->terminouPara[h] || dele->voltas < corrida->totalVoltas) {
+            continue;
+        }
+        corrida->terminouPara[h] = 1;
+        corrida->posicaoFinalDosHumanos[h] = posicaoDoCarro(corrida, dele);
+        if (!dele->pitFeito) {
+            corrida->desclassificadoDosHumanos[h] = 1;   /* não fez a parada obrigatória */
+            corrida->posicaoFinalDosHumanos[h] = TOTAL_CARROS;
+        }
+        if (h == 0) {
+            corrida->terminou = 1;
+            corrida->posicaoFinal = corrida->posicaoFinalDosHumanos[0];
+            corrida->desclassificado = corrida->desclassificadoDosHumanos[0];
         }
     }
 }
@@ -1105,7 +1333,13 @@ int jogadorVenceu(Corrida *corrida) {
  * Devolve: 1 se o jogador já cruzou a linha final em 1º, 2º ou 3º lugar (e não foi desclassificado), 0 se não.
  */
 int jogadorNoPodio(Corrida *corrida) {
-    return corrida->terminou && !corrida->desclassificado && corrida->posicaoFinal >= 1 && corrida->posicaoFinal <= 3;
+    /* Na tela dividida a festa não entra: ela é um filme de uma câmera só em tela cheia (com as
+     * tarjas de cinema e o aviso no meio), e são dois jogadores no sofá — os dois podem estar no
+     * pódio ao mesmo tempo, e não há como dar a tela inteira a um deles. Cada um vê o cartão de
+     * chegada na metade dele. Como todo o jogo pergunta a festa por aqui (o render, o main, a
+     * vibração), desligar num lugar só basta. */
+    return corrida->totalDeHumanos == 1 && corrida->terminou && !corrida->desclassificado
+           && corrida->posicaoFinal >= 1 && corrida->posicaoFinal <= 3;
 }
 
 /*

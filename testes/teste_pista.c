@@ -3205,6 +3205,20 @@ static void testarConfiguracoes(void) {
     }
     verificar(segundoBotao == 0, "nenhum comando vem repetido em dois botoes");
 
+    /* No teclado, cada COLUNA tem de ser um teclado completo: na tela dividida a coluna 1 e o
+     * jogador 1 (as setas) e a coluna 2 e o jogador 2 (o WASD), com a tecla de cada comando do
+     * lado da mao que vai usa-la */
+    int semColuna2 = 0;
+    for (int a = 0; a < TOTAL_ACOES; a++) {
+        semColuna2 += config.comandos[a][COLUNA_TECLA_2] == SEM_COMANDO;
+    }
+    verificar(semColuna2 == 0, "cada coluna de teclas e um teclado completo: o jogador 2 tem todos os comandos");
+    verificar(config.comandos[ACAO_NITRO][COLUNA_TECLA_1] == 46, "o nitro do jogador 1 e o ponto, ao lado das setas");
+    verificar(config.comandos[ACAO_NITRO][COLUNA_TECLA_2] == 81, "o nitro do jogador 2 e o Q, ao lado do WASD");
+    verificar(config.comandos[ACAO_FREIO_DE_MAO][COLUNA_TECLA_1] == 344
+              && config.comandos[ACAO_FREIO_DE_MAO][COLUNA_TECLA_2] == 340,
+              "cada shift fica do lado das suas teclas de direcao");
+
     /* Trocando para uma tecla ja usada, as duas trocam de lugar */
     int doFreio = config.comandos[ACAO_FREAR][COLUNA_TECLA_1], doNitro = config.comandos[ACAO_NITRO][COLUNA_TECLA_1];
     definirComando(&config, ACAO_NITRO, COLUNA_TECLA_1, doFreio);
@@ -3249,6 +3263,24 @@ static void testarConfiguracoes(void) {
     verificar(lida.vibracaoLigada == 1 && lida.forcaDaVibracao == 100 && lida.zonaMorta == 12 && lida.respostaDoVolante == VOLANTE_NORMAL, "valores absurdos ficam no padrao");
     verificar(lida.comandos[ACAO_NITRO][COLUNA_TECLA_1] != SEM_COMANDO && lida.comandos[ACAO_NITRO][COLUNA_BOTAO_1] != SEM_COMANDO, "nenhum comando fica sem tecla, nem com o arquivo estragado");
     verificar(lida.inverterCameraY == 1, "e o que estava certo no arquivo vale");
+    remove(arquivo);
+
+    /* Um arquivo de antes da tela dividida (sem a linha "versao") tem os comandos de um jogador so:
+     * o nitro no espaco, que na tela dividida fica debaixo da mao do jogador 2, e a coluna 2 sem
+     * nitro nenhum. A tabela inteira volta ao padrao novo, e o resto do arquivo e lido igual */
+    FILE *antigo = fopen(arquivo, "w");
+    fprintf(antigo, "comando nitro 32 0 6 0\nresolucao 3\nvibracao 0\n");
+    fclose(antigo);
+    carregarConfiguracoes(&lida, arquivo);
+    verificar(lida.comandos[ACAO_NITRO][COLUNA_TECLA_1] == 46 && lida.comandos[ACAO_NITRO][COLUNA_TECLA_2] == 81,
+              "arquivo antigo adota o teclado novo: nitro no ponto e no Q");
+    verificar(lida.resolucao == 3 && lida.vibracaoLigada == 0, "e o resto das configuracoes dele vale");
+    /* Com a linha da versao, os comandos do arquivo mandam */
+    FILE *novo = fopen(arquivo, "w");
+    fprintf(novo, "versao 2\ncomando nitro 32 81 6 0\n");
+    fclose(novo);
+    carregarConfiguracoes(&lida, arquivo);
+    verificar(lida.comandos[ACAO_NITRO][COLUNA_TECLA_1] == 32, "arquivo da versao de agora mantem a escolha do jogador");
     remove(arquivo);
 
     /* A vibracao obedece */
@@ -4460,6 +4492,184 @@ static void testarContatoDasBatidas(void) {
     liberarPista(pista);
 }
 
+
+/*
+ * testarGridDaTelaDividida
+ * A formação de dois jogadores no mesmo aparelho: cada um com o seu carro, os dois nas últimas
+ * vagas do grid e a IA pegando tudo o que sobrou, sem repetir carro nem lugar.
+ */
+static void testarGridDaTelaDividida(void) {
+    printf("\n43) Tela dividida: dois humanos no mesmo grid\n");
+    Pista *pista = criarPista();
+    Corrida corrida;
+    FormacaoLocal formacao = { 2, { 0, 3 } };
+    iniciarCorridaDividida(&corrida, pista, NIVEL_MEDIO, &formacao);
+
+    verificar(corrida.totalDeHumanos == 2, "a corrida tem dois humanos");
+    verificar(corrida.humanos[0] == &corrida.jogador, "o humano 0 e o carro do jogador de sempre");
+    verificar(corrida.humanos[1] != NULL && corrida.humanos[1] != &corrida.jogador,
+              "o humano 1 tem um carro proprio, numa vaga de rival");
+    verificar(corrida.humanos[0]->numero == 0 && corrida.humanos[1]->numero == 3,
+              "cada um ficou com o carro que pediu");
+    verificar(corrida.humanos[0]->controladoPeloJogador && corrida.humanos[1]->controladoPeloJogador,
+              "os dois carros sao de gente, nao da IA");
+    verificar(carroEDeHumano(&corrida, corrida.humanos[1]), "carroEDeHumano acha o segundo humano");
+    verificar(carroDoHumano(&corrida, 1) == corrida.humanos[1], "carroDoHumano devolve o carro certo");
+    verificar(carroDoHumano(&corrida, 9) == &corrida.jogador, "humano que nao existe cai no jogador 1");
+
+    /* Os 17 carros aparecem uma vez cada, e os 15 que sobraram sao da IA */
+    int vezes[TOTAL_CARROS];
+    for (int n = 0; n < TOTAL_CARROS; n++) {
+        vezes[n] = 0;
+    }
+    int daIA = 0;
+    vezes[corrida.jogador.numero]++;
+    for (int i = 0; i < TOTAL_RIVAIS; i++) {
+        vezes[corrida.rivais[i].numero]++;
+        if (!carroEDeHumano(&corrida, &corrida.rivais[i])) {
+            daIA++;
+        }
+    }
+    int repetido = 0;
+    for (int n = 0; n < TOTAL_CARROS; n++) {
+        repetido = repetido || vezes[n] != 1;
+    }
+    verificar(!repetido, "os 17 carros aparecem uma vez cada");
+    verificar(daIA == TOTAL_CARROS - 2, "a IA preenche os outros 15 lugares");
+
+    /* Lugares do grid: ninguem larga no mesmo lugar, e os dois humanos ficam atras de todos */
+    int lugarRepetido = 0, todaIAaFrente = 1;
+    for (int i = 0; i < TOTAL_CARROS; i++) {
+        for (int j = i + 1; j < TOTAL_CARROS; j++) {
+            float a = corrida.classificacao[i]->distanciaPercorrida;
+            float b = corrida.classificacao[j]->distanciaPercorrida;
+            lugarRepetido = lugarRepetido || fabsf(a - b) < 0.01f;
+        }
+    }
+    for (int i = 0; i < TOTAL_RIVAIS; i++) {
+        Carro *rival = &corrida.rivais[i];
+        if (!carroEDeHumano(&corrida, rival)) {
+            todaIAaFrente = todaIAaFrente
+                && rival->distanciaPercorrida > corrida.humanos[1]->distanciaPercorrida;
+        }
+    }
+    verificar(!lugarRepetido, "nenhum carro larga no lugar de outro");
+    verificar(corrida.humanos[1]->distanciaPercorrida > corrida.jogador.distanciaPercorrida,
+              "o jogador 2 larga a frente do jogador 1 (os dois na ultima fila)");
+    verificar(corrida.humanos[0]->deslocamentoLateral * corrida.humanos[1]->deslocamentoLateral < 0.0f,
+              "e em lados opostos da pista, lado a lado");
+    verificar(todaIAaFrente, "toda a IA larga a frente dos dois");
+
+    /* Carros repetidos no pedido sao separados, senao cada um perderia o proprio de vista */
+    Corrida repetida;
+    FormacaoLocal iguais = { 2, { 5, 5 } };
+    iniciarCorridaDividida(&repetida, pista, NIVEL_FACIL, &iguais);
+    verificar(repetida.humanos[0]->numero != repetida.humanos[1]->numero,
+              "pedir o mesmo carro para os dois da carros diferentes");
+
+    liberarPista(pista);
+}
+
+/*
+ * testarCorridaDeUmJogadorNaoMudou
+ * Guarda de regressao do montarCorrida: a corrida de um jogador tem de montar o MESMO grid de
+ * antes da tela dividida, com a mesma escala de habilidade da IA.
+ */
+static void testarCorridaDeUmJogadorNaoMudou(void) {
+    printf("\n44) A corrida de um jogador monta o mesmo grid de antes\n");
+    Pista *pista = criarPista();
+    Corrida corrida;
+    iniciarCorrida(&corrida, pista, 0, NIVEL_MEDIO);
+    const FichaDoNivel *ficha = fichaDoNivel(NIVEL_MEDIO);
+
+    verificar(corrida.totalDeHumanos == 1, "um humano");
+    verificar(corrida.humanos[0] == &corrida.jogador, "humanos[0] e o jogador");
+    verificar(corrida.humanos[1] == NULL, "nao ha um segundo humano");
+    verificar(todosOsHumanosChegaram(&corrida) == 0, "ninguem chegou ainda");
+
+    int ordemCerta = 1, habilidadeCerta = 1;
+    for (int r = 0; r < TOTAL_RIVAIS; r++) {
+        ordemCerta = ordemCerta && corrida.rivais[r].numero == r + 1;   /* o carro 0 e do jogador */
+        float esperada = ficha->habilidadeDaPole
+            - (ficha->habilidadeDaPole - ficha->habilidadeDoUltimo) * r / (TOTAL_RIVAIS - 1);
+        habilidadeCerta = habilidadeCerta && fabsf(corrida.rivais[r].habilidade - esperada) < 0.0001f;
+    }
+    verificar(ordemCerta, "os rivais sao os carros 1 a 16, na ordem");
+    verificar(habilidadeCerta, "a escala de habilidade da IA e a mesma de antes");
+
+    liberarPista(pista);
+}
+
+/*
+ * testarDoisVolantesNaMesmaCorrida
+ * Os dois jogadores dirigem de verdade: cada um com os seus comandos, cada um com o seu contador
+ * de voltas, e a IA nao toma o volante de ninguem antes da bandeirada dele.
+ */
+static void testarDoisVolantesNaMesmaCorrida(void) {
+    printf("\n45) Tela dividida: os dois volantes andam, cada um com os seus comandos\n");
+    Pista *pista = criarPista();
+    Corrida corrida;
+    FormacaoLocal formacao = { 2, { 0, 1 } };
+    iniciarCorridaDividida(&corrida, pista, NIVEL_FACIL, &formacao);
+    float quadro = 1.0f / 60.0f;
+    int quadrosMaximos = 60 * 60 * 15;   /* 15 minutos de jogo */
+
+    /* O jogador 1 acelera a fundo; o 2 toca o freio de vez em quando, para chegar depois.
+     * A cada quadro em que os dois pedidos sao diferentes, confere-se que cada carro recebeu os
+     * comandos DO SEU jogador: e isto, e nao o tempo de prova, que prova que os volantes estao
+     * separados (o tempo depende da ficha de cada carro e do transito dos 15 rivais). */
+    int quadros = 0, roubaramOVolante = 0, quadrosSeparados = 0, comandosTrocados = 0;
+    while (!todosOsHumanosChegaram(&corrida) && quadros < quadrosMaximos) {
+        int freando = (quadros % 10) == 0;
+        Comandos deUm = { 1, 0, 0, 0, 0.0f, 0, 0 };
+        deUm.esquerda = corrida.humanos[0]->deslocamentoLateral > 0.1f;
+        deUm.direita = corrida.humanos[0]->deslocamentoLateral < -0.1f;
+        Comandos deDois = { !freando, freando, 0, 0, 0.0f, 0, 0 };
+        deDois.esquerda = corrida.humanos[1]->deslocamentoLateral > 0.1f;
+        deDois.direita = corrida.humanos[1]->deslocamentoLateral < -0.1f;
+        corrida.comandosDosHumanos[1] = deDois;
+        atualizarCorrida(&corrida, deUm, quadro);
+        if (!corrida.terminouPara[1] && !corrida.humanos[1]->controladoPeloJogador) {
+            roubaramOVolante = 1;
+        }
+        /* Depois da largada, e so enquanto os dois ainda estao dirigindo */
+        if (freando && corrida.contagemRegressiva <= 0.0f
+            && !corrida.terminouPara[0] && !corrida.terminouPara[1]) {
+            quadrosSeparados++;
+            if (corrida.humanos[0]->ultimosComandos.frear || !corrida.humanos[1]->ultimosComandos.frear) {
+                comandosTrocados = 1;
+            }
+        }
+        quadros++;
+    }
+    printf("     jogador 1: %.2f s; jogador 2: %.2f s (%d quadros com pedidos diferentes)\n",
+           corrida.humanos[0]->tempoDeChegada, corrida.humanos[1]->tempoDeChegada, quadrosSeparados);
+
+    verificar(todosOsHumanosChegaram(&corrida), "a corrida so acaba quando os DOIS chegam");
+    verificar(corrida.terminouPara[0] && corrida.terminouPara[1], "cada um tem a sua bandeirada");
+    verificar(!roubaramOVolante, "a IA nao toma o volante de um humano antes de ele chegar");
+    verificar(corrida.humanos[0]->voltas >= corrida.totalVoltas
+              && corrida.humanos[1]->voltas >= corrida.totalVoltas, "os dois contadores de volta andaram");
+    verificar(quadrosSeparados > 100, "houve muitos quadros com pedidos diferentes para os dois");
+    verificar(!comandosTrocados, "cada carro recebeu os comandos do SEU jogador, nunca os do outro");
+    verificar(corrida.humanos[0]->tempoDeChegada < corrida.humanos[1]->tempoDeChegada,
+              "quem nao tocou o freio chegou antes");
+    verificar(corrida.posicaoFinalDosHumanos[0] != corrida.posicaoFinalDosHumanos[1],
+              "cada um tem a sua colocacao");
+    verificar(corrida.posicaoFinal == corrida.posicaoFinalDosHumanos[0],
+              "corrida.posicaoFinal continua sendo a do jogador 1");
+    verificar(corrida.desclassificado == corrida.desclassificadoDosHumanos[0],
+              "e corrida.desclassificado tambem");
+
+    /* Depois da bandeirada dele, a IA leva o carro do jogador 2 embora */
+    Comandos nada = { 0, 0, 0, 0, 0.0f, 0, 0 };
+    corrida.comandosDosHumanos[1] = nada;
+    atualizarCorrida(&corrida, nada, quadro);
+    verificar(!corrida.humanos[1]->controladoPeloJogador, "depois de chegar, quem dirige o carro 2 e a IA");
+
+    liberarPista(pista);
+}
+
 int main(int argc, char *argv[]) {
     int modoDetalhado = (argc > 1 && strcmp(argv[1], "-v") == 0);
 
@@ -4515,6 +4725,9 @@ int main(int argc, char *argv[]) {
     testarColisaoEEquilibrio();
     testarCameraLivre();
     testarNitro();
+    testarGridDaTelaDividida();
+    testarCorridaDeUmJogadorNaoMudou();
+    testarDoisVolantesNaMesmaCorrida();
 
     if (totalFalhas == 0) {
         printf("\nTodos os testes passaram.\n");

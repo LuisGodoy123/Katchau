@@ -48,26 +48,13 @@
 #include "controle.h"
 #include "passeio.h"
 #include <ctype.h>
+#include <math.h>
 
 /* Na vitória, o painel de chegada espera um pouco para o jogador ver o
  * confete e o refrão entrando */
 #define SEGUNDOS_ANTES_DE_SEGUIR 1.5f   /* depois da bandeirada */
 #define FORCA_DO_TOQUE 0.7f   /* o toque de teste da vibração, nas configurações */
 #define ATRASO_DO_AVISO_NA_FESTA  4.0f   /* segundos depois de cruzar a linha, no pódio, até aparecer o "aperte qualquer botão" (a festa passa limpa) */
-
-/*
- * lerComandos
- * Traduz as teclas apertadas para os comandos do carro.
- * As teclas e os botões são os escolhidos nas configurações (controle.c).
- * Recebe: nada.
- * Devolve: os comandos deste quadro.
- */
-static Comandos lerComandos(void) {
-    Comandos comandos = { 0, 0, 0, 0, 0.0f, 0, 0 };
-    lerComandosDoTeclado(&comandos);
-    somarComandosDoControle(&comandos);
-    return comandos;
-}
 
 /*
  * registrarTelemetria
@@ -166,13 +153,16 @@ static void medirQuadro(float tempoQuadro, int agora) {
  * Um quadro da corrida: o jogador dirige, a IA dirige os rivais.
  * ESC (ou START) pausa: a corrida e os sons congelam e o jogador escolhe
  * entre continuar e voltar ao menu principal. Antes da contagem passa a
- * apresentação da largada (apresentacao.c). O touchpad (ou C) troca a
- * distância da câmera. Depois da chegada, ENTER (ou A) vai ao resultado.
+ * apresentação da largada (apresentacao.c). O touchpad (ou C, e V para o
+ * jogador 2 na tela dividida) troca a distância da câmera. Depois da chegada
+ * dos dois, ENTER (ou A) vai ao resultado.
  * Recebe: a corrida, o estado do menu (para a pausa), se a corrida está
- *         pausada (é alterado aqui) e o tempo do quadro.
+ *         pausada (é alterado aqui), a apresentação, de onde vêm os comandos de cada jogador,
+ *         as visões (a câmera de cada um) e o tempo do quadro.
  * Devolve: a próxima tela.
  */
 static Tela atualizarTelaDaCorrida(Corrida *corrida, EstadoMenu *menu, int *pausada, Apresentacao *apresentacao,
+                                   const EntradaDoJogador entradas[], VisaoDoJogador visoes[],
                                    float tempoQuadro) {
     if (*pausada) {
         EscolhaDaPausa escolha = atualizarPausa(menu);
@@ -186,7 +176,11 @@ static Tela atualizarTelaDaCorrida(Corrida *corrida, EstadoMenu *menu, int *paus
         return TELA_CORRIDA;
     }
 
-    if (IsKeyPressed(KEY_ESCAPE) || controleApertou(BOTAO_START)) {
+    int pediuPausa = IsKeyPressed(KEY_ESCAPE) || controleApertou(BOTAO_START);
+    for (int v = 1; v < corrida->totalDeHumanos; v++) {
+        pediuPausa = pediuPausa || controleDoJogadorApertou(&entradas[v], BOTAO_START);   /* o jogador 2 também pausa */
+    }
+    if (pediuPausa) {
         tocarSom(SOM_CONFIRMAR);
         *pausada = 1;
         abrirPausaDaCorrida(menu);
@@ -199,32 +193,54 @@ static Tela atualizarTelaDaCorrida(Corrida *corrida, EstadoMenu *menu, int *paus
     if (apresentacaoAtiva(apresentacao)) {
         int pular = IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER) || IsKeyPressed(KEY_SPACE) ||
                     controleApertou(BOTAO_CONFIRMAR);
+        for (int v = 1; v < corrida->totalDeHumanos; v++) {
+            pular = pular || controleDoJogadorApertou(&entradas[v], BOTAO_CONFIRMAR);
+        }
         atualizarApresentacao(apresentacao, pular, tempoQuadro);
         return TELA_CORRIDA;
     }
 
-    /* Touchpad (ou C): a câmera vai de perto para médio, longe e volta */
-    if (IsKeyPressed(KEY_C) || controleApertou(BOTAO_CAMERA)) {
-        alternarDistanciaDaCamera();
-        tocarSom(SOM_CURSOR);
+    /* Touchpad (ou C): a câmera vai de perto para médio, longe e volta. Na tela dividida, cada
+     * jogador troca a dele: o 1 no C ou no controle dele, o 2 no V ou no controle dele */
+    for (int v = 0; v < corrida->totalDeHumanos; v++) {
+        int tecla = (v == 0) ? KEY_C : KEY_V;
+        if (IsKeyPressed(tecla) || controleDoJogadorApertou(&entradas[v], BOTAO_CAMERA)) {
+            alternarDistanciaDaVisao(&visoes[v]);
+            tocarSom(SOM_CURSOR);
+        }
     }
 
-    Comandos comandos = lerComandos();
+    /* Os comandos de cada jogador. O do jogador 1 entra por parâmetro, como sempre; os outros,
+     * pelo vetor que atualizarCorrida lê */
+    Comandos comandos;
+    lerComandosDoJogador(&entradas[0], &comandos);
+    for (int h = 1; h < corrida->totalDeHumanos; h++) {
+        lerComandosDoJogador(&entradas[h], &corrida->comandosDosHumanos[h]);
+    }
     atualizarCorrida(corrida, comandos, tempoQuadro);
-    /* O recorde da pista: quando o jogador termina, a melhor volta dele entra no recorde, se for a melhor de todas */
+    /* O recorde da pista: quando o jogador termina, a melhor volta dele entra no recorde, se for a
+     * melhor de todas. Na tela dividida não vale: a corrida se ajusta a dois humanos, o trânsito é
+     * outro e a volta não é comparável com a tabela de um jogador */
     static int recordeRegistrado = 0;
     if (corrida->contagemRegressiva > 0.0f) {
         recordeRegistrado = 0;
     } else if (corrida->terminou && !recordeRegistrado) {
         recordeRegistrado = 1;
-        if (!corrida->desclassificado && corrida->jogador.melhorVolta > 0.0f) {
+        if (corrida->totalDeHumanos == 1 && !corrida->desclassificado && corrida->jogador.melhorVolta > 0.0f) {
             registrarRecorde(corrida->pista->id, corrida->jogador.melhorVolta, corrida->jogador.nome);
         }
     }
     registrarTelemetria(corrida, &comandos);
     /* Espera um pouco: o botão de confirmar é também o freio de mão, e quem o aperta
      * na bandeirada não pode pular a tela da chegada sem querer */
-    int podeSeguir = corrida->tempoDeCorrida - corrida->jogador.tempoDeChegada > SEGUNDOS_ANTES_DE_SEGUIR;
+    /* A espera conta do ÚLTIMO que chegou: na tela dividida, quem terminou primeiro não leva os
+     * dois para a tela de resultado enquanto o outro ainda está na pista */
+    float ultimaChegada = corrida->jogador.tempoDeChegada;
+    for (int h = 1; h < corrida->totalDeHumanos; h++) {
+        ultimaChegada = fmaxf(ultimaChegada, corrida->humanos[h]->tempoDeChegada);
+    }
+    int podeSeguir = todosOsHumanosChegaram(corrida)
+                     && corrida->tempoDeCorrida - ultimaChegada > SEGUNDOS_ANTES_DE_SEGUIR;
     if (jogadorNoPodio(corrida)) {
         /* No pódio (1º, 2º ou 3º) a festa de câmeras e fogos passa sozinha; depois de uns segundos, qualquer botão leva ao resultado */
         int apertou = 0;
@@ -239,8 +255,8 @@ static Tela atualizarTelaDaCorrida(Corrida *corrida, EstadoMenu *menu, int *paus
             tocarSom(SOM_CONFIRMAR);
             return TELA_RESULTADO;
         }
-    } else if (corrida->terminou && podeSeguir && (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER) ||
-                                                   controleApertou(BOTAO_CONFIRMAR))) {
+    } else if (podeSeguir && (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER) ||
+                              controleApertou(BOTAO_CONFIRMAR))) {
         tocarSom(SOM_CONFIRMAR);
         return TELA_RESULTADO;
     }
@@ -263,6 +279,11 @@ static const char *recadoDaCorrida(const Corrida *corrida) {
     pista[i] = '\0';
     if (!corrida->terminou) {
         snprintf(texto, sizeof(texto), "%s: CORRIDA ABANDONADA", pista);
+    } else if (corrida->totalDeHumanos > 1) {
+        /* Na tela dividida o recado é dos dois: quem volta à cidade é o carro do jogador 1, mas a
+         * corrida foi dos dois e o resultado de um só não diria nada */
+        snprintf(texto, sizeof(texto), "%s: %dº E %dº LUGAR", pista,
+                 corrida->posicaoFinalDosHumanos[0], corrida->posicaoFinalDosHumanos[1]);
     } else if (corrida->desclassificado) {
         snprintf(texto, sizeof(texto), "%s: DESCLASSIFICADO", pista);
     } else if (corrida->posicaoFinal == 1) {
@@ -344,7 +365,15 @@ int main(int argc, char *argv[]) {
     carregarRecordes();
     Tela tela = TELA_ENTRADA;   /* primeiro a tela de entrada; depois do vídeo de abertura, dissolve nela */
     int venceuAntes = 0;   /* para soltar o confete uma vez só, no quadro da vitória */
-    Olhar olhar = olharParaAFrente();
+    /* Uma visão (câmera) e uma entrada (teclas e controle) por jogador do sofá. Com um jogador só
+     * o vetor tem um item, e tudo funciona como sempre */
+    VisaoDoJogador visoes[MAXIMO_DE_VISOES];
+    Janela janelas[MAXIMO_DE_VISOES];
+    EntradaDoJogador entradas[MAXIMO_DE_JOGADORES_LOCAIS];
+    for (int v = 0; v < MAXIMO_DE_VISOES; v++) {
+        iniciarVisao(&visoes[v], v);
+    }
+    repartirEntradas(entradas, 1);
     int pausada = 0;       /* a corrida está na pausa (ESC) */
     Apresentacao apresentacao = { 0 };   /* o jogo de câmeras antes da largada */
     EstadoDaVibracao estadoDaVibracao;
@@ -376,7 +405,9 @@ int main(int argc, char *argv[]) {
             EndDrawing();
             continue;   /* quando acaba, a intro se dissolve por cima do menu (desenharSaidaDaIntro) */
         }
-        atualizarControle();   /* acha o controle e lê o analógico, antes das telas perguntarem */
+        atualizarControle();   /* acha os controles e lê o analógico, antes das telas perguntarem */
+        /* Quem joga com o quê, todo quadro: assim ligar um controle no meio da corrida já vale */
+        repartirEntradas(entradas, (tela == TELA_CORRIDA || tela == TELA_RESULTADO) ? corrida.totalDeHumanos : 1);
         /* Os vídeos de fundo avançam só enquanto a tela deles está aberta */
         if (tela == TELA_ENTRADA) {
             atualizarVideoDeFundo(videoDaEntrada, tempoQuadro);
@@ -406,7 +437,8 @@ int main(int argc, char *argv[]) {
                 proxima = atualizarComoJogar();
                 break;
             case TELA_CORRIDA:
-                proxima = atualizarTelaDaCorrida(&corrida, &menu, &pausada, &apresentacao, tempoQuadro);
+                proxima = atualizarTelaDaCorrida(&corrida, &menu, &pausada, &apresentacao, entradas, visoes,
+                                                 tempoQuadro);
                 break;
             case TELA_PASSEIO:
                 proxima = atualizarPasseio(&menu, tempoQuadro);
@@ -436,11 +468,19 @@ int main(int argc, char *argv[]) {
         }
         /* Entrar na corrida (pelo Mack ou pelo "correr de novo") sempre começa uma nova */
         if (proxima == TELA_CORRIDA && tela != TELA_CORRIDA) {
-            iniciarCorrida(&corrida, pistas[menu.pistaEscolhida], menu.carroEscolhido, menu.nivelEscolhido);
+            if (menu.telaDividida) {
+                FormacaoLocal formacao = { MAXIMO_DE_JOGADORES_LOCAIS,
+                                           { menu.carroEscolhido, menu.carroDoJogador2 } };
+                iniciarCorridaDividida(&corrida, pistas[menu.pistaEscolhida], menu.nivelEscolhido, &formacao);
+            } else {
+                iniciarCorrida(&corrida, pistas[menu.pistaEscolhida], menu.carroEscolhido, menu.nivelEscolhido);
+            }
+            for (int v = 0; v < corrida.totalDeHumanos; v++) {
+                iniciarVisao(&visoes[v], v);
+            }
             limparConfetes();
             limparFumaca();
             limparFogos();
-            olhar = olharParaAFrente();
             iniciarEstadoDaVibracao(&estadoDaVibracao);
             iniciarEfeitosDaCorrida();
             iniciarApresentacao(&apresentacao);
@@ -557,14 +597,17 @@ int main(int argc, char *argv[]) {
         congelarCena(tela == TELA_CORRIDA && pausada);
         usarFormasRetas(tela != TELA_CORRIDA);   /* os menus usam retângulos arredondados; o HUD da corrida, não */
 
-        /* A câmera livre vale na corrida; na pausa ela fica onde está */
+        /* A câmera livre vale na corrida; na pausa ela fica onde está. Uma por jogador: na tela
+         * dividida, o analógico direito de cada controle mexe só na metade de quem o segura */
         if (!pausada) {
-            float eixoX = 0.0f, eixoY = 0.0f;
-            if (tela == TELA_CORRIDA) {
-                lerAnalogicoDaCamera(&eixoX, &eixoY);
+            int quantas = (tela == TELA_CORRIDA || tela == TELA_RESULTADO) ? corrida.totalDeHumanos : 1;
+            for (int v = 0; v < quantas && v < MAXIMO_DE_VISOES; v++) {
+                float eixoX = 0.0f, eixoY = 0.0f;
+                if (tela == TELA_CORRIDA) {
+                    lerAnalogicoDaCameraDoJogador(&entradas[v], &eixoX, &eixoY);
+                }
+                atualizarOlhar(&visoes[v].olhar, eixoX, eixoY, tempoQuadro);
             }
-            atualizarOlhar(&olhar, eixoX, eixoY, tempoQuadro);
-            definirOlhar(olhar);
         }
         switch (tela) {
             case TELA_ENTRADA:
@@ -619,17 +662,47 @@ int main(int argc, char *argv[]) {
                     }
                     break;
                 }
-                desenharVisaoDoJogador(&corrida);
-                comecarInterface(0);
-                if (!festa) {   /* na festa do pódio a tela fica limpa: só a imagem, os fogos e o aviso */
-                    desenharHud(&corrida);
+                /* O mundo anda uma vez por quadro; depois cada jogador tem a sua faixa de tela,
+                 * com a câmera e o HUD dele dentro. Com um jogador é uma faixa só: a tela inteira */
+                repartirJanelas(corrida.totalDeHumanos, janelas);
+                for (int v = 0; v < corrida.totalDeHumanos; v++) {
+                    visoes[v].janela = janelas[v];
+                    atualizarVisao(&corrida, &visoes[v]);
                 }
-                if (festa) {
-                    if (corrida.tempoDeCorrida - corrida.jogador.tempoDeChegada > ATRASO_DO_AVISO_NA_FESTA) {
-                        desenharAvisoParaContinuar(&corrida);   /* o painel de chegada some: o resultado vem depois do botão */
+                avancarMundoDaCorrida(&corrida, &visoes[0]);
+                /* Na tela dividida o HUD de cada faixa recua metade da tira da classificação: o 3D
+                 * usa a faixa inteira, mas o HUD tem de se afastar da linha do meio, senão a tira
+                 * cobriria o pé do mini-mapa e do velocímetro do jogador de cima */
+                int recuoDaTira = (corrida.totalDeHumanos > 1)
+                                  ? (int) (alturaDaFaixaDeClassificacao() / 2.0f) : 0;
+                for (int v = 0; v < corrida.totalDeHumanos; v++) {
+                    desenharVisao(&corrida, &visoes[v]);
+                    Janela daInterface = janelas[v];
+                    if (v > 0) {
+                        daInterface.y += recuoDaTira;
                     }
-                } else if (corrida.terminou) {
-                    desenharFimDeCorrida(&corrida);
+                    daInterface.altura -= recuoDaTira;
+                    definirAreaDaInterface(daInterface.x, daInterface.y, daInterface.largura, daInterface.altura);
+                    comecarInterface(0);
+                    if (!festa) {   /* na festa do pódio a tela fica limpa: só a imagem, os fogos e o aviso */
+                        desenharHudDoJogador(&corrida, v);
+                        /* Na largada, quem é esta faixa e com o que ela se joga (a entrada mora aqui) */
+                        desenharPlacaDeControles(&corrida, v, &entradas[v]);
+                    }
+                    if (festa) {
+                        if (corrida.tempoDeCorrida - corrida.jogador.tempoDeChegada > ATRASO_DO_AVISO_NA_FESTA) {
+                            desenharAvisoParaContinuar(&corrida);   /* o painel de chegada some: o resultado vem depois do botão */
+                        }
+                    } else if (corrida.terminouPara[v]) {
+                        desenharFimDeCorridaDoJogador(&corrida, v);
+                    }
+                    terminarInterface();   /* devolve a interface à tela cheia */
+                }
+                comecarInterface(0);
+                if (corrida.totalDeHumanos > 1) {
+                    /* A tira é a própria divisão: ela separa as metades e tapa a linha de sobra de
+                     * uma altura de tela ímpar, que era o outro motivo do risco preto */
+                    desenharFaixaDeClassificacao(&corrida);
                 }
                 desenharConfetes(pausada ? 0.0f : tempoQuadro);   /* na pausa, o confete para no ar */
                 terminarInterface();
@@ -643,7 +716,11 @@ int main(int argc, char *argv[]) {
                 desenharPasseio(&menu);
                 break;
             case TELA_RESULTADO:
-                desenharVisaoDoJogador(&corrida);   /* a corrida continua ao fundo */
+                /* A corrida continua ao fundo, na câmera do jogador 1 e na tela inteira */
+                visoes[0].janela = (Janela){ 0, 0, GetScreenWidth(), GetScreenHeight() };
+                atualizarVisao(&corrida, &visoes[0]);
+                avancarMundoDaCorrida(&corrida, &visoes[0]);
+                desenharVisao(&corrida, &visoes[0]);
                 comecarInterface(1);
                 desenharResultado(&corrida);
                 desenharConfetes(tempoQuadro);

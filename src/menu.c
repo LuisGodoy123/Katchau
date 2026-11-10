@@ -371,6 +371,21 @@ static int numeroDaFicha(const FichaTecnica *ficha) {
  * ================================================================== */
 
 /*
+ * outroCarro
+ * O carro do jogador 2 nunca é o do jogador 1: dois carros iguais na tela dividida fariam cada
+ * um perder o próprio de vista no meio do pelotão.
+ * Recebe: o carro do jogador 1 e para que lado andar (+1 ou -1).
+ * Devolve: o primeiro carro diferente do dele nessa direção.
+ */
+static int outroCarro(int doJogador1, int passo) {
+    int numero = (doJogador1 + passo + TOTAL_CARROS) % TOTAL_CARROS;
+    if (numero == doJogador1) {
+        numero = (numero + 1) % TOTAL_CARROS;   /* só aconteceria com um carro na lista */
+    }
+    return numero;
+}
+
+/*
  * iniciarMenu
  * Estado inicial: "JOGAR" marcado, carro 0 escolhido e a garagem
  * ordenada por velocidade.
@@ -417,6 +432,10 @@ void iniciarMenu(EstadoMenu *menu) {
     for (int i = 0; i < TOTAL_PISTAS; i++) {
         menu->destaquePista[i] = (i == menu->pistaEscolhida) ? 1.0f : 0.0f;
     }
+    menu->telaDividida = 0;
+    menu->carroDoJogador2 = outroCarro(menu->carroEscolhido, 1);
+    menu->destaqueDividida = 0.0f;
+    menu->destaqueCarro2 = 0.0f;
 }
 
 /*
@@ -1018,7 +1037,18 @@ void desenharGaragem(EstadoMenu *menu) {
  * ================================================================== */
 
 /* As linhas da tela */
-enum { FOCO_NA_PISTA, FOCO_NO_NIVEL, FOCO_NO_CORRER, TOTAL_FOCOS };
+enum { FOCO_NA_PISTA, FOCO_NO_NIVEL, FOCO_NO_CORRER, FOCO_NA_DIVIDIDA, FOCO_NO_CARRO_2, TOTAL_FOCOS };
+
+/*
+ * totalDeFocos
+ * A linha do carro do jogador 2 só existe com a tela dividida ligada, então a lista muda de
+ * tamanho conforme a pílula.
+ * Recebe: o estado do menu.
+ * Devolve: quantas linhas a tela tem agora (é este número que o andarNaLista recebe).
+ */
+static int totalDeFocos(const EstadoMenu *menu) {
+    return menu->telaDividida ? TOTAL_FOCOS : TOTAL_FOCOS - 1;
+}
 
 #define Y_CARTAO_PISTA        452.0f   /* os cartões das pistas, em fila embaixo */
 #define LARGURA_CARTAO_PISTA  182.0f
@@ -1042,6 +1072,13 @@ enum { FOCO_NA_PISTA, FOCO_NO_NIVEL, FOCO_NO_CORRER, TOTAL_FOCOS };
 #define X_BOTAO_CORRER        326.0f
 #define LARGURA_BOTAO_CORRER  440.0f
 #define ALTURA_BOTAO_CORRER   58.0f
+/* A tela dividida, no vão entre o IR COM O MACK (acaba em 314) e os cartões de pista (começam em
+ * 452). Cinza, e não vermelho, porque o vermelho é da ação principal da tela. */
+#define Y_BOTAO_DIVIDIDA      330.0f
+#define ALTURA_BOTAO_DIVIDIDA 44.0f
+#define Y_CARRO_DO_P2         384.0f   /* a linha do carro do jogador 2, só com a dividida ligada */
+#define ALTURA_CARRO_DO_P2    52.0f
+#define LADO_DA_MINIATURA_P2  44.0f
 #define FOLGA_DO_CURSOR       5.0f     /* o contorno amarelo fica um pouco para fora do item */
 #define GROSSURA_DO_CURSOR    3.0f
 #define RAPIDEZ_DO_CURSOR     5.0f     /* a pulsação dele */
@@ -1140,12 +1177,19 @@ static int nivelSobOMouse(float mouseX, float mouseY) {
  */
 Tela atualizarEscolhaDePista(EstadoMenu *menu) {
     int pistaAntes = menu->pistaEscolhida, nivelAntes = menu->nivelEscolhido, focoAntes = menu->focoDaCorrida;
-    menu->focoDaCorrida = andarNaLista(menu->focoDaCorrida, TOTAL_FOCOS);
+    int carro2Antes = menu->carroDoJogador2, divididaAntes = menu->telaDividida;
+    menu->focoDaCorrida = andarNaLista(menu->focoDaCorrida, totalDeFocos(menu));
     int mudou = apertouParaDireita() ? 1 : (apertouParaEsquerda() ? -1 : 0);
     if (menu->focoDaCorrida == FOCO_NA_PISTA && mudou != 0) {
         menu->pistaEscolhida = (menu->pistaEscolhida + mudou + TOTAL_PISTAS) % TOTAL_PISTAS;
     } else if (menu->focoDaCorrida == FOCO_NO_NIVEL && mudou != 0) {
         menu->nivelEscolhido = (NivelDaCorrida) ((menu->nivelEscolhido + mudou + TOTAL_NIVEIS) % TOTAL_NIVEIS);
+    } else if (menu->focoDaCorrida == FOCO_NA_DIVIDIDA && mudou != 0) {
+        menu->telaDividida = !menu->telaDividida;
+    } else if (menu->focoDaCorrida == FOCO_NO_CARRO_2 && mudou != 0) {
+        do {
+            menu->carroDoJogador2 = (menu->carroDoJogador2 + mudou + TOTAL_CARROS) % TOTAL_CARROS;
+        } while (menu->carroDoJogador2 == menu->carroEscolhido);   /* o carro do jogador 1 fica de fora */
     }
 
     /* O mouse: passar marca a linha; clicar escolhe; só o CORRER começa a corrida */
@@ -1154,9 +1198,15 @@ Tela atualizarEscolhaDePista(EstadoMenu *menu) {
     int cartao = cartaoSobOMouse(mouseX, mouseY);
     int nivel = nivelSobOMouse(mouseX, mouseY);
     int sobreCorrer = dentroDoRetangulo(mouseX, mouseY, X_BOTAO_CORRER, Y_BOTAO_CORRER, LARGURA_BOTAO_CORRER, ALTURA_BOTAO_CORRER);
+    int sobreDividida = dentroDoRetangulo(mouseX, mouseY, X_BOTAO_CORRER, Y_BOTAO_DIVIDIDA, LARGURA_BOTAO_CORRER, ALTURA_BOTAO_DIVIDIDA);
+    int sobreCarro2 = menu->telaDividida
+        && dentroDoRetangulo(mouseX, mouseY, X_BOTAO_CORRER, Y_CARRO_DO_P2, LARGURA_BOTAO_CORRER, ALTURA_CARRO_DO_P2);
     int voltar = sobreOVoltar(mouseX, mouseY);
     if (mouseSeMexeu()) {
-        menu->focoDaCorrida = (cartao >= 0) ? FOCO_NA_PISTA : (nivel >= 0) ? FOCO_NO_NIVEL : sobreCorrer ? FOCO_NO_CORRER : menu->focoDaCorrida;
+        menu->focoDaCorrida = (cartao >= 0) ? FOCO_NA_PISTA : (nivel >= 0) ? FOCO_NO_NIVEL
+                              : sobreCorrer ? FOCO_NO_CORRER
+                              : sobreDividida ? FOCO_NA_DIVIDIDA
+                              : sobreCarro2 ? FOCO_NO_CARRO_2 : menu->focoDaCorrida;
     }
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
         if (cartao >= 0) {
@@ -1165,9 +1215,26 @@ Tela atualizarEscolhaDePista(EstadoMenu *menu) {
         } else if (nivel >= 0) {
             menu->nivelEscolhido = (NivelDaCorrida) nivel;
             menu->focoDaCorrida = FOCO_NO_NIVEL;
+        } else if (sobreDividida) {
+            menu->telaDividida = !menu->telaDividida;
+            menu->focoDaCorrida = FOCO_NA_DIVIDIDA;
+        } else if (sobreCarro2) {
+            do {
+                menu->carroDoJogador2 = (menu->carroDoJogador2 + 1) % TOTAL_CARROS;
+            } while (menu->carroDoJogador2 == menu->carroEscolhido);
+            menu->focoDaCorrida = FOCO_NO_CARRO_2;
         }
     }
+    /* Desligou a tela dividida com o cursor na linha do carro do jogador 2: ela não existe mais */
+    if (!menu->telaDividida && menu->focoDaCorrida >= totalDeFocos(menu)) {
+        menu->focoDaCorrida = FOCO_NA_DIVIDIDA;
+    }
+    /* O carro do jogador 1 pode ter mudado na garagem desde a última vez aqui */
+    if (menu->carroDoJogador2 == menu->carroEscolhido) {
+        menu->carroDoJogador2 = outroCarro(menu->carroEscolhido, 1);
+    }
     if (menu->pistaEscolhida != pistaAntes || (int) menu->nivelEscolhido != nivelAntes || menu->focoDaCorrida != focoAntes
+        || menu->carroDoJogador2 != carro2Antes || menu->telaDividida != divididaAntes
         || (voltar && !menu->voltarAnterior)) {
         tocarSom(SOM_CURSOR);
     }
@@ -1180,6 +1247,8 @@ Tela atualizarEscolhaDePista(EstadoMenu *menu) {
         menu->destaqueNivel[i] = animarDestaque(menu->destaqueNivel[i], i == (int) menu->nivelEscolhido);
     }
     menu->destaqueCorrer = animarDestaque(menu->destaqueCorrer, menu->focoDaCorrida == FOCO_NO_CORRER);
+    menu->destaqueDividida = animarDestaque(menu->destaqueDividida, menu->focoDaCorrida == FOCO_NA_DIVIDIDA);
+    menu->destaqueCarro2 = animarDestaque(menu->destaqueCarro2, menu->focoDaCorrida == FOCO_NO_CARRO_2);
     menu->destaqueVoltar = animarDestaque(menu->destaqueVoltar, voltar);
 
     if (apertouVoltar() || (voltar && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))) {
@@ -1196,7 +1265,11 @@ Tela atualizarEscolhaDePista(EstadoMenu *menu) {
         if (menu->focoDaCorrida == FOCO_NO_CORRER) {
             return TELA_CORRIDA;
         }
-        menu->focoDaCorrida++;
+        if (menu->focoDaCorrida == FOCO_NA_DIVIDIDA) {
+            menu->telaDividida = !menu->telaDividida;   /* confirmar na pílula liga e desliga */
+            return TELA_PISTAS;
+        }
+        menu->focoDaCorrida = (menu->focoDaCorrida + 1) % totalDeFocos(menu);
     }
     return TELA_PISTAS;
 }
@@ -1379,6 +1452,93 @@ static void desenharBotaoCorrer(int comCursor) {
 }
 
 /*
+ * dizQuemJogaComOQue
+ * A linha de ajuda do botão da tela dividida: nomeia os dois lados, com a tecla de nitro de cada um
+ * lida das configurações (quem remapear vê a tecla nova aqui). Dizer de quem é o quê neste botão é
+ * a primeira das três sinalizações da tela dividida — as outras são a placa da largada e os
+ * títulos das colunas na tela de configurações.
+ * Recebe: nada.
+ * Devolve: a linha, conforme os controles ligados agora.
+ */
+static const char *dizQuemJogaComOQue(void) {
+    static char linha[128];
+    const Configuracoes *config = configuracoesAtuais();
+    int controles = quantosControles();
+    if (controles >= 2) {
+        return "JOGADOR 1: O 1º CONTROLE  ·  JOGADOR 2: O 2º CONTROLE";
+    }
+    /* O nomeDaTecla devolve um buffer giratório da raylib: copiar antes de juntar os dois */
+    char nitro1[16], nitro2[16];
+    snprintf(nitro1, sizeof(nitro1), "%s", nomeDaTecla(config->comandos[ACAO_NITRO][COLUNA_TECLA_1]));
+    snprintf(nitro2, sizeof(nitro2), "%s", nomeDaTecla(config->comandos[ACAO_NITRO][COLUNA_TECLA_2]));
+    if (controles == 1) {
+        snprintf(linha, sizeof(linha), "JOGADOR 1: O CONTROLE  ·  JOGADOR 2: WASD, NITRO NO %s", nitro2);
+    } else {
+        snprintf(linha, sizeof(linha), "JOGADOR 1: SETAS, NITRO NO %s  ·  JOGADOR 2: WASD, NITRO NO %s",
+                 nitro1, nitro2);
+    }
+    return linha;
+}
+
+/*
+ * desenharBotaoTelaDividida
+ * O caminho para a corrida de dois no mesmo aparelho, embaixo do IR COM O MACK: uma pílula cinza
+ * que acende em amarelo quando está ligada, com a luzinha de ligado/desligado à direita e, embaixo
+ * do título, quem dirige com o quê.
+ * Recebe: se está ligada e se o cursor está nela.
+ * Devolve: nada.
+ */
+static void desenharBotaoTelaDividida(int ligada, int comCursor) {
+    Rectangle r = { X_BOTAO_CORRER, Y_BOTAO_DIVIDIDA, LARGURA_BOTAO_CORRER, ALTURA_BOTAO_DIVIDIDA };
+    float raio = raioDoTamanho(r.width, r.height);
+    caixaArredondada(r, raio, ligada ? ColorLerp(Fade(COR_GRAFITE, 0.9f), COR_AMARELO, 0.45f)
+                                     : Fade(COR_GRAFITE, 0.86f));
+    contornoArredondado(r, raio, 1.0f, Fade(COR_CROMO, 0.18f));
+    if (comCursor) {
+        contornoArredondado(r, raio, 2.5f, corDoCursor());
+    }
+    escrever(FONTE_TITULO, "TELA DIVIDIDA: 2 JOGADORES", r.x + 14.0f,
+             noMeio(FONTE_TITULO, 19.0f, r.y + 15.0f), 19.0f, ligada ? COR_GRAFITE : COR_TEXTO_CLARO);
+    escrever(FONTE_FORTE, dizQuemJogaComOQue(), r.x + 14.0f, r.y + 27.0f, 11.0f,
+             ligada ? Fade(COR_GRAFITE, 0.85f) : COR_TEXTO_FRACO);
+    /* A luzinha de ligado, no canto direito */
+    Vector2 luz = { r.x + r.width - 20.0f, r.y + r.height / 2.0f };
+    DrawCircleV(luz, 7.0f, Fade(BLACK, 0.35f));
+    DrawCircleV(luz, 5.0f, ligada ? COR_AMARELO : Fade(COR_CROMO, 0.35f));
+}
+
+/*
+ * desenharCarroDoJogador2
+ * A linha do carro do jogador 2, só com a tela dividida ligada: a miniatura da garagem, o nome do
+ * carro e as setas que dizem que a linha muda para os lados.
+ * Recebe: o carro escolhido, o destaque (0 a 1) e se o cursor está na linha.
+ * Devolve: nada.
+ */
+static void desenharCarroDoJogador2(int carro, float destaque, int comCursor) {
+    float suave = suavizar(destaque);
+    Rectangle r = { X_BOTAO_CORRER, Y_CARRO_DO_P2, LARGURA_BOTAO_CORRER, ALTURA_CARRO_DO_P2 };
+    float raio = raioDoTamanho(r.width, r.height);
+    caixaArredondada(r, raio, ColorLerp(Fade(COR_GRAFITE, 0.8f), Fade(COR_GRAFITE, 0.95f), suave));
+    contornoArredondado(r, raio, 1.0f, Fade(COR_CROMO, 0.16f));
+    if (comCursor) {
+        contornoArredondado(r, raio, 2.5f, corDoCursor());
+    }
+    /* A faixa de cor do carro, na beirada esquerda */
+    DrawRectangleRec((Rectangle){ r.x + 6.0f, r.y + 8.0f, 4.0f, r.height - 16.0f }, corDoCarro(carro));
+    desenharMiniatura(carro, r.x + 20.0f + LADO_DA_MINIATURA_P2 / 2.0f, r.y + r.height - 6.0f,
+                      LADO_DA_MINIATURA_P2);
+    escrever(FONTE_FORTE, "CARRO DO JOGADOR 2", r.x + 78.0f, r.y + 10.0f, 11.0f, COR_TEXTO_FRACO);
+    escrever(FONTE_TITULO, fichaDoCarro(carro)->nome, r.x + 78.0f,
+             noMeio(FONTE_TITULO, 21.0f, r.y + 34.0f), 21.0f, WHITE);
+    if (comCursor) {
+        escrever(FONTE_TITULO, "<", r.x + r.width - 42.0f, noMeio(FONTE_TITULO, 20.0f, r.y + r.height / 2.0f),
+                 20.0f, COR_TEXTO_CLARO);
+        escrever(FONTE_TITULO, ">", r.x + r.width - 20.0f, noMeio(FONTE_TITULO, 20.0f, r.y + r.height / 2.0f),
+                 20.0f, COR_TEXTO_CLARO);
+    }
+}
+
+/*
  * desenharResumoDaCorrida
  * O que muda na corrida marcada, em uma linha, embaixo da dificuldade.
  * Recebe: o estado do menu.
@@ -1432,6 +1592,10 @@ void desenharEscolhaDePista(EstadoMenu *menu, Pista *pistas[]) {
     }
     desenharResumoDaCorrida(menu);
     desenharBotaoCorrer(foco == FOCO_NO_CORRER);
+    desenharBotaoTelaDividida(menu->telaDividida, foco == FOCO_NA_DIVIDIDA);
+    if (menu->telaDividida) {
+        desenharCarroDoJogador2(menu->carroDoJogador2, menu->destaqueCarro2, foco == FOCO_NO_CARRO_2);
+    }
 
     for (int i = 0; i < TOTAL_PISTAS; i++) {
         desenharCartaoDePista(i, pistas[i], menu->destaquePista[i], foco == FOCO_NA_PISTA && i == menu->pistaEscolhida);
@@ -1989,7 +2153,9 @@ void desenharConfiguracoes(EstadoMenu *menu) {
 
     /* Comandos */
     desenharTituloDeSecao("COMANDOS", Y_TITULO_COMANDOS);
-    static const char *COLUNAS[TOTAL_COLUNAS] = { "TECLA", "TECLA 2", "CONTROLE", "CONTROLE 2" };
+    /* Na tela dividida a 1ª coluna de teclas é o jogador 1 e a 2ª o jogador 2 — sem isto escrito,
+     * alguém remapeia a tecla do outro sem saber */
+    static const char *COLUNAS[TOTAL_COLUNAS] = { "TECLA (JOG. 1)", "TECLA (JOG. 2)", "CONTROLE", "CONTROLE 2" };
     for (int c = 0; c < TOTAL_COLUNAS; c++) {
         escreverCentralizado(FONTE_FORTE, COLUNAS[c], X_COLUNAS_COMANDO + (c + 0.5f) * LARGURA_COLUNA_COMANDO, Y_TITULO_COMANDOS + 2.0f, 13.0f, COR_TEXTO_FRACO);
     }
@@ -2116,6 +2282,11 @@ void desenharComoJogar(void) {
             DrawRectangleRec((Rectangle){ x + 20, y + 40, 312, 1 }, Fade(COR_CROMO, 0.15f));
         }
     }
+
+    /* De quem é cada tecla na tela dividida. As duas de cada comando aparecem acima, mas sem esta
+     * linha ninguém sabe que a 1ª é de um jogador e a 2ª do outro */
+    escreverComQuebra(FONTE_FORTE, "NA TELA DIVIDIDA, A 1ª TECLA DE CADA COMANDO É DO JOGADOR 1 (AS SETAS) E A 2ª É DO JOGADOR 2 (O WASD).",
+                      x + 20, topo + (ligado ? 412.0f : 402.0f), 11.0f, 312, COR_TEXTO_FRACO);
 
     /* ---- Dicas ---- */
     x = 392.0f;
@@ -2296,7 +2467,16 @@ static Color corDoPodio(int posicao) {
  */
 static void desenharLinhaDoResultado(Corrida *corrida, int posicao, float y) {
     Carro *carro = corrida->classificacao[posicao];
-    int ehJogador = (carro == &corrida->jogador);
+    /* Na tela dividida as duas linhas humanas ficam em vermelho, cada uma com a etiqueta do seu
+     * jogador; com um jogador é só a dele, e a etiqueta diz "VOCÊ", como sempre */
+    int humano = -1;
+    for (int h = 0; h < corrida->totalDeHumanos; h++) {
+        if (corrida->humanos[h] == carro) {
+            humano = h;
+        }
+    }
+    int ehJogador = (humano >= 0);
+    const char *etiqueta = (corrida->totalDeHumanos > 1) ? TextFormat("JOG %d", humano + 1) : "VOCÊ";
     char tempo[32];
 
     if (ehJogador) {
@@ -2317,7 +2497,7 @@ static void desenharLinhaDoResultado(Corrida *corrida, int posicao, float y) {
     if (ehJogador) {
         float x = X_COLUNA_PILOTO + larguraDoTexto(FONTE_TITULO, carro->nome, 18.0f) + 10;
         desenharParalelogramo(x, meio - 8.0f, 42, 16, 4, COR_AMARELO);
-        escreverCentralizado(FONTE_FORTE, "VOCÊ", x + 23, noMeio(FONTE_FORTE, 12.0f, meio), 12.0f, COR_GRAFITE);
+        escreverCentralizado(FONTE_FORTE, etiqueta, x + 23, noMeio(FONTE_FORTE, 12.0f, meio), 12.0f, COR_GRAFITE);
     }
 
     Color corTempo = ehJogador ? COR_TEXTO_CLARO : COR_CROMO;
@@ -2351,7 +2531,19 @@ static void desenharLinhaDoResultado(Corrida *corrida, int posicao, float y) {
 void desenharResultado(Corrida *corrida) {
     escurecerTela(0.75f, 0.6f, 0.8f);
 
-    if (corrida->desclassificado) {
+    if (corrida->totalDeHumanos > 1) {
+        /* Na tela dividida não há "você": o cabeçalho traz a colocação dos dois, na ordem em que
+         * terminaram, e quem foi desclassificado aparece com um X no lugar do número */
+        char marcas[MAXIMO_DE_JOGADORES_LOCAIS][8];
+        for (int h = 0; h < corrida->totalDeHumanos; h++) {
+            if (corrida->desclassificadoDosHumanos[h]) {
+                snprintf(marcas[h], sizeof(marcas[h]), "DSQ");
+            } else {
+                snprintf(marcas[h], sizeof(marcas[h]), "%dº", corrida->posicaoFinalDosHumanos[h]);
+            }
+        }
+        desenharCabecalho(TextFormat("JOGADOR 1: %s   ·   JOGADOR 2: %s", marcas[0], marcas[1]));
+    } else if (corrida->desclassificado) {
         desenharCabecalho("DESCLASSIFICADO: SEM PARADA");
     } else if (corrida->posicaoFinal == 1) {
         desenharCabecalho("VOCÊ VENCEU!");
@@ -2360,7 +2552,8 @@ void desenharResultado(Corrida *corrida) {
     } else {
         desenharCabecalho(TextFormat("VOCÊ CHEGOU EM %dº", corrida->posicaoFinal));
     }
-    if (!corrida->desclassificado && corrida->posicaoFinal <= 3) {   /* a medalha: ouro, prata ou bronze, com a colocação */
+    /* A medalha é de um jogador só: na tela dividida, o cabeçalho já diz as duas colocações */
+    if (corrida->totalDeHumanos == 1 && !corrida->desclassificado && corrida->posicaoFinal <= 3) {   /* ouro, prata ou bronze */
         static const Color MEDALHAS[3] = { { 255, 196, 40, 255 }, { 200, 206, 216, 255 }, { 205, 127, 70, 255 } };
         Color cor = MEDALHAS[corrida->posicaoFinal - 1];
         Vector2 centro = { LARGURA_TELA - 70.0f, 58.0f };

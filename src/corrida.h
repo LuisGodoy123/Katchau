@@ -14,9 +14,17 @@
 
 #include "pista.h"
 #include "carro.h"
+#include "config.h"
 
 #define TOTAL_RIVAIS   16
 #define TOTAL_CARROS   (TOTAL_RIVAIS + 1)   /* rivais + jogador */
+
+/* Quem são os humanos de uma corrida de tela dividida (menu.c monta, corrida.c usa).
+ * Num jogador, nada disso é preciso: iniciarCorrida continua como sempre. */
+typedef struct {
+    int totalDeJogadores;                              /* 1 ou MAXIMO_DE_JOGADORES_LOCAIS */
+    int numeroDoCarro[MAXIMO_DE_JOGADORES_LOCAIS];     /* o carro de cada um (nunca repetido) */
+} FormacaoLocal;   /* os lugares do grid não vêm daqui: corrida.c põe os humanos nos últimos, lado a lado */
 
 /* Os níveis de dificuldade, escolhidos antes da corrida */
 typedef enum {
@@ -47,6 +55,16 @@ typedef struct {
     Carro jogador;
     Carro rivais[TOTAL_RIVAIS];
 
+    /* Os humanos desta corrida. Num jogador: totalDeHumanos = 1 e humanos[0] = &jogador.
+     * Na tela dividida, o 2º humano mora numa vaga de rivais[] (quem dirige é ele, não a IA)
+     * e os comandos dele chegam em comandosDosHumanos[1], preenchidos antes de atualizarCorrida. */
+    int totalDeHumanos;
+    Carro *humanos[MAXIMO_DE_JOGADORES_LOCAIS];              /* humanos[0] == &jogador */
+    Comandos comandosDosHumanos[MAXIMO_DE_JOGADORES_LOCAIS]; /* o [0] não é usado: o jogador entra por parâmetro */
+    int terminouPara[MAXIMO_DE_JOGADORES_LOCAIS];            /* 1 depois que aquele humano completa as voltas */
+    int posicaoFinalDosHumanos[MAXIMO_DE_JOGADORES_LOCAIS];  /* a colocação de cada um na chegada (0 = ainda correndo) */
+    int desclassificadoDosHumanos[MAXIMO_DE_JOGADORES_LOCAIS];  /* 1 se ele chegou sem fazer a parada obrigatória */
+
     /* Ponteiros para todos os carros, em ordem de corrida:
      * classificacao[0] é o 1º lugar. Reordenado a cada quadro
      * com Insertion Sort (ordenacao.c). */
@@ -54,7 +72,7 @@ typedef struct {
 
     float contagemRegressiva;   /* segundos até a largada; a corrida só anda quando chega a 0 */
     float tempoDeCorrida;       /* segundos desde a largada (não para no fim) */
-    int terminou;               /* 1 depois que o jogador completa todas as voltas */
+    int terminou;               /* 1 depois que TODOS os humanos completam todas as voltas */
     int desclassificado;        /* 1 se o jogador terminou sem fazer a parada obrigatória */
     int posicaoFinal;           /* posição do jogador na chegada (1 a TOTAL_CARROS) */
     int mcqueenLiderava;        /* 1 enquanto o jogador, sendo o McQueen, está em 1º (para as falas dele) */
@@ -86,6 +104,10 @@ typedef enum {
 const FichaTecnica *fichaDoCarro(int numero);
 const FichaDoNivel *fichaDoNivel(NivelDaCorrida nivel);
 void iniciarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador, NivelDaCorrida nivel);
+void iniciarCorridaDividida(Corrida *corrida, Pista *pista, NivelDaCorrida nivel, const FormacaoLocal *formacao);
+int carroEDeHumano(const Corrida *corrida, const Carro *carro);
+Carro *carroDoHumano(Corrida *corrida, int humano);
+int todosOsHumanosChegaram(const Corrida *corrida);
 void atualizarCorrida(Corrida *corrida, Comandos comandosJogador, float tempoQuadro);
 int todosChegaram(Corrida *corrida);
 float batidaDoMcQueen(Corrida *corrida, int *contraCarro);

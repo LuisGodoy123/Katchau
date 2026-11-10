@@ -88,13 +88,41 @@ static RenderTexture2D cena, haloA, haloB;
 static Shader shaderClaros, shaderBorrar, shaderFinal;
 static int locLimiar, locPasso, locHalo, locTom, locContraste, locSaturacao, locForca, locVinheta, locDesfoque, locVirar;
 static int largura = 0, altura = 0, carregado = 0, desenhando = 0;   /* desenhando: 1 a cena, 2 as luzes */
+/* Onde a cena vai aparecer na tela. Largura 0 = a tela cheia (o normal). Na tela dividida as duas
+ * metades têm o MESMO tamanho, então as imagens são criadas uma vez e não mudam mais de quadro
+ * para quadro: o que muda é só o canto em que elas são desenhadas. */
+static int areaX = 0, areaY = 0, areaLargura = 0, areaAltura = 0;
+
+/*
+ * larguraDaArea / alturaDaArea
+ * Recebe: nada.
+ * Devolve: o tamanho em que a cena é desenhada (a área escolhida, ou a janela toda).
+ */
+static int larguraDaArea(void) {
+    return (areaLargura > 0) ? areaLargura : GetScreenWidth();
+}
+static int alturaDaArea(void) {
+    return (areaAltura > 0) ? areaAltura : GetScreenHeight();
+}
+
+/*
+ * definirAreaDoPosProcesso
+ * Recebe: o pedaço da tela em que a cena vai aparecer (largura 0 = a tela cheia).
+ * Devolve: nada.
+ */
+void definirAreaDoPosProcesso(int x, int y, int largura, int altura) {
+    areaX = x;
+    areaY = y;
+    areaLargura = largura;
+    areaAltura = altura;
+}
 
 /*
  * criarImagens
- * As imagens do tamanho da janela de agora (refeitas se ela mudar).
+ * As imagens do tamanho da área de agora (refeitas se ela mudar).
  */
 static void criarImagens(void) {
-    if (largura == GetScreenWidth() && altura == GetScreenHeight()) {
+    if (largura == larguraDaArea() && altura == alturaDaArea()) {
         return;
     }
     if (largura != 0) {
@@ -102,8 +130,8 @@ static void criarImagens(void) {
         UnloadRenderTexture(haloA);
         UnloadRenderTexture(haloB);
     }
-    largura = GetScreenWidth();
-    altura = GetScreenHeight();
+    largura = larguraDaArea();
+    altura = alturaDaArea();
     cena = LoadRenderTexture(largura, altura);
     haloA = LoadRenderTexture(largura / REDUCAO_DO_HALO, altura / REDUCAO_DO_HALO);
     haloB = LoadRenderTexture(largura / REDUCAO_DO_HALO, altura / REDUCAO_DO_HALO);
@@ -204,12 +232,12 @@ static void passar(Texture2D de, RenderTexture2D para, Shader shader) {
 
 /*
  * terminarPosProcesso
- * Faz o halo e põe a cena na tela, com o tom da pista.
- * Recebe: a pista (o tom), o desfoque de velocidade (0 = nenhum, 1 = o máximo) e se os efeitos
- *         estão ligados (senão, a cena só é copiada para a tela).
+ * Faz o halo e põe a cena na tela (na área escolhida), com o tom da pista.
+ * Recebe: a pista (o tom), o desfoque de velocidade (0 = nenhum, 1 = o máximo) e o acabamento:
+ *         só copiar, sem o halo (a tela dividida) ou completo.
  * Devolve: nada.
  */
-void terminarPosProcesso(int pista, float desfoque, int completo) {
+void terminarPosProcesso(int pista, float desfoque, AcabamentoDoPosProcesso acabamento) {
     if (!desenhando) {
         return;
     }
@@ -217,35 +245,40 @@ void terminarPosProcesso(int pista, float desfoque, int completo) {
     desenhando = 0;
     rlDrawRenderBatchActive();
     EndTextureMode();
-    if (!completo || !comLuzes) {
+    /* De onde sai e para onde vai: a imagem inteira, no pedaço de tela da área */
+    Rectangle daImagem = { 0, 0, (float) largura, (float) -altura };
+    Rectangle naTela = { (float) areaX, (float) areaY, (float) largura, (float) altura };
+    if (acabamento == POSPROCESSO_SO_COPIA) {
         /* Sem os efeitos: só copia a cena para a tela (desenhar direto na janela é mais lento) */
-        DrawTexturePro(cena.texture, (Rectangle){ 0, 0, (float) largura, (float) -altura },
-                       (Rectangle){ 0, 0, (float) largura, (float) altura }, (Vector2){ 0 }, 0.0f, WHITE);
+        DrawTexturePro(cena.texture, daImagem, naTela, (Vector2){ 0 }, 0.0f, WHITE);
         return;
     }
     const TomDaPista *t = &TONS[(pista >= 0 && pista < TOTAL_PISTAS) ? pista : 0];
+    int comHalo = (acabamento == POSPROCESSO_COMPLETO) && comLuzes;
 
     /* O halo: as luzes, borradas duas vezes em cada direção */
-    Vector2 horizontal = { 1.0f / haloA.texture.width, 0.0f }, vertical = { 0.0f, 1.0f / haloA.texture.height };
-    for (int i = 0; i < 2; i++) {
-        SetShaderValue(shaderBorrar, locPasso, &horizontal, SHADER_UNIFORM_VEC2);
-        passar(haloA.texture, haloB, shaderBorrar);
-        SetShaderValue(shaderBorrar, locPasso, &vertical, SHADER_UNIFORM_VEC2);
-        passar(haloB.texture, haloA, shaderBorrar);
+    if (comHalo) {
+        Vector2 horizontal = { 1.0f / haloA.texture.width, 0.0f }, vertical = { 0.0f, 1.0f / haloA.texture.height };
+        for (int i = 0; i < 2; i++) {
+            SetShaderValue(shaderBorrar, locPasso, &horizontal, SHADER_UNIFORM_VEC2);
+            passar(haloA.texture, haloB, shaderBorrar);
+            SetShaderValue(shaderBorrar, locPasso, &vertical, SHADER_UNIFORM_VEC2);
+            passar(haloB.texture, haloA, shaderBorrar);
+        }
     }
 
     /* Na tela */
     float virar = 0.0f;   /* as luzes e a cena foram desenhadas do mesmo jeito: nada a virar */
+    float forcaDoHalo = comHalo ? t->forcaDoHalo : 0.0f;
     SetShaderValue(shaderFinal, locTom, &t->tom, SHADER_UNIFORM_VEC3);
     SetShaderValue(shaderFinal, locContraste, &t->contraste, SHADER_UNIFORM_FLOAT);
     SetShaderValue(shaderFinal, locSaturacao, &t->saturacao, SHADER_UNIFORM_FLOAT);
-    SetShaderValue(shaderFinal, locForca, &t->forcaDoHalo, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(shaderFinal, locForca, &forcaDoHalo, SHADER_UNIFORM_FLOAT);
     SetShaderValue(shaderFinal, locVinheta, &t->vinheta, SHADER_UNIFORM_FLOAT);
     SetShaderValue(shaderFinal, locDesfoque, &desfoque, SHADER_UNIFORM_FLOAT);
     SetShaderValue(shaderFinal, locVirar, &virar, SHADER_UNIFORM_FLOAT);
     BeginShaderMode(shaderFinal);
-    SetShaderValueTexture(shaderFinal, locHalo, haloA.texture);
-    DrawTexturePro(cena.texture, (Rectangle){ 0, 0, (float) largura, (float) -altura },
-                   (Rectangle){ 0, 0, (float) largura, (float) altura }, (Vector2){ 0 }, 0.0f, WHITE);
+    SetShaderValueTexture(shaderFinal, locHalo, haloA.texture);   /* sem halo, a força é 0: a imagem não pesa */
+    DrawTexturePro(cena.texture, daImagem, naTela, (Vector2){ 0 }, 0.0f, WHITE);
     EndShaderMode();
 }

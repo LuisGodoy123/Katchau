@@ -626,13 +626,22 @@ void desenharApresentacao(const Apresentacao *apresentacao, Corrida *corrida) {
             }
             break;
         case TOMADA_JOGADOR: {
-            int lugar = TOTAL_CARROS;
-            for (int i = 0; i < TOTAL_CARROS; i++) {
-                if (corrida->classificacao[i] == &corrida->jogador) {
-                    lugar = i + 1;
+            /* Na tela dividida o letreiro apresenta os dois carros do sofá, e não só o do jogador 1 */
+            int dividida = (corrida->totalDeHumanos > 1);
+            int lugares[MAXIMO_DE_JOGADORES_LOCAIS] = { TOTAL_CARROS, TOTAL_CARROS };
+            for (int h = 0; h < corrida->totalDeHumanos; h++) {
+                for (int i = 0; i < TOTAL_CARROS; i++) {
+                    if (corrida->classificacao[i] == corrida->humanos[h]) {
+                        lugares[h] = i + 1;
+                    }
                 }
             }
-            desenharLetreiroGrande("SEU CARRO", corrida->jogador.nome, TextFormat("LARGA EM %dº DE %d", lugar, TOTAL_CARROS),
+            const char *titulo = dividida ? "OS SEUS CARROS" : "SEU CARRO";
+            const char *nomes = dividida ? TextFormat("%s  E  %s", corrida->humanos[0]->nome, corrida->humanos[1]->nome)
+                                         : corrida->jogador.nome;
+            const char *largada = dividida ? TextFormat("LARGAM EM %dº E %dº DE %d", lugares[0], lugares[1], TOTAL_CARROS)
+                                           : TextFormat("LARGA EM %dº DE %d", lugares[0], TOTAL_CARROS);
+            desenharLetreiroGrande(titulo, nomes, largada,
                                    entradaDoLetreiro(tempo, 0.4f, duracao + ESCURECER), baseDosLetreiros);
             break;
         }

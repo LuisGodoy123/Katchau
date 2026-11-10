@@ -1791,7 +1791,7 @@ void desenharPasseio(EstadoMenu *menu) {
     }
     float rapidez = Clamp(velocidadeDoCarroLivre(&carro) / carro.velocidadeMaxima, 0.0f, 1.2f);
     float desfoque = efeitos ? 0.35f * rapidez * rapidez + (carro.nitroLigado ? 0.25f : 0.0f) : 0.0f;
-    terminarPosProcesso(PISTA_OVAL, desfoque, efeitos);
+    terminarPosProcesso(PISTA_OVAL, desfoque, efeitos ? POSPROCESSO_COMPLETO : POSPROCESSO_SO_COPIA);
 
     comecarInterface(0);
     if (cena != CENA_DIRIGINDO) {

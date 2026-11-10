@@ -13,6 +13,47 @@ lista circular duplamente encadeada de segmentos.
 - **Fase 5 (em parte):** Interlagos de verdade (o traçado de 2023, num modelo 3D medido para o jogo), mini-mapa, zebras e muros do modelo,
   linha de chegada quadriculada e objetos na beira da pista (`src/obstaculos.c`). Falta o turbo.
 - **Fase 6:** menu principal, garagem com Merge Sort, como jogar, contagem regressiva e tela de resultado (`src/menu.c`).
+- **Tela dividida (2 jogadores no mesmo aparelho):** na tela do Mack, a pílula **TELA DIVIDIDA: 2 JOGADORES**
+  liga a corrida de dois, com uma linha logo abaixo para escolher o carro do jogador 2 (nunca o mesmo do
+  jogador 1). Os dois humanos largam lado a lado na última fila e os 15 carros da IA preenchem o resto do
+  grid. A tela se divide no meio: o jogador 1 em cima, o 2 embaixo, cada um com a sua câmera e o HUD
+  completo. A corrida só acaba quando os **dois** cruzam a linha; quem chega primeiro já vê o cartão de
+  chegada na metade dele enquanto o outro termina.
+  - **Controles, e como o jogo os anuncia.** É a coluna de teclas que separa os dois: a "TECLA (JOG. 1)"
+    das configurações é o jogador 1 e a "TECLA (JOG. 2)" é o jogador 2, então cada coluna é um teclado
+    completo, com a tecla de cada comando **do lado da mão que vai usá-la**:
+
+    | | direção | nitro | freio de mão | câmera |
+    |---|---|---|---|---|
+    | Jogador 1 | setas | **.** (ponto) | SHIFT direito | C |
+    | Jogador 2 | W A S D | **Q** | SHIFT esquerdo | V |
+
+    Com controles ligados, o 1º é do jogador 1 e o 2º do jogador 2. Nada disso é adivinhado: a pílula da
+    tela do Mack nomeia os dois lados (lendo as teclas de verdade, então remapear aparece lá), e **na
+    largada cada faixa mostra uma placa com os controles daquele jogador**, que sai quando a corrida
+    começa. Com um jogador, nada muda: as setas, o WASD e qualquer controle continuam dirigindo o mesmo
+    carro — o nitro dele é o ponto *ou* o Q, cada um ao lado do seu conjunto de direção (o espaço, que
+    era o nitro, fica sendo só o confirmar do jogo). Um `configuracoes.txt` salvo antes da tela dividida
+    tem o teclado de um jogador só: na primeira abertura os comandos voltam ao padrão novo (a linha
+    `versao` do arquivo), e o resto das configurações é lido normalmente.
+  - **O HUD**: a escala é sempre a da tela, então a letra tem o mesmo tamanho de quando se joga sozinho;
+    o que muda é o espaço. O que é de cada um fica na faixa dele (velocímetro, nitro, mini-mapa — menor
+    aqui —, painel da volta e uma plaquinha com "JOGADOR n", a posição e a volta). O que é de todos vira
+    uma **tira de classificação sobre a linha da divisão**, com uma célula por carro: a torre de 17
+    linhas desenhada duas vezes deixava o texto pequeno demais. A célula de cada humano vem clara e
+    marcada, quem está nos boxes fica amarelo e a volta mais rápida ganha contorno roxo.
+  - **A câmera** aponta mais para baixo na faixa (de 5 para ~14 graus): o campo de visão vertical fecha
+    de 65 para ~35 graus para manter o ângulo horizontal da tela cheia, e sem essa correção o carro
+    descia até ser cortado na borda de baixo.
+  - Como o mundo passa a ser desenhado duas vezes por quadro, o modo desliga sozinho o que custa mais e se
+    perde menos em meia tela: o telão (que é o mundo inteiro mais uma vez), o mapa de sombra, a torcida em 3D
+    (entra a pintada, a mesma que o telão usa) e o brilho/halo — a cor de cada pista e a vinheta ficam. Para
+    comparar com tudo ligado: `KATCHAU_DIVIDIDA_COMPLETA=1`.
+  - O que continua sendo só do jogador 1: a vibração do controle (o `vibrar.h` não tem índice de controle), o
+    motor granular "do próprio carro" (o carro do jogador 2 é ouvido pela voz de rival, como os outros), as
+    falas do McQueen, a telemetria e a festa do pódio, que é um filme de tela cheia e por isso não entra. O
+    recorde da pista também não é gravado na tela dividida: a corrida se ajusta a dois humanos e a volta não
+    é comparável com a tabela de um jogador.
 - **O jogo no mundo aberto:** no menu, **JOGAR** leva a Radiator Springs, e é lá que tudo acontece. As
   corridas começam no **Mack**, estacionado na rua principal, logo à frente da largada. Na vaga atrás da
   carreta, o jogador aperta **ENTER** (ou Y) para entrar: a porta de trás desce e vira rampa, o carro sobe e
@@ -220,6 +261,12 @@ CORRIDA ──(chegada + ENTER)──> RESULTADO ──(ENTER)──┤
 
 Na tela de resultado a corrida continua ao fundo, e a tabela se completa conforme
 os rivais terminam a prova.
+
+A tela dividida não é uma tela nova: é a mesma CORRIDA, só com dois humanos. Quem decide
+é a pílula da tela da PISTA (o Mack), e o resto do jogo pergunta
+`corrida.totalDeHumanos` — o `main.c` reparte a tela em faixas (`repartirJanelas`), desenha
+uma visão por jogador (`VisaoDoJogador`, em `render.h`) e um HUD por faixa
+(`definirAreaDaInterface`, em `hud.h`).
 
 ## Estrutura
 
