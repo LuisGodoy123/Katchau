@@ -13,6 +13,7 @@
 
 #include "corrida.h"
 #include "ordenacao.h"
+#include "sala.h"
 
 /* As telas do jogo. O main.c guarda em qual delas o jogador está. */
 typedef enum {
@@ -20,6 +21,8 @@ typedef enum {
     TELA_MENU,
     TELA_GARAGEM,
     TELA_PISTAS,
+    TELA_SALAS,            /* a lista de salas na mesma rede (sala.c acha; menu.c desenha) */
+    TELA_SALA_DE_ESPERA,   /* quem está na sala, com qual carro, e quem já deu PRONTO */
     TELA_COMO_JOGAR,
     TELA_CONFIGURACOES,
     TELA_CORRIDA,
@@ -68,9 +71,20 @@ typedef struct {
     int pistaEscolhida;                         /* em qual pista correr (IdPista) */
     NivelDaCorrida nivelEscolhido;              /* fácil, médio ou difícil */
     float destaqueNivel[TOTAL_NIVEIS];          /* animação (0 a 1) de cada botão de nível */
-    int focoDaCorrida;                          /* a linha marcada na tela da corrida: pista, nível ou CORRER */
+    int focoDaCorrida;                          /* a linha marcada na tela da corrida: pista, nível, CORRER ou ONLINE */
     float destaqueCorrer;                       /* animação (0 a 1) do botão CORRER */
     float destaquePista[TOTAL_PISTAS];          /* animação (0 a 1) de cada cartão de pista */
+
+    /* ---- O modo online (as telas no fim do menu.c) ---- */
+    float destaqueOnline;                       /* animação do botão CORRER ONLINE, no Mack */
+    int salaMarcada;                            /* a linha marcada na lista de salas */
+    float destaqueSala[MAXIMO_DE_SALAS];        /* animação de cada linha da lista */
+    int focoNaLista;                            /* a coluna da lista: as salas, ENTRAR ou CRIAR SALA */
+    float destaqueEntrar, destaqueCriar;
+    int focoNaSala;                             /* a linha da sala de espera (veja menu.c) */
+    float destaquePronto, destaqueLargar;
+    float destaqueNivelDaSala[TOTAL_NIVEIS];
+    float destaquePistaDaSala[TOTAL_PISTAS];
 } EstadoMenu;
 
 void iniciarMenu(EstadoMenu *menu);
@@ -86,6 +100,12 @@ void desenharGaragem(EstadoMenu *menu);
 
 Tela atualizarEscolhaDePista(EstadoMenu *menu);
 void desenharEscolhaDePista(EstadoMenu *menu, Pista *pistas[]);
+
+Tela atualizarListaDeSalas(EstadoMenu *menu);
+void desenharListaDeSalas(EstadoMenu *menu, Pista *pistas[]);
+
+Tela atualizarSalaDeEspera(EstadoMenu *menu);
+void desenharSalaDeEspera(EstadoMenu *menu, Pista *pistas[]);
 
 Tela atualizarConfiguracoes(EstadoMenu *menu);
 void desenharConfiguracoes(EstadoMenu *menu);

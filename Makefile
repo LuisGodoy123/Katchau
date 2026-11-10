@@ -16,10 +16,17 @@ CFLAGS = -std=c99 -O2 -Wall -Wextra -g -Isrc
 LOGICA = src/pista.c src/obstaculos.c src/carro.c src/ia.c \
          src/ordenacao.c src/corrida.c src/motor.c src/motorgranular.c src/recordes.c src/olhar.c src/pitstop.c src/vibracao.c src/configuracoes.c src/mjpeg.c src/colisao.c src/livre.c src/moradores.c
 
+# Módulos da rede: o modo online na mesma Wi-Fi. Não usam a raylib, mas também NÃO entram
+# em LOGICA: aquela lista é linkada pelos alvos de teste (teste_pista, teste_livre,
+# sondar_colisao, simular_dificuldade, teste_vibracao), todos com "-lm -lpthread" e nada
+# mais. Pôr rede aqui obrigaria os cinco a pedir -lws2_32 no Windows sem ter nada a ver
+# com rede. Por isso uma lista à parte, e LOGICA fica intocada.
+REDE = src/rede.c src/protocolo.c src/sala.c src/online.c
+
 # Módulos que desenham na tela
 DESENHO = src/render.c src/corte.c src/mundo.c src/construcao.c src/carros3d.c src/fumaca.c src/faiscas.c src/fogos.c src/marcas.c src/torcida3d.c src/telao.c src/posprocesso.c src/noite.c src/hud.c src/menu.c src/visual.c src/audio.c src/efeitos.c src/exibicao.c src/apresentacao.c src/intro.c src/videofundo.c src/controle.c src/passeio.c src/carreta.c
 
-FONTES = src/main.c $(LOGICA) $(DESENHO)
+FONTES = src/main.c $(LOGICA) $(REDE) $(DESENHO)
 OBJETOS = $(FONTES:src/%.c=build/%.o)
 FRAMEWORKS_DA_VIBRACAO = -framework Foundation -framework GameController -framework CoreHaptics
 
@@ -48,7 +55,9 @@ ifeq ($(OS),Windows_NT)
     # têm separada, em libglfw3.a. O -print-file-name devolve o caminho quando acha a biblioteca
     # e só o nome quando não acha, então o "/" diz se ela existe nesta máquina.
     GLFW_SEPARADA := $(findstring /,$(shell $(CC) -print-file-name=libglfw3.a))
-    LIBS     = -L$(RAYLIB_DIR) -lraylib $(if $(GLFW_SEPARADA),-lglfw3) -lopengl32 -lgdi32 -lwinmm -lpthread
+    # O -lws2_32 é o Winsock: a rede do Windows vem numa biblioteca à parte (no Linux e no
+    # macOS os sockets estão na libc, e lá não há nada a acrescentar).
+    LIBS     = -L$(RAYLIB_DIR) -lraylib $(if $(GLFW_SEPARADA),-lglfw3) -lopengl32 -lgdi32 -lwinmm -lpthread -lws2_32
     EXE      = $(NOME).exe
     # A libraylib.a TEM de vir da mesma árvore que os headers de RAYLIB_DIR. Se ela não estiver
     # lá, o -lraylib cai numa cópia qualquer que o toolchain tenha (o w64devkit traz uma), e o
@@ -106,12 +115,23 @@ run: $(EXE)
 	./$(EXE)
 
 # Os testes usam só a lógica, então compilam sem a raylib
-testes: build/teste_pista build/teste_livre
+testes: build/teste_pista build/teste_livre build/teste_rede
 	./build/teste_pista
 	./build/teste_livre
+	./build/teste_rede
 
 build/teste_livre: testes/teste_livre.c $(LOGICA) $(wildcard src/*.h) | build
 	$(CC) $(CFLAGS) testes/teste_livre.c $(LOGICA) -o $@ -lm -lpthread
+
+# O teste da rede linka LOGICA mais REDE (e, so no Windows, o Winsock)
+LIBS_DA_REDE = $(if $(filter Windows_NT,$(OS)),-lws2_32,)
+
+build/teste_rede: testes/teste_rede.c $(LOGICA) $(REDE) $(wildcard src/*.h) | build
+	$(CC) $(CFLAGS) testes/teste_rede.c $(LOGICA) $(REDE) -o $@ -lm -lpthread $(LIBS_DA_REDE)
+
+# Os dois lados da descoberta, em dois terminais (veja testes/teste_rede.c)
+testar-rede: build/teste_rede
+	./build/teste_rede
 
 build/teste_pista: testes/teste_pista.c $(LOGICA) $(wildcard src/*.h) | build
 	$(CC) $(CFLAGS) testes/teste_pista.c $(LOGICA) -o $@ -lm -lpthread
@@ -152,4 +172,4 @@ zip: clean
 clean:
 	rm -rf build $(NOME) $(NOME).exe $(NOME).zip
 
-.PHONY: all run testes testar-vibracao medir-interlagos memoria zip clean
+.PHONY: all run testes testar-rede testar-vibracao medir-interlagos memoria zip clean
