@@ -485,7 +485,7 @@ Pista *criarPista(void) {
     pit.fimDoLimite = 300.0f * e;                 /* depois das garagens */
     pit.fim = saida;                              /* na Reta Oposta */
     pit.primeiraVaga = 20.0f * e;                 /* as garagens ficam logo depois da linha */
-    pit.entreVagas = 18.0f * e;
+    pit.entreVagas = 15.5f * e;                   /* as 17 vagas até 268 m, na frente das garagens (até 270 m) */
     pit.encostar = 20.0f * e;
     pit.noCaminhoDaFaixa = pit.entrada + 40.0f * e;
     pit.deixaAFaixa = 290.0f * e;
@@ -529,7 +529,7 @@ Pista *criarCopaPistao(void) {
     pit.fimDoLimite = 330.0f;            /* o limite acaba no fim do muro de pit */
     pit.fim = 440.0f;
     pit.primeiraVaga = -260.0f;          /* todas antes da linha: quem para na última volta ainda cruza */
-    pit.entreVagas = 18.0f;
+    pit.entreVagas = 14.6f;              /* a última das 17 a 26 m da linha */
     pit.encostar = 12.0f;
     pit.noCaminhoDaFaixa = volta - 360.0f;   /* já no corredor antes do muro de pit começar */
     pit.deixaAFaixa = 330.0f;                /* só sai do corredor depois que o muro de pit acaba */
@@ -565,8 +565,8 @@ Pista *criarOval(void) {
     pit.inicioDoLimite = volta - 185.0f;
     pit.fimDoLimite = 60.0f;
     pit.fim = 248.0f;
-    pit.primeiraVaga = -160.0f;
-    pit.entreVagas = 11.0f;
+    pit.primeiraVaga = -177.0f;
+    pit.entreVagas = 10.0f;              /* as 17 antes da linha: a última a 17 m dela */
     pit.encostar = 9.0f;
     pit.noCaminhoDaFaixa = volta - 205.0f;
     pit.deixaAFaixa = 90.0f;
@@ -614,8 +614,8 @@ Pista *criarSplat(void) {
     pit.fimDoLimite = 62.0f;             /* e dobra de novo para voltar: só dá para fazer devagar */
     pit.fim = 72.0f;
     pit.primeiraVaga = -165.0f;
-    pit.entreVagas = 11.0f;
-    pit.encostar = 9.0f;
+    pit.entreVagas = 9.25f;              /* as 17 na reta do pit, antes da linha: a última a 17 m dela */
+    pit.encostar = 5.0f;                 /* saindo, vai logo para a faixa rápida (4,5 m ao lado): a vaga da frente está perto */
     pit.noCaminhoDaFaixa = volta - 160.0f;
     pit.deixaAFaixa = volta - 10.0f;
     pit.borda = 8.0f;

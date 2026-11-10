@@ -94,6 +94,9 @@ static const ModeloDoCarro MODELOS[TOTAL_CARROS] = {
     { "finn.glb", 1 },
     { "wingo.glb", 0 },
     { "snot_rod.glb", 0 },
+    { "jackson_storm.glb", 0 },
+    { "boost.glb", 0 },
+    { "dj.glb", 0 },
 };
 
 /* O arquivo, a frente (em quartos de volta: 0 = +z, 1 = +x, 2 = -z, 3 = -x) e as medidas de cada modelo */
@@ -302,23 +305,6 @@ static Shader shaderDosOlhos;
 static int locDoDesvio, locDosMeios, locDoTamanho, locDaForma;
 static int locsDoReflexo[3];   /* reflexoDaPintura no opaco, no translúcido e no dos olhos */
 static int locsDoOlho[3];      /* "olho" nos mesmos três: procurar pelo nome a cada quadro é caro */
-
-/* ---------- Cores ----------
- * Um acerto na pintura de um carro, ao carregar: a cor (só nos pixels perto do tom
- * escolhido) e quanto ela reflete o céu. Numa cor clara, o reflexo azulado apaga a cor: o
- * Luigi saía quase cinza na tela (o capô, azulado), e no filme ele é amarelo-manteiga. */
-typedef struct {
-    const char *arquivo;
-    int materiais[4];            /* os materiais da pintura, no .glb (-1 sobra) */
-    float tomDe, largura;        /* graus: o tom a mexer e até quantos graus dele */
-    float girar;                 /* graus a somar no tom */
-    float saturacao, brilho;     /* multiplicam */
-    float reflexo;               /* quanto o céu se reflete na pintura (1 = como nos outros carros) */
-} AcertoDeCor;
-
-static const AcertoDeCor ACERTOS_DE_COR[] = {
-    { "luigi.glb", { 2, 3, -1, -1 }, 49.0f, 14.0f, -4.0f, 1.05f, 1.22f, 0.35f },
-};
 
 static Model modelos[TOTAL_DE_MODELOS];
 static Matrix ajuste[TOTAL_DE_MODELOS];     /* do modelo como veio para o modelo normalizado */
@@ -1477,59 +1463,6 @@ static void trocarTextura(Material *material, int mapa, Texture2D nova) {
 }
 
 /*
- * acertarCores
- * Aplica os ACERTOS_DE_COR do carro (se tiver) em todas as texturas dele. Só mexe nos
- * pixels perto do tom escolhido, e cada vez menos quanto mais longe dele.
- * Recebe: o número do carro (o modelo já carregado).
- * Devolve: nada.
- */
-static void acertarCores(int numero) {
-    reflexos[numero] = 1.0f;
-    for (int a = 0; a < (int) (sizeof(ACERTOS_DE_COR) / sizeof(ACERTOS_DE_COR[0])); a++) {
-        const AcertoDeCor *acerto = &ACERTOS_DE_COR[a];
-        if (strcmp(acerto->arquivo, arquivoDoModelo(numero)) != 0) {
-            continue;
-        }
-        reflexos[numero] = acerto->reflexo;
-        for (int k = 0; k < 4 && acerto->materiais[k] >= 0; k++) {
-            int m = acerto->materiais[k] + 1;   /* a raylib põe um material padrão antes dos do .glb */
-            if (m >= modelos[numero].materialCount) {
-                continue;
-            }
-            Texture2D textura = modelos[numero].materials[m].maps[MATERIAL_MAP_ALBEDO].texture;
-            if (textura.id == 0 || textura.id == rlGetTextureIdDefault()) {
-                continue;
-            }
-            Image imagem = LoadImageFromTexture(textura);
-            Color *pixels = LoadImageColors(imagem);
-            int mexeu = 0;
-            for (int i = 0; i < imagem.width * imagem.height; i++) {
-                Vector3 hsv = ColorToHSV(pixels[i]);   /* tom em graus, saturação e brilho de 0 a 1 */
-                float distancia = fabsf(fmodf(hsv.x - acerto->tomDe + 540.0f, 360.0f) - 180.0f);
-                if (distancia >= acerto->largura || hsv.y < 0.15f) {
-                    continue;
-                }
-                float peso = 1.0f - distancia / acerto->largura;
-                peso = peso * peso * (3.0f - 2.0f * peso) * fminf(1.0f, (hsv.y - 0.15f) / 0.10f);
-                float tom = hsv.x + acerto->girar * peso;
-                float saturacao = fminf(1.0f, hsv.y * (1.0f + (acerto->saturacao - 1.0f) * peso));
-                float brilho = fminf(1.0f, hsv.z * (1.0f + (acerto->brilho - 1.0f) * peso));
-                Color nova = ColorFromHSV(fmodf(tom + 360.0f, 360.0f), saturacao, brilho);
-                nova.a = pixels[i].a;
-                pixels[i] = nova;
-                mexeu = 1;
-            }
-            if (mexeu) {
-                Image acertada = { pixels, imagem.width, imagem.height, 1, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
-                trocarTextura(&modelos[numero].materials[m], MATERIAL_MAP_ALBEDO, LoadTextureFromImage(acertada));
-            }
-            UnloadImageColors(pixels);
-            UnloadImage(imagem);
-        }
-    }
-}
-
-/*
  * medirBordasDaPalpebra
  * Para cada coluna da textura dos olhos, o maior trecho de branco do olho (na máscara): de um
  * lado ele acaba na pálpebra, do outro no fim do olho. O shader usa isso para fechar a pálpebra
@@ -1820,7 +1753,7 @@ void carregarCarros3D(void) {
 
     for (int numero = 0; numero < TOTAL_DE_MODELOS; numero++) {
         modelos[numero] = LoadModel(TextFormat("%s%s", PASTA_DOS_MODELOS, arquivoDoModelo(numero)));
-        acertarCores(numero);
+        reflexos[numero] = 1.0f;   /* todos refletem o céu do mesmo jeito (o Mack, nos olhos, menos) */
         carregarOlhos(numero, tabelaDosOlhos);
         prepararTexturas(modelos[numero]);
         translucidos[numero] = medirTranslucidos(modelos[numero]);

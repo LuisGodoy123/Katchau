@@ -26,6 +26,10 @@ O que muda em cada um:
     cílios é refeito espelhando a íris), o fundo é a textura sem elas
     (cada coluna refeita a partir das colunas dos lados, acompanhando a
     curva da pálpebra) e a máscara é o branco do olho.
+  - Lizzie: o modelo vem do avesso, com as faces e as normais para dentro.
+    O jogo não desenha o lado de trás das faces: ela aparecia oca, com o
+    banco e o lado de baixo à mostra e sem os olhos de frente. Todas as
+    peças viram para fora.
   - Xerife: tira uns triângulos soltos e finos que saem para os lados
     perto das rodas (alargavam a caixa do carro, e o jogo tira a largura
     dela).
@@ -54,6 +58,7 @@ import bmesh
 import bpy
 import mathutils
 import numpy as np
+from mathutils.bvhtree import BVHTree
 
 argv = sys.argv[sys.argv.index("--") + 1:]
 origem, destino = argv[0], argv[1]
@@ -107,6 +112,41 @@ def no_de_imagem(material):
     if material is None or not material.use_nodes:
         return None
     return next((n for n in material.node_tree.nodes if n.type == 'TEX_IMAGE' and n.image), None)
+
+
+def virar_para_fora(o):
+    """Vira a frente das faces e as normais da malha (um modelo que veio do avesso)"""
+    me = o.data
+    cantos = me.corner_normals
+    guardadas = {}
+    for p in me.polygons:
+        for canto in p.loop_indices:
+            guardadas[(p.index, me.loops[canto].vertex_index)] = -cantos[canto].vector
+    me.flip_normals()   # só a ordem dos cantos: as normais são postas logo abaixo
+    novas = [None] * len(me.loops)
+    for p in me.polygons:
+        for canto in p.loop_indices:
+            novas[canto] = guardadas[(p.index, me.loops[canto].vertex_index)]
+    me.normals_split_custom_set(novas)
+
+
+def esta_do_avesso(o):
+    """Um raio sai do meio de cada face da malha para a frente dela e outro para trás. Do lado
+    certo, muitos saem do carro pela frente; do avesso, os da frente batem no outro lado do carro
+    e quem sai são os de trás. Devolve 1 se a malha está do avesso"""
+    pontos, faces = [], []
+    for m in malhas():
+        base = len(pontos)
+        pontos += [m.matrix_world @ v.co for v in m.data.vertices]
+        faces += [[base + i for i in p.vertices] for p in m.data.polygons]
+    arvore = BVHTree.FromPolygons(pontos, faces)
+    frente = tras = 0
+    for p in o.data.polygons:
+        centro, normal = o.matrix_world @ p.center, (o.matrix_world.to_3x3() @ p.normal).normalized()
+        folga = 1e-4 * (1.0 + centro.length)
+        frente += arvore.ray_cast(centro + normal * folga, normal)[0] is None
+        tras += arvore.ray_cast(centro - normal * folga, -normal)[0] is None
+    return tras > frente + 0.2 * len(o.data.polygons)
 
 
 def trocar_imagem(velha, nova):
@@ -204,10 +244,12 @@ def brilho_e_saturacao(rgb):
     return maior, menor, (maior - menor) / np.maximum(maior, 1e-3)
 
 
-def achar_elipse(parar, semente, seguidos, longe, nome):
+def achar_elipse(parar, semente, seguidos, longe, nome, raios=None):
     """Uma elipse de eixos retos (meio x, meio y, raio x, raio y, em pixels) em volta da semente:
     raios saem dela até o primeiro trecho de "parar"; os que não acham (os cílios, por cima) ficam
-    de fora; a elipse é ajustada nas bordas, tirando as que destoam"""
+    de fora; a elipse é ajustada nas bordas, tirando as que destoam. Com "raios" (rx, ry), só o meio
+    é ajustado: a íris que passa da borda da textura tem bordas de um lado só, e com elas sozinhas a
+    elipse sai grande demais"""
     altura, largura = parar.shape
     sx, sy = semente
     bordas = []
@@ -224,13 +266,25 @@ def achar_elipse(parar, semente, seguidos, longe, nome):
                 bordas.append((sx + dx * (passo - seguidos + 1), sy + dy * (passo - seguidos + 1)))
                 break
     pontos = np.array(bordas, dtype=np.float64)
+    if raios is not None:
+        rx, ry = raios
+        cx, cy = sx, sy
     for _ in range(4):
         x, y = pontos[:, 0], pontos[:, 1]
-        A = np.stack([x * x, y * y, x, y], axis=1)
-        a, b, c, d = np.linalg.lstsq(A, np.ones(len(x)), rcond=None)[0]
-        cx, cy = -c / (2 * a), -d / (2 * b)
-        k = 1 + c * c / (4 * a) + d * d / (4 * b)
-        rx, ry = math.sqrt(k / a), math.sqrt(k / b)
+        if raios is None:
+            A = np.stack([x * x, y * y, x, y], axis=1)
+            a, b, c, d = np.linalg.lstsq(A, np.ones(len(x)), rcond=None)[0]
+            cx, cy = -c / (2 * a), -d / (2 * b)
+            k = 1 + c * c / (4 * a) + d * d / (4 * b)
+            rx, ry = math.sqrt(k / a), math.sqrt(k / b)
+        else:
+            # o meio do círculo de raio 1 que melhor passa pelas bordas, na escala da elipse (Gauss-Newton)
+            for _ in range(20):
+                px, py = (x - cx) / rx, (y - cy) / ry
+                d = np.maximum(np.hypot(px, py), 1e-6)
+                J = np.stack([-px / d / rx, -py / d / ry], axis=1)
+                passo = np.linalg.lstsq(J, -(d - 1.0), rcond=None)[0]
+                cx, cy = cx + passo[0], cy + passo[1]
         erro = np.abs(np.hypot((x - cx) / rx, (y - cy) / ry) - 1.0)
         bons = erro < max(0.06, np.percentile(erro, 75))
         if bons.all() or bons.sum() < 12:
@@ -240,14 +294,14 @@ def achar_elipse(parar, semente, seguidos, longe, nome):
     return cx, cy, rx, ry
 
 
-def achar_iris(rgb, semente):
+def achar_iris(rgb, semente, raios=None):
     """A íris: da semente (fração da textura) até o branco do olho (o brilho dela, branco também,
     é pequeno: só um trecho maior conta)"""
     altura, largura = rgb.shape[:2]
     _, menor, saturacao = brilho_e_saturacao(rgb)
     branco = (menor > 0.80) & (saturacao < 0.12)
     return achar_elipse(branco, (semente[0] * largura, semente[1] * altura), max(3, largura // 100),
-                        int(0.22 * largura), "íris")
+                        int(0.22 * largura), "íris", raios)
 
 
 def achar_pupila(rgb, iris):
@@ -291,13 +345,22 @@ def maiores_trechos(m):
     return inicio, fim
 
 
-def separar_olhos(nome, imagem, sementes, iris_de_cor):
+def separar_olhos(nome, imagem, sementes, iris_de_cor, mesmo_tamanho=False, cor_da_iris=0.3, sem_a_palpebra=False,
+                  copiar_iris=None):
     """As três camadas a partir da textura pintada. Devolve as elipses das íris.
-    iris_de_cor: as íris são coloridas (a Flo e o Xerife); senão (a Lizzie), cinza, dentro do branco"""
+    iris_de_cor: as íris são coloridas (a Flo e o Xerife); senão (a Lizzie), cinza, dentro do branco.
+    Para os carros da corrida (preparar_carros.py): mesmo_tamanho (as duas íris ficam com os raios da
+    menor, e cada uma só acha o meio: uma íris cortada pela borda da textura saía grande demais),
+    cor_da_iris (a saturação a partir da qual um pixel é da íris), sem_a_palpebra (o que tem a cor da
+    pálpebra não é íris, mesmo dentro da elipse) e copiar_iris (o número da íris inteira: as duas são o
+    mesmo desenho, e a outra, cortada pela borda ou pela pálpebra, vira cópia dela)"""
     rgb = ler(imagem)[..., :3]
     altura, largura = rgb.shape[:2]
     brilho, menor, saturacao = brilho_e_saturacao(rgb)
     elipses = [achar_iris(rgb, s) for s in sementes]
+    if mesmo_tamanho:
+        raios = (min(e[2] for e in elipses), min(e[3] for e in elipses))
+        elipses = [achar_iris(rgb, s, raios) for s in sementes]
     pupilas = [achar_pupila(rgb, e) for e in elipses]
     Y, X = np.mgrid[0:altura, 0:largura].astype(np.float64) + 0.5
     olho = (brilho > 0.5) & (saturacao < 0.16)    # o branco e a sombra dele (onde a íris pode aparecer)
@@ -330,8 +393,16 @@ def separar_olhos(nome, imagem, sementes, iris_de_cor):
 
     # O que é íris de verdade, dentro de cada elipse: a pupila (preta como os cílios, mas tanto faz) e
     # a cor da íris (ou, na íris cinza, o que está dentro do branco)
+    longe_da_palpebra = np.ones((altura, largura), bool)
     if iris_de_cor:
-        de_iris = (saturacao > 0.3) & (brilho > 0.1)
+        de_iris = (saturacao > cor_da_iris) & (brilho > 0.1)
+        if sem_a_palpebra:
+            # a cor da pálpebra: a do que não é branco nem íris (a maior parte é a lataria)
+            fora = ~olho & np.all([raio(e) > 1.15 for e in elipses], axis=0) & (brilho > 0.1)
+            palpebra = np.median(rgb[fora], axis=0)
+            longe_da_palpebra = np.linalg.norm(rgb - palpebra, axis=-1) > 0.12
+            de_iris &= longe_da_palpebra
+            print(f"FIGURANTE:   a pálpebra tem a cor {np.round(palpebra, 2)}: não é íris")
     else:
         de_iris = (Y >= T[None, :]) & (Y < E[None, :]) & (brilho < 0.9)
     iris = np.zeros((altura, largura, 4), dtype=np.float32)
@@ -339,7 +410,7 @@ def separar_olhos(nome, imagem, sementes, iris_de_cor):
     for e, pu in zip(elipses, pupilas):
         cx, cy, rx, ry = e
         r = raio(e)
-        boa = (r <= 1.0) & (de_iris | (raio(pu, 1.15) <= 1.0))
+        boa = (r <= 1.0) & (de_iris | (raio(pu, 1.15) <= 1.0)) & longe_da_palpebra
         # o que os cílios (ou o branco, na borda) tampam vem do espelho, de cima para baixo; se o espelho
         # também não é íris, do mesmo raio na horizontal
         ys, xs = np.nonzero((r <= 1.04) & ~boa)
@@ -357,6 +428,16 @@ def separar_olhos(nome, imagem, sementes, iris_de_cor):
         iris[..., 3] = np.maximum(iris[..., 3], alfa)
         # no fundo, sai o que era íris e a borda dela (o contorno escuro, fora da elipse ajustada)
         trocar |= boa | ((raio(e, 1.0, 3.0) <= 1.0) & (Y < E[None, :]))
+    if copiar_iris is not None:
+        # as outras íris viram cópia da inteira, cada uma no lugar dela
+        inteira = iris.copy()
+        cx0, cy0 = elipses[copiar_iris][:2]
+        for k, e in enumerate(elipses):
+            if k != copiar_iris:
+                ys, xs = np.nonzero(raio(e, 1.0, 3.0) <= 1.0)
+                de_y = np.clip(np.round(ys + cy0 - e[1]).astype(int), 0, altura - 1)
+                de_x = np.clip(np.round(xs + cx0 - e[0]).astype(int), 0, largura - 1)
+                iris[ys, xs] = inteira[de_y, de_x]
     trocar = dilatar(trocar, 3)
     peso = suavizar(trocar)
 
@@ -406,152 +487,166 @@ def olhos_pintados(nome, caminho_do_glb):
     return material_dos_olhos, separar_olhos(nome, imagem, sementes, iris_de_cor), lado
 
 
-os.makedirs(PASTA_DOS_OLHOS, exist_ok=True)
+def gravar_tabela_dos_olhos():
+    """A tabela dos olhos (olhos.txt): as linhas dos carros preparados agora, no lugar das antigas"""
+    tabela = os.path.join(PASTA_DOS_OLHOS, "olhos.txt")
+    linhas = open(tabela).read().splitlines() if os.path.exists(tabela) else []
+    linhas = [l for l in linhas if l.split(" ")[0] not in linhas_dos_olhos] + list(linhas_dos_olhos.values())
+    with open(tabela, "w") as arquivo:
+        arquivo.write("\n".join(linhas) + "\n")
 
-# ---- Flo e Lizzie ----
-for de, para in (("flo.glb", "flo"), ("lizzie.glb", "lizzie")):
-    importar(de)
+
+def preparar():
+    os.makedirs(PASTA_DOS_OLHOS, exist_ok=True)
+
+    # ---- Flo e Lizzie ----
+    for de, para in (("flo.glb", "flo"), ("lizzie.glb", "lizzie")):
+        importar(de)
+        aplicar_transformacoes()
+        if esta_do_avesso(max(malhas(), key=lambda o: len(o.data.polygons))):
+            for o in malhas():
+                virar_para_fora(o)
+            print(f"FIGURANTE: {para} estava do avesso, virada para fora")
+        sem_jpeg()
+        material, (elipses, largura, altura), lado = olhos_pintados(para, None)
+        caminho = exportar(para + ".glb")
+        linha_dos_olhos(para, caminho, material, elipses, largura, altura, lado)
+
+    # ---- Xerife: sem os fiapos dos lados ----
+    importar("sherrif.glb")
     aplicar_transformacoes()
+    tirados = 0
+    for o in malhas():
+        bm = bmesh.new()
+        bm.from_mesh(o.data)
+        fiapos = [f for f in bm.faces if abs(f.calc_center_median().x) > 1.17 and f.calc_center_median().z < 0.35]
+        tirados += len(fiapos)
+        bmesh.ops.delete(bm, geom=fiapos, context='FACES')
+        bm.to_mesh(o.data)
+        bm.free()
+    print("FIGURANTE: xerife sem", tirados, "triângulos soltos")
     sem_jpeg()
-    material, (elipses, largura, altura), lado = olhos_pintados(para, None)
-    caminho = exportar(para + ".glb")
-    linha_dos_olhos(para, caminho, material, elipses, largura, altura, lado)
+    material, (elipses, largura, altura), lado = olhos_pintados("xerife", None)
+    caminho = exportar("xerife.glb")
+    linha_dos_olhos("xerife", caminho, material, elipses, largura, altura, lado)
 
-# ---- Xerife: sem os fiapos dos lados ----
-importar("sherrif.glb")
-aplicar_transformacoes()
-tirados = 0
-for o in malhas():
-    bm = bmesh.new()
-    bm.from_mesh(o.data)
-    fiapos = [f for f in bm.faces if abs(f.calc_center_median().x) > 1.17 and f.calc_center_median().z < 0.35]
-    tirados += len(fiapos)
-    bmesh.ops.delete(bm, geom=fiapos, context='FACES')
-    bm.to_mesh(o.data)
-    bm.free()
-print("FIGURANTE: xerife sem", tirados, "triângulos soltos")
-sem_jpeg()
-material, (elipses, largura, altura), lado = olhos_pintados("xerife", None)
-caminho = exportar("xerife.glb")
-linha_dos_olhos("xerife", caminho, material, elipses, largura, altura, lado)
+    # ---- Ruivo ----
+    importar("cars_red.glb")
+    for o in malhas():
+        for mod in list(o.modifiers):
+            if mod.type == 'ARMATURE':
+                o.modifiers.remove(mod)   # a pose de repouso: os vértices como estão
+    for o in [o for o in malhas() if o.name.lower().startswith("icosphere")]:
+        bpy.data.objects.remove(o, do_unlink=True)
+    aplicar_transformacoes()
+    for o in malhas():
+        o.vertex_groups.clear()
+        while len(o.data.uv_layers) > 1:
+            o.data.uv_layers.remove(o.data.uv_layers[-1])
+        # espelha em x e vira as faces (para a frente das faces continuar para fora)
+        o.data.transform(mathutils.Matrix.Scale(-1.0, 4, (1.0, 0.0, 0.0)))
+        bm = bmesh.new()
+        bm.from_mesh(o.data)
+        bmesh.ops.reverse_faces(bm, faces=bm.faces)
+        bm.to_mesh(o.data)
+        bm.free()
+    sem_jpeg()
 
-# ---- Ruivo ----
-importar("cars_red.glb")
-for o in malhas():
-    for mod in list(o.modifiers):
-        if mod.type == 'ARMATURE':
-            o.modifiers.remove(mod)   # a pose de repouso: os vértices como estão
-for o in [o for o in malhas() if o.name.lower().startswith("icosphere")]:
-    bpy.data.objects.remove(o, do_unlink=True)
-aplicar_transformacoes()
-for o in malhas():
-    o.vertex_groups.clear()
-    while len(o.data.uv_layers) > 1:
-        o.data.uv_layers.remove(o.data.uv_layers[-1])
-    # espelha em x e vira as faces (para a frente das faces continuar para fora)
-    o.data.transform(mathutils.Matrix.Scale(-1.0, 4, (1.0, 0.0, 0.0)))
-    bm = bmesh.new()
-    bm.from_mesh(o.data)
-    bmesh.ops.reverse_faces(bm, faces=bm.faces)
-    bm.to_mesh(o.data)
-    bm.free()
-sem_jpeg()
+    # A cor da lataria, para a pálpebra: a mediana dos pixels bem vermelhos da textura do corpo
+    corpo = ler(no_de_imagem(bpy.data.materials["red_body"]).image)[..., :3].reshape(-1, 3)
+    cor_da_lataria = np.median(corpo[(corpo[:, 0] > 0.45) & (corpo[:, 1] < 0.2) & (corpo[:, 2] < 0.2)], axis=0)
 
-# A cor da lataria, para a pálpebra: a mediana dos pixels bem vermelhos da textura do corpo
-corpo = ler(no_de_imagem(bpy.data.materials["red_body"]).image)[..., :3].reshape(-1, 3)
-cor_da_lataria = np.median(corpo[(corpo[:, 0] > 0.45) & (corpo[:, 1] < 0.2) & (corpo[:, 2] < 0.2)], axis=0)
+    # Os olhos, como os do Ruivo do filme: cada olho numa metade de uma textura só (o do lado de x < 0 na de
+    # u menor), com as coordenadas tiradas da posição de cada ponto no olho (u de um lado ao outro, v de cima
+    # para baixo), para a íris sair redonda no modelo. O branco grande, a pálpebra (a lataria) no alto com o
+    # traço escuro, e a íris redonda, cor de âmbar, com a pupila grande e o brilho
+    olhos_do_ruivo = sorted((o for o in malhas() if o.data.materials and o.data.materials[0].name in ("red_eye_r", "red_eye_l")),
+                            key=lambda o: sum(v.co.x for v in o.data.vertices))
+    largura_do_olho = altura_do_olho = 1.0
+    for metade, o in enumerate(olhos_do_ruivo):
+        pontos = [v.co.copy() for v in o.data.vertices]
+        x0, x1 = min(p.x for p in pontos), max(p.x for p in pontos)
+        baixo, cima = min(p.z for p in pontos), max(p.z for p in pontos)
+        largura_do_olho, altura_do_olho = x1 - x0, cima - baixo
+        camada = o.data.uv_layers.active.data
+        for laco in o.data.loops:
+            p = pontos[laco.vertex_index]
+            u = 0.5 * metade + 0.5 * (p.x - x0) / (x1 - x0)
+            v = (cima - p.z) / (cima - baixo)
+            camada[laco.index].uv = (u, 1.0 - v)
+    print(f"FIGURANTE: olho do Ruivo de {largura_do_olho:.3f} x {altura_do_olho:.3f}")
 
-# Os olhos, como os do Ruivo do filme: cada olho numa metade de uma textura só (o do lado de x < 0 na de
-# u menor), com as coordenadas tiradas da posição de cada ponto no olho (u de um lado ao outro, v de cima
-# para baixo), para a íris sair redonda no modelo. O branco grande, a pálpebra (a lataria) no alto com o
-# traço escuro, e a íris redonda, cor de âmbar, com a pupila grande e o brilho
-olhos_do_ruivo = sorted((o for o in malhas() if o.data.materials and o.data.materials[0].name in ("red_eye_r", "red_eye_l")),
-                        key=lambda o: sum(v.co.x for v in o.data.vertices))
-largura_do_olho = altura_do_olho = 1.0
-for metade, o in enumerate(olhos_do_ruivo):
-    pontos = [v.co.copy() for v in o.data.vertices]
-    x0, x1 = min(p.x for p in pontos), max(p.x for p in pontos)
-    baixo, cima = min(p.z for p in pontos), max(p.z for p in pontos)
-    largura_do_olho, altura_do_olho = x1 - x0, cima - baixo
-    camada = o.data.uv_layers.active.data
-    for laco in o.data.loops:
-        p = pontos[laco.vertex_index]
-        u = 0.5 * metade + 0.5 * (p.x - x0) / (x1 - x0)
-        v = (cima - p.z) / (cima - baixo)
-        camada[laco.index].uv = (u, 1.0 - v)
-print(f"FIGURANTE: olho do Ruivo de {largura_do_olho:.3f} x {altura_do_olho:.3f}")
-
-L, A = 2 * LADO_DO_OLHO_DO_RUIVO, LADO_DO_OLHO_DO_RUIVO
-coluna = np.arange(L)
-metade = coluna >= L // 2
-u_no_olho = ((coluna % (L // 2)) + 0.5) / (L // 2)
-x_do_olho = np.where(metade, u_no_olho, 1.0 - u_no_olho)   # 0 no lado do nariz, 1 no de fora
-X = np.broadcast_to(x_do_olho[None, :], (A, L))
-Y = np.broadcast_to(((np.arange(A) + 0.5) / A)[:, None], (A, L))
-pixel = altura_do_olho / A
+    L, A = 2 * LADO_DO_OLHO_DO_RUIVO, LADO_DO_OLHO_DO_RUIVO
+    coluna = np.arange(L)
+    metade = coluna >= L // 2
+    u_no_olho = ((coluna % (L // 2)) + 0.5) / (L // 2)
+    x_do_olho = np.where(metade, u_no_olho, 1.0 - u_no_olho)   # 0 no lado do nariz, 1 no de fora
+    X = np.broadcast_to(x_do_olho[None, :], (A, L))
+    Y = np.broadcast_to(((np.arange(A) + 0.5) / A)[:, None], (A, L))
+    pixel = altura_do_olho / A
 
 
-def suave(borda, d):
-    """0 dentro, 1 fora, com um pixel e meio de transição"""
-    return np.clip((d - borda) / (1.5 * pixel) + 0.5, 0.0, 1.0)
+    def suave(borda, d):
+        """0 dentro, 1 fora, com um pixel e meio de transição"""
+        return np.clip((d - borda) / (1.5 * pixel) + 0.5, 0.0, 1.0)
 
 
-def misturar(a, b, quanto):
-    return a * (1.0 - quanto[..., None]) + np.asarray(b) * quanto[..., None]
+    def misturar(a, b, quanto):
+        return a * (1.0 - quanto[..., None]) + np.asarray(b) * quanto[..., None]
 
 
-abaixo = (Y - RUIVO_PALPEBRA) * altura_do_olho          # > 0 no branco
-branco = 0.97 - 0.15 * np.exp(-np.clip(abaixo, 0, None) / (0.18 * altura_do_olho)) - 0.06 * ((X - 0.5) * 2) ** 4
-fundo = np.stack([branco * 0.99, branco * 0.98, branco * 0.96], axis=-1)
-fundo = misturar(fundo, (0.10, 0.03, 0.03), 1.0 - suave(0.0, abaixo - RUIVO_CILIOS * altura_do_olho))
-fundo = misturar(fundo, cor_da_lataria, 1.0 - suave(0.0, abaixo))
-mascara = suave(0.0, abaixo - RUIVO_CILIOS * altura_do_olho)
+    abaixo = (Y - RUIVO_PALPEBRA) * altura_do_olho          # > 0 no branco
+    branco = 0.97 - 0.15 * np.exp(-np.clip(abaixo, 0, None) / (0.18 * altura_do_olho)) - 0.06 * ((X - 0.5) * 2) ** 4
+    fundo = np.stack([branco * 0.99, branco * 0.98, branco * 0.96], axis=-1)
+    fundo = misturar(fundo, (0.10, 0.03, 0.03), 1.0 - suave(0.0, abaixo - RUIVO_CILIOS * altura_do_olho))
+    fundo = misturar(fundo, cor_da_lataria, 1.0 - suave(0.0, abaixo))
+    mascara = suave(0.0, abaixo - RUIVO_CILIOS * altura_do_olho)
 
-raio = RUIVO_RAIO * altura_do_olho
-dx, dy = (X - RUIVO_IRIS_X) * largura_do_olho, (Y - RUIVO_IRIS_Y) * altura_do_olho
-r = np.hypot(dx, dy) / raio
-angulo = np.arctan2(dy, dx)
-t = np.clip((r - RUIVO_PUPILA) / (1.0 - RUIVO_PUPILA), 0.0, 1.0)
-forma = (A, L, 3)
-cor_da_iris = np.where(t[..., None] < 0.5,
-                       misturar(np.broadcast_to(RUIVO_IRIS_DENTRO, forma).copy(), RUIVO_IRIS_MEIO, t / 0.5),
-                       misturar(np.broadcast_to(RUIVO_IRIS_MEIO, forma).copy(), RUIVO_IRIS_FORA, (t - 0.5) / 0.5))
-cor_da_iris *= (1.0 + 0.09 * np.sin(angulo * 27.0) * (t > 0.05))[..., None]
-cor_da_iris = misturar(cor_da_iris, (0.16, 0.07, 0.02), 1.0 - suave(0.0, (0.93 - r) * raio))   # o aro escuro
-cor_da_iris = misturar(cor_da_iris, (0.04, 0.03, 0.03), 1.0 - suave(RUIVO_PUPILA * raio, r * raio))
-brilho = np.hypot(dx + 0.30 * raio * np.where(metade, 1.0, -1.0)[None, :], dy + 0.30 * raio)
-cor_da_iris = misturar(cor_da_iris, (1, 1, 1), 1.0 - suave(0.13 * raio, brilho))
-alfa = 1.0 - suave(raio, r * raio)
-iris = np.concatenate([cor_da_iris, alfa[..., None]], axis=-1)
-gravar("ruivo_fundo", fundo)
-gravar("ruivo_iris", iris, alfa=True)
-gravar("ruivo_mascara", np.repeat(mascara[..., None], 3, axis=-1))
+    raio = RUIVO_RAIO * altura_do_olho
+    dx, dy = (X - RUIVO_IRIS_X) * largura_do_olho, (Y - RUIVO_IRIS_Y) * altura_do_olho
+    r = np.hypot(dx, dy) / raio
+    angulo = np.arctan2(dy, dx)
+    t = np.clip((r - RUIVO_PUPILA) / (1.0 - RUIVO_PUPILA), 0.0, 1.0)
+    forma = (A, L, 3)
+    cor_da_iris = np.where(t[..., None] < 0.5,
+                           misturar(np.broadcast_to(RUIVO_IRIS_DENTRO, forma).copy(), RUIVO_IRIS_MEIO, t / 0.5),
+                           misturar(np.broadcast_to(RUIVO_IRIS_MEIO, forma).copy(), RUIVO_IRIS_FORA, (t - 0.5) / 0.5))
+    cor_da_iris *= (1.0 + 0.09 * np.sin(angulo * 27.0) * (t > 0.05))[..., None]
+    cor_da_iris = misturar(cor_da_iris, (0.16, 0.07, 0.02), 1.0 - suave(0.0, (0.93 - r) * raio))   # o aro escuro
+    cor_da_iris = misturar(cor_da_iris, (0.04, 0.03, 0.03), 1.0 - suave(RUIVO_PUPILA * raio, r * raio))
+    brilho = np.hypot(dx + 0.30 * raio * np.where(metade, 1.0, -1.0)[None, :], dy + 0.30 * raio)
+    cor_da_iris = misturar(cor_da_iris, (1, 1, 1), 1.0 - suave(0.13 * raio, brilho))
+    alfa = 1.0 - suave(raio, r * raio)
+    iris = np.concatenate([cor_da_iris, alfa[..., None]], axis=-1)
+    gravar("ruivo_fundo", fundo)
+    gravar("ruivo_iris", iris, alfa=True)
+    gravar("ruivo_mascara", np.repeat(mascara[..., None], 3, axis=-1))
 
-# O modelo: os dois olhos numa malha, com um material só e a textura junta (o fundo com as íris)
-a = (alfa * mascara)[..., None]
-textura = nova_imagem("ruivo_olhos", fundo * (1 - a) + cor_da_iris * a)
-textura.pack()
-material = olhos_do_ruivo[0].data.materials[0]
-material.name = "red_eyes"
-no = no_de_imagem(material)
-no.image = textura
-no.extension = 'EXTEND'
-olhos_do_ruivo[1].data.materials[0] = material
-bpy.ops.object.select_all(action='DESELECT')
-for o in olhos_do_ruivo:
-    o.select_set(True)
-bpy.context.view_layer.objects.active = olhos_do_ruivo[0]
-bpy.ops.object.join()
-caminho = exportar("ruivo.glb")
-# na tabela: a íris anda de lado ANDA_POR_RAIO raios; os meios, um em cada metade
-raio_u, raio_v = raio / largura_do_olho * 0.5, RUIVO_RAIO
-cx = (0.5 * (1.0 - RUIVO_IRIS_X) * L, (0.5 + 0.5 * RUIVO_IRIS_X) * L)
-linha_dos_olhos("ruivo", caminho, "red_eyes", [(cx[0], RUIVO_IRIS_Y * A, raio_u * L, raio_v * A),
-                                               (cx[1], RUIVO_IRIS_Y * A, raio_u * L, raio_v * A)], L, A, -1)
+    # O modelo: os dois olhos numa malha, com um material só e a textura junta (o fundo com as íris)
+    a = (alfa * mascara)[..., None]
+    textura = nova_imagem("ruivo_olhos", fundo * (1 - a) + cor_da_iris * a)
+    textura.pack()
+    material = olhos_do_ruivo[0].data.materials[0]
+    material.name = "red_eyes"
+    no = no_de_imagem(material)
+    no.image = textura
+    no.extension = 'EXTEND'
+    olhos_do_ruivo[1].data.materials[0] = material
+    bpy.ops.object.select_all(action='DESELECT')
+    for o in olhos_do_ruivo:
+        o.select_set(True)
+    bpy.context.view_layer.objects.active = olhos_do_ruivo[0]
+    bpy.ops.object.join()
+    caminho = exportar("ruivo.glb")
+    # na tabela: a íris anda de lado ANDA_POR_RAIO raios; os meios, um em cada metade
+    raio_u, raio_v = raio / largura_do_olho * 0.5, RUIVO_RAIO
+    cx = (0.5 * (1.0 - RUIVO_IRIS_X) * L, (0.5 + 0.5 * RUIVO_IRIS_X) * L)
+    linha_dos_olhos("ruivo", caminho, "red_eyes", [(cx[0], RUIVO_IRIS_Y * A, raio_u * L, raio_v * A),
+                                                   (cx[1], RUIVO_IRIS_Y * A, raio_u * L, raio_v * A)], L, A, -1)
 
-# ---- A tabela dos olhos: as linhas destes, no lugar das antigas ----
-tabela = os.path.join(PASTA_DOS_OLHOS, "olhos.txt")
-linhas = open(tabela).read().splitlines() if os.path.exists(tabela) else []
-linhas = [l for l in linhas if l.split(" ")[0] not in linhas_dos_olhos] + list(linhas_dos_olhos.values())
-with open(tabela, "w") as arquivo:
-    arquivo.write("\n".join(linhas) + "\n")
+    gravar_tabela_dos_olhos()
+
+
+# Rodando direto (blender -P), prepara os figurantes; importado (preparar_carros.py), só empresta as funções
+if __name__ == "__main__":
+    preparar()

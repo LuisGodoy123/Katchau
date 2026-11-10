@@ -9,7 +9,7 @@ lista circular duplamente encadeada de segmentos.
 - **Fase 1:** pista como lista circular duplamente encadeada (`src/pista.c`), testada no terminal.
 - **Fase 2:** estrada em pseudo-3D (hoje em 3D de verdade, veja "O 3D").
 - **Fase 3:** carro do jogador (`src/carro.c`), corrida de 3 voltas com tempo por volta (`src/corrida.c`) e HUD simples (`src/hud.c`).
-- **Fase 4:** 13 rivais com IA (`src/ia.c`), classificação refeita a cada quadro com Insertion Sort (`src/ordenacao.c`), colisão e posição no HUD.
+- **Fase 4:** 16 rivais com IA (`src/ia.c`), classificação refeita a cada quadro com Insertion Sort (`src/ordenacao.c`), colisão e posição no HUD.
 - **Fase 5 (em parte):** Interlagos de verdade (o traçado de 2023, num modelo 3D medido para o jogo), mini-mapa, zebras e muros do modelo,
   linha de chegada quadriculada e objetos na beira da pista (`src/obstaculos.c`). Falta o turbo.
 - **Fase 6:** menu principal, garagem com Merge Sort, como jogar, contagem regressiva e tela de resultado (`src/menu.c`).
@@ -47,8 +47,8 @@ lista circular duplamente encadeada de segmentos.
   bronca; fugindo para longe, ele desiste. A Flo, o Ruivo, o Xerife e a
   Lizzie não correm: os modelos deles (`recursos/modelos/carros/flo.glb`, `ruivo.glb`, `xerife.glb`,
   `lizzie.glb`) saem de `ferramentas/preparar_figurantes.py` (que passa as texturas JPEG para PNG, porque a
-  raylib do jogo não lê JPEG, separa os olhos pintados de cada um nas três camadas dos olhos vivos e redesenha
-  os do Ruivo como os do filme) e entram em `carros3d.c` depois dos carros da corrida.
+  raylib do jogo não lê JPEG, separa os olhos pintados de cada um nas três camadas dos olhos vivos, redesenha
+  os do Ruivo como os do filme e desvira a Lizzie, que vem do avesso) e entram em `carros3d.c` depois dos carros da corrida.
 - **Passeio livre:** um mundo aberto de Radiator Springs (a cidade, o Willy's Butte, os cânions e, colada na
   cidade, a pista de treino de terra que veio do Cars 2), sem pista: o carro anda em qualquer direção
   (`src/livre.c`, que dirige com a direção livre da corrida, `dirigirSemPista` em `src/carro.c`) e o "para
@@ -259,6 +259,8 @@ testes/
   teste_pista.c    testa pista, carro, corrida, IA e ordenação no terminal
 ferramentas/
   medir_interlagos.c     mede o modelo de Interlagos e escreve src/interlagos.h (make medir-interlagos)
+  preparar_carros.py     prepara os modelos do Luigi, do Wingo, do Jackson Storm, do Boost e do DJ (Blender)
+  preparar_figurantes.py prepara os da Flo, do Ruivo, do Xerife e da Lizzie (Blender)
   gerar_som_da_zebra.py  gera recursos/sons/efeitos/zebra.wav
 recursos/
   fontes/          Racing Sans One e Saira Condensed (licença OFL, arquivos *_licenca.txt)
@@ -278,8 +280,8 @@ a janela). O resto é lógica pura e pode ser testado no terminal.
 
 ## Os carros
 
-São 14 carros (`FICHAS` em `corrida.c`), todos modelos 3D em `recursos/modelos/carros/`. Na garagem o
-jogador escolhe um; os outros 13 viram os rivais, e o jogador larga em último. A "volta limpa" é o tempo de
+São 17 carros (`FICHAS` em `corrida.c`), todos modelos 3D em `recursos/modelos/carros/`. Na garagem o
+jogador escolhe um; os outros 16 viram os rivais, e o jogador larga em último. A "volta limpa" é o tempo de
 uma volta lançada, sozinho na pista e dirigido pela IA, usando o nitro.
 
 | Carro | Jeito | Interlagos | Copa Pistão |
@@ -298,6 +300,9 @@ uma volta lançada, sozinho na pista e dirigido pela IA, usando o nitro.
 | Finn McMissile | espião, rápido em tudo | 72,7 s | 39,2 s |
 | Wingo | tuner, nervoso na arrancada | 72,8 s | 40,0 s |
 | Snot Rod | motorzão, difícil de segurar | 72,7 s | 38,8 s |
+| Jackson Storm | nova geração, voa na reta | 73,4 s | 39,3 s |
+| Boost | líder dos tuners, arrancada brava | 73,1 s | 39,6 s |
+| DJ | tuner do som, liso nas curvas | 73,1 s | 39,8 s |
 
 `carros3d.c` carrega os modelos e deixa todos iguais: mede cada um, escala para o comprimento do personagem
 (`MODELOS`), centraliza, põe as rodas no chão e a frente para +z. O carro no mundo segue a pista, o
@@ -307,9 +312,11 @@ e a fumaça e a poeira são nuvens soltas no mundo (`fumaca.c`). As rodas giram 
 do resto do modelo e a desenha girando em volta do próprio eixo; as da frente também viram com o volante. Na arrancada elas patinam, e o giro na tela
 tem um limite, porque acima dele a roda pareceria girar ao contrário. A garagem e o menu usam uma foto de cada modelo, tirada ao carregar.
 
-Os modelos são do Sketchfab, de DinseyPixarCarsModels e LukeMcQueen02, publicados como CC-BY-4.0 (o do Luigi veio
-sem autor nem licença). Os personagens são de *Carros* (Disney/Pixar). A única mudança nos arquivos foi converter as
-texturas JPEG para PNG, porque a raylib da Homebrew não lê JPEG.
+Os modelos são do Sketchfab, de DinseyPixarCarsModels e LukeMcQueen02 (o Luigi), publicados como CC-BY-4.0. Os
+personagens são de *Carros* (Disney/Pixar). Nos arquivos, as texturas JPEG viraram PNG, porque a raylib da Homebrew não
+lê JPEG. O Luigi, o Wingo, o Jackson Storm, o Boost e o DJ passam por `ferramentas/preparar_carros.py`, que também separa
+os olhos pintados nas três camadas dos olhos vivos, desvira as peças do avesso (o jogo não desenha o lado de trás das
+faces: o Wingo aparecia oco, e o Luigi antigo tinha a luz do lado errado) e põe o DJ, que vinha deitado, de frente para +z.
 
 ## Pilotagem
 
@@ -357,7 +364,7 @@ Em Interlagos, nos níveis médio e difícil, a parada nos boxes é obrigatória
 
 - **Entrar:** no fim da Subida dos Boxes, onde acaba o guard-rail da esquerda e começam as faixas brancas que separam o pit lane, com as rodas da esquerda em cima da linha branca (`querEntrarNoPit`). Ali o piloto automático assume, no limite de 100 km/h perto das garagens. A linha de corrida da Subida passa pela esquerda, então só entra quem encosta de propósito na linha (`soEncostadoNaBorda`).
 - **O caminho:** é o pit lane do modelo, medido (`PIT_INTERLAGOS` em `interlagos.h`): passa na frente das garagens, logo depois da linha de chegada, corre por dentro do S do Senna e da Curva do Sol e volta à pista na Reta Oposta. A tabela medida é alisada (média dos vizinhos) e, longe da vaga, o carro anda exatamente por ela, sem atraso; o passo na pista é corrigido para ele andar no mundo o que a velocidade manda (por dentro de uma curva, um metro da linha da pista vale menos), o bico aponta para onde ele andou de verdade (com um giro máximo) e a câmera vem atrás do bico. Nas curvas do caminho ele anda no máximo na velocidade que as faz com 25 m/s² de lado, freando com calma antes delas, e antes da manobra até a vaga já chega devagar: nada de balanço, câmera de lado ou trancos na saída.
-- **A troca:** cada carro tem uma vaga. Na do jogador, o Guido passa por todas as rodas em 3,2 s (`faseDaTroca` e `lugarDoGuido` em `pitstop.c`, desenho em `render.c`), e a imagem corta para uma câmera ao lado do carro.
+- **A troca:** cada carro tem uma vaga (as 17 cabem na frente das garagens). Na do jogador, o Guido passa por todas as rodas em 3,2 s (`faseDaTroca` e `lugarDoGuido` em `pitstop.c`, desenho em `render.c`), e a imagem corta para uma câmera ao lado do carro.
 - **Rivais:** cada um para numa volta (`voltaDoPit`) e leva mais tempo na troca que o Guido. No pit lane há fila: quem vem atrás reduz, quem sai da vaga espera passar quem já vem na faixa, e a colisão só separa os carros, sem tranco nem rodada; o carro parado na troca nunca é empurrado.
 
 A Copa Pistão ainda não tem pit lane: lá não há parada.
@@ -593,7 +600,7 @@ Nas outras pistas, o telão é uma estrutura 3D (`objetos/telao.glb` e `telao_ka
 as caixas de som e o letreiro KATCHAU com lâmpadas. A tela traz uma imagem de espera só dela; ao carregar, o jogo troca
 essa imagem pela transmissão (`ligarTeloesDoCenario` em `mundo.c`). A transmissão é desenhada sem as sombras do sol.
 
-Desenhar a transmissão é desenhar o mundo inteiro outra vez (o cenário e os 14 carros), numa imagem de 512x312. Como
+Desenhar a transmissão é desenhar o mundo inteiro outra vez (o cenário e os 17 carros), numa imagem de 512x312. Como
 Interlagos tem 5 telões em 6 km de pista, isso só é feito quando alguma tela está no campo de visão do jogador: no
 resto da volta, o que apareceria nela é invisível. `teloesAVista` (`mundo.c`) guarda a caixa de cada tela no
 carregamento e `atualizarTelao` (`render.c`) pergunta antes de desenhar. `KATCHAU_SEM_TELAO=1 ./katchau` desliga a

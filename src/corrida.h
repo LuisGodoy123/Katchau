@@ -15,7 +15,7 @@
 #include "pista.h"
 #include "carro.h"
 
-#define TOTAL_RIVAIS   13
+#define TOTAL_RIVAIS   16
 #define TOTAL_CARROS   (TOTAL_RIVAIS + 1)   /* rivais + jogador */
 
 /* Os níveis de dificuldade, escolhidos antes da corrida */
@@ -56,7 +56,7 @@ typedef struct {
     float tempoDeCorrida;       /* segundos desde a largada (não para no fim) */
     int terminou;               /* 1 depois que o jogador completa todas as voltas */
     int desclassificado;        /* 1 se o jogador terminou sem fazer a parada obrigatória */
-    int posicaoFinal;           /* posição do jogador na chegada (1 a 8) */
+    int posicaoFinal;           /* posição do jogador na chegada (1 a TOTAL_CARROS) */
     int mcqueenLiderava;        /* 1 enquanto o jogador, sendo o McQueen, está em 1º (para as falas dele) */
     float mcqueenTempoNaPonta;  /* segundos seguidos em 1º */
     int mcqueenPosicao;         /* a posição do jogador (sendo o McQueen) que as falas já "viram" (0 = ainda não) */

@@ -75,7 +75,7 @@ typedef enum {
  * o mais perto da linha. As distâncias são múltiplas do segmento, então
  * cada lugar cai bem no começo de um segmento. Uma pista pode ter o
  * próprio grid (o que já vem pintado no modelo): veja GridDaPista. */
-#define LUGARES_NO_GRID       14
+#define LUGARES_NO_GRID       17   /* um para cada carro (TOTAL_CARROS, em corrida.h) */
 #define DISTANCIA_DA_POLE     COMPRIMENTO_SEGMENTO            /* da pole até a linha */
 #define ESPACO_ENTRE_LUGARES  (2.0f * COMPRIMENTO_SEGMENTO)   /* de um lugar ao seguinte */
 #define LATERAL_DO_GRID       0.4f                            /* -0,4 à esquerda, +0,4 à direita */

@@ -338,13 +338,14 @@ static const char *textoDoTempo(float segundos, char *texto, int tamanho) {
 
 /* Código de três letras e a cor de cada carro, na ordem das fichas */
 static const char *CODIGOS[TOTAL_CARROS] = {
-    "MCQ", "KNG", "DOC", "FRA", "SAL", "RAM", "LUI", "GUI", "MAT", "SAR", "FIL", "FIN", "WIN", "SNO"
+    "MCQ", "KNG", "DOC", "FRA", "SAL", "RAM", "LUI", "GUI", "MAT", "SAR", "FIL", "FIN", "WIN", "SNO", "STO", "BOO", "DJ"
 };
 static const Color CORES_DAS_EQUIPES[TOTAL_CARROS] = {
     { 224,  30,  36, 255 }, {  40, 140, 230, 255 }, {  20,  50, 140, 255 }, { 200,  20,  30, 255 },
     { 110, 190, 240, 255 }, { 150,  60, 200, 255 }, { 250, 210,  40, 255 }, {  60, 110, 220, 255 },
     { 150,  90,  50, 255 }, {  80, 110,  50, 255 }, { 120, 200, 110, 255 }, { 170, 185, 200, 255 },
-    {  80, 210,  90, 255 }, { 255, 130,  20, 255 }
+    {  80, 210,  90, 255 }, { 255, 130,  20, 255 }, {   0,  95, 255, 255 }, { 195, 145, 215, 255 },
+    {   0, 200, 215, 255 }
 };
 
 /*

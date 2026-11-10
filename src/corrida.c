@@ -58,9 +58,9 @@
 /* Um respiro só com o motor, depois 3, 2, 1... KATCHAU! */
 #define SEGUNDOS_DE_CONTAGEM   (ESPERA_ANTES_DA_CONTAGEM + NUMEROS_DA_CONTAGEM * SEGUNDOS_POR_NUMERO)
 
-/* Os 14 carros do jogo. O número de cada um é a posição neste vetor e
+/* Os 17 carros do jogo. O número de cada um é a posição neste vetor e
  * define o modelo 3D (carros3d.c). O jogador escolhe um deles na garagem;
- * os outros 13 viram os rivais. Os carros têm jeitos diferentes, mas o mesmo
+ * os outros 16 viram os rivais. Os carros têm jeitos diferentes, mas o mesmo
  * ritmo: a aderência de cada um foi calculada para a volta limpa dar o mesmo
  * tempo em Interlagos, e a velocidade máxima varia pouco porque decide o oval. */
 static const FichaTecnica FICHAS[TOTAL_CARROS] = {
@@ -79,6 +79,9 @@ static const FichaTecnica FICHAS[TOTAL_CARROS] = {
     { "Finn McMissile", "espiao, rapido na reta", 12060.0f, 2380.0f, 0.498f, 4.6f, 2.12f },
     { "Wingo", "tuner, nervoso na arrancada", 12000.0f, 2550.0f, 0.494f, 4.4f, 2.67f },
     { "Snot Rod", "motorzao, dificil de segurar", 12100.0f, 2500.0f, 0.485f, 4.6f, 2.53f },
+    { "Jackson Storm", "nova geracao, voa na reta", 12110.0f, 2400.0f, 0.489f, 4.5f, 2.17f },
+    { "Boost", "lider dos tuners, arrancada brava", 12040.0f, 2750.0f, 0.472f, 4.5f, 2.31f },
+    { "DJ", "tuner do som, liso nas curvas", 12000.0f, 2650.0f, 0.492f, 4.2f, 2.58f },
 };
 
 /* Os níveis: o fácil não tem pitstop, e só o difícil gasta os pneus. Quanto mais difícil, mais os
