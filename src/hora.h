@@ -91,6 +91,7 @@ void iniciarRelogio(void);                 /* a primeira vez: 10h da manhã; dep
 void avancarRelogio(float segundos);
 float horaDoDia(void);                     /* 0 a 24 */
 void definirHoraDoDia(float hora);
+void sortearHoraDoDia(void);               /* uma hora qualquer do dia de 48 minutos (cada parte na proporção do tempo dela) */
 void escreverHora(char *texto, int tamanho, float hora);   /* "19:42" */
 
 const LuzDoDia *luzDaHora(void);           /* a luz da hora de agora */

@@ -2711,7 +2711,7 @@ static void testarNiveisEDesgaste(void) {
 
 /*
  * testarPneuEstourado
- * No dificil, com a vida do pneu perto de 20%, o pneu do jogador estoura: o carro perde velocidade,
+ * No dificil, com a vida do pneu em 5%, um pneu de tras do jogador estoura: o carro perde velocidade,
  * puxa para um lado e so a troca nos boxes resolve.
  */
 static void testarPneuEstourado(void) {
@@ -2721,23 +2721,23 @@ static void testarPneuEstourado(void) {
     static Corrida corrida;
     Comandos acelerar = { 1, 0, 0, 0, 0.0f, 0, 0 };
 
-    /* O pneu cruza os 80% de desgaste e estoura (so o do jogador, so no dificil) */
+    /* O pneu cruza os 95% de desgaste e estoura (so o do jogador, so no dificil) */
     iniciarCorrida(&corrida, pista, 0, NIVEL_DIFICIL);
     corrida.contagemRegressiva = 0.0f;
     corrida.jogador.velocidade = corrida.jogador.velocidadeMaxima;
-    corrida.jogador.desgaste = 0.78f;
+    corrida.jogador.desgaste = 0.93f;
     verificar(corrida.jogador.pneuEstourado == 0, "comeca sem pneu estourado");
     for (int i = 0; i < 60 * 3; i++) {
         atualizarCorrida(&corrida, acelerar, quadro);
     }
-    corrida.jogador.desgaste = 0.799f;
+    corrida.jogador.desgaste = 0.949f;
     int estourou = 0;
     for (int i = 0; i < 60 * 20 && !estourou; i++) {
         atualizarCorrida(&corrida, acelerar, quadro);
         estourou = corrida.jogador.pneuEstourado != 0;
     }
-    verificar(estourou, "chegando aos 80% de desgaste o pneu estoura");
-    verificar(corrida.jogador.pneuEstourado == 1 || corrida.jogador.pneuEstourado == 2, "e e um pneu dianteiro (1 ou 2)");
+    verificar(estourou, "chegando aos 95% de desgaste (5% de vida) o pneu estoura");
+    verificar(corrida.jogador.pneuEstourado == 4 || corrida.jogador.pneuEstourado == 8, "e e um pneu traseiro (4 ou 8)");
     verificar(!corrida.jogador.nitroLigado, "o nitro apaga");
     verificar(corrida.rivais[0].pneuEstourado == 0, "os rivais nao estouram");
 
@@ -2770,7 +2770,7 @@ static void testarPneuEstourado(void) {
     Carro sem = com;
     com.velocidade = sem.velocidade = 6000.0f;
     estourarPneu(&com);
-    float lado = (com.pneuEstourado == 1) ? -1.0f : 1.0f;
+    float lado = (com.pneuEstourado & 5) ? -1.0f : 1.0f;   /* os da esquerda sao os bits 0 e 2 */
     for (int i = 0; i < 60 * 2; i++) {
         atualizarCarro(&com, acelerar, quadro);
         atualizarCarro(&sem, acelerar, quadro);
@@ -2779,14 +2779,14 @@ static void testarPneuEstourado(void) {
            com.deslocamentoLateral, sem.deslocamentoLateral, lado);
     verificar((com.deslocamentoLateral - sem.deslocamentoLateral) * lado > 0.3f, "o carro puxa para o lado do pneu estourado");
 
-    /* Os quatro estouram aos poucos: um a cada marca de desgaste (80, 86, 92 e 97%), e cada um piora o carro */
+    /* Os quatro estouram aos poucos: um a cada marca de desgaste (95, 96,7, 98,3 e 100%), e cada um piora o carro */
     Carro aos = criarCarro("Teste", 0, buscarSegmento(pista, 1000), 0.0f, 12000.0f, 2400.0f, 0.5f);
     aos.controladoPeloJogador = 1;
     aos.gastaPneu = 1;
     aos.habilidade = 1.0f;
-    aos.desgaste = 0.79f;
+    aos.desgaste = 0.94f;
     aos.velocidade = aos.velocidadeMaxima;
-    static const float MARCAS[4] = { 0.80f, 0.86f, 0.92f, 0.97f };
+    static const float MARCAS[4] = { 0.95f, 0.9667f, 0.9833f, 1.00f };
     static const float TETOS[5] = { 1.0f, 0.55f, 0.46f, 0.38f, 0.30f };
     int certo = 1, ordemCerta = 1, vistos = 0, anterior = 0;
     float maiorComQuatro = 0.0f;
@@ -2799,8 +2799,8 @@ static void testarPneuEstourado(void) {
         }
         certo &= (n == devia) && (n >= anterior);
         if (n > anterior) {
-            ordemCerta &= (n > 1 || aos.pneuEstourado == 1 || aos.pneuEstourado == 2);   /* o primeiro e dianteiro */
-            ordemCerta &= (n != 2 || (aos.pneuEstourado & 3) == 3);                        /* o segundo e o outro dianteiro */
+            ordemCerta &= (n > 1 || aos.pneuEstourado == 4 || aos.pneuEstourado == 8);   /* o primeiro e traseiro */
+            ordemCerta &= (n != 2 || (aos.pneuEstourado & 12) == 12);                     /* o segundo e o outro traseiro */
             vistos |= 1 << n;
         }
         anterior = n;
@@ -2812,7 +2812,7 @@ static void testarPneuEstourado(void) {
         }
     }
     verificar(certo, "cada pneu estoura na sua marca de desgaste, na ordem, e nenhum volta sozinho");
-    verificar(ordemCerta && aos.pneuEstourado == 15, "primeiro um dianteiro, depois o outro dianteiro, depois os de tras: os quatro");
+    verificar(ordemCerta && aos.pneuEstourado == 15, "primeiro um traseiro, depois o outro traseiro, depois os da frente: os quatro");
     verificar(vistos == ((1 << 1) | (1 << 2) | (1 << 3) | (1 << 4)), "e estouraram um de cada vez (1, 2, 3 e 4 pneus)");
     printf("     com os quatro estourados: velocidade maxima vista %.0f (teto %.0f)\n", maiorComQuatro, aos.velocidadeMaxima * TETOS[4]);
     verificar(maiorComQuatro <= aos.velocidadeMaxima * TETOS[4] * 1.02f, "com os quatro no aro, nao passa de 30% da velocidade maxima");

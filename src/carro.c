@@ -134,11 +134,19 @@
 #define PUXAO_DO_TRASEIRO         0.60f    /* o pneu de trás puxa menos que o da frente */
 #define FREADA_DO_PNEU_ESTOURADO  3500.0f  /* o quanto a velocidade cai por segundo até o teto */
 
-/* Os pneus estouram um a um, quando o desgaste passa de cada marca (a vida fica abaixo de 20%, 14%, 8% e 3%).
- * Quanto mais estourados, menor a velocidade possível e menos o carro segura. Índice: quantos já estouraram. */
-static const float DESGASTE_DE_CADA_ESTOURO[4] = { 0.80f, 0.86f, 0.92f, 0.97f };
+/* Os pneus estouram um a um, quando o desgaste passa de cada marca: o primeiro com a vida em 5%, e aos poucos
+ * (3,3% e 1,7%) até os quatro no aro com a vida em 0%. Quanto mais estourados, menor a velocidade possível e
+ * menos o carro segura. Índice: quantos já estouraram. */
+static const float DESGASTE_DE_CADA_ESTOURO[4] = { 0.95f, 0.9667f, 0.9833f, 1.00f };
 static const float TETO_COM_PNEUS_ESTOURADOS[5] = { 1.00f, 0.55f, 0.46f, 0.38f, 0.30f };   /* fração da velocidade máxima */
 static const float ADERENCIA_NO_ARO[5] = { 1.00f, 0.70f, 0.60f, 0.52f, 0.45f };            /* e o aro segura menos que o pneu */
+/* Rodando no aro o carro destraciona, como no filme: a traseira não para no lugar (balança para os lados, mais
+ * acelerando), o aro quase não alinha o carro, e a roda patina (o giro do motor sobe e ele acelera menos) */
+#define BALANCO_NO_ARO            26.0f    /* o empurrão da traseira para os lados, por segundo ao quadrado (graus) */
+#define BALANCO_ACELERANDO        1.7f     /* acelerando, o balanço cresce isso */
+#define ALINHA_NO_ARO             0.45f    /* o quanto o carro deixa de se alinhar sozinho (com os 4 no aro) */
+#define PATINA_NO_ARO             0.22f    /* o giro a mais do motor, acelerando com os de trás no aro */
+#define ACELERA_NO_ARO            0.18f    /* a aceleração que se perde por pneu estourado */
 #define VELOCIDADE_PERDIDA        0.035f   /* com o pneu acabado, a máxima cai esse tanto */
 #define RAIO_DA_RODA               0.35f /* metros: quanto a roda gira por metro andado */
 #define GIRO_MAXIMO_DAS_RODAS     30.0f  /* radianos por segundo: mais que isso, na tela, a roda parece girar ao contrário */
@@ -514,6 +522,23 @@ float aderenciaAtual(const Carro *carro) {
 }
 
 /*
+ * semPneu
+ * O quanto o carro está rodando no aro: 0 (os quatro pneus) a 1 (os quatro no aro); os de trás contam mais,
+ * porque são eles que soltam a traseira.
+ * Recebe: o carro.
+ * Devolve: de 0 a 1.
+ */
+static float semPneu(const Carro *carro) {
+    float soma = 0.0f;
+    for (int roda = 0; roda < 4; roda++) {
+        if (carro->pneuEstourado & (1 << roda)) {
+            soma += (roda < 2) ? 0.2f : 0.3f;
+        }
+    }
+    return soma;
+}
+
+/*
  * atualizarDrift
  * O freio de mão, com o volante virado, quebra a traseira. Depois disso quem manda é o
  * pé: acelerando de lado o drift continua, sem acelerar ele acaba, e o volante controla
@@ -548,7 +573,15 @@ static void atualizarDrift(Carro *carro, Comandos comandos, float tempoQuadro) {
     if (aceleraDeLado) {
         torque += lado * TORQUE_DO_ACELERADOR * forca;
     }
-    float alinhar = VOLTA_DO_ANGULO * (1.0f - (1.0f - VOLTA_SEM_ADERENCIA) * forca);
+    /* No aro: a traseira balança sozinha (um vaivém irregular, como quem perde o pé), mais rápido e acelerando */
+    float noAro = (carro->pneuEstourado && carro->estadoDoPit == PIT_FORA) ? semPneu(carro) : 0.0f;
+    if (noAro > 0.0f && carro->velocidade > VELOCIDADE_PARA_O_DRIFT * 0.5f) {
+        float t = carro->tempoDoEstouro;
+        float vaivem = 0.6f * sinf(1.9f * t) + 0.3f * sinf(3.7f * t + 1.3f) + 0.15f * sinf(7.3f * t + 0.4f);
+        float rapidez = fminf(carro->velocidade / carro->velocidadeMaxima, 1.0f);
+        torque += vaivem * BALANCO_NO_ARO * noAro * rapidez * (comandos.acelerar ? BALANCO_ACELERANDO : 1.0f);
+    }
+    float alinhar = VOLTA_DO_ANGULO * (1.0f - (1.0f - VOLTA_SEM_ADERENCIA) * forca) * (1.0f - ALINHA_NO_ARO * noAro);
     float aceleracaoDoGiro = torque - carro->anguloDeDrift * alinhar * alinhar - carro->giroDoDrift * AMORTECE_O_GIRO;
     carro->giroDoDrift += aceleracaoDoGiro * tempoQuadro;
     carro->anguloDeDrift += carro->giroDoDrift * tempoQuadro;
@@ -573,8 +606,8 @@ int quantosPneusEstourados(const Carro *carro) {
 
 /*
  * estourarPneu
- * O próximo pneu estoura. Primeiro um dianteiro (o lado é sorteado pelo caminho que o carro andou, para não ser
- * sempre o mesmo), depois o outro dianteiro e então os de trás, do mesmo lado do primeiro e depois do outro.
+ * O próximo pneu estoura. Primeiro um traseiro (o lado é sorteado pelo caminho que o carro andou, para não ser
+ * sempre o mesmo), depois o outro traseiro e então os da frente, do mesmo lado do primeiro e depois do outro.
  * A cada estouro o carro roda no aro com menos velocidade possível, puxa mais e segura menos. Só uma troca nos
  * boxes resolve (e conserta os quatro). O nitro apaga e o controle vibra forte.
  * Recebe: o carro.
@@ -589,7 +622,7 @@ void estourarPneu(Carro *carro) {
         carro->ladoDoPrimeiroEstouro = (((long) carro->distanciaPercorrida / 997) % 2 == 0) ? 0 : 1;
     }
     int f = carro->ladoDoPrimeiroEstouro;
-    const int ORDEM[4] = { f, 1 - f, 2 + f, 3 - f };   /* esquerda = 0 e 2, direita = 1 e 3 */
+    const int ORDEM[4] = { 2 + f, 3 - f, f, 1 - f };   /* os de trás primeiro; esquerda = 0 e 2, direita = 1 e 3 */
     carro->pneuEstourado |= 1 << ORDEM[ja];
     carro->tempoDoEstouro = 0.0f;
     carro->nitroLigado = 0;
@@ -608,7 +641,7 @@ static void atualizarDesgaste(Carro *carro, float distancia) {
     }
     float metros = distancia / UNIDADES_POR_METRO * (1.0f + GASTO_DERRAPANDO * carro->derrapagem);
     carro->desgaste = fminf(carro->desgaste + metros / carro->metrosDeUmJogoDePneus, 1.0f);
-    /* Os pneus do jogador estouram um a um quando a vida passa de ~20%; só na pista (no pit lane ele já está parando) */
+    /* Os pneus do jogador estouram um a um de 5% de vida até 0%; só na pista (no pit lane ele já está parando) */
     while (carro->controladoPeloJogador && carro->estadoDoPit == PIT_FORA && quantosPneusEstourados(carro) < 4
            && carro->desgaste >= DESGASTE_DE_CADA_ESTOURO[quantosPneusEstourados(carro)]) {
         estourarPneu(carro);
@@ -1192,10 +1225,17 @@ int atualizarCarro(Carro *carro, Comandos comandos, float tempoQuadro) {
 
     carro->ultimosComandos = comandos;
     atualizarNitro(carro, comandos, tempoQuadro);
-    atualizarMotor(&carro->motor, carro->velocidade / carro->velocidadeMaxima + ROTACAO_NO_DRIFT * carro->forcaDoDrift,
+    float patinando = (carro->pneuEstourado && comandos.acelerar) ? PATINA_NO_ARO * semPneu(carro) : 0.0f;
+    atualizarMotor(&carro->motor, carro->velocidade / carro->velocidadeMaxima + ROTACAO_NO_DRIFT * carro->forcaDoDrift + patinando,
                    (comandos.acelerar || carro->nitroLigado) && !comandos.frear && !comandos.freioDeMao,
                    comandos.frear, carro->forcaDoDrift > SEGURA_A_MARCHA, tempoQuadro);
+    float antesDeAcelerar = carro->velocidade;
     atualizarVelocidade(carro, comandos, tempoQuadro);
+    if (carro->pneuEstourado && carro->velocidade > antesDeAcelerar) {
+        /* o aro patina: do que o motor somou, parte se perde */
+        float perde = fminf(ACELERA_NO_ARO * (float) quantosPneusEstourados(carro), 0.6f);
+        carro->velocidade -= (carro->velocidade - antesDeAcelerar) * perde;
+    }
     if (carro->pneuEstourado) {   /* rodando no aro, a velocidade cai até o teto e não passa dele */
         carro->tempoDoEstouro += tempoQuadro;
         float teto = carro->velocidadeMaxima * TETO_COM_PNEUS_ESTOURADOS[quantosPneusEstourados(carro)];

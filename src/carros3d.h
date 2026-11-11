@@ -37,6 +37,7 @@ void desenharSombra(int numero, Matrix noMundo);
 int rodaDoCanto(int numero, int canto, Vector3 *centro);
 void trocarRodaNoProximoDesenho(int roda, float andamento);
 void esconderRodaNoProximoDesenho(int roda);
+void pneusEstouradosNoProximoDesenho(int pneus);   /* os bits de Carro.pneuEstourado: sobra o aro e o canto baixa */
 void definirOlhoDosCarros(Vector3 olho);
 
 /* Os olhos vivos dos carros num modelo que não é carro (o Mack, em passeio.c) */

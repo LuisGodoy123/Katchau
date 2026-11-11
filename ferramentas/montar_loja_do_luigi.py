@@ -32,8 +32,8 @@ demorado. --amostras é o número de amostras do Cycles por ponto na luz assada.
 
 O que ela faz:
   1. Desenha as texturas (em PNG, porque a raylib do jogo não lê JPEG): o piso
-     de tábuas longas e estreitas vermelho-castanhas, o asfalto da baia de
-     serviço, a raiz de madeira dos painéis do móvel (redemoinhos suaves e nós)
+     de tábuas longas e estreitas vermelho-castanhas, a raiz de madeira dos
+     painéis do móvel (redemoinhos suaves e nós)
      e a borracha dos pneus (flanco, banda de rodagem, faixa branca).
   2. Pinta os pôsteres de corridas italianas antigas: cada um é uma cena
      pequena renderizada no Blender com um dos carros do jogo
@@ -48,10 +48,10 @@ O que ela faz:
      janelas da frente e os dois arcos, que descem até o chão e viram
      vitrines com plataforma), o rebaixo entre as paredes e a casca fechado,
      caixilhos, rodapé, sanca e vigas cor de vinho, colunas redondas com base
-     e capitel, o teto com luzes embutidas, o piso de tábuas e a baia de
-     asfalto com as faixas; o móvel do fundo com as prateleiras de pneus, as
+     e capitel, o teto com luzes embutidas, o piso de tábuas (inteiro, da
+     porta ao fundo); o móvel do fundo com as prateleiras de pneus, as
      plaquinhas e o nicho de cortinas vermelhas com a placa "Fettuccini
-     Alfredo" e as três pilhas de pneus; o espelho, o elevador, a máquina de
+     Alfredo" e as três pilhas de pneus; o espelho, a máquina de
      balancear, os pneus-banco, o pneu-troféu e as paredes forradas de pôsteres
      (colunas de quadros quase encostados, do rodapé alto até a sanca).
   4. Assa a luz no Cycles (difusa direta e indireta, sem a cor) nas cores
@@ -202,8 +202,6 @@ LUGAR_DO_LUIGI = (467.90, 173.40, 3.0, 1.7)    # x, z, comprimento, largura
 LUGAR_DO_GUIDO = (459.10, 173.60, 2.4, 1.2)
 MOVEL_X = (457.00, 470.00)   # o móvel do fundo (nicho no meio), encostado na parede z = Z_FUNDO
 ESPELHO_X = (471.00, 477.40)
-BAIA_FUNDO = 8.8             # a baia de asfalto entra isso a partir da face de fora da fachada
-ELEVADOR_TS = (3.55, 5.30)   # o elevador, em (ao longo da fachada, para dentro) a partir de DIAG_A
 MAQUINA_U = 8.80             # a máquina de balancear, na parede do arco de oeste, ao lado da coluna da porta
 CENTRO_DO_SALAO = (461.70, 152.40)   # o pódio de pneus no meio do salão da frente
 # Pneus-banco (x, z)
@@ -227,8 +225,6 @@ METAL_ESCURO = (0.20, 0.21, 0.23)
 CAIXILHO = (0.16, 0.24, 0.18)
 BEGE = (0.85, 0.77, 0.60)
 BRANCO = (1.0, 1.0, 1.0)
-FAIXA_AMARELA = (0.93, 0.72, 0.12)
-FAIXA_BRANCA = (0.93, 0.93, 0.90)
 LUZ_DA_LAMPADA = (1.0, 0.97, 0.90)     # a cor do vértice das lâmpadas (brilham sozinhas)
 
 
@@ -363,7 +359,6 @@ def amostrar(img, x, y):
 # ------------------------------------------------------------------
 TAM_DO_PISO = 1024
 METROS_DO_PISO = 4.0           # a textura do piso cobre 4 x 4 m: 30 tábuas de 13 cm, de 1,7 a 2,3 m
-METROS_DO_ASFALTO = 2.5
 METROS_DA_RAIZ = 2.8           # um painel de raiz do móvel (3,9 m) mostra pouco mais de uma repetição
 COR_DO_PISO = (0.55, 0.18, 0.145)   # vermelho-castanho (carmim escuro), na tela
 
@@ -404,18 +399,6 @@ def textura_do_piso():
     cor = cor * (tom * (1 + 0.035 * v1 + 0.03 * v2 + 0.015 * mancha))[..., None]
     cor = np.broadcast_to(cor, (n, n, 3)).copy()
     cor[fresta | junta] *= 0.62
-    return np.clip(cor, 0, 1)
-
-
-def textura_do_asfalto():
-    rng = np.random.default_rng(5)
-    n = 512
-    largo = ruido(n, n, 40, 40, rng)
-    medio = ruido(n, n, 6, 6, rng)
-    fino = ruido(n, n, 0.7, 0.7, rng)
-    v = 0.25 + 0.025 * largo + 0.015 * medio + 0.03 * fino
-    v = v + np.where(fino > 1.7, 0.09, 0) - np.where(fino < -1.9, 0.06, 0)
-    cor = np.stack([v * 1.0, v * 0.985, v * 0.96], axis=2)
     return np.clip(cor, 0, 1)
 
 
@@ -496,9 +479,8 @@ def v_da_faixa(nome, frac=0.5):
 
 
 print('Desenhando as texturas...')
-TEXTURAS = {'piso': textura_do_piso(), 'asfalto': textura_do_asfalto(), 'raiz': textura_da_raiz(), 'pneus': textura_dos_pneus()}
+TEXTURAS = {'piso': textura_do_piso(), 'raiz': textura_da_raiz(), 'pneus': textura_dos_pneus()}
 IMG_PISO = imagem('loja_piso', TEXTURAS['piso'])
-IMG_ASFALTO = imagem('loja_asfalto', TEXTURAS['asfalto'])
 IMG_RAIZ = imagem('loja_raiz', TEXTURAS['raiz'])
 IMG_PNEU = imagem('loja_pneus', TEXTURAS['pneus'])
 print('  %.0f s' % (time.time() - INICIO))
@@ -688,7 +670,7 @@ def limpar_cena():
             colecao.remove(d)
     for m in list(bpy.data.materials):
         bpy.data.materials.remove(m)
-    guardar = {IMG_PISO.name, IMG_ASFALTO.name, IMG_RAIZ.name, IMG_PNEU.name, 'loja_posteres', 'loja_espelho'}
+    guardar = {IMG_PISO.name, IMG_RAIZ.name, IMG_PNEU.name, 'loja_posteres', 'loja_espelho'}
     for im in list(bpy.data.images):
         if im.name not in guardar:
             bpy.data.images.remove(im)
@@ -1340,7 +1322,6 @@ def normal_de(pts):
 MALHAS = {
     'cores': Malha('loja_cores'),
     'piso': Malha('loja_piso', IMG_PISO),
-    'asfalto': Malha('loja_asfalto', IMG_ASFALTO),
     'posteres': Malha('loja_posteres', IMG_POSTERES),
     'raiz': Malha('loja_raiz', IMG_RAIZ),
     'pneus': Malha('loja_pneus', IMG_PNEU),
@@ -1573,34 +1554,6 @@ def grade_no_convexo(conv, passo):
             z += passo
         x += passo
     return pecas
-
-
-def separar_por_convexo(pecas, conv):
-    """Separa cada peça em (dentro de conv, fora de conv)"""
-    s = 1 if area2(conv) > 0 else -1
-    dentro, fora = [], []
-    xs = [p[0] for p in conv]
-    zs = [p[1] for p in conv]
-    for pc in pecas:
-        px = [p[0] for p in pc]
-        pz = [p[1] for p in pc]
-        if max(px) < min(xs) or min(px) > max(xs) or max(pz) < min(zs) or min(pz) > max(zs):
-            fora.append(pc)
-            continue
-        resto = pc
-        for k in range(len(conv)):
-            a, b = np.asarray(conv[k]), np.asarray(conv[(k + 1) % len(conv)])
-            e = b - a
-            n = np.array([-e[1], e[0]]) * s
-            f = cortar_meio_plano(resto, a, -n)
-            if len(f) >= 3 and abs(area2(f)) > 1e-6:
-                fora.append(f)
-            resto = cortar_meio_plano(resto, a, n)
-            if len(resto) < 3:
-                break
-        if len(resto) >= 3 and abs(area2(resto)) > 1e-6:
-            dentro.append(resto)
-    return dentro, fora
 
 
 # ------------------------------------------------------------------
@@ -1871,40 +1824,17 @@ PECAS_DO_PISO = [
 ]
 SOLEIRA = [tuple(diag(PORTA_T[0] + FOLGA_DO_VAO, -0.02)), tuple(diag(PORTA_T[1] - FOLGA_DO_VAO, -0.02)),
            tuple(diag(PORTA_T[1] - FOLGA_DO_VAO, RECUO_DA_DIAGONAL)), tuple(diag(PORTA_T[0] + FOLGA_DO_VAO, RECUO_DA_DIAGONAL))]
-BAIA = [tuple(diag(PORTA_T[0] + FOLGA_DO_VAO, -0.05)), tuple(diag(PORTA_T[1] - FOLGA_DO_VAO, -0.05)),
-        tuple(diag(PORTA_T[1] - FOLGA_DO_VAO, BAIA_FUNDO)), tuple(diag(PORTA_T[0] + FOLGA_DO_VAO, BAIA_FUNDO))]
 
 
 def montar_piso():
+    """O piso de tábuas inteiro, da soleira da porta ao fundo"""
     pecas = []
     for pc in PECAS_DO_PISO + [SOLEIRA]:
         pecas += grade_no_convexo([np.asarray(p) for p in pc], PASSO_DO_PISO)
-    asfalto, madeira = separar_por_convexo(pecas, [np.asarray(p) for p in BAIA])
     up = np.array([0, 1.0, 0])
-    for pc in madeira:
+    for pc in pecas:
         pts = [(p[0], PISO_Y, p[1]) for p in pc]
         MALHAS['piso'].face(pts, BRANCO, n=up, uvs=[(p[0] / METROS_DO_PISO, -p[1] / METROS_DO_PISO) for p in pc], suave=True)
-    for pc in asfalto:
-        pts = [(p[0], PISO_Y, p[1]) for p in pc]
-        MALHAS['asfalto'].face(pts, BRANCO, n=up, uvs=[(p[0] / METROS_DO_ASFALTO, -p[1] / METROS_DO_ASFALTO) for p in pc], suave=True)
-    # as faixas da baia: brancas contínuas nos lados e amarela tracejada no meio
-    h = PISO_Y + 0.012
-    t0, t1 = PORTA_T[0] + FOLGA_DO_VAO, PORTA_T[1] - FOLGA_DO_VAO
-
-    def faixa(ta, tb, sa, sb, cor):
-        pts = [diag(ta, sa), diag(tb, sa), diag(tb, sb), diag(ta, sb)]
-        CORES.face([(p[0], h, p[1]) for p in pts], cor, n=up)
-    for t in (t0 + 0.25, t1 - 0.25 - 0.13):
-        s = 0.05
-        while s < BAIA_FUNDO - 0.3:
-            faixa(t, t + 0.13, s, min(s + PASSO, BAIA_FUNDO - 0.3), FAIXA_BRANCA)
-            s += PASSO
-    tm = (t0 + t1) / 2
-    s = 0.4
-    while s < BAIA_FUNDO - 0.6:
-        faixa(tm - 0.08, tm + 0.08, s, s + 0.9, FAIXA_AMARELA)
-        s += 1.6
-    faixa(t0 + 0.25, t1 - 0.25, BAIA_FUNDO - 0.43, BAIA_FUNDO - 0.3, FAIXA_BRANCA)
 
 
 def montar_teto():
@@ -2425,7 +2355,7 @@ montar_vitrine(P_ARCO_SUL, P_ARCO_SUL.vaos[0], vitrine_da_piramide)
 
 
 # ------------------------------------------------------------------
-# 3f. A porta de garagem (enrolada no alto), o espelho, o elevador, a máquina, os bancos
+# 3f. A porta de garagem (enrolada no alto), o espelho, a máquina, os bancos
 # ------------------------------------------------------------------
 def montar_porta_enrolada():
     W = P_PORTA
@@ -2499,40 +2429,6 @@ CROMO = (0.62, 0.64, 0.67)
 CROMO_BRILHO = (0.97, 0.97, 0.98)
 
 
-def montar_elevador():
-    """O elevador de uma coluna: base com faixa zebrada, coluna cromada com colar vermelho, a cabeça e
-    dois braços longos com pontas pretas e amarelas e sapatas de borracha (a colisão é uma caixa)"""
-    t, s = ELEVADOR_TS
-    c = diag(t, s)
-    R = Ref(c, DIAG_D, DIAG_N)
-    up = (0, 1, 0)
-    caixa(CORES, R, -0.62, 0.62, 0, 0.04, -0.62, 0.62, METAL_ESCURO, sem=('baixo',))
-    # a faixa zebrada em volta da base (blocos amarelos e pretos; cada lado fica com um canto)
-    for lado in range(4):
-        ang = lado * math.pi / 2
-        ca, sa = math.cos(ang), math.sin(ang)
-        for j in range(7):
-            s0, s1 = -0.62 + j * 0.16, -0.62 + (j + 1) * 0.16
-            cor = FAIXA_AMARELA if j % 2 == 0 else PRETO_DE_BORRACHA
-            q = [(s0, 0.50), (s1, 0.50), (s1, 0.62), (s0, 0.62)]
-            CORES.face([R.p(a * ca - b * sa, 0.042, a * sa + b * ca) for a, b in q], cor, n=up)
-    torno(CORES, R.p(0, 0.04, 0), up, R.d(1, 0, 0), [(0.27, 0.0), (0.27, 0.04), (0.20, 0.08), (0.18, 0.12), (0.18, 1.08),
-                                                        (0.215, 1.12), (0.215, 1.20)], 24,
-          verniz((c[0], c[1]), PISO_Y, 1.2, base=CROMO, realce=CROMO_BRILHO, largura=0.35))
-    torno(CORES, R.p(0, 0.78, 0), up, R.d(1, 0, 0), [(0.20, 0.0), (0.205, 0.02), (0.205, 0.12), (0.20, 0.14)], 24, VERMELHO)
-    caixa(CORES, R, -0.30, 0.30, 1.20, 1.32, -0.30, 0.30, METAL_ESCURO)
-    for a in (-0.40, 0.40):
-        caixa(CORES, R, a - 0.07, a + 0.07, 1.22, 1.32, -0.80, 0.80, CROMO)
-        for ponta in (-1, 1):
-            for j in range(3):
-                b0 = ponta * (0.80 + j * 0.10)
-                b1 = ponta * (0.80 + (j + 1) * 0.10)
-                caixa(CORES, R, a - 0.07, a + 0.07, 1.22, 1.32, min(b0, b1), max(b0, b1),
-                      FAIXA_AMARELA if j % 2 == 0 else PRETO_DE_BORRACHA)
-            torno(CORES, R.p(a, 1.32, ponta * 1.0), up, R.d(1, 0, 0), [(0.09, 0.0), (0.09, 0.06), (0.0, 0.06)], 12, PRETO_DE_BORRACHA)
-    COLISAO_CAIXAS.append(('caixa', R, -0.6, 0.6, -1.3, 1.3))
-
-
 def montar_maquina():
     W = P_ARCO_OESTE
     c = W.p0 + MAQUINA_U * W.R.u + 0.62 * W.R.n
@@ -2584,7 +2480,6 @@ def montar_podio():
 montar_porta_enrolada()
 montar_podio()
 montar_espelho()
-montar_elevador()
 montar_maquina()
 montar_bancos()
 
@@ -3304,7 +3199,7 @@ def finalizar_cores(objs):
         tinta = ler_atributo(me, 'tinta')
         brilho = ler_atributo(me, 'brilho')
         dados.append((o, luz, tinta, brilho, cantos))
-        if o['malha'] in ('cores', 'piso', 'asfalto'):
+        if o['malha'] in ('cores', 'piso'):
             ok = brilho.sum(1) == 0
             lums.append(luz[ok] @ LUMA)
     lum = np.concatenate(lums)
@@ -3442,7 +3337,7 @@ def refletir_no_piso(objs):
     textura), borrada pelos vizinhos. O piso da textura é escuro: estes realces leem como o brilho
     do encerado."""
     from mathutils.bvhtree import BVHTree
-    texturas = {'posteres': ATLAS, 'raiz': TEXTURAS['raiz'], 'pneus': TEXTURAS['pneus'], 'asfalto': TEXTURAS['asfalto']}
+    texturas = {'posteres': ATLAS, 'raiz': TEXTURAS['raiz'], 'pneus': TEXTURAS['pneus']}
     V, T, C, U, X, lista = [], [], [], [], [], []
     base = 0
     for o in objs:
@@ -3670,13 +3565,13 @@ def renderizar_eevee(caminho, w, h):
 
 
 def pintar_espelho(objs):
-    """Renderiza a sala do ponto que o espelho reflete (de quem está no meio da baia, à altura de um
+    """Renderiza a sala do ponto que o espelho reflete (de quem entra pela porta, à altura de um
     carro) e põe na textura do espelho, invertida como num espelho"""
     R = ESPELHO['R']
     a0, a1 = ESPELHO['a']
     h0, h1 = ESPELHO['h']
     b = ESPELHO['b']
-    # o observador: no meio da baia, a 1,5 m do chão
+    # o observador: logo depois da porta, a 1,5 m do chão
     obs = diag((PORTA_T[0] + PORTA_T[1]) / 2 - 1.0, 6.5)
     obs_b = float((obs - R.o) @ R.n)
     obs_a = float((obs - R.o) @ R.u)
@@ -3956,7 +3851,6 @@ def montar_json():
             profundidade_do_rebaixo=RECUO_DA_DIAGONAL,
         ),
         lugares=lugares,
-        baia_de_servico=[[round(p[0], 3), round(p[1], 3)] for p in BAIA],
         contorno_por_dentro=[[round(p[0], 3), round(p[1], 3)] for p in CONTORNO],
         aberturas_para_tirar_da_casca=aberturas,
         nota_das_aberturas='Peças de ror_Object_46 inteiras dentro de cada caixa (eixos do jogo; "faces" = quantas faces '

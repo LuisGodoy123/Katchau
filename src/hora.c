@@ -303,6 +303,23 @@ void definirHoraDoDia(float novaHora) {
     relogioIniciado = 1;
 }
 
+/*
+ * sortearHoraDoDia
+ * Uma hora qualquer, sorteada nos 48 minutos do dia: cada parte sai na proporção dos minutos dela (o dia, que
+ * dura mais, sai mais; a noite, o pôr e o nascer do sol também aparecem).
+ * Recebe: nada.
+ * Devolve: nada.
+ */
+void sortearHoraDoDia(void) {
+    float minutosDoDia = 0.0f;
+    for (int i = 0; i < TOTAL_DE_PARTES; i++) {
+        minutosDoDia += PARTES[i].minutos;
+    }
+    hora = PARTES[0].de;
+    relogioIniciado = 1;
+    avancarRelogio((float) GetRandomValue(0, (int) (minutosDoDia * 60.0f) - 1) + (float) GetRandomValue(0, 99) / 100.0f);
+}
+
 void escreverHora(char *texto, int tamanho, float h) {
     int minutos = (int) floorf(fmodf(h, 24.0f) * 60.0f);
     snprintf(texto, (size_t) tamanho, "%02d:%02d", (minutos / 60) % 24, minutos % 60);

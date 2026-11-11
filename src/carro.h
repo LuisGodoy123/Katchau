@@ -127,7 +127,7 @@ typedef struct {
     float desgaste;                /* de 0 (novos) a 1 (acabados); o Guido zera na troca */
     int pneuEstourado;             /* os pneus estourados, um bit para cada roda (0 = nenhum): bit 0 dianteiro esquerdo,
                                     * 1 dianteiro direito, 2 traseiro esquerdo, 3 traseiro direito. Os quatro estouram
-                                    * aos poucos, quando a vida passa de ~20% (veja estourarPneu) */
+                                    * aos poucos, de 5% de vida até 0%, os de trás primeiro (veja estourarPneu) */
     int ladoDoPrimeiroEstouro;     /* 0 = o primeiro pneu a estourar foi o esquerdo, 1 = o direito (os outros seguem dele) */
     float tempoDoEstouro;          /* segundos desde o último estouro */
     float fasePulso;               /* segundos andando no topo da velocidade: é a fase das oscilações da velocidade (veja atualizarVelocidade) */

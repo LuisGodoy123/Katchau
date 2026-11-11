@@ -59,24 +59,6 @@
       "nota": "olhando para a porta"
     }
   },
-  "baia_de_servico": [
-    [
-      471.888,
-      159.214
-    ],
-    [
-      477.241,
-      165.765
-    ],
-    [
-      470.388,
-      171.365
-    ],
-    [
-      465.035,
-      164.814
-    ]
-  ],
   "contorno_por_dentro": [
     [
       455.8,
@@ -297,7 +279,7 @@
   "nota_das_aberturas": "Peças de ror_Object_46 inteiras dentro de cada caixa (eixos do jogo; \"faces\" = quantas faces a peça tem). vao_na_face_de_fora: os quatro cantos do vão, na face de fora da casca (a janela e os arcos têm o alto em arco até o y do alto). Tirar do desenho; na colisão do mapa, a do painel da porta sai (a porta fica aberta) e as dos vidros podem ficar (a colisão da loja já fecha as janelas e as vitrines por dentro).",
   "colisao": {
     "arquivo": "loja_do_luigi_colisao.glb",
-    "triangulos": 245,
+    "triangulos": 237,
     "nota": "piso em y = piso_y (com uma aba de 1,5 m para fora da porta) e paredes em pé; sem teto nem tampos"
   }
 }

@@ -12,7 +12,8 @@
  *
  * O dia passa (hora.c): 48 minutos do nascer do sol ao nascer do sol, com
  * o pôr do sol e a noite. No quarto do cone do Cozy Cone mais perto do Mack
- * (o cone 8), parado, o jogador dorme e escolhe a hora de acordar.
+ * (o cone 8), parado, o jogador dorme oito horas. O jogo começa nesse quarto, numa hora sorteada,
+ * e a volta de uma corrida também cai numa hora sorteada.
  * ------------------------------------------------------------------
  */
 
@@ -180,10 +181,12 @@ static float treino[3] = { TREINO_X, 0.0f, TREINO_Z };
 
 typedef enum { CENA_DIRIGINDO, CENA_ENTRANDO, CENA_NA_CARRETA, CENA_PARTINDO, CENA_SAINDO } CenaDoMack;
 
-/* Dormir no Cozy Cone: no quarto do cone 8 (o mais perto do Mack), parado, ENTER (ou Y) abre a escolha da
- * hora de acordar; a tela escurece, o relógio pula para a hora escolhida e a tela clareia */
+/* Dormir no Cozy Cone: no quarto do cone 8 (o mais perto do Mack), parado, ENTER (ou Y) dorme; a tela
+ * escurece, o relógio pula oito horas e a tela clareia. É também ali que o jogo começa */
 #define CAMA_X                775.127f  /* o lugar do carro no cone 8 (recursos/modelos/cozy_cone_quartos.json) */
 #define CAMA_Z                157.912f
+#define CAMA_RUMO             -1.5623f  /* de frente para a porta (entrou de ré, como no filme) */
+#define TETO_DO_QUARTO        4.83f     /* o chão do quarto se procura abaixo disto (acima está o teto e o topo do cone) */
 #define NA_CAMA_ATE           3.5f      /* metros do lugar */
 #define PISO_DO_QUARTO        2.4f      /* acima disso o carro está no piso do quarto (a praça fica em 1,9) */
 #define PARADO_PARA_DORMIR    1.5f      /* m/s */
@@ -193,19 +196,11 @@ typedef enum { CENA_DIRIGINDO, CENA_ENTRANDO, CENA_NA_CARRETA, CENA_PARTINDO, CE
 #define COR_DA_NOITE          (Color){ 72, 86, 196, 255 }
 #define LUGAR_DOS_POSTES      3         /* o lugar dos postes entre os modelos colocados no mundo (mundo.h) */
 
-typedef struct {
-    const char *nome;
-    float hora;
-} HoraDeAcordar;
-static const HoraDeAcordar HORAS_DE_ACORDAR[] = {
-    { "AMANHECER", 6.0f }, { "MANHÃ", 9.0f }, { "MEIO-DIA", 12.0f }, { "TARDE", 16.0f },
-    { "PÔR DO SOL", 18.6f }, { "NOITE", 21.5f }, { "MADRUGADA", 2.0f },
-};
-#define TOTAL_DE_HORAS_DE_ACORDAR (int) (sizeof(HORAS_DE_ACORDAR) / sizeof(HORAS_DE_ACORDAR[0]))
-typedef enum { ACORDADO, ESCOLHENDO_A_HORA, ADORMECENDO, DORMINDO, ACORDANDO } Sono;
+#define HORAS_DE_SONO         8.0f      /* dormindo, o relógio pula oito horas */
+typedef enum { ACORDADO, ADORMECENDO, DORMINDO, ACORDANDO } Sono;
 static Sono sono = ACORDADO;
 static float tempoDoSono = 0.0f;
-static int horaEscolhida = 0;
+static float horaDeAcordar = 0.0f;
 
 static Model mack, rodasDoMack, modeloDaPorta;
 static int luzesDoMack = -1, luzesDoBau = -1;   /* as lâmpadas de fora do Mack e o que brilha no baú (luzes.c) */
@@ -568,53 +563,27 @@ static int naCamaDoCone(void) {
 
 /*
  * deitar
- * Abre a escolha da hora de acordar, marcando a primeira que vem depois da hora de agora.
+ * Dorme: a tela escurece, o relógio pula oito horas e a tela clareia, com a cidade já como deve estar.
  */
 static void deitar(void) {
-    float agora = horaDoDia(), menor = 99.0f;
-    horaEscolhida = 0;
-    for (int i = 0; i < TOTAL_DE_HORAS_DE_ACORDAR; i++) {
-        float falta = fmodf(HORAS_DE_ACORDAR[i].hora - agora + 48.0f, 24.0f);
-        if (falta > 1.0f && falta < menor) {
-            menor = falta;
-            horaEscolhida = i;
-        }
-    }
-    sono = ESCOLHENDO_A_HORA;
+    horaDeAcordar = fmodf(horaDoDia() + HORAS_DE_SONO, 24.0f);
+    sono = ADORMECENDO;
+    tempoDoSono = 0.0f;
     tocarSom(SOM_CONFIRMAR);
 }
 
 /*
  * atualizarSono
- * A escolha da hora (CIMA/BAIXO, ENTER dorme, ESC desiste) e depois o escurecer, o pulo do
- * relógio e o clarear.
+ * O escurecer, o pulo do relógio e o clarear.
  * Recebe: o tempo do quadro.
  * Devolve: nada.
  */
 static void atualizarSono(float tempoQuadro) {
-    if (sono == ESCOLHENDO_A_HORA) {
-        if (IsKeyPressed(KEY_UP) || IsKeyPressed(KEY_W) || controleApertou(BOTAO_CIMA)) {
-            horaEscolhida = (horaEscolhida + TOTAL_DE_HORAS_DE_ACORDAR - 1) % TOTAL_DE_HORAS_DE_ACORDAR;
-            tocarSom(SOM_CURSOR);
-        } else if (IsKeyPressed(KEY_DOWN) || IsKeyPressed(KEY_S) || controleApertou(BOTAO_BAIXO)) {
-            horaEscolhida = (horaEscolhida + 1) % TOTAL_DE_HORAS_DE_ACORDAR;
-            tocarSom(SOM_CURSOR);
-        } else if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER) || IsKeyPressed(KEY_SPACE)
-                   || controleApertou(BOTAO_CONFIRMAR) || controleApertou(BOTAO_LIMPAR)) {
-            sono = ADORMECENDO;
-            tempoDoSono = 0.0f;
-            tocarSom(SOM_CONFIRMAR);
-        } else if (IsKeyPressed(KEY_ESCAPE) || IsKeyPressed(KEY_BACKSPACE) || controleApertou(BOTAO_VOLTAR)) {
-            sono = ACORDADO;
-            tocarSom(SOM_VOLTAR);
-        }
-        return;
-    }
     tempoDoSono += tempoQuadro;
     if (sono == ADORMECENDO && tempoDoSono >= ADORMECE_EM) {
         sono = DORMINDO;
         tempoDoSono = 0.0f;
-        definirHoraDoDia(HORAS_DE_ACORDAR[horaEscolhida].hora);
+        definirHoraDoDia(horaDeAcordar);
         atualizarLuzesDaCidade(luzDaHora()->luzesDaCidade, 0.0f, 1);   /* acorda com a cidade já como deve estar */
         definirHoraDaCidade(horaDoDia());
     } else if (sono == DORMINDO && tempoDoSono >= DORME_POR) {
@@ -754,6 +723,15 @@ static void prepararMapa(void) {
     }
 }
 
+/* O carro no quarto do cone 8, no lugar dele (o chão é o do quarto, não o teto nem o topo do cone) */
+static void acordarNoCone(void) {
+    levarCarroPara(&carro, malha, CAMA_X, CAMA_Z, CAMA_RUMO);
+    float chao = (malha != NULL) ? alturaDoChaoNaMalha(malha, CAMA_X, CAMA_Z, TETO_DO_QUARTO, NULL) : SEM_CHAO;
+    if (chao > SEM_CHAO) {
+        carro.y = chao;
+    }
+}
+
 /*
  * iniciarPasseio
  * Recebe: o carro escolhido na garagem.
@@ -763,10 +741,11 @@ void iniciarPasseio(int numeroDoCarro) {
     prepararMapa();
     numero = numeroDoCarro;
     iniciarCarroLivre(&carro, fichaDoCarro(numero), largada[0], largada[1], largada[2], largada[3]);
-    voltarAoComeco(&carro, malha);
+    acordarNoCone();   /* o jogo começa no quarto do cone 8, de frente para a porta */
     iniciarMoradores(malha, numero);   /* cada um em casa (menos quem tem o carro do jogador) */
     colocarNoMundoAberto(LUGAR_DOS_POSTES, modeloDosPostes(), matrizesDosPostes());   /* com sombra, como o Mack */
-    iniciarRelogio();
+    sortearHoraDoDia();   /* cada vez que entra no jogo, uma hora do dia */
+    definirHoraDaCidade(horaDoDia());
     atualizarLuzesDaCidade(luzDaHora()->luzesDaCidade, 0.0f, 1);   /* já acesas, se for de noite */
     sono = ACORDADO;
     cena = CENA_DIRIGINDO;
@@ -846,6 +825,11 @@ void voltarDaCorrida(int numeroDoCarro, const char *texto) {
     if (numeroDoCarro != numero || !pronto) {
         iniciarPasseio(numeroDoCarro);
     }
+    /* acabando ou abandonando, a corrida levou um tempo: volta numa outra hora do dia (só desistir na
+     * escolha da corrida, voltarDaEscolhaDaCorrida, deixa a hora como estava) */
+    sortearHoraDoDia();
+    definirHoraDaCidade(horaDoDia());
+    atualizarLuzesDaCidade(luzDaHora()->luzesDaCidade, 0.0f, 1);
     snprintf(recado, sizeof(recado), "%s", texto);
     tempoDoRecado = 0.0f;
     correrDireto = 0;
@@ -1131,7 +1115,7 @@ Tela atualizarPasseio(EstadoMenu *menu, float tempoQuadro) {
         tempoDoRecado -= tempoQuadro;
     }
     sustoDoMack = fmaxf(sustoDoMack - tempoQuadro, 0.0f);
-    if (!pausado && !mapaAberto && sono != ESCOLHENDO_A_HORA) {
+    if (!pausado && !mapaAberto) {
         /* a cidade segue, até nas cenas do Mack; e o dia passa (dormindo, o relógio pula de uma vez) */
         if (sono == ACORDADO) {
             avancarRelogio(tempoQuadro);
@@ -1949,39 +1933,8 @@ static void desenharHudDoPasseio(void) {
 }
 
 /*
- * desenharEscolhaDaHora
- * A lista das horas de acordar, no meio da tela, sobre o quarto escurecido.
- */
-static void desenharEscolhaDaHora(void) {
-    float largura = (float) larguraVirtual(), altura = (float) alturaVirtual();
-    DrawRectangle(-200, -200, (int) largura + 400, (int) altura + 400, Fade(BLACK, 0.45f));
-    float w = 400.0f, linha = 40.0f, h = 100.0f + TOTAL_DE_HORAS_DE_ACORDAR * linha + 44.0f;
-    Rectangle caixa = { largura / 2.0f - w / 2.0f, altura / 2.0f - h / 2.0f, w, h };
-    caixaArredondada(caixa, 14.0f, COR_PAINEL);
-    escreverCentralizado(FONTE_TITULO, "DORMIR ATÉ", largura / 2.0f, caixa.y + 18.0f, 30.0f, WHITE);
-    char agora[8], subtitulo[40];
-    escreverHora(agora, (int) sizeof(agora), horaDoDia());
-    snprintf(subtitulo, sizeof(subtitulo), "AGORA SÃO %s", agora);
-    escreverCentralizado(FONTE_FORTE, subtitulo, largura / 2.0f, caixa.y + 58.0f, 14.0f, COR_TEXTO_FRACO);
-    for (int i = 0; i < TOTAL_DE_HORAS_DE_ACORDAR; i++) {
-        float y = caixa.y + 90.0f + i * linha;
-        int marcada = (i == horaEscolhida);
-        if (marcada) {
-            caixaArredondada((Rectangle){ caixa.x + 18.0f, y, w - 36.0f, linha - 6.0f }, 10.0f, Fade(COR_DA_NOITE, 0.9f));
-        }
-        char hora[8];
-        escreverHora(hora, (int) sizeof(hora), HORAS_DE_ACORDAR[i].hora);
-        float topo = noMeio(FONTE_TITULO, 21.0f, y + (linha - 6.0f) / 2.0f);
-        escrever(FONTE_TITULO, HORAS_DE_ACORDAR[i].nome, caixa.x + 34.0f, topo, 21.0f, marcada ? WHITE : Fade(WHITE, 0.8f));
-        escreverADireita(FONTE_TITULO, hora, caixa.x + w - 34.0f, topo, 21.0f, marcada ? WHITE : COR_TEXTO_FRACO);
-    }
-    const char *dica = controleConectado() ? "A  DORMIR      B  VOLTAR" : "ENTER  DORMIR      ESC  VOLTAR";
-    escreverCentralizado(FONTE_FORTE, dica, largura / 2.0f, caixa.y + h - 32.0f, 13.0f, COR_TEXTO_FRACO);
-}
-
-/*
  * desenharSono
- * A tela escurecendo, o "Z z z" com a hora de acordar, e a tela clareando.
+ * A tela escurecendo, o "Z z z" com a hora em que acorda (oito horas depois), e a tela clareando.
  */
 static void desenharSono(void) {
     float escuro = escuroDoSono();
@@ -1998,8 +1951,8 @@ static void desenharSono(void) {
         return;
     }
     char hora[8], linha[64];
-    escreverHora(hora, (int) sizeof(hora), HORAS_DE_ACORDAR[horaEscolhida].hora);
-    snprintf(linha, sizeof(linha), "%s  %s", HORAS_DE_ACORDAR[horaEscolhida].nome, hora);
+    escreverHora(hora, (int) sizeof(hora), horaDeAcordar);
+    snprintf(linha, sizeof(linha), "OITO HORAS DEPOIS  -  %s", hora);
     escreverCentralizado(FONTE_TITULO, "Z  z  z", largura / 2.0f, altura / 2.0f - 46.0f, 46.0f, Fade((Color){ 170, 182, 255, 255 }, texto));
     escreverCentralizado(FONTE_FORTE, linha, largura / 2.0f, altura / 2.0f + 14.0f, 18.0f, Fade(WHITE, texto));
 }
@@ -2099,7 +2052,7 @@ void desenharPasseio(EstadoMenu *menu) {
         terminarInterface();
         return;
     }
-    float dt = (pausado || mapaAberto || sono == ESCOLHENDO_A_HORA) ? 0.0f : GetFrameTime();
+    float dt = (pausado || mapaAberto) ? 0.0f : GetFrameTime();
     Camera3D camera = montarCamera();   /* sempre: ela segue o carro mesmo nas cenas, para não dar tranco depois */
     if (cena != CENA_DIRIGINDO) {
         camera = cameraDaCena();
@@ -2173,9 +2126,6 @@ void desenharPasseio(EstadoMenu *menu) {
         desenharMapaGrande();
     } else {
         desenharHudDoPasseio();
-        if (sono == ESCOLHENDO_A_HORA) {
-            desenharEscolhaDaHora();
-        }
         desenharSono();
     }
     terminarInterface();

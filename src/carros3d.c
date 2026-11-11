@@ -63,11 +63,14 @@ typedef struct {
 typedef struct {
     Vector3 centro;
     float raio, xMinimo, xMaximo;
+    float raioDoAro;   /* onde acaba o aro e começa a borracha (o que sobra quando o pneu estoura) */
 } RodaDoCarro;
 
 /* As peças de uma roda que usam o mesmo material */
 typedef struct {
     Mesh malha;        /* com o centro da roda na origem */
+    Mesh aro;          /* só o aro (sem a borracha), para o pneu estourado */
+    int temAro;
     int material;
     int roda;
 } PecaDeRoda;
@@ -125,8 +128,8 @@ static const char *VERTICES_DO_SHADER =
     "#version 330\n"
     "in vec3 vertexPosition; in vec2 vertexTexCoord; in vec3 vertexNormal; in vec4 vertexColor;\n"
     "uniform mat4 mvp; uniform mat4 matModel;\n"
-    "out vec2 fragTexCoord; out vec4 fragColor; out vec3 fragNormal; out vec3 fragPos;\n"
-    "void main() { fragTexCoord = vertexTexCoord; fragColor = vertexColor;\n"
+    "out vec2 fragTexCoord; out vec4 fragColor; out vec3 fragNormal; out vec3 fragPos; out vec3 fragNaPeca;\n"
+    "void main() { fragTexCoord = vertexTexCoord; fragColor = vertexColor; fragNaPeca = vertexPosition;\n"
     "              fragNormal = mat3(matModel) * vertexNormal;\n"
     "              fragPos = vec3(matModel * vec4(vertexPosition, 1.0));\n"
     "              gl_Position = mvp * vec4(vertexPosition, 1.0); }\n";
@@ -146,13 +149,15 @@ static const char *VERTICES_DO_SHADER =
  * No passeio, o sol, a luz e o céu refletido mudam com a hora (hora.c). */
 #define PIXELS_DO_SHADER_LENDO(DECLARACOES, LEITURA, CORTE, SAIDA) \
     "#version 330\n" \
-    "in vec2 fragTexCoord; in vec4 fragColor; in vec3 fragNormal; in vec3 fragPos;\n" \
+    "in vec2 fragTexCoord; in vec4 fragColor; in vec3 fragNormal; in vec3 fragPos; in vec3 fragNaPeca;\n" \
     "uniform sampler2D texture0; uniform vec4 colDiffuse; uniform vec3 olho; uniform float reflexoDaPintura;\n" \
+    "uniform float corteDoAro;\n" /* na roda de pneu estourado: o que passa desse raio (em volta do eixo x) some */ \
     DECLARACOES \
     "out vec4 finalColor;\n" \
     GLSL_DA_LUZ_DA_NOITE GLSL_DO_SOL GLSL_DA_LUZ_DO_DIA GLSL_DO_REFLEXO_DO_DIA GLSL_DAS_LAMPADAS \
     "void main() { vec4 cor = " LEITURA " * colDiffuse * fragColor;\n" \
     "              " CORTE "\n" \
+    "              if (corteDoAro > 0.0 && length(fragNaPeca.yz) > corteDoAro) discard;\n" \
     "              vec3 n = normalize(fragNormal);\n" \
     "              if (!gl_FrontFacing) n = -n;\n" \
     "              float sol = max(dot(n, solDoDia), 0.0);\n" \
@@ -306,6 +311,7 @@ static float reflexos[TOTAL_DE_MODELOS];    /* quanto o céu se reflete na pintu
 static Shader shaderDosOlhos;
 static int locDoDesvio, locDosMeios, locDoTamanho, locDaForma;
 static int locsDoReflexo[3];   /* reflexoDaPintura no opaco, no translúcido e no dos olhos */
+static int locsDoCorte[2];     /* corteDoAro no opaco e no translúcido */
 static int locsDoOlho[3];      /* "olho" nos mesmos três: procurar pelo nome a cada quadro é caro */
 
 static Model modelos[TOTAL_DE_MODELOS];
@@ -328,6 +334,7 @@ static Matrix poseDosGarfos;             /* no carro normalizado; vale só para 
 static int temPoseDosGarfos = 0;
 static Vector3 pontaDosGarfosNormal;     /* o meio das pás, em cima, no carro normalizado */
 static int rodaEscondida = -1;           /* a roda que não está no carro no próximo desenho */
+static int estouradosNoProximo = 0;      /* os pneus estourados no próximo desenho (bits, como Carro.pneuEstourado) */
 static Matrix corpoInclinado;            /* a suspensão: só o corpo inclina, as rodas não */
 static int temCorpoInclinado = 0;
 
@@ -401,7 +408,14 @@ static void desenharPecaTrocando(PecaDeRoda *peca, RodaDoCarro *roda, Model mode
  *         do carro no mundo, o ângulo das rodas e o volante.
  * Devolve: nada.
  */
-static void desenharRodas(int numero, Model modelo, Matrix noMundo, float anguloDasRodas, float volante, int soTranslucidas) {
+/* O bit da roda em Carro.pneuEstourado: 0 dianteiro esquerdo, 1 dianteiro direito, 2 traseiro esquerdo,
+ * 3 traseiro direito (no carro normalizado, a frente é +z e a esquerda é +x) */
+static int bitDaRoda(const RodaDoCarro *roda) {
+    return 1 << (((roda->centro.z > 0.0f) ? 0 : 2) + ((roda->centro.x > 0.0f) ? 0 : 1));
+}
+
+static void desenharRodas(int numero, Model modelo, Matrix noMundo, float anguloDasRodas, float volante, int soTranslucidas,
+                          const float *subida) {
     for (int i = 0; i < totalDePecas[numero]; i++) {
         PecaDeRoda *peca = &pecas[numero][i];
         if (soTranslucidas && translucidos[numero] != NULL && !translucidos[numero][peca->material]) {
@@ -415,13 +429,86 @@ static void desenharRodas(int numero, Model modelo, Matrix noMundo, float angulo
         if (peca->roda == rodaEscondida) {
             continue;
         }
+        int estourado = (estouradosNoProximo & bitDaRoda(roda)) != 0;
         Matrix giro = MatrixRotateX(anguloDasRodas);
         if (roda->centro.z > 0.0f) {
             giro = MatrixMultiply(giro, MatrixRotateY(-volante * GRAUS_DAS_RODAS_DA_FRENTE * DEG2RAD));
         }
-        Matrix lugar = MatrixMultiply(giro, MatrixTranslate(roda->centro.x, roda->centro.y, roda->centro.z));
-        DrawMesh(peca->malha, modelo.materials[peca->material], MatrixMultiply(lugar, noMundo));
+        float y = roda->centro.y + ((subida != NULL) ? subida[peca->roda] : 0.0f);
+        Matrix lugar = MatrixMultiply(giro, MatrixTranslate(roda->centro.x, y, roda->centro.z));
+        Shader shader = modelo.materials[peca->material].shader;
+        int corte = -1;
+        if (estourado) {   /* sobra o aro: a borracha que é peça à parte nem vai, e o resto que passa do aro é cortado */
+            corte = (shader.id == shaderOpaco.id) ? 0 : (shader.id == shaderTranslucido.id) ? 1 : -1;
+            if (corte >= 0) {
+                float raio = roda->raioDoAro * 1.01f;
+                SetShaderValue(shader, locsDoCorte[corte], &raio, SHADER_UNIFORM_FLOAT);
+            }
+        }
+        DrawMesh((estourado && peca->temAro) ? peca->aro : peca->malha, modelo.materials[peca->material], MatrixMultiply(lugar, noMundo));
+        if (corte >= 0) {
+            float semCorte = 0.0f;
+            SetShaderValue(shader, locsDoCorte[corte], &semCorte, SHADER_UNIFORM_FLOAT);
+        }
     }
+}
+
+/*
+ * pneusEstouradosNoProximoDesenho
+ * Os pneus que estouraram: no próximo desenho a borracha some e sobra o aro, e o carro baixa daquele canto
+ * (o aro é menor que o pneu).
+ * Recebe: os pneus, um bit para cada (como Carro.pneuEstourado).
+ * Devolve: nada.
+ */
+void pneusEstouradosNoProximoDesenho(int pneus) {
+    estouradosNoProximo = pneus;
+}
+
+/*
+ * caimentoDoEstouro
+ * Sem a borracha, a roda fica menor: o canto dela baixa o que o pneu tinha a mais que o aro. O carro, que é
+ * rígido, inclina no plano que melhor passa pelos cantos (mínimos quadrados de altura = h + p·x + q·z), e o
+ * que sobra em cada roda ela mesma sobe ou desce (a suspensão), para todas tocarem o chão.
+ * Recebe: o número do carro e onde guardar quanto cada roda sobe.
+ * Devolve: a matriz da inclinação, no carro normalizado.
+ */
+static Matrix caimentoDoEstouro(int numero, float *subida) {
+    int n = totalDeRodas[numero];
+    float desce[MAXIMO_DE_RODAS];
+    double s1 = 0, sx = 0, sz = 0, sxx = 0, szz = 0, sxz = 0, sd = 0, sxd = 0, szd = 0;
+    for (int r = 0; r < n; r++) {
+        const RodaDoCarro *roda = &rodas[numero][r];
+        desce[r] = (estouradosNoProximo & bitDaRoda(roda)) ? -(roda->raio - roda->raioDoAro) : 0.0f;
+        double x = roda->centro.x, z = roda->centro.z, d = desce[r];
+        s1 += 1; sx += x; sz += z; sxx += x * x; szz += z * z; sxz += x * z; sd += d; sxd += x * d; szd += z * d;
+    }
+    /* as equações normais (3 x 3), pela regra de Cramer */
+    double a[3][3] = { { s1, sx, sz }, { sx, sxx, sxz }, { sz, sxz, szz } }, b[3] = { sd, sxd, szd };
+    double det = a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1]) - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0])
+                 + a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]);
+    float h = (n > 0) ? (float) (sd / s1) : 0.0f, p = 0.0f, q = 0.0f;
+    if (fabs(det) > 1e-9) {
+        double x[3];
+        for (int k = 0; k < 3; k++) {
+            double m[3][3];
+            for (int i = 0; i < 3; i++) {
+                for (int j = 0; j < 3; j++) {
+                    m[i][j] = (j == k) ? b[i] : a[i][j];
+                }
+            }
+            x[k] = (m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+                    + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])) / det;
+        }
+        h = (float) x[0];
+        p = (float) x[1];
+        q = (float) x[2];
+    }
+    for (int r = 0; r < n; r++) {
+        subida[r] = desce[r] - (h + p * rodas[numero][r].centro.x + q * rodas[numero][r].centro.z);
+    }
+    /* (x, 0, 0) sobe p·x girando em z; (0, 0, z) sobe q·z girando em x para o outro lado */
+    return MatrixMultiply(MatrixMultiply(MatrixRotateZ(asinf(Clamp(p, -0.5f, 0.5f))), MatrixRotateX(-asinf(Clamp(q, -0.5f, 0.5f)))),
+                          MatrixTranslate(0.0f, h, 0.0f));
 }
 
 /*
@@ -841,6 +928,12 @@ static void prepararOlhos(int numero, float volante) {
 void desenharCarro3D(int numero, Matrix noMundo, float anguloDasRodas, float volante) {
     rlDrawRenderBatchActive();   /* o que já estava na fila sai antes de mudar a profundidade */
 
+    /* Com pneu estourado, o carro baixa daquele canto (a roda vira só o aro) */
+    float subida[MAXIMO_DE_RODAS] = { 0 };
+    if (estouradosNoProximo) {
+        noMundo = MatrixMultiply(caimentoDoEstouro(numero, subida), noMundo);
+    }
+
     Model modelo = modelos[numero];
     Matrix corpo = temCorpoInclinado ? MatrixMultiply(ajuste[numero], corpoInclinado) : ajuste[numero];
     modelo.transform = MatrixMultiply(corpo, noMundo);
@@ -862,7 +955,7 @@ void desenharCarro3D(int numero, Matrix noMundo, float anguloDasRodas, float vol
     if (comGarfos) {
         desenharComShader(doGuido, shaderOpaco, -1);
     }
-    desenharRodas(numero, modelo, noMundo, anguloDasRodas, volante, 0);
+    desenharRodas(numero, modelo, noMundo, anguloDasRodas, volante, 0, subida);
     float normal = 1.0f;   /* o shaderOpaco também desenha outras coisas, como a roda solta */
     SetShaderValue(shaderOpaco, locsDoReflexo[0], &normal, SHADER_UNIFORM_FLOAT);
 
@@ -872,12 +965,13 @@ void desenharCarro3D(int numero, Matrix noMundo, float anguloDasRodas, float vol
     if (comGarfos) {
         desenharSoTranslucidos(doGuido, shaderTranslucido, translucidosDosGarfos);
     }
-    desenharRodas(numero, modelo, noMundo, anguloDasRodas, volante, 1);
+    desenharRodas(numero, modelo, noMundo, anguloDasRodas, volante, 1, subida);
     rlDrawRenderBatchActive();
     rlEnableDepthMask();
     EndBlendMode();
     rodaEmTroca = -1;
     rodaEscondida = -1;
+    estouradosNoProximo = 0;
     temPoseDosGarfos = 0;
     temCorpoInclinado = 0;
 }
@@ -1234,7 +1328,7 @@ static void separarRodas(int numero) {
                 }
             }
             UploadMesh(&peca, false);
-            pecas[numero][totalDePecas[numero]++] = (PecaDeRoda){ peca, modelo->meshMaterial[m], r };
+            pecas[numero][totalDePecas[numero]++] = (PecaDeRoda){ .malha = peca, .temAro = 0, .material = modelo->meshMaterial[m], .roda = r };
         }
 
         /* O resto do carro, no lugar da malha original (continua nas medidas do modelo) */
@@ -1253,6 +1347,236 @@ static void separarRodas(int numero) {
         MemFree(pai);
         MemFree(ilhas);
     }
+}
+
+/*
+ * separarAros
+ * Em cada roda, o que é pneu e o que é aro, para o pneu estourado sumir e sobrar o aro.
+ * Quando o pneu é uma peça à parte (um anel que vai até a banda e não chega no meio), ele sai inteiro, e o
+ * aro vai até onde vão as outras peças. Quando a roda é um cilindro só, com o aro pintado na tampa, o raio do
+ * aro vem da cor: de fora para dentro, as faixas de raio com a cor da borracha (a da banda) são do pneu, e a
+ * primeira que não é marca onde o aro acaba (uma faixa só de outra cor, como as letras, não conta). Na hora
+ * de desenhar, o que passa do raio do aro é cortado (o shader descarta).
+ * Recebe: o número do carro.
+ * Devolve: nada.
+ */
+#define FAIXAS_DO_RAIO        24
+#define PERTO_DA_BORRACHA     0.16f    /* a distância de cor (0 a 1 em cada canal) que ainda é borracha */
+#define BORRACHA_NA_FAIXA     0.50f    /* da área da faixa: mais que isso com a cor da borracha, a faixa é do pneu */
+#define ANEL_DO_PNEU_DENTRO   0.35f    /* do raio: o anel do pneu não chega mais perto do eixo que isso... */
+#define ANEL_DO_PNEU_FORA     0.86f    /* ...e vai pelo menos até aqui */
+#define ARO_QUANDO_NAO_ACHA   0.62f    /* do raio, quando nem a forma nem a cor separam o aro */
+
+typedef struct {
+    Color *pixels;
+    int largura, altura;
+} PixelsDoMaterial;
+
+/* A cor da roda num ponto de um triângulo (a textura do material, com a tinta dele) */
+static Vector3 corNaRoda(const PixelsDoMaterial *imagem, Color tinta, float u, float v) {
+    Vector3 cor = { tinta.r / 255.0f, tinta.g / 255.0f, tinta.b / 255.0f };
+    if (imagem->pixels != NULL) {
+        int x = (int) ((u - floorf(u)) * imagem->largura), y = (int) ((v - floorf(v)) * imagem->altura);
+        x = (x < 0) ? 0 : (x >= imagem->largura) ? imagem->largura - 1 : x;
+        y = (y < 0) ? 0 : (y >= imagem->altura) ? imagem->altura - 1 : y;
+        Color px = imagem->pixels[y * imagem->largura + x];
+        cor = (Vector3){ cor.x * px.r / 255.0f, cor.y * px.g / 255.0f, cor.z * px.b / 255.0f };
+    }
+    return cor;
+}
+
+static float Vector3Area(Vector3 a, Vector3 b, Vector3 c);   /* a área de um triângulo */
+
+/*
+ * amostrarRoda
+ * Passa por toda a área dos triângulos de uma peça (vários pontos em cada um, para as tampas em leque, que vão
+ * do eixo até a borda num triângulo só, contarem em cada raio) e soma, por faixa de raio, a área e a área com
+ * a cor da borracha. Sem a cor da borracha ainda (borracha NULL), soma a cor da banda (de 0,88 do raio para fora).
+ * Recebe: a peça, os triângulos que ficam de fora (NULL: nenhum), a imagem e a tinta do material, o raio da roda,
+ *         a cor da borracha e onde somar.
+ * Devolve: nada.
+ */
+static void amostrarRoda(Mesh m, const unsigned char *fora, const PixelsDoMaterial *imagem, Color tinta, float raio,
+                         const Vector3 *borracha, float *area, float *comBorracha, Vector3 *corDaBanda, float *areaDaBanda) {
+    for (int t = 0; t < m.vertexCount / 3; t++) {
+        if (fora != NULL && fora[t]) {
+            continue;
+        }
+        Vector3 p[3];
+        Vector2 uv[3];
+        for (int c = 0; c < 3; c++) {
+            int k = t * 3 + c;
+            p[c] = (Vector3){ m.vertices[k * 3], m.vertices[k * 3 + 1], m.vertices[k * 3 + 2] };
+            uv[c] = (m.texcoords != NULL) ? (Vector2){ m.texcoords[k * 2], m.texcoords[k * 2 + 1] } : (Vector2){ 0.0f, 0.0f };
+        }
+        float tamanho = Vector3Area(p[0], p[1], p[2]);
+        float maior = fmaxf(Vector3Distance(p[0], p[1]), fmaxf(Vector3Distance(p[1], p[2]), Vector3Distance(p[2], p[0])));
+        int n = (int) Clamp(ceilf(maior / (raio / FAIXAS_DO_RAIO)), 1.0f, 10.0f);
+        float peso = tamanho / (float) (n * (n + 1) / 2);
+        for (int i = 0; i < n; i++) {
+            for (int j = 0; j < n - i; j++) {
+                float a = (i + 1.0f / 3.0f) / n, b = (j + 1.0f / 3.0f) / n, c = 1.0f - a - b;
+                Vector3 ponto = Vector3Add(Vector3Add(Vector3Scale(p[0], a), Vector3Scale(p[1], b)), Vector3Scale(p[2], c));
+                float u = uv[0].x * a + uv[1].x * b + uv[2].x * c, v = uv[0].y * a + uv[1].y * b + uv[2].y * c;
+                Vector3 cor = corNaRoda(imagem, tinta, u, v);
+                float noRaio = hypotf(ponto.y, ponto.z) / raio;
+                if (borracha == NULL) {
+                    if (noRaio > 0.88f) {
+                        *corDaBanda = Vector3Add(*corDaBanda, Vector3Scale(cor, peso));
+                        *areaDaBanda += peso;
+                    }
+                    continue;
+                }
+                int faixa = (int) Clamp(noRaio * FAIXAS_DO_RAIO, 0.0f, FAIXAS_DO_RAIO - 1.0f);
+                area[faixa] += peso;
+                if (Vector3Distance(cor, *borracha) < PERTO_DA_BORRACHA) {
+                    comBorracha[faixa] += peso;
+                }
+            }
+        }
+    }
+}
+
+static void separarAros(int numero) {
+    Model *modelo = &modelos[numero];
+    PixelsDoMaterial *imagens = MemAlloc(modelo->materialCount * sizeof(PixelsDoMaterial));
+    for (int m = 0; m < modelo->materialCount; m++) {
+        Texture2D textura = modelo->materials[m].maps[MATERIAL_MAP_ALBEDO].texture;
+        imagens[m] = (PixelsDoMaterial){ NULL, 0, 0 };
+        int usada = 0;
+        for (int i = 0; i < totalDePecas[numero]; i++) {
+            usada |= pecas[numero][i].material == m;
+        }
+        if (usada && textura.id != 0 && textura.id != rlGetTextureIdDefault()) {
+            Image imagem = LoadImageFromTexture(textura);
+            imagens[m] = (PixelsDoMaterial){ LoadImageColors(imagem), imagem.width, imagem.height };
+            UnloadImage(imagem);
+        }
+    }
+    for (int r = 0; r < totalDeRodas[numero]; r++) {
+        RodaDoCarro *roda = &rodas[numero][r];
+        float raio = fmaxf(roda->raio, 0.01f);
+        float bordaDoPneu = 2.0f, maiorAro = 0.0f;
+        unsigned char *doAnel[MAXIMO_DE_PECAS_RODA * MAXIMO_DE_RODAS] = { 0 };
+
+        /* 1. As ilhas de cada peça: o anel do pneu sai inteiro */
+        for (int i = 0; i < totalDePecas[numero]; i++) {
+            PecaDeRoda *peca = &pecas[numero][i];
+            if (peca->roda != r) {
+                continue;
+            }
+            Mesh m = peca->malha;
+            int triangulos = m.vertexCount / 3;
+            int *pai = MemAlloc(m.vertexCount * sizeof(int));
+            float *menor = MemAlloc(m.vertexCount * sizeof(float)), *maior = MemAlloc(m.vertexCount * sizeof(float));
+            int *naIlha = MemAlloc(m.vertexCount * sizeof(int));
+            marcarIlhas(m, pai);
+            for (int v = 0; v < m.vertexCount; v++) {
+                menor[v] = 10.0f;
+                maior[v] = 0.0f;
+                naIlha[v] = 0;
+            }
+            for (int t = 0; t < triangulos; t++) {
+                int raiz = acharRaiz(pai, t * 3);
+                naIlha[raiz]++;
+                for (int c = 0; c < 3; c++) {
+                    int k = t * 3 + c;
+                    float noRaio = hypotf(m.vertices[k * 3 + 1], m.vertices[k * 3 + 2]) / raio;
+                    menor[raiz] = fminf(menor[raiz], noRaio);
+                    maior[raiz] = fmaxf(maior[raiz], noRaio);
+                }
+            }
+            doAnel[i] = MemAlloc(triangulos);
+            int noAnel = 0;
+            for (int t = 0; t < triangulos; t++) {
+                int raiz = acharRaiz(pai, t * 3);
+                doAnel[i][t] = menor[raiz] >= ANEL_DO_PNEU_DENTRO && maior[raiz] >= ANEL_DO_PNEU_FORA;
+                noAnel += doAnel[i][t];
+            }
+            for (int v = 0; v < m.vertexCount; v++) {
+                if (naIlha[v] == 0) {
+                    continue;
+                }
+                if (menor[v] >= ANEL_DO_PNEU_DENTRO && maior[v] >= ANEL_DO_PNEU_FORA) {
+                    bordaDoPneu = fminf(bordaDoPneu, menor[v]);
+                } else if (naIlha[v] >= 8 && maior[v] >= 0.40f && maior[v] < 0.93f) {
+                    maiorAro = fmaxf(maiorAro, maior[v]);
+                }
+            }
+            peca->temAro = 0;
+            if (noAnel > 0 && noAnel < triangulos) {
+                Mesh soAro = malhaVazia(triangulos - noAnel);
+                int feitos = 0;
+                for (int t = 0; t < triangulos; t++) {
+                    if (!doAnel[i][t]) {
+                        copiarTriangulo(&soAro, m, t, MatrixIdentity(), feitos++);
+                    }
+                }
+                UploadMesh(&soAro, false);
+                peca->aro = soAro;
+                peca->temAro = 1;
+            }
+            MemFree(pai);
+            MemFree(menor);
+            MemFree(maior);
+            MemFree(naIlha);
+        }
+
+        /* 2. O raio do aro */
+        float aro;
+        if (bordaDoPneu < 1.5f) {
+            aro = fmaxf(bordaDoPneu, maiorAro);   /* o aro pode passar um pouco da borda de dentro do pneu */
+        } else {
+            /* um cilindro só: a cor da banda é a da borracha, e de fora para dentro procura onde ela acaba */
+            Vector3 corDaBanda = { 0 };
+            float areaDaBanda = 0.0f, area[FAIXAS_DO_RAIO] = { 0 }, comBorracha[FAIXAS_DO_RAIO] = { 0 };
+            for (int passada = 0; passada < 2; passada++) {
+                Vector3 borracha = Vector3Scale(corDaBanda, 1.0f / fmaxf(areaDaBanda, 1e-9f));
+                for (int i = 0; i < totalDePecas[numero]; i++) {
+                    PecaDeRoda *peca = &pecas[numero][i];
+                    if (peca->roda != r) {
+                        continue;
+                    }
+                    amostrarRoda(peca->malha, doAnel[i], &imagens[peca->material], modelo->materials[peca->material].maps[MATERIAL_MAP_ALBEDO].color,
+                                 raio, (passada == 0) ? NULL : &borracha, area, comBorracha, &corDaBanda, &areaDaBanda);
+                }
+            }
+            int b = FAIXAS_DO_RAIO - 1;
+            while (b > 0 && area[b] <= 0.0f) {
+                b--;
+            }
+            int ultimaDoPneu = b + 1;
+            for (int falhas = 0; b >= 0; b--) {
+                if (area[b] <= 0.0f) {
+                    continue;
+                }
+                if (comBorracha[b] >= BORRACHA_NA_FAIXA * area[b]) {
+                    ultimaDoPneu = b;
+                    falhas = 0;
+                } else if (++falhas >= 2) {
+                    break;
+                }
+            }
+            aro = (float) ultimaDoPneu / FAIXAS_DO_RAIO;
+            if (aro < 0.40f) {
+                aro = (maiorAro > 0.0f) ? maiorAro : ARO_QUANDO_NAO_ACHA;   /* o aro também é escuro: a cor não separa */
+            }
+        }
+        roda->raioDoAro = Clamp(aro, 0.40f, 0.90f) * raio;
+        for (int i = 0; i < totalDePecas[numero]; i++) {
+            MemFree(doAnel[i]);
+        }
+    }
+    for (int m = 0; m < modelo->materialCount; m++) {
+        if (imagens[m].pixels != NULL) {
+            UnloadImageColors(imagens[m].pixels);
+        }
+    }
+    MemFree(imagens);
+}
+
+static float Vector3Area(Vector3 a, Vector3 b, Vector3 c) {
+    return 0.5f * Vector3Length(Vector3CrossProduct(Vector3Subtract(b, a), Vector3Subtract(c, a)));
 }
 
 /*
@@ -1750,6 +2074,11 @@ void carregarCarros3D(void) {
     float reflexoNormal = 1.0f;   /* sem isto o uniform começa em 0: nenhum carro refletiria */
     for (int i = 0; i < 3; i++) {
         locsDoReflexo[i] = GetShaderLocation(comReflexo[i], "reflexoDaPintura");
+        if (i < 2) {
+            float semCorte = 0.0f;
+            locsDoCorte[i] = GetShaderLocation(comReflexo[i], "corteDoAro");
+            SetShaderValue(comReflexo[i], locsDoCorte[i], &semCorte, SHADER_UNIFORM_FLOAT);
+        }
         locsDoOlho[i] = GetShaderLocation(comReflexo[i], "olho");
         SetShaderValue(comReflexo[i], locsDoReflexo[i], &reflexoNormal, SHADER_UNIFORM_FLOAT);
     }
@@ -1787,7 +2116,10 @@ void carregarCarros3D(void) {
         medirCaixaDoCarro(numero);
         acharRodas(numero, larguraDaFicha(numero), (caixa.max.y - caixa.min.y) * escala);
         separarRodas(numero);
-        TraceLog(LOG_INFO, "CARRO: %s tem %d rodas, em %d pecas", nomeDoModelo(numero), totalDeRodas[numero], totalDePecas[numero]);
+        separarAros(numero);
+        TraceLog(LOG_INFO, "CARRO: %s tem %d rodas, em %d pecas (o aro vai até %.0f%% do raio)", nomeDoModelo(numero),
+                 totalDeRodas[numero], totalDePecas[numero],
+                 (totalDeRodas[numero] > 0) ? 100.0f * rodas[numero][0].raioDoAro / fmaxf(rodas[numero][0].raio, 0.01f) : 0.0f);
         if (numero < TOTAL_CARROS) {
             prepararMiniatura(numero);   /* a garagem só mostra os carros da corrida */
         }
@@ -1820,6 +2152,9 @@ void descarregarCarros3D(void) {
         }
         for (int i = 0; i < totalDePecas[numero]; i++) {
             UnloadMesh(pecas[numero][i].malha);
+            if (pecas[numero][i].temAro) {
+                UnloadMesh(pecas[numero][i].aro);
+            }
         }
         if (numero < TOTAL_CARROS) {
             UnloadRenderTexture(miniaturas[numero]);

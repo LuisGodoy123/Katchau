@@ -188,9 +188,11 @@ Mack, **ENTER** (ou Y) entra nele. **O dia passa**: um dia inteiro de Radiator S
 de pôr do sol, 10 de noite e 4 de amanhecer). O sol nasce na ponta leste da rua principal, atravessa o céu e se põe
 no fim dela, laranja; de noite a cidade fica azulada, com a lua e as estrelas, e o céu, as sombras, os carros, a
 poeira e o lado de dentro dos prédios acompanham (`src/hora.c`; a luz é o mesmo cálculo de antes, com o sol e as
-cores da hora, e ao meio-dia e fora do passeio ela é a de sempre). No quarto do **cone 8 do Cozy Cone** (o mais
-perto do Mack), parado, **ENTER** (ou Y) dorme: escolhe-se a hora de acordar (amanhecer, manhã, meio-dia, tarde,
-pôr do sol, noite ou madrugada), a tela escurece e o dia recomeça na hora escolhida. **Nos pastos em volta da cidade**
+cores da hora, e ao meio-dia e fora do passeio ela é a de sempre). O jogo começa no quarto do **cone 8 do Cozy
+Cone** (o mais perto do Mack), numa hora sorteada do dia (cada parte do dia sai na proporção dos minutos dela); a
+volta de uma corrida, acabada ou abandonada, também cai numa hora sorteada, e desistir na escolha da corrida, no
+Mack, deixa a hora como estava. No quarto, parado, **ENTER** (ou Y) dorme: a tela escurece, passam oito horas e
+a tela clareia. **Nos pastos em volta da cidade**
 há rebanhos de tratores-vaca, como no filme: de dia pastam, piscando; de noite dormem, de olhos fechados. Parado perto
 de um que dorme, com o freio de mão puxado (o carro fica parado), pise no acelerador: o motor ronca, o trator acorda
 assustado, dá um pulinho e cai de costas, uma cambalhota para trás, mugindo e soltando fumaça, e o susto passa para os
@@ -212,7 +214,7 @@ grilos cantam (`src/grilos.c`, gerados no próprio jogo). Nas cenas do Mack, **E
 da rua principal; na frente da loja do Luigi, a torre de pneus é de pneus 3D. A **Casa Della Tires** é aberta: o
 carro entra dirigindo pela porta de garagem e encontra o lado de dentro da
 loja como no filme, com o piso de tábuas encerado, os pôsteres de corridas italianas, o móvel dos pneus com o nicho
-"Fettuccini Alfredo", o elevador e a baia de serviço, e o Luigi e o Guido estacionados (`src/interiores.c`; o modelo
+"Fettuccini Alfredo", e o Luigi e o Guido estacionados (`src/interiores.c`; o modelo
 `recursos/modelos/loja_do_luigi.glb`, a colisão de dentro e as medidas saem de `ferramentas/montar_loja_do_luigi.py`,
 e `montar_mundo_aberto.py` tira do prédio do mapa o painel pintado da porta e os vidros). O **Cozy Cone** também:
 os 8 cones são quartos, como o do McQueen no filme, com o carpete, o papel de parede, os quadros, os abajures, o
@@ -525,6 +527,7 @@ Na escolha da corrida (no Mack) se escolhe a pista e o nível (`NIVEIS` em `corr
 | Difícil | 8 | 0,97 a 0,91 | sim (em Interlagos) | sim (em Interlagos) |
 
 - **Pneus:** o desgaste cresce com o caminho (um jogo dura cerca de 5 voltas) e 5 vezes mais rápido derrapando. Pneu gasto segura menos nas curvas e tira um pouco da velocidade máxima; a troca do Guido deixa os pneus novos. Os rivais também gastam.
+- **Pneu estourado** (no difícil, só o do jogador): com a vida do pneu em 5% estoura um pneu de trás, e aos poucos o outro de trás e os da frente, até os quatro no aro com a vida em 0%. Como no filme, a borracha some e o carro roda no aro (`separarAros` em `carros3d.c` acha onde o aro acaba em cada modelo: pela peça do pneu, quando ela é à parte, ou pela cor da borracha na tampa da roda, e o shader corta o que passa do aro), baixa daquele canto, solta uma chuva de faíscas do aro raspando no asfalto (`faiscas.c`) e destraciona: a traseira balança sozinha, mais acelerando, o carro quase não se alinha, a roda patina (o giro do motor sobe e ele acelera menos) e a velocidade máxima cai a cada pneu. Só a troca nos boxes resolve.
 - **Freio de mão** (Shift, ou Cruz no controle): tira velocidade. Um toque com o volante virado quebra a traseira (`atualizarDrift` em `carro.c`), e o carro fica de lado até 55°. Depois quem manda é o pé: acelerando de lado o drift continua, sem acelerar ele acaba, e o volante controla o ângulo, que tem inércia; virar para o outro lado é o contraesterço. De lado o carro vai para onde o bico aponta (até um limite, para não sair da pista), solta fumaça, gasta pneu e perde velocidade, mais quanto mais de lado.
 - **Câmbio** (`motor.c`): cada marcha é bem mais longa que a anterior, e a nova nasce entre 6.200 e 6.400 rpm, longe do corte de 8.000. A reduzida depende do pé: freando reduz cedo, com uma acelerada de punta-taco; aliviando, deixa a marcha longa; acelerando com o motor fraco, pula direto para a marcha que tem força.
 

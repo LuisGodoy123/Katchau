@@ -451,7 +451,11 @@ static void desenharCarroNoMundo(Camera3D camera, Carro *carro) {
         aperto = fmaxf(aperto, 1.0f);
     }
     float susto = carro->rodando ? 1.0f : (carro->pancada - 0.3f) / 0.4f;
+    if (carro->pneuEstourado && carro->estadoDoPit == PIT_FORA) {
+        susto = fmaxf(susto, 0.6f);   /* rodando no aro, de olho arregalado, como no filme */
+    }
     expressaoNoProximoDesenho(carro->numero, aperto, susto);
+    pneusEstouradosNoProximoDesenho(carro->pneuEstourado);   /* a borracha some, sobra o aro e o canto baixa */
     desenharCarro3D(carro->numero, matrizDoCarro(carro), carro->anguloDasRodas, carro->volante);
 }
 

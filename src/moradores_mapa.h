@@ -18,8 +18,8 @@
  *   entrada_* e vaga_*  de cada lugar (a vaga é a do dono);
  *   porta_* / dentro_*  a Casa Della Tires: o Luigi e o Guido estacionam
  *            dentro da loja, lado a lado, olhando a porta de garagem
- *            (recursos/modelos/loja_do_luigi.json); o caminho entra pelo
- *            lado da porta longe do elevador. No Cozy Cone, o McQueen fica
+ *            (recursos/modelos/loja_do_luigi.json); o caminho entra pela
+ *            porta de garagem e vai até a vaga de cada um. No Cozy Cone, o McQueen fica
  *            dentro do cone 1 e a Sally, dentro da recepção, atrás do balcão
  *            (cozy_cone_quartos.json e cozy_cone_recepcao.json), os dois
  *            olhando a porta: entram de ré. Para a ré começar com o carro
