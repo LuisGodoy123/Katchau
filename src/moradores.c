@@ -73,13 +73,16 @@
 #define GIRO_NA_SAIDA         1.0f      /* radianos: o quanto ele gira recuando */
 #define MAIS_NOS              256
 #define MAIS_PROGRAMAS        8
-#define TETO_DA_CIDADE        4.5f      /* metros: o chão da cidade fica abaixo disso (até uns 2 m) e as marquises,
-                                         * acima (a Sally estaciona embaixo da do Cozy Cone): procurar daqui para baixo */
+#define TETO_DA_CIDADE        4.5f      /* metros: o chão da cidade fica abaixo disso (até uns 3 m, o piso dos cones
+                                         * do Cozy Cone) e as marquises e os tetos, acima: procurar daqui para baixo */
 #define NINGUEM               (-1)
 #define SEM_PERCURSO          (-1)
 
 /* A vida na cidade */
 #define CHANCE_DE_EMENDAR     0.3f      /* acabado um programa, a chance de ir a outro antes de voltar para casa */
+#define NOITINHA              19.5f     /* horas: daí em diante, só o café da Flo (aberto de noite)... */
+#define RECOLHER              22.0f     /* ...e daí até o amanhecer, todo mundo em casa */
+#define AMANHECE              5.5f
 #define BUSCAR_FICA_DE        8.0f      /* segundos de conversa quando um passa para buscar o outro */
 #define BUSCAR_FICA_ATE       14.0f
 #define SAI_ATRAS_DE          1.4f      /* segundos: quem vai junto sai tanto depois do outro */
@@ -166,6 +169,11 @@ typedef struct {
     const char *nome;
     const char *vaga;        /* o nó do grafo da vaga do dono */
     float rumo;              /* para onde o carro aponta, estacionado */
+    const char *visitas;     /* o nó das vagas de visita, quando não cabem ao lado da do dono (o McQueen fica
+                              * dentro do cone; quem vem buscá-lo para na praça). NULL: ao lado da do dono */
+    float rumoDasVisitas;    /* para onde apontam as de visita, em "visitas" */
+    unsigned char lados;     /* quais das vagas de visita (LADOS, um bit cada) servem; 0: todas. Dentro de um
+                              * prédio, só as que têm o caminho livre até elas (a ré não desvia de nada) */
 } Lugar;
 
 typedef struct {
@@ -216,6 +224,7 @@ typedef struct {
 typedef struct {
     float x, z, rumo;
     int ocupada;             /* 1 + o número do morador que está nela ou indo para ela (0 = livre) */
+    int no;                  /* o nó do grafo de onde se chega a ela: o da vaga do dono ou o das visitas */
 } Vaga;
 
 typedef struct {
@@ -260,6 +269,7 @@ static Rotina rotinas[MAIS_MORADORES];
 static int total = 0;
 static int moradorDaPessoa[TOTAL_DE_PESSOAS];
 static Vaga vagas[TOTAL_DE_LUGARES][MAIS_VAGAS];
+static float horaDaCidade = 12.0f;   /* a hora do dia (o passeio avisa): de noite, cada um fica em casa */
 static int totalDeVagas[TOTAL_DE_LUGARES];
 static int noDaVaga[TOTAL_DE_LUGARES];
 static int vizinhos[MAIS_NOS][6];
@@ -377,10 +387,30 @@ static int vagaLivre(MalhaDeColisao *malha, float x, float z, float rumo, float 
             }
         }
     }
+    /* E nenhuma parede atravessando a vaga: dentro de um prédio (a Casa Della Tires) não há telhado nem
+     * tampo que o chão acuse. Raios pelas bordas e pelas diagonais do retângulo, a 1 m do chão */
+    float cantos[4][2];
+    for (int k = 0; k < 4; k++) {
+        float frente = (k == 0 || k == 3) ? 0.5f : -0.5f, lado = (k < 2) ? 0.5f : -0.5f;
+        cantos[k][0] = x + fx * comprimento * frente + dx * largura * lado;
+        cantos[k][1] = z + fz * comprimento * frente + dz * largura * lado;
+    }
+    static const int BORDAS[6][2] = { { 0, 1 }, { 1, 2 }, { 2, 3 }, { 3, 0 }, { 0, 2 }, { 1, 3 } };
+    for (int k = 0; k < 6; k++) {
+        const float *a = cantos[BORDAS[k][0]], *b = cantos[BORDAS[k][1]];
+        float comprimentoDaBorda = hypotf(b[0] - a[0], b[1] - a[1]);
+        float origem[3] = { a[0], meio + 1.0f, a[1] };
+        float direcao[3] = { (b[0] - a[0]) / comprimentoDaBorda, 0.0f, (b[1] - a[1]) / comprimentoDaBorda };
+        Acerto acerto;
+        if (raioNaMalha(malha, origem, direcao, comprimentoDaBorda, &acerto)) {
+            return 0;
+        }
+    }
     return 1;
 }
 
-/* As vagas de cada lugar: a do dono e, ao lado dela, outras para visitas, se couberem */
+/* As vagas de cada lugar: a do dono e, ao lado dela (ou do nó das visitas do lugar), outras para visitas, se
+ * couberem */
 /* Uma vaga nova encosta em alguma das que já existem (de qualquer lugar)? (a da Casa Della Tires ficava no
  * caminho da ré do Guido, que estaciona do lado do Luigi) */
 static int pertoDeOutraVaga(float x, float z) {
@@ -404,19 +434,31 @@ static void montarVagas(MalhaDeColisao *malha) {
             fprintf(stderr, "MORADORES: o nó %s não existe\n", LUGARES[l].vaga);
             continue;
         }
-        vagas[l][totalDeVagas[l]++] = (Vaga){ RUAS[no].x, RUAS[no].z, LUGARES[l].rumo, 0 };
+        vagas[l][totalDeVagas[l]++] = (Vaga){ RUAS[no].x, RUAS[no].z, LUGARES[l].rumo, 0, no };
     }
     for (int l = 0; l < TOTAL_DE_LUGARES; l++) {
         if (noDaVaga[l] < 0) {
             continue;
         }
+        int no = noDaVaga[l];
         float rumo = LUGARES[l].rumo;
-        float x = vagas[l][0].x, z = vagas[l][0].z, dx = cosf(rumo), dz = sinf(rumo);
+        if (LUGARES[l].visitas != NULL) {
+            no = noPeloNome(LUGARES[l].visitas);
+            rumo = LUGARES[l].rumoDasVisitas;
+            if (no < 0) {
+                fprintf(stderr, "MORADORES: o nó %s não existe\n", LUGARES[l].visitas);
+                continue;
+            }
+        }
+        float x = RUAS[no].x, z = RUAS[no].z, dx = cosf(rumo), dz = sinf(rumo);
         static const float LADOS[] = { 3.6f, -3.6f, 7.2f, -7.2f };
         for (int k = 0; k < 4 && totalDeVagas[l] < MAIS_VAGAS; k++) {
+            if (LUGARES[l].lados != 0 && !(LUGARES[l].lados & (1u << k))) {
+                continue;
+            }
             float vx = x + dx * LADOS[k], vz = z + dz * LADOS[k];
             if (!pertoDeOutraVaga(vx, vz) && vagaLivre(malha, vx, vz, rumo, 5.8f, 2.6f)) {
-                vagas[l][totalDeVagas[l]++] = (Vaga){ vx, vz, rumo, 0 };
+                vagas[l][totalDeVagas[l]++] = (Vaga){ vx, vz, rumo, 0, no };
             }
         }
     }
@@ -528,20 +570,20 @@ static void comecarRe(Rotina *r, const Morador *m, float ateX, float ateZ, float
 
 /*
  * montarCaminho
- * Os pontos do caminho, a partir dos nós da ida (do primeiro, a vaga de onde sai ou o nó mais perto, até
- * a vaga do dono do lugar de chegada), e a manobra de saída. Nas vagas de visita (ao lado da do dono), um
- * ponto a mais na frente (ou atrás) da vaga, no fundo da entrada: ele entra e sai em linha reta, sem
- * passar pela frente do carro do dono.
- * Recebe: a vaga de onde sai (NULL: ele não está numa vaga, e o primeiro nó entra no caminho) e o lugar
- *         dela, e a vaga de chegada.
+ * Os pontos do caminho, a partir dos nós da ida (do primeiro, o nó da vaga de onde sai ou o nó mais perto,
+ * até o nó da vaga de chegada: o da vaga do dono ou o das visitas do lugar), e a manobra de saída. Nas vagas
+ * de visita (ao lado do nó), um ponto a mais na frente (ou atrás) da vaga, no fundo da entrada: ele entra e
+ * sai em linha reta, sem passar pela frente do carro do dono.
+ * Recebe: a vaga de onde sai (NULL: ele não está numa vaga, e o primeiro nó entra no caminho) e o número
+ *         dela no lugar, e a vaga de chegada.
  */
-static void montarCaminho(Morador *m, Rotina *r, const int *nos, int n, const Vaga *saida, int lugarDaSaida,
-                          int vagaDaSaida, int lugar, int v) {
+static void montarCaminho(Morador *m, Rotina *r, const int *nos, int n, const Vaga *saida, int vagaDaSaida,
+                          int lugar, int v) {
     const Vaga *vaga = &vagas[lugar][v];
     m->totalDoCaminho = 0;
     int primeiroDoMeio = (saida != NULL) ? 1 : 0;
     if (saida != NULL && vagaDaSaida > 0) {
-        const NoDaRua *dono = &RUAS[noDaVaga[lugarDaSaida]], *primeiro = &RUAS[nos[1]];
+        const NoDaRua *dono = &RUAS[saida->no], *primeiro = &RUAS[nos[1]];
         float fx = sinf(saida->rumo), fz = -cosf(saida->rumo);
         float fundo = (primeiro->x - dono->x) * fx + (primeiro->z - dono->z) * fz;
         if (fundo > 0.0f) {   /* estacionado de ré, olhando a entrada: sai de frente, reto */
@@ -553,7 +595,7 @@ static void montarCaminho(Morador *m, Rotina *r, const int *nos, int n, const Va
                      ((!eRua(nos[i]) && eRua(nos[i + 1])) ? ENTRA_NA_RUA : 0) | (eTreino(nos[i]) ? NO_TREINO : 0));
     }
     if (v > 0 && n >= 2) {
-        const NoDaRua *dono = &RUAS[noDaVaga[lugar]], *ultimo = &RUAS[nos[n - 2]];
+        const NoDaRua *dono = &RUAS[vaga->no], *ultimo = &RUAS[nos[n - 2]];
         float fx = sinf(vaga->rumo), fz = -cosf(vaga->rumo);
         float fundo = (ultimo->x - dono->x) * fx + (ultimo->z - dono->z) * fz;
         porNoCaminho(m, r, vaga->x + fx * fundo, vaga->z + fz * fundo, 0);
@@ -616,9 +658,10 @@ static int partir(int quem, int lugar, int percurso) {
         return 0;
     }
     static int nos[MAIS_PONTOS_NO_CAMINHO];
-    int n = nosDaIda(noDaVaga[r->lugarAtual], percurso, noDaVaga[lugar], nos, MAIS_PONTOS_NO_CAMINHO - 4);
+    int de = vagas[r->lugarAtual][r->vagaAtual].no, ate = vagas[lugar][v].no;
+    int n = nosDaIda(de, percurso, ate, nos, MAIS_PONTOS_NO_CAMINHO - 4);
     if (n < 3 && percurso != SEM_PERCURSO) {
-        n = nosDaIda(noDaVaga[r->lugarAtual], SEM_PERCURSO, noDaVaga[lugar], nos, MAIS_PONTOS_NO_CAMINHO - 4);
+        n = nosDaIda(de, SEM_PERCURSO, ate, nos, MAIS_PONTOS_NO_CAMINHO - 4);
     }
     if (n < 3) {
         if (lugar != r->lugarAtual) {
@@ -633,7 +676,7 @@ static int partir(int quem, int lugar, int percurso) {
     }
     r->lugarAtual = lugar;
     r->vagaAtual = v;
-    montarCaminho(m, r, nos, n, &saida, lugarDaSaida, vagaDaSaida, lugar, v);
+    montarCaminho(m, r, nos, n, &saida, vagaDaSaida, lugar, v);
     return 1;
 }
 
@@ -673,7 +716,7 @@ static int voltarDeOndeEsta(int quem, int lugar) {
         return 0;
     }
     static int nos[MAIS_PONTOS_NO_CAMINHO];
-    int n = nosDaIda(melhor, SEM_PERCURSO, noDaVaga[lugar], nos, MAIS_PONTOS_NO_CAMINHO - 4);
+    int n = nosDaIda(melhor, SEM_PERCURSO, vagas[lugar][v].no, nos, MAIS_PONTOS_NO_CAMINHO - 4);
     if (n < 1) {
         return 0;
     }
@@ -682,7 +725,7 @@ static int voltarDeOndeEsta(int quem, int lugar) {
     }
     r->lugarAtual = lugar;
     r->vagaAtual = v;
-    montarCaminho(m, r, nos, n, NULL, 0, 0, lugar, v);
+    montarCaminho(m, r, nos, n, NULL, 0, lugar, v);
     return 1;
 }
 
@@ -738,6 +781,21 @@ static int livreParaIr(int quem) {
            && r->fase == SEM_PROGRAMA && r->indoLugar < 0 && moradores[quem].espera > 2.0f;
 }
 
+/* O programa combina com a hora? De noitinha só o café da Flo; tarde da noite, nenhum */
+static int programaNaHora(const Programa *g) {
+    if (horaDaCidade >= RECOLHER || horaDaCidade < AMANHECE) {
+        return 0;
+    }
+    if (horaDaCidade >= NOITINHA) {
+        return g->lugar == LUGAR_FLO && g->percurso == SEM_PERCURSO;
+    }
+    return 1;
+}
+
+void definirHoraDaCidade(float hora) {
+    horaDaCidade = hora;
+}
+
 /*
  * escolherPrograma
  * Sorteia um programa (pelo peso), que não seja ficar onde está. Com convidado livre em outro lugar,
@@ -755,6 +813,9 @@ static int escolherPrograma(int quem) {
         }
         if (g->lugar == r->lugarAtual && !emCasa(quem)) {
             continue;   /* a ronda e o treino saem de casa */
+        }
+        if (!programaNaHora(g)) {
+            continue;   /* de noite, cada um em casa (ou no café da Flo, de noitinha) */
         }
         possiveis[n++] = i;
         soma += g->peso;

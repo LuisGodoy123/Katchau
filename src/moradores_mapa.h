@@ -15,7 +15,18 @@
  *   ret_*    os retornos (oeste, leste e na rodovia);
  *   TS / TN  o caminho pela areia até a pista de treino (indo / voltando) e
  *            OV_* o oval;
- *   entrada_* e vaga_*  de cada lugar (a vaga é a do dono).
+ *   entrada_* e vaga_*  de cada lugar (a vaga é a do dono);
+ *   porta_* / dentro_*  a Casa Della Tires: o Luigi e o Guido estacionam
+ *            dentro da loja, lado a lado, olhando a porta de garagem
+ *            (recursos/modelos/loja_do_luigi.json); o caminho entra pelo
+ *            lado da porta longe do elevador. No Cozy Cone, o McQueen fica
+ *            dentro do cone 1 e a Sally, dentro da recepção, atrás do balcão
+ *            (cozy_cone_quartos.json e cozy_cone_recepcao.json), os dois
+ *            olhando a porta: entram de ré. Para a ré começar com o carro
+ *            de lado (como numa vaga da rua) e não de costas, o caminho
+ *            chega de lado: o do cone sobe pela praça (praca_*) até a frente
+ *            da porta, e o da recepção vira dentro dela (volta_* e manobra_*).
+ *            Quem vem buscar o McQueen para na praça (visitas_*).
  * As ruas têm mão: cada nó lista para onde se vai a partir dele.
  * ------------------------------------------------------------------
  */
@@ -29,19 +40,21 @@ enum {
 };
 
 static const Lugar LUGARES[] = {
-    [LUGAR_LUIGI]    = { "Casa Della Tires (Luigi)", "vaga_luigi",    0.844f },
-    [LUGAR_GUIDO]    = { "Casa Della Tires (Guido)", "vaga_guido",    0.844f },
-    [LUGAR_RAMONE]   = { "Ramone's House of Body Art", "vaga_ramone", 3.142f },
-    [LUGAR_FLO]      = { "Flo's V8 Café",            "vaga_flo",      0.000f },
-    [LUGAR_CURIOS]   = { "Radiator Springs Curios",  "vaga_lizzie",   0.000f },
-    [LUGAR_DOC]      = { "Clínica do Doc Hudson",    "vaga_doc",      3.142f },
-    [LUGAR_MCQUEEN]  = { "Cozy Cone (o cone do McQueen)", "vaga_mcqueen", 1.571f },
-    [LUGAR_SALLY]    = { "Cozy Cone (o escritório da Sally)", "vaga_sally", 0.000f },
-    [LUGAR_SARGENTO] = { "Sarge's Surplus Hut",      "vaga_sarge",    3.142f },
-    [LUGAR_FILLMORE] = { "Fillmore's Taste-In",      "vaga_fillmore", 3.142f },
-    [LUGAR_MATE]     = { "Tow Mater Towing & Salvage", "vaga_mater",  6.137f },
-    [LUGAR_XERIFE]   = { "atrás do outdoor da entrada leste", "vaga_sheriff", 3.142f },
-    [LUGAR_RUIVO]    = { "o quartel, junto da estátua do Stanley", "vaga_red", 1.571f },
+    [LUGAR_LUIGI]    = { "Casa Della Tires (Luigi)", "vaga_luigi",    0.525f, NULL, 0.0f, 0 },
+    [LUGAR_GUIDO]    = { "Casa Della Tires (Guido)", "vaga_guido",    0.525f, NULL, 0.0f, 0 },
+    [LUGAR_RAMONE]   = { "Ramone's House of Body Art", "vaga_ramone", 3.142f, NULL, 0.0f, 0 },
+    [LUGAR_FLO]      = { "Flo's V8 Café",            "vaga_flo",      0.000f, NULL, 0.0f, 0 },
+    [LUGAR_CURIOS]   = { "Radiator Springs Curios",  "vaga_lizzie",   0.000f, NULL, 0.0f, 0 },
+    [LUGAR_DOC]      = { "Clínica do Doc Hudson",    "vaga_doc",      3.142f, NULL, 0.0f, 0 },
+    [LUGAR_MCQUEEN]  = { "Cozy Cone (o cone do McQueen)", "vaga_mcqueen", 1.5623f,
+                         "visitas_do_cone_do_mcqueen", -1.5623f, 0 },
+    [LUGAR_SALLY]    = { "Cozy Cone (a recepção da Sally)", "vaga_sally", 0.000f,
+                         NULL, 0.0f, 0x2 },   /* a visita só cabe a oeste dela: a leste, o balcão e um vaso */
+    [LUGAR_SARGENTO] = { "Sarge's Surplus Hut",      "vaga_sarge",    3.142f, NULL, 0.0f, 0 },
+    [LUGAR_FILLMORE] = { "Fillmore's Taste-In",      "vaga_fillmore", 3.142f, NULL, 0.0f, 0 },
+    [LUGAR_MATE]     = { "Tow Mater Towing & Salvage", "vaga_mater",  6.137f, NULL, 0.0f, 0 },
+    [LUGAR_XERIFE]   = { "atrás do outdoor da entrada leste", "vaga_sheriff", 3.142f, NULL, 0.0f, 0 },
+    [LUGAR_RUIVO]    = { "o quartel, junto da estátua do Stanley", "vaga_red", 1.571f, NULL, 0.0f, 0 },
 };
 
 /* O grafo das ruas */
@@ -70,7 +83,7 @@ static const NoDaRua RUAS[] = {
     { "O580", 580.0f, 131.5f, { "O555", "entrada_flo", "entrada_curios" } },
     { "L605", 605.0f, 138.8f, { "L630", "entrada_doc" } },
     { "O605", 605.0f, 131.5f, { "O580" } },
-    { "L630", 630.0f, 138.8f, { "L655", "entrada_cozy" } },
+    { "L630", 630.0f, 138.8f, { "L655", "entrada_cozy", "praca_do_cone_do_mcqueen" } },
     { "O630", 630.0f, 131.5f, { "O605" } },
     { "L655", 655.0f, 138.8f, { "L680" } },
     { "O655", 655.0f, 131.5f, { "O630", "entrada_doc" } },
@@ -192,9 +205,11 @@ static const NoDaRua RUAS[] = {
     { "OV_E8", 1065.0f, 400.0f, { "OV_T7" } },
     { "OV_T7", 1052.0f, 368.0f, { "OV_T8" } },
     { "OV_T8", 1028.0f, 350.5f, { "OV_T0", "TN325" } },
-    { "entrada_casa_della_tires", 480.5f, 145.8f, { "L505", "O450", "vaga_luigi", "vaga_guido" } },
-    { "vaga_luigi", 476.0f, 156.5f, { "entrada_casa_della_tires" } },
-    { "vaga_guido", 479.8f, 160.3f, { "entrada_casa_della_tires" } },
+    { "entrada_casa_della_tires", 480.5f, 145.8f, { "L505", "O450", "porta_casa_della_tires" } },
+    { "porta_casa_della_tires", 479.2f, 158.7f, { "entrada_casa_della_tires", "dentro_casa_della_tires" } },
+    { "dentro_casa_della_tires", 470.2f, 169.5f, { "porta_casa_della_tires", "vaga_luigi", "vaga_guido" } },
+    { "vaga_luigi", 467.9f, 173.4f, { "dentro_casa_della_tires" } },
+    { "vaga_guido", 464.8f, 171.6f, { "dentro_casa_della_tires" } },
     { "entrada_ramone", 483.0f, 125.0f, { "L505", "O450", "vaga_ramone" } },
     { "vaga_ramone", 483.0f, 118.5f, { "entrada_ramone" } },
     { "entrada_flo", 547.0f, 124.5f, { "L580", "O530", "flo_bombas" } },
@@ -204,10 +219,18 @@ static const NoDaRua RUAS[] = {
     { "vaga_lizzie", 561.0f, 150.0f, { "entrada_curios" } },
     { "entrada_doc", 634.5f, 125.5f, { "L655", "O605", "vaga_doc" } },
     { "vaga_doc", 634.5f, 119.5f, { "entrada_doc" } },
-    { "entrada_cozy", 660.0f, 146.5f, { "L680", "O630", "vaga_mcqueen", "cozy_patio" } },
-    { "vaga_mcqueen", 641.5f, 152.0f, { "entrada_cozy" } },
-    { "cozy_patio", 678.0f, 160.0f, { "entrada_cozy", "vaga_sally" } },
-    { "vaga_sally", 696.5f, 166.5f, { "cozy_patio" } },
+    { "entrada_cozy", 660.0f, 146.5f,
+      { "L680", "O630", "praca_do_cone_do_mcqueen", "cozy_patio", "visitas_do_cone_do_mcqueen" } },
+    { "praca_do_cone_do_mcqueen", 649.0f, 145.5f, { "porta_do_cone_do_mcqueen" } },
+    { "porta_do_cone_do_mcqueen", 649.0f, 155.5f, { "vaga_mcqueen", "entrada_cozy" } },
+    { "vaga_mcqueen", 628.56f, 155.53f, { "porta_do_cone_do_mcqueen" } },
+    { "visitas_do_cone_do_mcqueen", 646.0f, 167.0f, { "entrada_cozy" } },
+    { "cozy_patio", 678.0f, 160.0f, { "entrada_cozy", "porta_da_recepcao" } },
+    { "porta_da_recepcao", 698.2f, 172.5f, { "cozy_patio", "dentro_da_recepcao" } },
+    { "dentro_da_recepcao", 698.2f, 183.0f, { "porta_da_recepcao", "volta_da_recepcao" } },
+    { "volta_da_recepcao", 701.0f, 188.0f, { "manobra_da_recepcao" } },
+    { "manobra_da_recepcao", 694.0f, 189.0f, { "vaga_sally" } },
+    { "vaga_sally", 697.9f, 199.6f, { "dentro_da_recepcao" } },
     { "entrada_sarge", 701.0f, 126.8f, { "L715", "O680", "vaga_sarge" } },
     { "vaga_sarge", 701.0f, 119.5f, { "entrada_sarge" } },
     { "entrada_fillmore", 755.5f, 125.5f, { "L770", "O735", "vaga_fillmore" } },

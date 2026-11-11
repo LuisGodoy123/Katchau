@@ -26,6 +26,7 @@ void soltarNuvem(Vector3 roda, Vector3 velocidadeDoCarro, float forca, TipoDeNuv
 void soltarNuvemColorida(Vector3 roda, Vector3 velocidadeDoCarro, float forca, TipoDeNuvem tipo, Color cor);
 void atualizarFumaca(float tempoQuadro);
 void desenharFumaca3D(Camera3D camera);
+void luzDaFumaca(Color luz);   /* a luz que cai nela (BRANCO: a de sempre) */
 void comecarChamas(Camera3D camera);
 void terminarChamas(void);
 void desenharChamaDoNitro(Vector3 escape, Vector3 paraTras);

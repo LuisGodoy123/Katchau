@@ -29,6 +29,7 @@ void descarregarPosProcesso(void);
 void definirAreaDoPosProcesso(int x, int y, int largura, int altura);
 void comecarPosProcesso(void);
 void comecarLuzesDoPosProcesso(void);
+void comecarLuzesComProfundidade(void);   /* as luzes tapadas pelo que está na frente (o passeio) */
 void terminarPosProcesso(int pista, float desfoque, AcabamentoDoPosProcesso acabamento);
 
 #endif

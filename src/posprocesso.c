@@ -7,7 +7,11 @@
  *   1) a cena 3D vai para "cena", do tamanho da janela;
  *   2) o que emite luz (refletores, flashes, chamas do nitro, telas dos telões)
  *      é desenhado de novo numa imagem de 1/4 do tamanho e borrado duas vezes
- *      em cada direção: esse é o halo (o branco só iluminado não brilha);
+ *      em cada direção: esse é o halo (o branco só iluminado não brilha). No
+ *      passeio (comecarLuzesComProfundidade), as luzes vão para uma imagem do
+ *      tamanho da cena que usa a profundidade dela: o que está na frente (um
+ *      prédio, um carro, o Mack) tapa a luz, e o halo não atravessa nada; essa
+ *      imagem é reduzida a 1/4 antes de borrar;
  *   3) na tela, um shader junta a cena e o halo, corrige a cor (o tom de cada
  *      pista, contraste e saturação), escurece as bordas (vinheta) e, em alta
  *      velocidade, borra as bordas na direção do centro.
@@ -57,6 +61,17 @@ static const char *PIXELS_BORRAR =
     "    finalColor = vec4(c, 1.0);\n"
     "}\n";
 
+/* Reduz a imagem das luzes a 1/4: a média de um quadrado de 4x4 (um tubo fino não some) */
+static const char *PIXELS_REDUZIR =
+    "#version 330\n"
+    "in vec2 fragTexCoord; uniform sampler2D texture0; uniform vec2 passo;\n"
+    "out vec4 finalColor;\n"
+    "void main() {\n"
+    "    vec3 c = texture(texture0, fragTexCoord + passo * vec2(-1.0, -1.0)).rgb + texture(texture0, fragTexCoord + passo * vec2(1.0, -1.0)).rgb\n"
+    "           + texture(texture0, fragTexCoord + passo * vec2(-1.0, 1.0)).rgb + texture(texture0, fragTexCoord + passo * vec2(1.0, 1.0)).rgb;\n"
+    "    finalColor = vec4(c * 0.25, 1.0);\n"
+    "}\n";
+
 static const char *PIXELS_FINAL =
     "#version 330\n"
     "in vec2 fragTexCoord; uniform sampler2D texture0; uniform sampler2D halo;\n"
@@ -85,9 +100,12 @@ static const char *PIXELS_FINAL =
     "}\n";
 
 static RenderTexture2D cena, haloA, haloB;
-static Shader shaderClaros, shaderBorrar, shaderFinal;
+static RenderTexture2D luzesCheias;   /* do tamanho da cena, com a profundidade dela (não é dona da profundidade) */
+static Shader shaderClaros, shaderBorrar, shaderFinal, shaderReduzir;
 static int locLimiar, locPasso, locHalo, locTom, locContraste, locSaturacao, locForca, locVinheta, locDesfoque, locVirar;
-static int largura = 0, altura = 0, carregado = 0, desenhando = 0;   /* desenhando: 1 a cena, 2 as luzes */
+static int locPassoDaReducao;
+static int largura = 0, altura = 0, carregado = 0;
+static int desenhando = 0;   /* 1 a cena, 2 as luzes (no halo), 3 as luzes (na imagem cheia, com profundidade) */
 /* Onde a cena vai aparecer na tela. Largura 0 = a tela cheia (o normal). Na tela dividida as duas
  * metades têm o MESMO tamanho, então as imagens são criadas uma vez e não mudam mais de quadro
  * para quadro: o que muda é só o canto em que elas são desenhadas. */
@@ -117,6 +135,31 @@ void definirAreaDoPosProcesso(int x, int y, int largura, int altura) {
     areaAltura = altura;
 }
 
+/* A imagem das luzes do tamanho da cena: a cor dela, e a profundidade emprestada da cena */
+static void criarLuzesCheias(void) {
+    luzesCheias.id = rlLoadFramebuffer();
+    luzesCheias.texture.id = rlLoadTexture(NULL, largura, altura, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8, 1);
+    luzesCheias.texture.width = largura;
+    luzesCheias.texture.height = altura;
+    luzesCheias.texture.mipmaps = 1;
+    luzesCheias.texture.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
+    luzesCheias.depth = cena.depth;
+    rlFramebufferAttach(luzesCheias.id, luzesCheias.texture.id, RL_ATTACHMENT_COLOR_CHANNEL0, RL_ATTACHMENT_TEXTURE2D, 0);
+    rlFramebufferAttach(luzesCheias.id, cena.depth.id, RL_ATTACHMENT_DEPTH, RL_ATTACHMENT_RENDERBUFFER, 0);
+    if (!rlFramebufferComplete(luzesCheias.id)) {
+        TraceLog(LOG_WARNING, "POSPROCESSO: a imagem das luzes com profundidade não ficou completa");
+    }
+    SetTextureFilter(luzesCheias.texture, TEXTURE_FILTER_BILINEAR);
+    SetTextureWrap(luzesCheias.texture, TEXTURE_WRAP_CLAMP);
+}
+
+static void descarregarLuzesCheias(void) {
+    /* a profundidade é da cena: solta antes, senão rlUnloadFramebuffer a apagaria junto */
+    rlFramebufferAttach(luzesCheias.id, 0, RL_ATTACHMENT_DEPTH, RL_ATTACHMENT_RENDERBUFFER, 0);
+    rlUnloadFramebuffer(luzesCheias.id);
+    rlUnloadTexture(luzesCheias.texture.id);
+}
+
 /*
  * criarImagens
  * As imagens do tamanho da área de agora (refeitas se ela mudar).
@@ -126,6 +169,7 @@ static void criarImagens(void) {
         return;
     }
     if (largura != 0) {
+        descarregarLuzesCheias();
         UnloadRenderTexture(cena);
         UnloadRenderTexture(haloA);
         UnloadRenderTexture(haloB);
@@ -133,6 +177,7 @@ static void criarImagens(void) {
     largura = larguraDaArea();
     altura = alturaDaArea();
     cena = LoadRenderTexture(largura, altura);
+    criarLuzesCheias();
     haloA = LoadRenderTexture(largura / REDUCAO_DO_HALO, altura / REDUCAO_DO_HALO);
     haloB = LoadRenderTexture(largura / REDUCAO_DO_HALO, altura / REDUCAO_DO_HALO);
     SetTextureFilter(cena.texture, TEXTURE_FILTER_BILINEAR);
@@ -151,6 +196,8 @@ void carregarPosProcesso(void) {
     shaderClaros = LoadShaderFromMemory(NULL, PIXELS_CLAROS);
     shaderBorrar = LoadShaderFromMemory(NULL, PIXELS_BORRAR);
     shaderFinal = LoadShaderFromMemory(NULL, PIXELS_FINAL);
+    shaderReduzir = LoadShaderFromMemory(NULL, PIXELS_REDUZIR);
+    locPassoDaReducao = GetShaderLocation(shaderReduzir, "passo");
     locLimiar = GetShaderLocation(shaderClaros, "limiar");
     locPasso = GetShaderLocation(shaderBorrar, "passo");
     locHalo = GetShaderLocation(shaderFinal, "halo");
@@ -173,11 +220,13 @@ void descarregarPosProcesso(void) {
         return;
     }
     if (largura != 0) {
+        descarregarLuzesCheias();
         UnloadRenderTexture(cena);
         UnloadRenderTexture(haloA);
         UnloadRenderTexture(haloB);
         largura = altura = 0;
     }
+    UnloadShader(shaderReduzir);
     UnloadShader(shaderClaros);
     UnloadShader(shaderBorrar);
     UnloadShader(shaderFinal);
@@ -218,6 +267,26 @@ void comecarLuzesDoPosProcesso(void) {
 }
 
 /*
+ * comecarLuzesComProfundidade
+ * Como comecarLuzesDoPosProcesso, mas as luzes vão para uma imagem do tamanho da cena que usa a
+ * profundidade dela: o que está na frente de uma luz a tapa (chamar BeginMode3D depois, como na cena).
+ * Recebe: nada. Devolve: nada.
+ */
+void comecarLuzesComProfundidade(void) {
+    if (desenhando != 1) {
+        return;
+    }
+    rlDrawRenderBatchActive();
+    EndTextureMode();
+    BeginTextureMode(luzesCheias);
+    /* só a cor é limpa (a profundidade é a da cena): um retângulo preto, sem teste de profundidade */
+    rlDisableDepthTest();
+    DrawRectangle(0, 0, largura, altura, BLACK);
+    rlDrawRenderBatchActive();
+    desenhando = 3;
+}
+
+/*
  * passar
  * Desenha uma imagem inteira em outra com um shader (de cabeça para baixo, como sai da RenderTexture).
  */
@@ -241,13 +310,19 @@ void terminarPosProcesso(int pista, float desfoque, AcabamentoDoPosProcesso acab
     if (!desenhando) {
         return;
     }
-    int comLuzes = (desenhando == 2);
+    int comLuzes = (desenhando >= 2);
+    int luzesNaImagemCheia = (desenhando == 3);
     desenhando = 0;
     rlDrawRenderBatchActive();
     EndTextureMode();
     /* De onde sai e para onde vai: a imagem inteira, no pedaço de tela da área */
     Rectangle daImagem = { 0, 0, (float) largura, (float) -altura };
     Rectangle naTela = { (float) areaX, (float) areaY, (float) largura, (float) altura };
+    if (luzesNaImagemCheia && acabamento == POSPROCESSO_COMPLETO) {
+        Vector2 passo = { 1.0f / largura, 1.0f / altura };
+        SetShaderValue(shaderReduzir, locPassoDaReducao, &passo, SHADER_UNIFORM_VEC2);
+        passar(luzesCheias.texture, haloA, shaderReduzir);
+    }
     if (acabamento == POSPROCESSO_SO_COPIA) {
         /* Sem os efeitos: só copia a cena para a tela (desenhar direto na janela é mais lento) */
         DrawTexturePro(cena.texture, daImagem, naTela, (Vector2){ 0 }, 0.0f, WHITE);

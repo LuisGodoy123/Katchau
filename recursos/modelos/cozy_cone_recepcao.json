@@ -1,0 +1,603 @@
+{
+  "sobre": "Recepção (escritório) do Cozy Cone Motel por dentro (ferramentas/montar_recepcao_do_cozy_cone.py). Eixos do jogo: x, y para cima, z. Rumo do jogo: 0 olhando para -z, crescendo para a direita (a frente é (sin r, -cos r)).",
+  "piso_y": 1.905,
+  "teto_y": 7.646,
+  "teto_y_fundo": 6.166,
+  "nota_do_teto": "o teto é inclinado como o telhado: y = 7.670 - 0.0600 (z - 178.44), de y 7.65 na frente a 6.17 nos fundos",
+  "porta": {
+    "centro_na_fachada": [
+      698.215,
+      1.905,
+      179.05
+    ],
+    "centro_por_dentro": [
+      698.215,
+      1.905,
+      180.559
+    ],
+    "direcao_para_dentro": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "rumo_para_dentro": 3.1416,
+    "rumo_para_fora": 0.0,
+    "ao_longo": [
+      1.0,
+      0.0,
+      0.0
+    ],
+    "largura": 7.57,
+    "largura_livre_no_chao": 6.42,
+    "altura": 4.025,
+    "pontas_na_fachada": [
+      [
+        694.43,
+        179.05
+      ],
+      [
+        702.0,
+        179.05
+      ]
+    ],
+    "profundidade_do_rebaixo": 1.509,
+    "nota": "a entrada do meio já é aberta na casca (x 694,40-702,03, verga em y 5,96); as sapatas dos pilares (y 2,0-2,1) deixam 6,42 m livres junto ao chão (x 695,02-701,44); o piso de dentro emenda com a praça (3 cm acima dela, com a borda chanfrada)"
+  },
+  "lugares": {
+    "sally": {
+      "x": 697.9,
+      "y": 1.905,
+      "z": 199.6,
+      "rumo": 0.0,
+      "comprimento": 4.8,
+      "largura": 2.4,
+      "nota": "atrás do balcão (ao lado da ponta redonda dele), na frente da estante, de frente para a entrada"
+    }
+  },
+  "caminho_da_entrada": {
+    "pontos": [
+      [
+        698.215,
+        1.905,
+        178.05
+      ],
+      [
+        698.215,
+        1.905,
+        182.559
+      ],
+      [
+        697.9,
+        1.905,
+        195.7
+      ],
+      [
+        697.9,
+        1.905,
+        199.6
+      ]
+    ],
+    "largura": 4.0,
+    "faixa_livre_x": [
+      695.8,
+      699.8
+    ],
+    "nota": "o corredor x 695.80-699.80 fica livre de móveis da soleira até o fundo da vaga (z 201.80); o balcão começa em x 699.95"
+  },
+  "contorno_por_dentro": [
+    [
+      687.18,
+      180.559
+    ],
+    [
+      709.4,
+      180.559
+    ],
+    [
+      709.4,
+      203.5
+    ],
+    [
+      687.18,
+      203.5
+    ]
+  ],
+  "aberturas_para_tirar_da_casca": [
+    {
+      "nome": "recepcao_piso_de_dentro",
+      "descricao": "o piso velho de dentro (y 2,11; o novo fica em piso_y, na altura da praça)",
+      "caixa_min": [
+        686.753,
+        2.113,
+        179.916
+      ],
+      "caixa_max": [
+        709.548,
+        2.113,
+        204.028
+      ],
+      "faces": 2,
+      "objetos": [
+        "Object_9"
+      ],
+      "sai_da_colisao": true
+    },
+    {
+      "nome": "recepcao_balcao",
+      "descricao": "o balcão do Race-O-Rama no meio da sala",
+      "caixa_min": [
+        697.181,
+        2.051,
+        186.443
+      ],
+      "caixa_max": [
+        699.365,
+        2.889,
+        193.783
+      ],
+      "faces": 10,
+      "objetos": [
+        "Object_9"
+      ],
+      "sai_da_colisao": true
+    },
+    {
+      "nome": "recepcao_armario_oeste",
+      "descricao": "o armário encostado na parede oeste",
+      "caixa_min": [
+        686.64,
+        2.051,
+        187.496
+      ],
+      "caixa_max": [
+        688.798,
+        5.834,
+        195.669
+      ],
+      "faces": 8,
+      "objetos": [
+        "Object_9"
+      ],
+      "sai_da_colisao": true
+    },
+    {
+      "nome": "recepcao_armario_leste",
+      "descricao": "o armário encostado na parede leste",
+      "caixa_min": [
+        707.827,
+        2.051,
+        187.127
+      ],
+      "caixa_max": [
+        709.985,
+        5.834,
+        195.299
+      ],
+      "faces": 8,
+      "objetos": [
+        "Object_9"
+      ],
+      "sai_da_colisao": true
+    },
+    {
+      "nome": "recepcao_hastes_da_vitrine_oeste",
+      "descricao": "as duas hastes em pé atrás do vidro da vitrine de oeste (x 689,5 e 692,5, y 4,22-7,90; cada uma são 4 tiras soltas de 2 faces): a parede inclinada de dentro as cruzaria e elas furariam o teto novo",
+      "caixa_min": [
+        689.42,
+        4.22,
+        179.55
+      ],
+      "caixa_max": [
+        692.6,
+        7.9,
+        179.7
+      ],
+      "faces": 16,
+      "objetos": [
+        "Object_9"
+      ],
+      "sai_da_colisao": true
+    },
+    {
+      "nome": "recepcao_fundo_da_caixa",
+      "descricao": "o fundo da caixa de vidro (y 1,90-1,97, virado para baixo; furaria o piso novo)",
+      "caixa_min": [
+        686.603,
+        1.936,
+        180.203
+      ],
+      "caixa_max": [
+        709.88,
+        1.936,
+        204.182
+      ],
+      "faces": 6,
+      "objetos": [
+        "Object_16"
+      ],
+      "sai_da_colisao": true
+    },
+    {
+      "nome": "recepcao_vidro_oeste",
+      "descricao": "o vidro da parede oeste (as janelas e as bandeiras)",
+      "caixa_min": [
+        686.603,
+        1.939,
+        178.481
+      ],
+      "caixa_max": [
+        686.642,
+        7.677,
+        204.061
+      ],
+      "faces": 2,
+      "objetos": [
+        "Object_16"
+      ],
+      "sai_da_colisao": false
+    },
+    {
+      "nome": "recepcao_vidro_leste",
+      "descricao": "o vidro da parede leste (as janelas e as bandeiras)",
+      "caixa_min": [
+        709.92,
+        1.939,
+        178.481
+      ],
+      "caixa_max": [
+        709.92,
+        7.677,
+        204.182
+      ],
+      "faces": 2,
+      "objetos": [
+        "Object_16"
+      ],
+      "sai_da_colisao": false
+    },
+    {
+      "nome": "recepcao_vidro_vitrine_oeste",
+      "descricao": "o vidro da vitrine de oeste (a do letreiro OFFICE), entre o peitoril e a verga",
+      "recorte": {
+        "cantos": [
+          [
+            686.9,
+            3.108,
+            179.405
+          ],
+          [
+            693.875,
+            3.108,
+            179.405
+          ],
+          [
+            693.875,
+            5.896,
+            179.405
+          ],
+          [
+            686.9,
+            5.896,
+            179.405
+          ]
+        ],
+        "profundidade": 0.85
+      },
+      "objetos": [
+        "Object_16"
+      ],
+      "sai_da_colisao": false
+    },
+    {
+      "nome": "recepcao_vidro_bandeira_oeste",
+      "descricao": "o vidro da bandeira em cima da vitrine de oeste, entre os trilhos",
+      "recorte": {
+        "cantos": [
+          [
+            686.95,
+            6.152,
+            178.713
+          ],
+          [
+            693.85,
+            6.152,
+            178.713
+          ],
+          [
+            693.85,
+            7.466,
+            178.713
+          ],
+          [
+            686.95,
+            7.466,
+            178.713
+          ]
+        ],
+        "profundidade": 0.25
+      },
+      "objetos": [
+        "Object_16"
+      ],
+      "sai_da_colisao": false
+    },
+    {
+      "nome": "recepcao_vidro_vitrine_leste",
+      "descricao": "o vidro da vitrine de leste (a dos cactos), entre o peitoril e a verga",
+      "recorte": {
+        "cantos": [
+          [
+            702.575,
+            3.108,
+            179.405
+          ],
+          [
+            709.32,
+            3.108,
+            179.405
+          ],
+          [
+            709.32,
+            5.895,
+            179.405
+          ],
+          [
+            702.575,
+            5.895,
+            179.405
+          ]
+        ],
+        "profundidade": 0.88
+      },
+      "objetos": [
+        "Object_16"
+      ],
+      "sai_da_colisao": false
+    },
+    {
+      "nome": "recepcao_vidro_bandeira_leste",
+      "descricao": "o vidro da bandeira em cima da vitrine de leste, entre os trilhos",
+      "recorte": {
+        "cantos": [
+          [
+            702.57,
+            6.152,
+            178.721
+          ],
+          [
+            709.3,
+            6.152,
+            178.721
+          ],
+          [
+            709.3,
+            7.415,
+            178.721
+          ],
+          [
+            702.57,
+            7.415,
+            178.721
+          ]
+        ],
+        "profundidade": 0.25
+      },
+      "objetos": [
+        "Object_16"
+      ],
+      "sai_da_colisao": false
+    },
+    {
+      "nome": "recepcao_vidro_fundos_janela_oeste",
+      "descricao": "o vidro da janela de oeste dos fundos",
+      "recorte": {
+        "cantos": [
+          [
+            687.34,
+            3.108,
+            204.09
+          ],
+          [
+            694.31,
+            3.108,
+            204.09
+          ],
+          [
+            694.31,
+            5.868,
+            204.09
+          ],
+          [
+            687.34,
+            5.868,
+            204.09
+          ]
+        ],
+        "profundidade": 0.35
+      },
+      "objetos": [
+        "Object_16"
+      ],
+      "sai_da_colisao": false
+    },
+    {
+      "nome": "recepcao_vidro_fundos_vao_do_meio",
+      "descricao": "o vidro do vão do meio dos fundos (atrás da estante), acima das sapatas",
+      "recorte": {
+        "cantos": [
+          [
+            694.86,
+            3.21,
+            204.13
+          ],
+          [
+            702.48,
+            3.21,
+            204.13
+          ],
+          [
+            702.48,
+            5.905,
+            204.13
+          ],
+          [
+            694.86,
+            5.905,
+            204.13
+          ]
+        ],
+        "profundidade": 0.25
+      },
+      "objetos": [
+        "Object_16"
+      ],
+      "sai_da_colisao": false
+    },
+    {
+      "nome": "recepcao_vidro_fundos_vao_do_meio_pe",
+      "descricao": "o vidro do vão do meio dos fundos, entre as sapatas dos pilares",
+      "recorte": {
+        "cantos": [
+          [
+            695.47,
+            1.95,
+            204.13
+          ],
+          [
+            701.87,
+            1.95,
+            204.13
+          ],
+          [
+            701.87,
+            3.21,
+            204.13
+          ],
+          [
+            695.47,
+            3.21,
+            204.13
+          ]
+        ],
+        "profundidade": 0.3
+      },
+      "objetos": [
+        "Object_16"
+      ],
+      "sai_da_colisao": false
+    },
+    {
+      "nome": "recepcao_vidro_fundos_atras_da_sapata_oeste",
+      "descricao": "o vidro do vão do meio dos fundos atrás da sapata do pilar de oeste",
+      "recorte": {
+        "cantos": [
+          [
+            694.86,
+            2.1,
+            203.9
+          ],
+          [
+            695.47,
+            2.1,
+            203.9
+          ],
+          [
+            695.47,
+            3.21,
+            203.9
+          ],
+          [
+            694.86,
+            3.21,
+            203.9
+          ]
+        ],
+        "profundidade": 0.0
+      },
+      "objetos": [
+        "Object_16"
+      ],
+      "sai_da_colisao": false
+    },
+    {
+      "nome": "recepcao_vidro_fundos_atras_da_sapata_leste",
+      "descricao": "o vidro do vão do meio dos fundos atrás da sapata do pilar de leste",
+      "recorte": {
+        "cantos": [
+          [
+            701.87,
+            2.1,
+            203.9
+          ],
+          [
+            702.48,
+            2.1,
+            203.9
+          ],
+          [
+            702.48,
+            3.21,
+            203.9
+          ],
+          [
+            701.87,
+            3.21,
+            203.9
+          ]
+        ],
+        "profundidade": 0.0
+      },
+      "objetos": [
+        "Object_16"
+      ],
+      "sai_da_colisao": false
+    },
+    {
+      "nome": "recepcao_vidro_fundos_janela_leste",
+      "descricao": "o vidro da janela de leste dos fundos",
+      "recorte": {
+        "cantos": [
+          [
+            703.01,
+            3.108,
+            204.17
+          ],
+          [
+            709.6,
+            3.108,
+            204.17
+          ],
+          [
+            709.6,
+            5.87,
+            204.17
+          ],
+          [
+            703.01,
+            5.87,
+            204.17
+          ]
+        ],
+        "profundidade": 0.5
+      },
+      "objetos": [
+        "Object_16"
+      ],
+      "sai_da_colisao": false
+    }
+  ],
+  "nota_das_aberturas": "As com caixa: peças inteiras da casca dentro dela (eixos do jogo; \"faces\" = quantas faces saem; conferidas com testar_aberturas.py no Race-O-Rama original x4,5); nenhuma caixa contém peça inteira de outro objeto além do de \"objetos\" (que é só informação). As que saem da colisão: o piso velho (y 2,11, acima do novo), o balcão, os armários e as hastes do Race-O-Rama (dentro da sala nova) e o fundo da caixa de vidro. Os vidros saem só do desenho (a colisão deles fica, por fora da colisão daqui): os dos lados por caixa; os da frente (inclinados) e o dos fundos por RECORTE, só no vão de cada vitrine, bandeira e janela, porque a caixa deles também conteria as peças da moldura do Object_9 que ficam na frente do vidro (o painel verde, o rodapé, o peitoril, os trilhos). Os cantos de cada recorte ficam num plano vertical no meio do vidro; a faixa de ±(profundidade + 0,3) m em volta dele só contém o vidro (conferido com as funções recortar() e tirar_pecas() do integrador no mapa: só o Object_16 perde área, e a do vão). A ordem importa (as vitrines antes das bandeiras; os vidros dos lados antes dos recortes). O tampo da caixa de vidro (Object_16, y 7,72-6,27) fica no mapa: ele fica 5 cm ou mais acima do teto novo e a câmera para nele.",
+  "colisao": {
+    "arquivo": "cozy_cone_recepcao_colisao.glb",
+    "triangulos": 424,
+    "nota": "piso em y = piso_y (com uma aba que desce à praça na entrada) e paredes em pé até o teto (a da frente, inclinada, com a entrada aberta); os móveis em caixas sem tampa de 1.6 m ou até o alto deles (os cactos, os abajures de pé, a estante, as pilhas de cones: a câmera do jogo, aqui dentro, anda em y ~3,9, 2 m acima do carro, e não atravessa a colisão); sem teto (o tampo da caixa de vidro do mapa faz o teto da câmera)"
+  },
+  "contagens": {
+    "triangulos": 97980,
+    "materiais": 4,
+    "texturas": 3,
+    "bytes": 8237252,
+    "primitivas": 7,
+    "maior_primitiva": 32709
+  }
+}

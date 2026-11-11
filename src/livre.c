@@ -205,6 +205,13 @@ void voltarAoComeco(CarroLivre *carro, MalhaDeColisao *malha) {
     levarCarroPara(carro, malha, carro->xInicial, carro->zInicial, carro->rumoInicial);
 }
 
+/* Parado com o freio de mão (dirigir): o motor sobe até quase o limitador quando acelera */
+#define PARADO_NO_FREIO       1.0f      /* m/s: mais devagar que isso, o freio de mão segura o carro parado */
+#define GIRO_PARADO           0.12f     /* o giro do motor em marcha lenta (do conta-giros, 0 a 1) */
+#define GIRO_RONCANDO         0.92f     /* e acelerando parado */
+#define SOBE_O_RONCO          2.2f      /* por segundo */
+#define DESCE_O_RONCO         1.6f
+
 /* O rumo (visto de cima) segue a frente, se ela não estiver apontando para o céu ou o chão */
 static void atualizarRumo(CarroLivre *carro) {
     if (hypotf(carro->frente[0], carro->frente[2]) > 0.2f) {
@@ -224,6 +231,28 @@ static void dirigir(CarroLivre *carro, const Comandos *comandos, float passo) {
     float frente = escalar(v, f), lado = escalar(v, d);
     int emPe = n[1] <= EMPINADO;   /* numa parede */
     Carro *corrida = &carro->corrida;
+
+    /* Parado com o freio de mão puxado: o carro fica onde está, e o acelerador só faz o motor roncar (em
+     * movimento, o freio de mão é o do drift, como sempre) */
+    carro->segurado = comandos->freioDeMao && !emPe && fabsf(frente) < PARADO_NO_FREIO && fabsf(lado) < PARADO_NO_FREIO;
+    if (carro->segurado) {
+        float alvo = comandos->acelerar ? GIRO_RONCANDO : GIRO_PARADO;
+        float subida = comandos->acelerar ? SOBE_O_RONCO : DESCE_O_RONCO;
+        corrida->motor.giro += limitar(alvo - corrida->motor.giro, -subida * passo, subida * passo);
+        corrida->motor.carga = comandos->acelerar ? 1.0f : 0.0f;
+        corrida->motor.marcha = 0;
+        corrida->velocidade = 0.0f;
+        corrida->re = 0.0f;
+        corrida->forcaDoDrift = corrida->anguloDeDrift = corrida->giroDoDrift = corrida->derrapagem = 0.0f;
+        carro->motor = corrida->motor;
+        carro->roncando = comandos->acelerar ? limitar((corrida->motor.giro - GIRO_PARADO) / (GIRO_RONCANDO - GIRO_PARADO), 0.0f, 1.0f)
+                                             : 0.0f;
+        carro->escorregando = 0.0f;
+        carro->doDriftAntes = 0.0f;
+        carro->vx = carro->vy = carro->vz = 0.0f;
+        return;
+    }
+    carro->roncando = 0.0f;
 
     /* ---- A direção da corrida: nitro, motor, velocidade, volante, drift, ré e o giro do rumo ----
      * A velocidade de agora (as batidas e a ladeira mexem nela) entra na conta da corrida */

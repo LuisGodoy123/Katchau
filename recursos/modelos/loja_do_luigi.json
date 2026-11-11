@@ -1,0 +1,303 @@
+{
+  "sobre": "Casa Della Tires por dentro (ferramentas/montar_loja_do_luigi.py). Eixos do jogo: x, y para cima, z. Rumo do jogo: 0 olhando para -z, crescendo para a direita (a frente é (sin r, -cos r)).",
+  "piso_y": 1.92,
+  "teto_y": 8.42,
+  "porta": {
+    "centro_na_fachada": [
+      474.526,
+      1.92,
+      162.521
+    ],
+    "centro_por_dentro": [
+      473.907,
+      1.92,
+      163.028
+    ],
+    "direcao_para_dentro": [
+      -0.7744,
+      0.0,
+      0.6327
+    ],
+    "rumo_para_dentro": -2.2559,
+    "rumo_para_fora": 0.8857,
+    "ao_longo": [
+      0.6327,
+      0.0,
+      0.7744
+    ],
+    "largura": 8.46,
+    "altura": 4.98,
+    "pontas_na_fachada": [
+      [
+        471.831,
+        159.223
+      ],
+      [
+        477.222,
+        165.82
+      ]
+    ],
+    "profundidade_do_rebaixo": 0.8
+  },
+  "lugares": {
+    "luigi": {
+      "x": 467.9,
+      "y": 1.92,
+      "z": 173.4,
+      "rumo": 0.5249,
+      "comprimento": 3.0,
+      "largura": 1.7,
+      "nota": "olhando para a porta"
+    },
+    "guido": {
+      "x": 459.1,
+      "y": 1.92,
+      "z": 173.6,
+      "rumo": 0.9507,
+      "comprimento": 2.4,
+      "largura": 1.2,
+      "nota": "olhando para a porta"
+    }
+  },
+  "baia_de_servico": [
+    [
+      471.888,
+      159.214
+    ],
+    [
+      477.241,
+      165.765
+    ],
+    [
+      470.388,
+      171.365
+    ],
+    [
+      465.035,
+      164.814
+    ]
+  ],
+  "contorno_por_dentro": [
+    [
+      455.8,
+      147.65
+    ],
+    [
+      469.7,
+      147.65
+    ],
+    [
+      469.7,
+      157.879
+    ],
+    [
+      478.174,
+      168.25
+    ],
+    [
+      486.85,
+      168.25
+    ],
+    [
+      486.85,
+      177.05
+    ],
+    [
+      455.8,
+      177.05
+    ]
+  ],
+  "aberturas_para_tirar_da_casca": [
+    {
+      "nome": "painel_da_porta",
+      "descricao": "o painel de porta de garagem pintado, 0,6 m para dentro da fachada diagonal",
+      "caixa_min": [
+        471.37,
+        1.8,
+        159.6
+      ],
+      "caixa_max": [
+        476.96,
+        7.65,
+        166.42
+      ],
+      "faces": 10,
+      "vao_na_face_de_fora": [
+        [
+          471.83,
+          1.87,
+          159.21
+        ],
+        [
+          477.22,
+          1.87,
+          165.79
+        ],
+        [
+          477.22,
+          6.93,
+          165.79
+        ],
+        [
+          471.83,
+          6.93,
+          159.21
+        ]
+      ]
+    },
+    {
+      "nome": "vidro_janela_frente_1",
+      "descricao": "o vidro pintado da janela da frente de oeste (parede z = 146,45)",
+      "caixa_min": [
+        456.72,
+        2.73,
+        146.75
+      ],
+      "caixa_max": [
+        460.94,
+        7.14,
+        146.87
+      ],
+      "faces": 12,
+      "vao_na_face_de_fora": [
+        [
+          456.78,
+          2.8,
+          146.45
+        ],
+        [
+          460.87,
+          2.8,
+          146.45
+        ],
+        [
+          460.87,
+          7.07,
+          146.45
+        ],
+        [
+          456.78,
+          7.07,
+          146.45
+        ]
+      ]
+    },
+    {
+      "nome": "vidro_janela_frente_2",
+      "descricao": "o vidro pintado da janela da frente de leste (parede z = 146,45)",
+      "caixa_min": [
+        464.57,
+        2.73,
+        146.74
+      ],
+      "caixa_max": [
+        468.79,
+        7.14,
+        146.84
+      ],
+      "faces": 12,
+      "vao_na_face_de_fora": [
+        [
+          464.64,
+          2.8,
+          146.45
+        ],
+        [
+          468.72,
+          2.8,
+          146.45
+        ],
+        [
+          468.72,
+          7.07,
+          146.45
+        ],
+        [
+          464.64,
+          7.07,
+          146.45
+        ]
+      ]
+    },
+    {
+      "nome": "vidro_arco_oeste",
+      "descricao": "o vidro pintado do arco da parede x = 470,7 (vira vitrine)",
+      "caixa_min": [
+        469.92,
+        1.7,
+        148.88
+      ],
+      "caixa_max": [
+        470.06,
+        7.54,
+        155.11
+      ],
+      "faces": 10,
+      "vao_na_face_de_fora": [
+        [
+          470.7,
+          1.85,
+          148.95
+        ],
+        [
+          470.7,
+          1.85,
+          155.02
+        ],
+        [
+          470.7,
+          7.48,
+          155.02
+        ],
+        [
+          470.7,
+          7.48,
+          148.95
+        ]
+      ]
+    },
+    {
+      "nome": "vidro_arco_sul",
+      "descricao": "o vidro pintado do arco da parede z = 167,18 (vira vitrine)",
+      "caixa_min": [
+        480.54,
+        1.75,
+        167.58
+      ],
+      "caixa_max": [
+        485.75,
+        7.58,
+        167.68
+      ],
+      "faces": 10,
+      "vao_na_face_de_fora": [
+        [
+          480.54,
+          1.85,
+          167.18
+        ],
+        [
+          485.58,
+          1.85,
+          167.18
+        ],
+        [
+          485.58,
+          7.51,
+          167.18
+        ],
+        [
+          480.54,
+          7.51,
+          167.18
+        ]
+      ]
+    }
+  ],
+  "nota_das_aberturas": "Peças de ror_Object_46 inteiras dentro de cada caixa (eixos do jogo; \"faces\" = quantas faces a peça tem). vao_na_face_de_fora: os quatro cantos do vão, na face de fora da casca (a janela e os arcos têm o alto em arco até o y do alto). Tirar do desenho; na colisão do mapa, a do painel da porta sai (a porta fica aberta) e as dos vidros podem ficar (a colisão da loja já fecha as janelas e as vitrines por dentro).",
+  "colisao": {
+    "arquivo": "loja_do_luigi_colisao.glb",
+    "triangulos": 245,
+    "nota": "piso em y = piso_y (com uma aba de 1,5 m para fora da porta) e paredes em pé; sem teto nem tampos"
+  }
+}

@@ -285,6 +285,8 @@ static void desenharBorrao3D(int imagem, Vector3 centro, float tamanho, float gi
     }
 }
 
+static Color luzAtualDaFumaca = { 255, 255, 255, 255 };
+
 /*
  * desenharFumaca3D
  * Desenha as nuvens, misturadas com o que está atrás. Elas respeitam o que
@@ -296,6 +298,7 @@ static void desenharBorrao3D(int imagem, Vector3 centro, float tamanho, float gi
  * Devolve: nada.
  */
 void desenharFumaca3D(Camera3D camera) {
+    Color luz = luzAtualDaFumaca;
     rlDrawRenderBatchActive();
     BeginBlendMode(BLEND_ALPHA);
     rlDisableDepthMask();
@@ -317,13 +320,24 @@ void desenharFumaca3D(Camera3D camera) {
         float opacidade = (ehDrift ? OPACIDADE_DRIFT : ehPneu ? OPACIDADE_PNEU : OPACIDADE_POEIRA) * nuvem->forca * entrada * (1.0f - fase) * (1.0f - fase);
 
         desenharBorrao3D(nuvem->imagem, nuvem->posicao, tamanho, nuvem->giro,
-                         Fade(nuvem->cor, opacidade));
+                         Fade(ColorTint(nuvem->cor, luz), opacidade));
     }
     rlEnd();
     rlSetTexture(0);
     rlDrawRenderBatchActive();
     rlEnableDepthMask();
     EndBlendMode();
+}
+
+/*
+ * luzDaFumaca
+ * A luz que cai na fumaça e na poeira (no passeio, a da hora: de noite elas escurecem junto com
+ * o resto). Vale até mudar; BRANCO é a de sempre.
+ * Recebe: a cor da luz.
+ * Devolve: nada.
+ */
+void luzDaFumaca(Color luz) {
+    luzAtualDaFumaca = luz;
 }
 
 /*

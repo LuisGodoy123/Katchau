@@ -60,8 +60,15 @@ lista circular duplamente encadeada de segmentos.
   entra, a porta sobe, e aí vem a escolha da corrida. Escolhida, o Mack parte pela rua (uma cena curta, com a
   música do menu seguindo até a apresentação da pista); desistindo, o carro desce de ré pela rampa. No fim
   da corrida (ou saindo dela pela pausa), o carro desce do mesmo jeito, de volta na cidade, com o resultado
-  no alto da tela. Por dentro, a carreta é o "camarim" do carro (`src/carreta.c`): chapa escura com neon
-  roxo, prateleiras com troféus e miniaturas, quadros, teto estrelado e um telão. Os olhos do Mack são vivos
+  no alto da tela. Por dentro, a carreta é o "camarim" do McQueen (`src/carreta.c`), um modelo 3D
+  (`recursos/modelos/mack_interior.glb`, de `ferramentas/montar_carreta_do_mack.py`, com a luz assada nas cores
+  dos vértices), como no filme: escuro, com o neon amarelo contornando os raios das paredes e os caixotões do
+  teto, o céu de estrelas de fibra ótica no meio do teto, as fileiras de spots sobre as prateleiras de troféus,
+  pôsteres e carrinhos, o teclado da porta, o piso de chapa xadrez preta polida e, no fundo, o console com a tela
+  e as caixas de som e o 95 em relevo com as bandeiras. O que brilha (`mack_interior_luzes.glb`) é desenhado aceso
+  por cima e entra no brilho em volta. Por fora, de noite o Mack acende as 281 lâmpadas âmbar de contorno da
+  carreta e da cabine, os faróis e as lanternas (`recursos/modelos/mack_luzes.glb` e `.json`, de
+  `ferramentas/luzes/montar_luzes_do_mack.py`), que andam com ele (`registrarLuzesMoveis` em `src/luzes.c`). Os olhos do Mack são vivos
   como os dos carros (o mesmo shader e a mesma cara de `src/carros3d.c`): ele pisca, olha em volta,
   acompanha o carro do jogador e se assusta se bater nele. O modelo (`recursos/modelos/mack.glb`, as 10
   rodas em `mack_rodas.glb`, que giram quando ele anda, e a porta em `mack_porta.glb`) e as camadas dos
@@ -69,8 +76,9 @@ lista circular duplamente encadeada de segmentos.
   texturas (filtro xBR do ffmpeg), separa as rodas e a porta e põe o caminhão em metros (30 m).
 - **Os moradores de Radiator Springs** (`src/moradores.c`, o mapa deles em `src/moradores_mapa.h`): o McQueen
   (quando o jogador está com outro carro), o Mate, a Sally, o Doc, o Luigi, o Guido, o Ramone, a Flo, o Xerife,
-  o Sargento, o Fillmore, a Lizzie e o Ruivo, cada um no seu lugar (a loja do Luigi, o café da Flo, o Cozy
-  Cone, o ferro-velho, o quartel, o esconderijo do Xerife atrás do outdoor...) e com uma rotina de dia: vai a
+  o Sargento, o Fillmore, a Lizzie e o Ruivo, cada um no seu lugar (dentro da loja do Luigi, o café da Flo, o
+  McQueen dentro do cone dele e a Sally dentro da recepção do Cozy Cone, o ferro-velho, o quartel, o esconderijo
+  do Xerife atrás do outdoor...) e com uma rotina de dia: vai a
   outros lugares (quase todos passam no café da Flo), fica um tempo e volta. Andam pela faixa da direita,
   seguindo o grafo das ruas, freiam atrás de quem vai para o mesmo lado na frente deles (cansando de esperar
   outro morador, seguem; dois que se encostam se empurram de lado, e ninguém fica travado), esperam a vez de
@@ -175,11 +183,49 @@ também os triângulos da colisão.
 **Na cidade**, os comandos são os da corrida, mais: **R** (ou Y) volta para a rua principal,
 **T** vai para a pista de treino, **M** (ou LB) abre o mapa (lá, **Z**/RB aproxima e **ENTER**/A leva à pista
 de treino), **C** troca a câmera e **ESC** pausa. O velocímetro é o mesmo da corrida; no canto de baixo à
-esquerda fica o minimapa (redondo, com o Mack marcado em laranja). Na vaga atrás do Mack, **ENTER** (ou Y)
-entra nele. Nas cenas do Mack, **ENTER** (ou A) pula. A pista de treino fica além da planície de areia, ao sul
-da rua principal; na frente da loja do Luigi, a torre de pneus é de pneus 3D. A câmera vem atrás de para onde o
+esquerda fica o minimapa (redondo, com o Mack marcado em laranja), com a hora do dia em cima. Na vaga atrás do
+Mack, **ENTER** (ou Y) entra nele. **O dia passa**: um dia inteiro de Radiator Springs dura 48 minutos (28 de dia, 6
+de pôr do sol, 10 de noite e 4 de amanhecer). O sol nasce na ponta leste da rua principal, atravessa o céu e se põe
+no fim dela, laranja; de noite a cidade fica azulada, com a lua e as estrelas, e o céu, as sombras, os carros, a
+poeira e o lado de dentro dos prédios acompanham (`src/hora.c`; a luz é o mesmo cálculo de antes, com o sol e as
+cores da hora, e ao meio-dia e fora do passeio ela é a de sempre). No quarto do **cone 8 do Cozy Cone** (o mais
+perto do Mack), parado, **ENTER** (ou Y) dorme: escolhe-se a hora de acordar (amanhecer, manhã, meio-dia, tarde,
+pôr do sol, noite ou madrugada), a tela escurece e o dia recomeça na hora escolhida. **Nos pastos em volta da cidade**
+há rebanhos de tratores-vaca, como no filme: de dia pastam, piscando; de noite dormem, de olhos fechados. Parado perto
+de um que dorme, com o freio de mão puxado (o carro fica parado), pise no acelerador: o motor ronca, o trator acorda
+assustado, dá um pulinho e cai de costas, uma cambalhota para trás, mugindo e soltando fumaça, e o susto passa para os
+vizinhos; depois de um tempo, com o carro longe, ele desvira e volta a dormir (`src/tratores.c`). **De noite a cidade acende**
+como no filme: no pôr do sol, cada lugar liga na sua vez, letra por letra e lâmpada por lâmpada, piscando antes de
+firmar (os neons do Ramone, da Flo, do Luigi, do Sargento, da placa do Cozy Cone, as lâmpadas da Curios, o domo do
+Fillmore brilhando, os letreiros e as vitrines da rua), e as luzes jogam cor no chão e nas paredes em volta; no
+amanhecer apagam. De dia os tubos aparecem apagados, como vidro colorido. Cada lugar é um modelo
+(`recursos/modelos/luzes/<lugar>.glb`, com as luzes em volta no `.json`, feitos pelas ferramentas de
+`ferramentas/luzes/`) desenhado por cima do mapa (`src/luzes.c`); a luz deles alcança a cidade toda (até 64 luzes ao
+mesmo tempo, as que estão na frente da câmera) e não atravessa as paredes (de cada lâmpada, raios na malha de colisão
+medem até onde ela enxerga), e o brilho em volta é tapado pelo que está na frente (prédios, carros, o Mack). Como no filme, os carros não acendem faróis; a rua
+é iluminada pelos postes de madeira com luminárias amarelas de sódio, ligados por fios, e no cruzamento um semáforo
+pendurado pisca amarelo dia e noite (`recursos/modelos/postes.glb`, com a sombra do sol e o tronco sólido para o
+carro, `src/postes.c`; as luminárias e as lentes em `luzes/postes.glb` e `luzes/semaforo.glb`, todos de
+`ferramentas/luzes/montar_postes.py`). Os prédios em que se entra têm a luz de noite deles (abajures e luminárias acesos, misturada com a de
+dia pela hora: `<interior>_noite.glb`), os moradores recolhem para casa (de noitinha só se vai ao café da Flo) e os
+grilos cantam (`src/grilos.c`, gerados no próprio jogo). Nas cenas do Mack, **ENTER** (ou A) pula. A pista de treino fica além da planície de areia, ao sul
+da rua principal; na frente da loja do Luigi, a torre de pneus é de pneus 3D. A **Casa Della Tires** é aberta: o
+carro entra dirigindo pela porta de garagem e encontra o lado de dentro da
+loja como no filme, com o piso de tábuas encerado, os pôsteres de corridas italianas, o móvel dos pneus com o nicho
+"Fettuccini Alfredo", o elevador e a baia de serviço, e o Luigi e o Guido estacionados (`src/interiores.c`; o modelo
+`recursos/modelos/loja_do_luigi.glb`, a colisão de dentro e as medidas saem de `ferramentas/montar_loja_do_luigi.py`,
+e `montar_mundo_aberto.py` tira do prédio do mapa o painel pintado da porta e os vidros). O **Cozy Cone** também:
+os 8 cones são quartos, como o do McQueen no filme, com o carpete, o papel de parede, os quadros, os abajures, o
+ar-condicionado e os capachos de fibra (`recursos/modelos/cozy_cone_quartos.glb`, de
+`ferramentas/montar_quartos_do_cozy_cone.py`), e a recepção é o escritório da Sally, com o piso xadrez, o balcão,
+a estante de cones, os cactos e o letreiro OFFICE em neon (`recursos/modelos/cozy_cone_recepcao.glb`, de
+`ferramentas/montar_recepcao_do_cozy_cone.py`); o carro entra pela porta de cada cone e pela entrada da recepção,
+e de fora se vê o lado de dentro pelas janelas. A câmera vem atrás de para onde o
 carro está indo (a velocidade), como nos jogos de corrida: no drift, ela olha o caminho e o carro aparece de lado
-(devagar ou de ré, ela vem atrás do bico). Na corrida sem a direção guiada é igual (`rumoDaViagem` em `carro.c`). No chão, o carro dirige com a mesma conta da corrida (a direção livre, sem assistência): o volante, a
+(devagar ou de ré, ela vem atrás do bico). E ela nunca perde o carro de vista: com um morro atrás, sobe por cima
+dele; debaixo de um teto (dentro da loja do Luigi ou do Cozy Cone, numa marquise, embaixo de uma ponte), chega mais perto e desce
+para baixo dele; com uma parede no caminho, vem para a frente dela, sempre com uma folga para não se ver através
+das paredes; livre do obstáculo, volta aos poucos (`cameraLivre`, em `passeio.c`). Na corrida sem a direção guiada é igual (`rumoDaViagem` em `carro.c`). No chão, o carro dirige com a mesma conta da corrida (a direção livre, sem assistência): o volante, a
 curva, o freio, a ré, o nitro e o drift são iguais, em qualquer piso (a areia só segura um pouco a velocidade).
 **Wallride:** encoste numa parede rápido (mais de ~40 km/h), de raspão, e vire o volante para o lado dela: o carro
 sobe e anda nela enquanto tiver velocidade (abaixo de ~30 km/h ele solta). Na parede o controle é arcade: a câmera
@@ -202,7 +248,7 @@ tamanho real (`comecarInterface()` em `hud.c`).
 |-------|----------|------|
 | ↑ ou W | R2 | Acelerar |
 | ↓ ou S | L2 | Frear |
-| SHIFT | Cruz | Freio de mão (com o volante virado, drift) |
+| SHIFT | Cruz | Freio de mão (com o volante virado, drift; parado, segura o carro e o acelerador só faz o motor roncar) |
 | ESPAÇO | Bola | Nitro (segure): recarrega aos poucos, e bem mais rápido freando |
 | ← → ou A D | analógico esquerdo ou direcional | Virar (o volante gira aos poucos e volta sozinho ao centro) |
 | | analógico direito | Câmera livre: gira em volta do carro; todo para cima olha para o alto e todo para baixo olha para trás num giro rápido (soltando, volta) |
@@ -294,7 +340,14 @@ src/
   hud.c/.h         posições, volta e setores, mini-mapa e velocímetro  (fases 3 a 6)
   menu.c/.h        menu, garagem, como jogar e tela de resultado       (fase 6)
   passeio.c/.h     a cidade (o mundo aberto), o Mack e as cenas da ida e da volta das corridas
-  carreta.c/.h     o lado de dentro da carreta do Mack (neon, troféus, quadros, telão)
+  carreta.c/.h     o lado de dentro da carreta do Mack (o modelo mack_interior.glb)
+  interiores.c/.h  o lado de dentro dos prédios em que o carro entra (a loja do Luigi, o Cozy Cone)
+  hora.c/.h        o relógio do passeio (o dia de 48 minutos) e a luz de cada hora
+  luzes.c/.h       as luzes da cidade à noite (neons, lâmpadas, vitrines)
+  grilos.c/.h      o som dos grilos de noite
+  postes.c/.h      os postes de luz da rua e o semáforo (o desenho e os troncos sólidos)
+  tratores.c/.h    os tratores-vaca dos pastos: dormem de noite e tombam de costas com o ronco do motor
+  leitor_json.c/.h um leitor pequeno dos JSON das ferramentas (os números das chaves e as listas)
   moradores.c/.h   os moradores andando pela cidade (lógica: rotina, caminho, fila); o mapa em moradores_mapa.h
   visual.c/.h      identidade visual: cores, fontes, logo e formas     (fase 6)
   olhar.c/.h       câmera livre: transforma o analógico direito em ângulos
@@ -309,9 +362,22 @@ ferramentas/
   medir_interlagos.c     mede o modelo de Interlagos e escreve src/interlagos.h (make medir-interlagos)
   preparar_carros.py     prepara os modelos do Luigi, do Wingo, do Jackson Storm, do Boost e do DJ (Blender)
   preparar_figurantes.py prepara os da Flo, do Ruivo, do Xerife e da Lizzie (Blender)
+  montar_mundo_aberto.py monta o mapa do passeio, radiator_springs.glb e .col (Blender)
+  montar_loja_do_luigi.py  o lado de dentro da Casa Della Tires: o desenho, a colisão e as medidas (Blender)
+  montar_carreta_do_mack.py  o lado de dentro da carreta do Mack (Blender)
+  montar_quartos_do_cozy_cone.py    os quartos dos 8 cones do Cozy Cone: o desenho, a colisão e as medidas (Blender)
+  montar_recepcao_do_cozy_cone.py   a recepção do Cozy Cone (o escritório da Sally) (Blender)
+  (as três ferramentas dos interiores, com --noite, fazem também a luz de noite: <interior>_noite.glb e .json)
+  luzes/montar_luzes_ramone_e_flo.py           os neons do Ramone e do café da Flo (Blender)
+  luzes/montar_luzes_luigi_e_curios.py         os neons, os varais e as lâmpadas do Luigi e da Curios (Blender)
+  luzes/montar_luzes_sarge_fillmore_cozy.py    o Sargento, o domo do Fillmore e a placa e os cones do Cozy Cone (Blender)
+  luzes/montar_luzes_da_cidade.py              os letreiros e as vitrines do resto da cidade (Blender)
+  luzes/montar_postes.py                       os postes de luz da rua, os fios e o semáforo (Blender)
+  luzes/montar_luzes_do_mack.py                as lâmpadas de contorno, os faróis e as lanternas do Mack (Blender)
+  preparar_trator.py     prepara o trator-vaca (corpo, olhos, rodas, medidas) e escolhe os pastos dos rebanhos (Blender)
   gerar_som_da_zebra.py  gera recursos/sons/efeitos/zebra.wav
 recursos/
-  fontes/          Racing Sans One e Saira Condensed (licença OFL, arquivos *_licenca.txt)
+  fontes/          Racing Sans One, Saira Condensed e Lobster (licença OFL, arquivos *_licenca.txt)
   sons/            música, efeitos dos menus e falas do McQueen (*.wav, *.mp3)
     nascar/        motores V8 estilo NASCAR em várias rotações (loops) e o motor da largada
     efeitos/       vento, pneu, grama, muro, nitro, câmbio, voltas e pit stop
@@ -365,6 +431,8 @@ personagens são de *Carros* (Disney/Pixar). Nos arquivos, as texturas JPEG vira
 lê JPEG. O Luigi, o Wingo, o Jackson Storm, o Boost e o DJ passam por `ferramentas/preparar_carros.py`, que também separa
 os olhos pintados nas três camadas dos olhos vivos, desvira as peças do avesso (o jogo não desenha o lado de trás das
 faces: o Wingo aparecia oco, e o Luigi antigo tinha a luz do lado errado) e põe o DJ, que vinha deitado, de frente para +z.
+O trator-vaca dos pastos é o "cars tractor" de [zairiqzairiq](https://sketchfab.com/zairiqzairiq), também CC-BY-4.0,
+preparado por `ferramentas/preparar_trator.py` (sem o esqueleto, em metros, separado em corpo, olhos e rodas).
 
 ## Pilotagem
 

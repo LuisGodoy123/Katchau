@@ -9,6 +9,10 @@
  * é fotografado de cima uma vez: a foto vira o minimapa e o mapa grande.
  * O Mack (mack.glb, de ferramentas/preparar_mack.py) fica estacionado
  * na rua principal, logo à frente da largada.
+ *
+ * O dia passa (hora.c): 48 minutos do nascer do sol ao nascer do sol, com
+ * o pôr do sol e a noite. No quarto do cone do Cozy Cone mais perto do Mack
+ * (o cone 8), parado, o jogador dorme e escolhe a hora de acordar.
  * ------------------------------------------------------------------
  */
 
@@ -22,6 +26,12 @@
 #include "passeio.h"
 #include "livre.h"
 #include "carreta.h"
+#include "interiores.h"
+#include "hora.h"
+#include "luzes.h"
+#include "postes.h"
+#include "tratores.h"
+#include "grilos.h"
 #include "moradores.h"
 #include "colisao.h"
 #include "corrida.h"
@@ -56,6 +66,17 @@
 #define ATRASO_DA_ALTURA      0.10f     /* segundos: e sobe e desce com o carro com este */
 #define VELOCIDADE_DA_DISTANCIA 7.0f    /* 1/s: a troca de distância da câmera */
 #define FOLGA_DA_CAMERA       1.2f      /* metros: a câmera nunca entra no chão */
+/* O que há em volta da câmera (cameraLivre): ela confere, na malha de colisão, o caminho do carro até ela */
+#define ALTURA_DO_PIVO        1.2f      /* metros acima do carro: o ponto que a câmera tem de enxergar */
+#define FOLGA_DA_PAREDE       0.85f     /* metros: o mínimo entre a câmera e uma parede ou um teto (o plano de perto
+                                         * da imagem fica a 0,5 m dela, e os cantos dele a ~0,8 m: mais perto, ela
+                                         * vê através da parede) */
+#define MENOR_BRACO           0.6f      /* metros do pivô: o mais perto do carro que uma parede traz a câmera */
+#define SOBE_O_MORRO_ATE      6.0f      /* metros: um morro atrás do carro mais alto que isso, ela vem para a frente dele */
+#define COBERTO_ATE           12.0f     /* metros acima do carro: um teto mais baixo que isso, e o carro está coberto */
+#define ATRASO_DA_COBERTURA   0.35f     /* segundos: entrando ou saindo de baixo de um teto, a câmera vem para perto
+                                         * (e volta) com este atraso */
+#define VOLTA_DA_CAMERA       3.0f      /* 1/s: livre do obstáculo, a câmera volta para o lugar dela aos poucos */
 #define OLHAR_PARA_BAIXO      5.0f      /* graus */
 #define ALTURA_DA_SOMBRA      0.04f
 #define SOMBRA_PERTO_DA_CAMERA 0.40f
@@ -91,6 +112,9 @@ typedef struct {
 } Distancia;
 
 static const Distancia DISTANCIAS[3] = { { 5.2f, 2.1f }, { 8.5f, 3.4f }, { 13.0f, 5.0f } };
+/* Coberto (dentro de um prédio, como a loja do Luigi, debaixo de uma marquise ou de uma ponte), a câmera vem
+ * para perto, mesmo com a distância de longe escolhida */
+static const Distancia DISTANCIA_COBERTA = { 5.0f, 2.0f };
 
 static MalhaDeColisao *malha = NULL;
 static int tentouCarregar = 0;
@@ -101,6 +125,8 @@ static int pausado = 0, mapaAberto = 0, zoomDoMapa = 1;
 static const float ZOOMS_DO_MAPA[3] = { 1.0f, 2.5f, 6.0f };
 static Olhar olhar;
 static float rumoDaCamera = 0.0f, alturaDaCamera = 0.0f, noWallride = 0.0f;
+static float cobertura = 0.0f;                  /* 0 ao ar livre, 1 coberto (com o atraso da cobertura) */
+static Vector3 desvioDaCamera = { 0.0f, 0.0f, 0.0f };   /* o quanto o que há em volta tirou a câmera do lugar dela */
 static Vector3 cimaDaCamera = { 0.0f, 1.0f, 0.0f }, frenteDaCamera = { 0.0f, 0.0f, -1.0f };
 static int distanciaEscolhida = 1;
 static Distancia distanciaAtual = { 8.5f, 3.4f };
@@ -141,7 +167,6 @@ static float treino[3] = { TREINO_X, 0.0f, TREINO_Z };
 #define ACELERACAO_DO_MACK    3.0f      /* m/s², partindo */
 #define LONGE_DA_RAMPA        3.0f      /* metros entre o pé da rampa e o carro, depois de descer */
 #define FUNDO_DA_CARRETA      1.5f      /* metros entre a porta e a traseira do carro, lá dentro */
-#define FUNDO_DO_ESCURO       12.0f     /* metros do lado de dentro da carreta, da porta para dentro (FUNDO_DO_BAU, em preparar_mack.py) */
 #define DESENHA_O_BAU_ATE     150.0f    /* metros: mais longe que isso, o lado de dentro da carreta não aparece */
 #define DESENHA_MORADOR_ATE   320.0f    /* metros: mais longe que isso, os moradores não são desenhados */
 #define SOMBRA_DE_MORADOR_ATE 70.0f     /* e a sombra deles, só de perto */
@@ -155,10 +180,37 @@ static float treino[3] = { TREINO_X, 0.0f, TREINO_Z };
 
 typedef enum { CENA_DIRIGINDO, CENA_ENTRANDO, CENA_NA_CARRETA, CENA_PARTINDO, CENA_SAINDO } CenaDoMack;
 
+/* Dormir no Cozy Cone: no quarto do cone 8 (o mais perto do Mack), parado, ENTER (ou Y) abre a escolha da
+ * hora de acordar; a tela escurece, o relógio pula para a hora escolhida e a tela clareia */
+#define CAMA_X                775.127f  /* o lugar do carro no cone 8 (recursos/modelos/cozy_cone_quartos.json) */
+#define CAMA_Z                157.912f
+#define NA_CAMA_ATE           3.5f      /* metros do lugar */
+#define PISO_DO_QUARTO        2.4f      /* acima disso o carro está no piso do quarto (a praça fica em 1,9) */
+#define PARADO_PARA_DORMIR    1.5f      /* m/s */
+#define ADORMECE_EM           1.2f      /* segundos escurecendo... */
+#define DORME_POR             1.8f      /* ...dormindo (a tela preta)... */
+#define ACORDA_EM             1.4f      /* ...e clareando */
+#define COR_DA_NOITE          (Color){ 72, 86, 196, 255 }
+#define LUGAR_DOS_POSTES      3         /* o lugar dos postes entre os modelos colocados no mundo (mundo.h) */
+
+typedef struct {
+    const char *nome;
+    float hora;
+} HoraDeAcordar;
+static const HoraDeAcordar HORAS_DE_ACORDAR[] = {
+    { "AMANHECER", 6.0f }, { "MANHÃ", 9.0f }, { "MEIO-DIA", 12.0f }, { "TARDE", 16.0f },
+    { "PÔR DO SOL", 18.6f }, { "NOITE", 21.5f }, { "MADRUGADA", 2.0f },
+};
+#define TOTAL_DE_HORAS_DE_ACORDAR (int) (sizeof(HORAS_DE_ACORDAR) / sizeof(HORAS_DE_ACORDAR[0]))
+typedef enum { ACORDADO, ESCOLHENDO_A_HORA, ADORMECENDO, DORMINDO, ACORDANDO } Sono;
+static Sono sono = ACORDADO;
+static float tempoDoSono = 0.0f;
+static int horaEscolhida = 0;
+
 static Model mack, rodasDoMack, modeloDaPorta;
+static int luzesDoMack = -1, luzesDoBau = -1;   /* as lâmpadas de fora do Mack e o que brilha no baú (luzes.c) */
 static int temMack = 0, temRodasDoMack = 0, temPortaDoMack = 0, temOlhosDoMack = 0;
 static Vector3 eixoDaRoda[MAIS_RODAS];   /* o meio de cada roda, no modelo (o eixo é o x dele) */
-static BoundingBox caixaDaRoda[MAIS_RODAS];
 static float raioDaRodaDoMack[MAIS_RODAS];
 static Matrix matrizesDoMack[MAIS_RODAS], matrizesDasRodas[MAIS_RODAS], matrizesDaPorta[MAIS_RODAS];   /* lidas no desenho */
 static float mackX = 0.0f, mackY = 0.0f, mackZ = 0.0f, mackRumo = 0.0f, mackInclinacao = 0.0f;
@@ -299,7 +351,6 @@ static void carregarMack(void) {
             for (int i = 0; i < rodasDoMack.meshCount; i++) {
                 BoundingBox roda = GetMeshBoundingBox(rodasDoMack.meshes[i]);
                 eixoDaRoda[i] = Vector3Scale(Vector3Add(roda.min, roda.max), 0.5f);
-                caixaDaRoda[i] = roda;
                 raioDaRodaDoMack[i] = fmaxf((roda.max.y - roda.min.y) / 2.0f, 0.1f);
             }
         }
@@ -480,6 +531,110 @@ static int naVagaDoMack(void) {
     return atrasDaPorta > -0.5f && atrasDaPorta < VAGA_ATE && fabsf(deLado) < VAGA_DE_LADO && fabsf(carro.y - mackY) < 3.0f;
 }
 
+/* Um multiplicador de luz (0 a 1 em cada canal) como cor */
+static Color corDaLuz(Vector3 luz) {
+    return (Color){ (unsigned char) (Clamp(luz.x, 0.0f, 1.0f) * 255.0f), (unsigned char) (Clamp(luz.y, 0.0f, 1.0f) * 255.0f),
+                    (unsigned char) (Clamp(luz.z, 0.0f, 1.0f) * 255.0f), 255 };
+}
+
+/* Os postes da rua: o carro não atravessa o tronco (e bater nele soa como bater num muro) */
+static void empurrarDosPostes(void) {
+    for (int i = 0; i < totalDePostes(); i++) {
+        const Poste *p = poste(i);
+        if (fabsf(p->x - carro.x) > 8.0f || fabsf(p->z - carro.z) > 8.0f || carro.y < p->base - 2.0f) {
+            continue;
+        }
+        empurrarDaCaixa(p->x, p->z, 0.0f, p->raio, p->raio, p->topo);
+    }
+}
+
+/* Os tratores dos pastos são sólidos (em pé ou de costas) */
+static void empurrarDosTratores(void) {
+    for (int i = 0; i < totalDeTratores(); i++) {
+        float x, z, rumo, meioComprimento, meiaLargura, alto;
+        if (!caixaDoTrator(i, &x, &z, &rumo, &meioComprimento, &meiaLargura, &alto)
+            || fabsf(x - carro.x) > 12.0f || fabsf(z - carro.z) > 12.0f) {
+            continue;
+        }
+        empurrarDaCaixa(x, z, rumo, meioComprimento, meiaLargura, alto);
+    }
+}
+
+/* O carro parado no quarto do cone 8, dirigindo e acordado: pode dormir */
+static int naCamaDoCone(void) {
+    return cena == CENA_DIRIGINDO && sono == ACORDADO && hypotf(carro.x - CAMA_X, carro.z - CAMA_Z) < NA_CAMA_ATE
+           && carro.y > PISO_DO_QUARTO && fabsf(velocidadeDoCarroLivre(&carro)) < PARADO_PARA_DORMIR;
+}
+
+/*
+ * deitar
+ * Abre a escolha da hora de acordar, marcando a primeira que vem depois da hora de agora.
+ */
+static void deitar(void) {
+    float agora = horaDoDia(), menor = 99.0f;
+    horaEscolhida = 0;
+    for (int i = 0; i < TOTAL_DE_HORAS_DE_ACORDAR; i++) {
+        float falta = fmodf(HORAS_DE_ACORDAR[i].hora - agora + 48.0f, 24.0f);
+        if (falta > 1.0f && falta < menor) {
+            menor = falta;
+            horaEscolhida = i;
+        }
+    }
+    sono = ESCOLHENDO_A_HORA;
+    tocarSom(SOM_CONFIRMAR);
+}
+
+/*
+ * atualizarSono
+ * A escolha da hora (CIMA/BAIXO, ENTER dorme, ESC desiste) e depois o escurecer, o pulo do
+ * relógio e o clarear.
+ * Recebe: o tempo do quadro.
+ * Devolve: nada.
+ */
+static void atualizarSono(float tempoQuadro) {
+    if (sono == ESCOLHENDO_A_HORA) {
+        if (IsKeyPressed(KEY_UP) || IsKeyPressed(KEY_W) || controleApertou(BOTAO_CIMA)) {
+            horaEscolhida = (horaEscolhida + TOTAL_DE_HORAS_DE_ACORDAR - 1) % TOTAL_DE_HORAS_DE_ACORDAR;
+            tocarSom(SOM_CURSOR);
+        } else if (IsKeyPressed(KEY_DOWN) || IsKeyPressed(KEY_S) || controleApertou(BOTAO_BAIXO)) {
+            horaEscolhida = (horaEscolhida + 1) % TOTAL_DE_HORAS_DE_ACORDAR;
+            tocarSom(SOM_CURSOR);
+        } else if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER) || IsKeyPressed(KEY_SPACE)
+                   || controleApertou(BOTAO_CONFIRMAR) || controleApertou(BOTAO_LIMPAR)) {
+            sono = ADORMECENDO;
+            tempoDoSono = 0.0f;
+            tocarSom(SOM_CONFIRMAR);
+        } else if (IsKeyPressed(KEY_ESCAPE) || IsKeyPressed(KEY_BACKSPACE) || controleApertou(BOTAO_VOLTAR)) {
+            sono = ACORDADO;
+            tocarSom(SOM_VOLTAR);
+        }
+        return;
+    }
+    tempoDoSono += tempoQuadro;
+    if (sono == ADORMECENDO && tempoDoSono >= ADORMECE_EM) {
+        sono = DORMINDO;
+        tempoDoSono = 0.0f;
+        definirHoraDoDia(HORAS_DE_ACORDAR[horaEscolhida].hora);
+        atualizarLuzesDaCidade(luzDaHora()->luzesDaCidade, 0.0f, 1);   /* acorda com a cidade já como deve estar */
+        definirHoraDaCidade(horaDoDia());
+    } else if (sono == DORMINDO && tempoDoSono >= DORME_POR) {
+        sono = ACORDANDO;
+        tempoDoSono = 0.0f;
+    } else if (sono == ACORDANDO && tempoDoSono >= ACORDA_EM) {
+        sono = ACORDADO;
+    }
+}
+
+/* O quanto a tela está escura no sono (0 a 1) */
+static float escuroDoSono(void) {
+    switch (sono) {
+        case ADORMECENDO: return Clamp(tempoDoSono / ADORMECE_EM, 0.0f, 1.0f);
+        case DORMINDO: return 1.0f;
+        case ACORDANDO: return 1.0f - Clamp(tempoDoSono / ACORDA_EM, 0.0f, 1.0f);
+        default: return 0.0f;
+    }
+}
+
 /* O carro parado num lugar, de pé no chão, com o bico para o rumo dado (nas cenas do Mack) */
 static void porCarroEm(float x, float z, float rumo, float andou) {
     float chao = alturaDoChaoNaMalha(malha, x, z, mackY + 3.0f, NULL);
@@ -589,6 +744,13 @@ static void prepararMapa(void) {
     if (pronto) {
         fotografarMapa();
         carregarMack();
+        carregarInteriores();   /* a loja do Luigi e o Cozy Cone por dentro, no lugar dos prédios */
+        carregarLuzesDaCidade(malha);   /* os neons e as lâmpadas da noite */
+        luzesDoMack = registrarLuzesMoveis("recursos/modelos/mack_luzes.glb", "recursos/modelos/mack_luzes.json", 0);
+        luzesDoBau = registrarLuzesMoveis("recursos/modelos/mack_interior_luzes.glb", NULL, 1);
+        carregarPostes();               /* os postes de luz da rua e o semáforo */
+        carregarTratores();             /* os tratores-vaca dos pastos */
+        carregarGrilos();
     }
 }
 
@@ -603,6 +765,10 @@ void iniciarPasseio(int numeroDoCarro) {
     iniciarCarroLivre(&carro, fichaDoCarro(numero), largada[0], largada[1], largada[2], largada[3]);
     voltarAoComeco(&carro, malha);
     iniciarMoradores(malha, numero);   /* cada um em casa (menos quem tem o carro do jogador) */
+    colocarNoMundoAberto(LUGAR_DOS_POSTES, modeloDosPostes(), matrizesDosPostes());   /* com sombra, como o Mack */
+    iniciarRelogio();
+    atualizarLuzesDaCidade(luzDaHora()->luzesDaCidade, 0.0f, 1);   /* já acesas, se for de noite */
+    sono = ACORDADO;
     cena = CENA_DIRIGINDO;
     mackAndou = 0.0f;
     aberturaDaPorta = 0.0f;
@@ -710,6 +876,12 @@ void descarregarPasseio(void) {
     }
     temMack = temRodasDoMack = temPortaDoMack = temOlhosDoMack = 0;
     descarregarInteriorDaCarreta();
+    descarregarInteriores();
+    descarregarLuzesDaCidade();
+    colocarNoMundoAberto(LUGAR_DOS_POSTES, NULL, NULL);
+    descarregarPostes();
+    descarregarTratores();
+    descarregarGrilos();
     liberarMalhaDeColisao(malha);
     malha = NULL;
     if (fotoDoMapa.id != 0) {
@@ -752,6 +924,8 @@ static Tela sair(void) {
 static void reiniciarCamera(void) {
     rumoDaCamera = carro.rumo;
     alturaDaCamera = carro.y;
+    cobertura = 0.0f;
+    desvioDaCamera = (Vector3){ 0.0f, 0.0f, 0.0f };
     cimaDoDesenho = (Vector3){ 0.0f, 1.0f, 0.0f };
     noWallride = 0.0f;
     cimaDaCamera = (Vector3){ 0.0f, 1.0f, 0.0f };
@@ -957,10 +1131,19 @@ Tela atualizarPasseio(EstadoMenu *menu, float tempoQuadro) {
         tempoDoRecado -= tempoQuadro;
     }
     sustoDoMack = fmaxf(sustoDoMack - tempoQuadro, 0.0f);
-    if (!pausado && !mapaAberto) {
-        /* a cidade segue, até nas cenas do Mack */
+    if (!pausado && !mapaAberto && sono != ESCOLHENDO_A_HORA) {
+        /* a cidade segue, até nas cenas do Mack; e o dia passa (dormindo, o relógio pula de uma vez) */
+        if (sono == ACORDADO) {
+            avancarRelogio(tempoQuadro);
+        }
+        definirHoraDaCidade(horaDoDia());   /* de noite os moradores ficam em casa */
         atualizarMoradores(malha, carro.x, carro.z, carro.rumo, velocidadeDoCarroLivre(&carro), tempoQuadro);
+        atualizarLuzesDaCidade(luzDaHora()->luzesDaCidade, tempoQuadro, 0);
+        /* os tratores dormem de noite; o ronco do motor parado (freio de mão e acelerador) os assusta */
+        atualizarTratores(luzDaHora()->luzesDaCidade, (Vector3){ carro.x, carro.y, carro.z },
+                          (cena == CENA_DIRIGINDO && sono == ACORDADO) ? carro.roncando : 0.0f, tempoQuadro);
     }
+    atualizarGrilos(luzDaHora()->luzesDaCidade, !pausado && !mapaAberto && cena == CENA_DIRIGINDO);
     if (cena != CENA_DIRIGINDO) {
         return atualizarCena(tempoQuadro);
     }
@@ -995,6 +1178,10 @@ Tela atualizarPasseio(EstadoMenu *menu, float tempoQuadro) {
         }
         return TELA_PASSEIO;
     }
+    if (sono != ACORDADO) {
+        atualizarSono(tempoQuadro);   /* escolhendo a hora ou dormindo: o carro fica parado no quarto */
+        return TELA_PASSEIO;
+    }
     if (IsKeyPressed(KEY_ESCAPE) || controleApertou(BOTAO_START)) {
         tocarSom(SOM_CONFIRMAR);
         pausado = 1;
@@ -1011,6 +1198,11 @@ Tela atualizarPasseio(EstadoMenu *menu, float tempoQuadro) {
     if (IsKeyPressed(KEY_C) || controleApertou(BOTAO_CAMERA)) {
         distanciaEscolhida = (distanciaEscolhida + 1) % 3;
         tocarSom(SOM_CURSOR);
+    }
+    /* No quarto do cone 8, ENTER (ou Y) dorme */
+    if (naCamaDoCone() && (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER) || controleApertou(BOTAO_LIMPAR))) {
+        deitar();
+        return TELA_PASSEIO;
     }
     /* Na vaga do Mack, ENTER (ou Y) entra nele; fora dela, Y volta à rua principal */
     int naVaga = naVagaDoMack();
@@ -1035,6 +1227,8 @@ Tela atualizarPasseio(EstadoMenu *menu, float tempoQuadro) {
         sustoDoMack = SEGUNDOS_DE_SUSTO;   /* bateram no Mack: ele se assusta */
     }
     empurrarDosMoradores();
+    empurrarDosPostes();
+    empurrarDosTratores();
     if (carro.quedas != quedasAntes) {
         reiniciarCamera();   /* caiu do mundo e voltou ao começo: a câmera não fica lá embaixo */
     }
@@ -1080,16 +1274,101 @@ static float rumoDaViagem(void) {
     return carro.rumo + diferenca * peso;
 }
 
+/* Um raio na malha de "de" até "ate" (Devolve: 1 se bateu em alguma coisa no caminho) */
+static int raioEntre(Vector3 de, Vector3 ate, Acerto *acerto) {
+    Vector3 caminho = Vector3Subtract(ate, de);
+    float distancia = Vector3Length(caminho);
+    if (distancia < 1e-3f) {
+        return 0;
+    }
+    float origem[3] = { de.x, de.y, de.z };
+    float direcao[3] = { caminho.x / distancia, caminho.y / distancia, caminho.z / distancia };
+    return raioNaMalha(malha, origem, direcao, distancia, acerto);
+}
+
+/*
+ * cameraLivre
+ * Onde a câmera pode ficar, o mais perto possível de onde ela queria ficar, com o carro à vista: o
+ * "braço" do pivô (logo acima do carro) até ela, conferido na malha de colisão. O que estiver no
+ * caminho decide, pela direção da face:
+ *   - chão (um morro atrás do carro, a beira de uma rampa): ela sobe por cima dele;
+ *   - teto (o forro de um prédio, uma marquise, uma ponte): ela desce para baixo dele;
+ *   - parede (ou o morro alto demais): ela vem para a frente dela.
+ * Só o chão embaixo dela conta como chão: o telhado de cima não (antes a câmera pulava para cima de
+ * qualquer teto em que o carro entrasse embaixo). E ela fica a FOLGA_DA_PAREDE das paredes e do teto
+ * em volta, senão o plano de perto da imagem os corta e se vê através deles.
+ * Recebe: o pivô e onde a câmera queria ficar.
+ */
+static Vector3 cameraLivre(Vector3 pivo, Vector3 camera) {
+    float chao = alturaDoChaoNaMalha(malha, camera.x, camera.z, camera.y, NULL);
+    if (chao > SEM_CHAO && camera.y < chao + FOLGA_DA_CAMERA) {
+        camera.y = chao + FOLGA_DA_CAMERA;
+    }
+    for (int tentativa = 0; tentativa < 4; tentativa++) {
+        Acerto acerto;
+        if (!raioEntre(pivo, camera, &acerto)) {
+            break;
+        }
+        if (acerto.normal[1] > 0.6f) {   /* chão no caminho: por cima dele */
+            float topo = alturaDoChaoNaMalha(malha, camera.x, camera.z, camera.y + SOBE_O_MORRO_ATE + FOLGA_DA_CAMERA, NULL);
+            float sobe = fmaxf(topo, acerto.ponto[1]) + FOLGA_DA_CAMERA;
+            if (sobe > camera.y + 0.01f && sobe < camera.y + SOBE_O_MORRO_ATE) {
+                camera.y = sobe;
+                continue;
+            }
+        } else if (acerto.normal[1] < -0.6f) {   /* teto no caminho: por baixo dele */
+            float desce = fmaxf(acerto.ponto[1] - FOLGA_DA_PAREDE, pivo.y - 0.3f);
+            if (desce < camera.y - 0.01f) {
+                camera.y = desce;
+                continue;
+            }
+        }
+        /* parede: a câmera vem para a frente dela */
+        Vector3 braco = Vector3Subtract(camera, pivo);
+        float comprimento = Vector3Length(braco);
+        float ate = fmaxf(acerto.distancia - FOLGA_DA_PAREDE, fminf(MENOR_BRACO, comprimento));
+        camera = Vector3Add(pivo, Vector3Scale(braco, ate / comprimento));
+        break;
+    }
+
+    /* Longe das paredes em volta (de lado, o raio do carro até ela não as vê) e do teto em cima */
+    float centro[3] = { camera.x, camera.y, camera.z }, cima[3] = { 0.0f, 1.0f, 0.0f }, empurrao[3];
+    if (empurrarDasParedes(malha, centro, FOLGA_DA_PAREDE, cima, empurrao)) {
+        Vector3 empurrada = { camera.x + empurrao[0], camera.y, camera.z + empurrao[2] };
+        Acerto acerto;
+        if (!raioEntre(pivo, empurrada, &acerto)) {   /* sem passar para trás de outra parede */
+            camera = empurrada;
+        }
+    }
+    Acerto acerto;
+    if (raioNaMalha(malha, centro, cima, FOLGA_DA_PAREDE, &acerto)) {
+        camera.y = fmaxf(camera.y - (FOLGA_DA_PAREDE - acerto.distancia), pivo.y - 0.3f);
+    }
+    return camera;
+}
+
 /*
  * montarCamera
  * Atrás do carro, para onde ele está indo visto de cima (com um pequeno atraso), girando com
- * o analógico direito; nunca dentro do chão. Numa parede, ela continua de pé, atrás e um pouco
- * para fora dela.
+ * o analógico direito, e sempre com o carro à vista (cameraLivre): por cima de um morro, por baixo
+ * de um teto, na frente de uma parede. Coberto, ela vem mais perto. Numa parede, ela continua de
+ * pé, atrás e um pouco para fora dela.
  */
 static Camera3D montarCamera(void) {
     float dt = (pausado || mapaAberto) ? 0.0f : GetFrameTime();
     float passo = fminf(VELOCIDADE_DA_DISTANCIA * dt, 1.0f);
-    Distancia alvo = DISTANCIAS[distanciaEscolhida];
+    Vector3 pivo = { carro.x, carro.y + ALTURA_DO_PIVO, carro.z };
+    if (dt > 0.0f) {
+        float origem[3] = { pivo.x, pivo.y, pivo.z }, paraCima[3] = { 0.0f, 1.0f, 0.0f };
+        Acerto acerto;
+        float coberto = raioNaMalha(malha, origem, paraCima, COBERTO_ATE, &acerto) ? 1.0f : 0.0f;
+        cobertura += (coberto - cobertura) * (1.0f - expf(-dt / ATRASO_DA_COBERTURA));
+    }
+    Distancia escolhida = DISTANCIAS[distanciaEscolhida];
+    Distancia alvo = {
+        escolhida.atras + (fminf(DISTANCIA_COBERTA.atras, escolhida.atras) - escolhida.atras) * cobertura,
+        escolhida.altura + (fminf(DISTANCIA_COBERTA.altura, escolhida.altura) - escolhida.altura) * cobertura,
+    };
     distanciaAtual.atras += (alvo.atras - distanciaAtual.atras) * passo;
     distanciaAtual.altura += (alvo.altura - distanciaAtual.altura) * passo;
 
@@ -1102,14 +1381,26 @@ static Camera3D montarCamera(void) {
     float giro = rumoDaCamera + olhar.giro * DEG2RAD;
     float dx = sinf(giro), dz = -cosf(giro);
 
-    Camera3D camera = { 0 };
-    camera.position = (Vector3){ carro.x - dx * distanciaAtual.atras, alturaDaCamera + distanciaAtual.altura,
-                                 carro.z - dz * distanciaAtual.atras };
-    float chao = alturaDoChaoNaMalha(malha, camera.position.x, camera.position.z, camera.position.y + 30.0f, NULL);
-    if (chao > SEM_CHAO && camera.position.y < chao + FOLGA_DA_CAMERA) {
-        camera.position.y = chao + FOLGA_DA_CAMERA;
+    /* Onde ela queria ficar, e onde pode: chegar perto do carro (ou descer) é na hora, senão ela entra
+     * na parede; voltar para o lugar é aos poucos, sem tranco, enquanto o carro continuar à vista */
+    Vector3 desejada = { carro.x - dx * distanciaAtual.atras, alturaDaCamera + distanciaAtual.altura,
+                         carro.z - dz * distanciaAtual.atras };
+    Vector3 livre = cameraLivre(pivo, desejada);
+    Vector3 desvio = Vector3Subtract(livre, desejada);
+    if (dt > 0.0f) {
+        Vector3 suave = Vector3Lerp(desvioDaCamera, desvio, 1.0f - expf(-dt * VOLTA_DA_CAMERA));
+        Vector3 comSuave = Vector3Add(desejada, suave);
+        Acerto acerto;
+        if (Vector3Distance(pivo, comSuave) > Vector3Distance(pivo, livre) + 0.02f || raioEntre(pivo, comSuave, &acerto)) {
+            suave = desvio;
+        }
+        desvioDaCamera = suave;
     }
-    float ladeira = (carro.y + 1.0f - camera.position.y) / distanciaAtual.atras + distanciaAtual.altura / distanciaAtual.atras * 0.55f;
+    Camera3D camera = { 0 };
+    camera.position = Vector3Add(desejada, desvioDaCamera);
+    /* olhando para o carro de onde ela está (perto de uma parede, ela vem mais para perto e mais para cima dele) */
+    float horizontal = fmaxf(hypotf(camera.position.x - carro.x, camera.position.z - carro.z), 1.0f);
+    float ladeira = (carro.y + 1.0f - camera.position.y) / horizontal + distanciaAtual.altura / distanciaAtual.atras * 0.55f;
     camera.target = (Vector3){ camera.position.x + dx,
                                camera.position.y + ladeira + tanf((olhar.elevacao - OLHAR_PARA_BAIXO) * DEG2RAD),
                                camera.position.z + dz };
@@ -1321,6 +1612,20 @@ static Matrix matrizDoMorador(const Morador *m) {
     noMundo.m12 = m->x;      noMundo.m13 = m->y;      noMundo.m14 = m->z;
     noMundo.m15 = 1.0f;
     return noMundo;
+}
+
+/*
+ * prepararLampadas
+ * As luzes pontuais deste quadro (as da cidade e as que os interiores jogam para fora): as MAIS_LAMPADAS
+ * que mais aparecem para a câmera vão para os shaders do mapa e dos carros.
+ */
+static void prepararLampadas(Camera3D camera) {
+    static Lampada todas[256];
+    int total = lampadasAcesas(todas, 256);
+    static Lampada escolhidas[MAIS_LAMPADAS];
+    int quantas = escolherLampadas(camera, todas, total, escolhidas, MAIS_LAMPADAS);
+    aplicarLampadas(escolhidas, quantas);
+    ligarVistaDasLampadas();
 }
 
 /*
@@ -1590,6 +1895,20 @@ static void desenharHudDoPasseio(void) {
                      6.0f, COR_PAINEL);
     escreverCentralizado(FONTE_FORTE, tecla, centro.x, centro.y + RAIO_DO_MINIMAPA_NA_TELA + 10.0f, 12.0f, WHITE);
 
+    /* A hora, em cima do minimapa: um sol ou uma lua e o relógio */
+    char textoDaHora[8];
+    escreverHora(textoDaHora, (int) sizeof(textoDaHora), horaDoDia());
+    float larguraDaHora = larguraDoTexto(FONTE_TITULO, textoDaHora, 18.0f) + 40.0f;
+    Rectangle caixaDaHora = { centro.x - larguraDaHora / 2.0f, centro.y - RAIO_DO_MINIMAPA_NA_TELA - 36.0f, larguraDaHora, 26.0f };
+    caixaArredondada(caixaDaHora, 8.0f, COR_PAINEL);
+    int deNoite = luzDaHora()->luzesDaCidade > 0.5f;
+    Vector2 astro = { caixaDaHora.x + 14.0f, caixaDaHora.y + 13.0f };
+    DrawCircleV(astro, 6.0f, deNoite ? (Color){ 226, 232, 255, 255 } : COR_AMARELO);
+    if (deNoite) {
+        DrawCircleV((Vector2){ astro.x + 3.0f, astro.y - 2.0f }, 5.0f, COR_PAINEL);   /* a lua minguante */
+    }
+    escrever(FONTE_TITULO, textoDaHora, caixaDaHora.x + 26.0f, caixaDaHora.y + 3.0f, 18.0f, WHITE);
+
     float x = largura / 2.0f;
 
     /* Na vaga atrás da carreta: o botão de entrar no Mack */
@@ -1605,6 +1924,19 @@ static void desenharHudDoPasseio(void) {
         escrever(FONTE_TITULO, texto, caixa.x + 26.0f + larguraDaTecla, caixa.y + 10.0f, 20.0f, WHITE);
     }
 
+    /* No quarto do cone 8: o botão de dormir */
+    if (naCamaDoCone()) {
+        const char *tecla = controleConectado() ? "Y" : "ENTER";
+        const char *texto = "DORMIR";
+        float larguraDaTecla = larguraDoTexto(FONTE_TITULO, tecla, 18.0f) + 18.0f;
+        float total = larguraDaTecla + 12.0f + larguraDoTexto(FONTE_TITULO, texto, 20.0f) + 28.0f;
+        Rectangle caixa = { x - total / 2.0f, altura - 92.0f, total, 44.0f };
+        caixaArredondada(caixa, 10.0f, COR_PAINEL);
+        caixaArredondada((Rectangle){ caixa.x + 14.0f, caixa.y + 9.0f, larguraDaTecla, 26.0f }, 6.0f, COR_DA_NOITE);
+        escreverCentralizado(FONTE_TITULO, tecla, caixa.x + 14.0f + larguraDaTecla / 2.0f, caixa.y + 11.0f, 18.0f, WHITE);
+        escrever(FONTE_TITULO, texto, caixa.x + 26.0f + larguraDaTecla, caixa.y + 10.0f, 20.0f, WHITE);
+    }
+
     desenharFalasDosMoradores(x, altura);
 
     /* O resultado da corrida, na volta à cidade */
@@ -1616,6 +1948,62 @@ static void desenharHudDoPasseio(void) {
     }
 }
 
+/*
+ * desenharEscolhaDaHora
+ * A lista das horas de acordar, no meio da tela, sobre o quarto escurecido.
+ */
+static void desenharEscolhaDaHora(void) {
+    float largura = (float) larguraVirtual(), altura = (float) alturaVirtual();
+    DrawRectangle(-200, -200, (int) largura + 400, (int) altura + 400, Fade(BLACK, 0.45f));
+    float w = 400.0f, linha = 40.0f, h = 100.0f + TOTAL_DE_HORAS_DE_ACORDAR * linha + 44.0f;
+    Rectangle caixa = { largura / 2.0f - w / 2.0f, altura / 2.0f - h / 2.0f, w, h };
+    caixaArredondada(caixa, 14.0f, COR_PAINEL);
+    escreverCentralizado(FONTE_TITULO, "DORMIR ATÉ", largura / 2.0f, caixa.y + 18.0f, 30.0f, WHITE);
+    char agora[8], subtitulo[40];
+    escreverHora(agora, (int) sizeof(agora), horaDoDia());
+    snprintf(subtitulo, sizeof(subtitulo), "AGORA SÃO %s", agora);
+    escreverCentralizado(FONTE_FORTE, subtitulo, largura / 2.0f, caixa.y + 58.0f, 14.0f, COR_TEXTO_FRACO);
+    for (int i = 0; i < TOTAL_DE_HORAS_DE_ACORDAR; i++) {
+        float y = caixa.y + 90.0f + i * linha;
+        int marcada = (i == horaEscolhida);
+        if (marcada) {
+            caixaArredondada((Rectangle){ caixa.x + 18.0f, y, w - 36.0f, linha - 6.0f }, 10.0f, Fade(COR_DA_NOITE, 0.9f));
+        }
+        char hora[8];
+        escreverHora(hora, (int) sizeof(hora), HORAS_DE_ACORDAR[i].hora);
+        float topo = noMeio(FONTE_TITULO, 21.0f, y + (linha - 6.0f) / 2.0f);
+        escrever(FONTE_TITULO, HORAS_DE_ACORDAR[i].nome, caixa.x + 34.0f, topo, 21.0f, marcada ? WHITE : Fade(WHITE, 0.8f));
+        escreverADireita(FONTE_TITULO, hora, caixa.x + w - 34.0f, topo, 21.0f, marcada ? WHITE : COR_TEXTO_FRACO);
+    }
+    const char *dica = controleConectado() ? "A  DORMIR      B  VOLTAR" : "ENTER  DORMIR      ESC  VOLTAR";
+    escreverCentralizado(FONTE_FORTE, dica, largura / 2.0f, caixa.y + h - 32.0f, 13.0f, COR_TEXTO_FRACO);
+}
+
+/*
+ * desenharSono
+ * A tela escurecendo, o "Z z z" com a hora de acordar, e a tela clareando.
+ */
+static void desenharSono(void) {
+    float escuro = escuroDoSono();
+    if (escuro <= 0.0f) {
+        return;
+    }
+    float largura = (float) larguraVirtual(), altura = (float) alturaVirtual();
+    DrawRectangle(-200, -200, (int) largura + 400, (int) altura + 400, Fade(BLACK, escuro));
+    float texto = escuro * escuro;
+    if (sono == DORMINDO) {
+        texto = Clamp(fminf(tempoDoSono / 0.3f, (DORME_POR - tempoDoSono) / 0.3f), 0.0f, 1.0f);
+    }
+    if (sono != DORMINDO || texto <= 0.0f) {
+        return;
+    }
+    char hora[8], linha[64];
+    escreverHora(hora, (int) sizeof(hora), HORAS_DE_ACORDAR[horaEscolhida].hora);
+    snprintf(linha, sizeof(linha), "%s  %s", HORAS_DE_ACORDAR[horaEscolhida].nome, hora);
+    escreverCentralizado(FONTE_TITULO, "Z  z  z", largura / 2.0f, altura / 2.0f - 46.0f, 46.0f, Fade((Color){ 170, 182, 255, 255 }, texto));
+    escreverCentralizado(FONTE_FORTE, linha, largura / 2.0f, altura / 2.0f + 14.0f, 18.0f, Fade(WHITE, texto));
+}
+
 /* Um retângulo com uma cor em cada canto (dentro de rlBegin(RL_QUADS)) */
 static void quadrado(Vector3 a, Vector3 b, Vector3 c, Vector3 d, Color ca, Color cb, Color cc, Color cd) {
     rlColor4ub(ca.r, ca.g, ca.b, ca.a); rlVertex3f(a.x, a.y, a.z);
@@ -1625,48 +2013,20 @@ static void quadrado(Vector3 a, Vector3 b, Vector3 c, Vector3 d, Color ca, Color
 }
 
 /*
- * desenharCaixasDasRodas
- * As rodas da carreta sobem acima do piso do baú: em cada lado, uma caixa cobrindo as rodas de lá (do
- * meio delas até a parede, e 40 cm acima do pneu, o arco inteiro), no lado de dentro (carreta.c).
- */
-static void desenharCaixasDasRodas(Matrix deDentro) {
-    if (!temRodasDoMack) {
-        return;
-    }
-    Vector3 de[2], ate[2];
-    int total = 0;
-    float piso = dobradica.y + 0.005f, porta = dobradica.z + 0.04f, parede = (larguraDaPorta - 0.06f) / 2.0f;
-    for (int lado = -1; lado <= 1; lado += 2) {
-        float z0 = 1e9f, z1 = -1e9f, dentro = 1e9f, topo = -1e9f;
-        for (int i = 0; i < rodasDoMack.meshCount; i++) {
-            BoundingBox r = caixaDaRoda[i];
-            float meioZ = (r.min.z + r.max.z) / 2.0f;
-            if (eixoDaRoda[i].x * lado <= 0.0f || meioZ - porta < 0.0f || meioZ - porta > FUNDO_DO_ESCURO || r.max.y <= piso) {
-                continue;   /* do outro lado, fora do baú, ou embaixo do piso */
-            }
-            z0 = fminf(z0, r.min.z); z1 = fmaxf(z1, r.max.z);
-            dentro = fminf(dentro, fminf(fabsf(r.min.x), fabsf(r.max.x)));
-            topo = fmaxf(topo, r.max.y);
-        }
-        if (z1 < z0) {
-            continue;
-        }
-        de[total] = (Vector3){ lado * (dentro - 0.10f), 0.0f, z0 - 0.20f - porta };
-        /* até quase a parede de fora da carreta (passando da do lado de dentro): pelo arco, de fora, a
-         * primeira coisa que se vê é a face escura da caixa */
-        ate[total] = (Vector3){ lado * (parede + 0.12f), topo + 0.40f - piso, z1 + 0.20f - porta };   /* 40 cm acima do pneu: o arco inteiro */
-        total++;
-    }
-    desenharCaixasDeRoda(deDentro, de, ate, total);
-}
-
-/*
  * desenharBauDoMack
  * O lado de dentro da carreta (carreta.c), sempre que o Mack está perto: o modelo não tem nada dentro
  * do baú (ferramentas/preparar_mack.py tira o que havia lá), então é ele que fecha o baú, visto de
- * qualquer lado (pela porta aberta ou, de baixo, pelas caixas das rodas). Com a porta aberta, também
- * o lado de dentro da porta, de chapa de metal, que vira o piso da rampa.
+ * qualquer lado (pela porta aberta ou, pelos arcos das rodas, as caixas delas). Com a porta aberta,
+ * também o lado de dentro da porta, de chapa de metal, que vira o piso da rampa.
  */
+/* As lâmpadas de fora do Mack vão com ele; o que brilha no baú, junto com o lado de dentro (veja abaixo) */
+static void moverLuzesDoMack(Vector3 camera) {
+    Matrix doMack = matrizDoMack();
+    moverLuzes(luzesDoMack, MatrixMultiply(mack.transform, doMack), temMack);
+    Matrix deDentro = MatrixMultiply(MatrixTranslate(dobradica.x, dobradica.y + 0.005f, dobradica.z + 0.04f), doMack);
+    moverLuzes(luzesDoBau, deDentro, temPortaDoMack && Vector3Distance(camera, (Vector3){ doMack.m12, doMack.m13, doMack.m14 }) < DESENHA_O_BAU_ATE);
+}
+
 static void desenharBauDoMack(Vector3 camera) {
     if (!temPortaDoMack) {
         return;
@@ -1674,8 +2034,7 @@ static void desenharBauDoMack(Vector3 camera) {
     Matrix mack = matrizDoMack();
     if (Vector3Distance(camera, (Vector3){ mack.m12, mack.m13, mack.m14 }) < DESENHA_O_BAU_ATE) {
         Matrix deDentro = MatrixMultiply(MatrixTranslate(dobradica.x, dobradica.y + 0.005f, dobradica.z + 0.04f), mack);
-        desenharInteriorDaCarreta(deDentro, larguraDaPorta - 0.06f, alturaDaPorta - 0.04f, FUNDO_DO_ESCURO);
-        desenharCaixasDasRodas(deDentro);
+        desenharInteriorDaCarreta(deDentro);
     }
     if (aberturaDaPorta <= 0.001f) {
         return;
@@ -1740,7 +2099,7 @@ void desenharPasseio(EstadoMenu *menu) {
         terminarInterface();
         return;
     }
-    float dt = (pausado || mapaAberto) ? 0.0f : GetFrameTime();
+    float dt = (pausado || mapaAberto || sono == ESCOLHENDO_A_HORA) ? 0.0f : GetFrameTime();
     Camera3D camera = montarCamera();   /* sempre: ela segue o carro mesmo nas cenas, para não dar tranco depois */
     if (cena != CENA_DIRIGINDO) {
         camera = cameraDaCena();
@@ -1748,12 +2107,17 @@ void desenharPasseio(EstadoMenu *menu) {
     int carroAparece = (cena != CENA_PARTINDO && cena != CENA_NA_CARRETA);   /* partindo, ele está na carreta */
     Matrix noMundo = matrizDoCarro();
     colocarMack();   /* antes das sombras: ele também faz sombra */
+    moverLuzesDoMack(camera.position);
     soltarPoeiraEFumaca(noMundo, (cena == CENA_DIRIGINDO) ? dt : 0.0f);
     atualizarFumaca(dt);
     atualizarMarcas(dt);
     atualizarMinimapa();
 
     prepararLuzes(0);
+    const LuzDoDia *luzDoDia = luzDaHora();   /* a luz da hora (no fim do quadro volta a do meio-dia) */
+    aplicarLuzDoDia(luzDoDia);
+    luzDaFumaca(corDaLuz(luzDoDia->base));
+    prepararLampadas(camera);
     prepararSombras(CENARIO_DO_MUNDO_ABERTO, camera, configuracoesAtuais()->sombras);
     definirOlhoDosCarros(camera.position);
     comecarPosProcesso();
@@ -1761,6 +2125,8 @@ void desenharPasseio(EstadoMenu *menu) {
     BeginMode3D(camera);
     rlDisableBackfaceCulling();
     desenharCenario(CENARIO_DO_MUNDO_ABERTO, camera.position);
+    desenharInteriores(camera.position, corDaLuz(luzDoDia->interior), luzDoDia->luzesDaCidade);   /* por dentro */
+    desenharLuzesDaCidade(camera, luzDoDia->base);   /* os neons (apagados de dia) */
     if (temOlhosDoMack) {
         prepararOlhosDoModelo(olharDoMack(camera), (cena == CENA_PARTINDO) ? 0.3f : 0.0f, (sustoDoMack > 0.0f) ? 1.0f : 0.0f);
     }
@@ -1768,6 +2134,7 @@ void desenharPasseio(EstadoMenu *menu) {
     desenharBauDoMack(camera.position);
     desenharMarcas();
     desenharMoradores(camera);
+    desenharTratores(camera);
     if (carroAparece) {
         if (cena == CENA_DIRIGINDO) {   /* na rampa e dentro da carreta, a sombra cairia na rua */
             comecarSombrasNoChao();
@@ -1782,16 +2149,22 @@ void desenharPasseio(EstadoMenu *menu) {
     EndMode3D();
     int efeitos = configuracoesAtuais()->efeitos;
     if (efeitos) {
-        /* As luzes de novo, sozinhas: o halo nasce da chama do nitro */
-        comecarLuzesDoPosProcesso();
+        /* As luzes de novo, sozinhas: o halo nasce da chama do nitro e dos neons */
+        comecarLuzesComProfundidade();   /* o que está na frente (prédios, carros, o Mack) tapa as luzes */
         prepararPlanosDaCamera();
         BeginMode3D(camera);
+        rlDisableBackfaceCulling();
+        desenharHalosDaCidade(camera);
         desenharChamas(camera, noMundo);
+        rlEnableBackfaceCulling();
         EndMode3D();
     }
     float rapidez = Clamp(velocidadeDoCarroLivre(&carro) / carro.velocidadeMaxima, 0.0f, 1.2f);
     float desfoque = efeitos ? 0.35f * rapidez * rapidez + (carro.nitroLigado ? 0.25f : 0.0f) : 0.0f;
     terminarPosProcesso(PISTA_OVAL, desfoque, efeitos ? POSPROCESSO_COMPLETO : POSPROCESSO_SO_COPIA);
+    aplicarLuzDoDia(NULL);   /* fora do passeio (as corridas, os menus), a luz de sempre */
+    aplicarLampadas(NULL, 0);
+    luzDaFumaca(WHITE);
 
     comecarInterface(0);
     if (cena != CENA_DIRIGINDO) {
@@ -1800,6 +2173,10 @@ void desenharPasseio(EstadoMenu *menu) {
         desenharMapaGrande();
     } else {
         desenharHudDoPasseio();
+        if (sono == ESCOLHENDO_A_HORA) {
+            desenharEscolhaDaHora();
+        }
+        desenharSono();
     }
     terminarInterface();
     if (pausado) {

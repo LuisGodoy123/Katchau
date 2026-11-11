@@ -1,0 +1,31 @@
+{
+  "comprimento": 3.05,
+  "largura": 2.0873,
+  "altura": 2.5514,
+  "eixo_tras": {
+    "y": 0.8519,
+    "z": -0.848,
+    "raio": 0.8522
+  },
+  "eixo_frente": {
+    "y": 0.257,
+    "z": 0.848,
+    "raio": 0.2645
+  },
+  "traseira_z": -1.6967,
+  "frente_z": 1.3533,
+  "escapamento": {
+    "x": 0.2221,
+    "y": 2.5,
+    "z": 0.5161
+  },
+  "olhos": {
+    "y_cima": 2.301,
+    "y_baixo": 1.6617,
+    "cor_da_palpebra": [
+      0.787,
+      0.528,
+      0.528
+    ]
+  }
+}

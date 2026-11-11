@@ -27,6 +27,7 @@
 #include "rlgl.h"
 #include "obstaculos.h"
 #include "noite.h"
+#include "hora.h"
 #include "corte.h"
 
 #define PASTA_TEXTURAS        "recursos/texturas/"
@@ -122,11 +123,12 @@
  * costas para o sol, está na própria sombra (senão, nos trilhos e muros finos, o mapa dá um
  * serrilhado de claro e escuro) */
 #define GLSL_DA_SOMBRA \
+    GLSL_DO_SOL \
     "uniform mat4 luzVP; uniform sampler2D mapaDeSombra; uniform float sombraLigada;\n" \
     "float naSombra(vec3 p) {\n" \
     "    if (sombraLigada < 0.5) return 0.0;\n" \
     "    vec3 n = normalize(cross(dFdx(p), dFdy(p)));\n" \
-    "    float deFrente = dot(n, normalize(vec3(0.35, 0.8, 0.45)));\n" \
+    "    float deFrente = dot(n, solDoDia);\n" \
     "    vec4 q = luzVP * vec4(p + n * 0.15, 1.0);\n" \
     "    q.xyz = q.xyz / q.w * 0.5 + 0.5;\n" \
     "    if (q.x <= 0.0 || q.x >= 1.0 || q.y <= 0.0 || q.y >= 1.0 || q.z >= 1.0) return 0.0;\n" \
@@ -155,10 +157,10 @@ static const char *PIXELS_DO_SHADER =
     "in vec2 fragTexCoord; in vec4 fragColor; in vec3 fragPos;\n"
     "uniform sampler2D texture0; uniform vec4 colDiffuse;\n"
     "out vec4 finalColor;\n"
-    GLSL_DA_SOMBRA
+    GLSL_DA_SOMBRA GLSL_DA_LUZ_DO_DIA
     "void main() { vec4 cor = texture(texture0, fragTexCoord) * colDiffuse * fragColor;\n"
     "              if (cor.a < 0.5) discard;\n"
-    "              finalColor = vec4(cor.rgb * (1.0 - " FORCA_DA_SOMBRA " * naSombra(fragPos)), 1.0); }\n";
+    "              finalColor = vec4(cor.rgb * (1.0 - " FORCA_DA_SOMBRA " * forcaDaSombra * naSombra(fragPos)), 1.0); }\n";
 
 /* Para o mapa de sombra: só a profundidade, furando o que for transparente (as folhas) */
 static const char *VERTICES_DA_PROFUNDIDADE =
@@ -248,6 +250,7 @@ static Shader shaderDosMapasDeDia;
 #define ALTURA_DO_SOL         500.0f   /* metros: de onde o sol "olha" */
 #define COR_DA_TELA_NO_HALO   (Color){ 215, 215, 215, 255 }   /* as telas brilham, mas menos que um refletor */
 #define REFAZER_A_SOMBRA      25.0f   /* metros que a câmera anda até o mapa de sombra ser refeito */
+#define SOL_ANDOU             0.999996f /* cosseno (0,16°): o sol andou isso, e o mapa de sombra é refeito */
 #define SLOT_DA_SOMBRA        15       /* a unidade de textura do mapa (as do material vão até 11) */
 static Shader shaderDaProfundidade;
 static RenderTexture2D mapaDeSombra;
@@ -257,7 +260,8 @@ static void carregarSombras(void);
 static void desenharLote(int i, Matrix origem);
 
 /* As pistas de dia vêm com as imagens sem luz nenhuma: aqui entra o mesmo sol de luzDoSol,
- * com a direção da superfície saindo das derivadas da posição */
+ * com a direção da superfície saindo das derivadas da posição. No passeio, a luz muda com a
+ * hora (hora.c): os multiplicadores valem 1 ao meio-dia, e o resultado é o de sempre */
 static const char *VERTICES_DOS_MAPAS_DE_DIA =
     "#version 330\n"
     "in vec3 vertexPosition; in vec2 vertexTexCoord;\n"
@@ -271,21 +275,23 @@ static const char *PIXELS_DOS_MAPAS_DE_DIA =
     "in vec2 fragTexCoord; in vec3 fragPos;\n"
     "uniform sampler2D texture0; uniform vec4 colDiffuse;\n"
     "out vec4 finalColor;\n"
-    GLSL_DA_SOMBRA
+    GLSL_DA_SOMBRA GLSL_DA_LUZ_DO_DIA GLSL_DAS_LAMPADAS
     "void main() { vec4 cor = texture(texture0, fragTexCoord) * colDiffuse;\n"
     "              if (cor.a < 0.5) discard;\n"
-    "              cor.rgb *= 1.0 - " FORCA_DA_SOMBRA " * naSombra(fragPos);\n"
+    "              cor.rgb *= 1.0 - " FORCA_DA_SOMBRA " * forcaDaSombra * naSombra(fragPos);\n"
     "              vec3 n = normalize(cross(dFdx(fragPos), dFdy(fragPos)));\n"
-    "              float luz = 0.58 + 0.30 * (n.y * 0.5 + 0.5) + 0.38 * max(dot(n, normalize(vec3(0.35, 0.8, 0.45))), 0.0);\n"
+    "              vec3 luz = 0.58 * luzDeBase + 0.30 * (n.y * 0.5 + 0.5) * luzDoCeu\n"
+    "                         + 0.38 * max(dot(n, solDoDia), 0.0) * luzDoSol + luzDasLampadas(fragPos, n);\n"
     "              finalColor = vec4(cor.rgb * luz * 0.92, 1.0); }\n";
 
 /* Interlagos: o modelo veio de outro jogo, e cada material pede um jeito de desenhar
  * (veja interlagos_materiais.h). Todos têm a mesma luz e a mesma sombra dos mapas de dia */
 #define GLSL_DA_LUZ_DOS_MAPAS \
+    GLSL_DA_LUZ_DO_DIA \
     "vec3 iluminar(vec3 cor) {\n" \
-    "    cor *= 1.0 - " FORCA_DA_SOMBRA " * naSombra(fragPos);\n" \
+    "    cor *= 1.0 - " FORCA_DA_SOMBRA " * forcaDaSombra * naSombra(fragPos);\n" \
     "    vec3 n = normalize(cross(dFdx(fragPos), dFdy(fragPos)));\n" \
-    "    float luz = 0.58 + 0.30 * (n.y * 0.5 + 0.5) + 0.38 * max(dot(n, normalize(vec3(0.35, 0.8, 0.45))), 0.0);\n" \
+    "    vec3 luz = 0.58 * luzDeBase + 0.30 * (n.y * 0.5 + 0.5) * luzDoCeu + 0.38 * max(dot(n, solDoDia), 0.0) * luzDoSol;\n" \
     "    return cor * luz * 0.92;\n" \
     "}\n"
 #define GLSL_DO_COMECO_DE_INTERLAGOS \
@@ -367,6 +373,52 @@ static BoundingBox *caixasDoEstadio = NULL;
 static Mesh pinturaDoEstadio;
 static Mesh ceuDeDia, tampaDoCeu, ceuDeNoite;
 static Texture2D texturaCeu;
+
+/* O céu do passeio muda com a hora (hora.c): a imagem de dia é recolorida (o céu num degradê do
+ * horizonte para o alto, as nuvens, que são as partes sem cor da imagem, com a cor da hora), o lado
+ * do sol brilha no fim da tarde, e de noite entram as estrelas e a lua. Ao meio-dia, a imagem como
+ * ela é, mais o sol */
+static Shader shaderDoCeu;
+static Material materialDoCeu;
+static int locMisturaDoDia, locCorDoHorizonte, locCorDoAlto, locCorDasNuvens, locCorDoBrilho, locEstrelas,
+           locSolNoCeu, locCorDoSol, locLuaNoCeu, locBrilhoDaLua;
+static const char *VERTICES_DO_CEU =
+    "#version 330\n"
+    "in vec3 vertexPosition; in vec2 vertexTexCoord; in vec4 vertexColor;\n"
+    "uniform mat4 mvp;\n"
+    "out vec2 fragTexCoord; out vec4 fragColor; out vec3 direcao;\n"
+    "void main() { fragTexCoord = vertexTexCoord; fragColor = vertexColor; direcao = vertexPosition;\n"
+    "              gl_Position = mvp * vec4(vertexPosition, 1.0); }\n";
+static const char *PIXELS_DO_CEU =
+    "#version 330\n"
+    "in vec2 fragTexCoord; in vec4 fragColor; in vec3 direcao;\n"
+    "uniform sampler2D texture0; uniform sampler2D texture1; uniform vec4 colDiffuse;\n"
+    "uniform float misturaDoDia; uniform vec3 corDoHorizonte; uniform vec3 corDoAlto; uniform vec3 corDasNuvens;\n"
+    "uniform vec3 corDoBrilho; uniform float estrelas; uniform vec3 solNoCeu; uniform vec3 corDoSol;\n"
+    "uniform vec3 luaNoCeu; uniform float brilhoDaLua;\n"
+    "out vec4 finalColor;\n"
+    "void main() {\n"
+    "    vec3 d = normalize(direcao);\n"
+    "    vec3 imagem = (texture(texture0, fragTexCoord) * colDiffuse * fragColor).rgb;\n"
+    "    float maior = max(imagem.r, max(imagem.g, imagem.b)), menor = min(imagem.r, min(imagem.g, imagem.b));\n"
+    "    float nuvem = smoothstep(0.30, 0.10, (maior - menor) / max(maior, 0.001)) * smoothstep(0.55, 0.85, maior);\n"
+    "    float alto = clamp(d.y, 0.0, 1.0);\n"
+    "    vec2 h = normalize(d.xz + vec2(0.00001)), hs = normalize(solNoCeu.xz + vec2(0.00001));\n"
+    "    float ladoDoSol = pow(max(dot(h, hs), 0.0), 3.0) * (1.0 - smoothstep(0.0, 0.45, alto));\n"
+    "    vec3 ceu = mix(corDoHorizonte, corDoAlto, pow(alto, 0.55)) + corDoBrilho * ladoDoSol;\n"
+    "    vec3 nuvens = corDasNuvens * (0.55 + 0.45 * maior) + corDoBrilho * ladoDoSol * 0.6;\n"
+    "    vec3 cor = mix(mix(ceu, nuvens, nuvem), imagem, misturaDoDia);\n"
+    "    vec2 uv = vec2(atan(d.x, d.z) * 0.15915, asin(clamp(d.y, -1.0, 1.0)) * 0.63662);\n"
+    "    float estrela = texture(texture1, uv * vec2(2.0, 1.2)).r;\n"
+    "    cor += vec3(estrela) * estrelas * 0.85 * (1.0 - nuvem) * smoothstep(0.05, 0.25, d.y);\n"
+    "    float s = max(dot(d, solNoCeu), 0.0);\n"
+    "    float acima = smoothstep(-0.02, 0.01, d.y) * (1.0 - 0.85 * nuvem);\n"
+    "    cor += corDoSol * acima * (smoothstep(0.99980, 0.99988, s) * 1.6 + pow(s, 400.0) * 0.5 + pow(s, 12.0) * 0.15);\n"
+    "    float l = max(dot(d, luaNoCeu), 0.0);\n"
+    "    cor += vec3(0.92, 0.94, 1.0) * brilhoDaLua * (1.0 - 0.7 * nuvem)\n"
+    "           * (smoothstep(0.99990, 0.99995, l) * 0.95 + pow(l, 300.0) * 0.12);\n"
+    "    finalColor = vec4(cor, 1.0);\n"
+    "}\n";
 static Texture2D texturaAsfalto[2], texturaGrama;
 static Texture2D texturaDoConcreto;   /* o concreto limpo dos muros de Interlagos (gerado) */
 static Model modelosDosObjetos[TOTAL_MODELOS_DE_OBJETO];
@@ -1175,6 +1227,7 @@ static void carregarShadersDeInterlagos(void) {
         SetShaderValue(shadersDeInterlagos[d], GetShaderLocation(shadersDeInterlagos[d], "metrosDoLadrilho"), &ladrilho,
                        SHADER_UNIFORM_FLOAT);
         recebemSombra[totalQueRecebemSombra++] = shadersDeInterlagos[d];
+        registrarShaderDoDia(shadersDeInterlagos[d]);
     }
 }
 
@@ -2110,6 +2163,51 @@ static void ligarTeloesDoCenario(void) {
 }
 
 /*
+ * carregarCeuDoPasseio
+ * O shader e o material do céu do passeio (veja PIXELS_DO_CEU).
+ */
+static void carregarCeuDoPasseio(void) {
+    shaderDoCeu = LoadShaderFromMemory(VERTICES_DO_CEU, PIXELS_DO_CEU);
+    materialDoCeu = LoadMaterialDefault();
+    materialDoCeu.shader = shaderDoCeu;
+    locMisturaDoDia = GetShaderLocation(shaderDoCeu, "misturaDoDia");
+    locCorDoHorizonte = GetShaderLocation(shaderDoCeu, "corDoHorizonte");
+    locCorDoAlto = GetShaderLocation(shaderDoCeu, "corDoAlto");
+    locCorDasNuvens = GetShaderLocation(shaderDoCeu, "corDasNuvens");
+    locCorDoBrilho = GetShaderLocation(shaderDoCeu, "corDoBrilho");
+    locEstrelas = GetShaderLocation(shaderDoCeu, "estrelas");
+    locSolNoCeu = GetShaderLocation(shaderDoCeu, "solNoCeu");
+    locCorDoSol = GetShaderLocation(shaderDoCeu, "corDoSol");
+    locLuaNoCeu = GetShaderLocation(shaderDoCeu, "luaNoCeu");
+    locBrilhoDaLua = GetShaderLocation(shaderDoCeu, "brilhoDaLua");
+}
+
+/*
+ * desenharCeuDoPasseio
+ * O céu do passeio, com a luz do dia aplicada (luzAplicada).
+ * Recebe: a matriz que põe o céu em volta da câmera.
+ */
+static void desenharCeuDoPasseio(Matrix naCamera) {
+    const LuzDoDia *luz = luzAplicada();
+    SetShaderValue(shaderDoCeu, locMisturaDoDia, &luz->misturaDoDia, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(shaderDoCeu, locCorDoHorizonte, &luz->horizonte, SHADER_UNIFORM_VEC3);
+    SetShaderValue(shaderDoCeu, locCorDoAlto, &luz->alto, SHADER_UNIFORM_VEC3);
+    SetShaderValue(shaderDoCeu, locCorDasNuvens, &luz->nuvens, SHADER_UNIFORM_VEC3);
+    SetShaderValue(shaderDoCeu, locCorDoBrilho, &luz->brilho, SHADER_UNIFORM_VEC3);
+    SetShaderValue(shaderDoCeu, locEstrelas, &luz->estrelas, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(shaderDoCeu, locSolNoCeu, &luz->solNoCeu, SHADER_UNIFORM_VEC3);
+    SetShaderValue(shaderDoCeu, locCorDoSol, &luz->corDoSol, SHADER_UNIFORM_VEC3);
+    SetShaderValue(shaderDoCeu, locLuaNoCeu, &luz->luaNoCeu, SHADER_UNIFORM_VEC3);
+    SetShaderValue(shaderDoCeu, locBrilhoDaLua, &luz->lua, SHADER_UNIFORM_FLOAT);
+    Texture2D branca = { rlGetTextureIdDefault(), 1, 1, 1, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
+    materialDoCeu.maps[MATERIAL_MAP_METALNESS].texture = texturaDoCeuNoturno();
+    materialDoCeu.maps[MATERIAL_MAP_ALBEDO].texture = texturaCeu;
+    DrawMesh(ceuDeDia, materialDoCeu, naCamera);
+    materialDoCeu.maps[MATERIAL_MAP_ALBEDO].texture = branca;
+    DrawMesh(tampaDoCeu, materialDoCeu, naCamera);
+}
+
+/*
  * carregarMundo
  * Prepara o cenário das pistas. Chamar uma vez, depois de criar a janela.
  * Recebe: as pistas, na ordem de IdPista.
@@ -2121,6 +2219,8 @@ void carregarMundo(Pista *pistas[]) {
     totalQueRecebemSombra = 0;
     recebemSombra[totalQueRecebemSombra++] = shader;
     recebemSombra[totalQueRecebemSombra++] = shaderDosMapasDeDia;
+    registrarShaderDoDia(shader);
+    registrarShaderDoDia(shaderDosMapasDeDia);
     carregarShadersDeInterlagos();
     carregarSombras();
     material = LoadMaterialDefault();
@@ -2137,6 +2237,7 @@ void carregarMundo(Pista *pistas[]) {
     ceuDeNoite = construirCeuDeNoite();
     /* Na vertical a imagem não se repete: a borda de cima não pode misturar com a de baixo */
     rlTextureParameters(texturaCeu.id, RL_TEXTURE_WRAP_T, RL_TEXTURE_WRAP_CLAMP);
+    carregarCeuDoPasseio();
 
     carregarModelosDosObjetos();
     carregarMapaDeDia(pistas[PISTA_INTERLAGOS], ARQUIVO_DE_INTERLAGOS, ESCALA_INTERLAGOS, TORCIDA_INTERLAGOS,
@@ -2311,6 +2412,11 @@ void descarregarMundo(void) {
     material.maps[MATERIAL_MAP_ALBEDO].texture.id = rlGetTextureIdDefault();
     material.shader.id = rlGetShaderIdDefault();
     UnloadMaterial(material);
+    materialDoCeu.maps[MATERIAL_MAP_ALBEDO].texture.id = rlGetTextureIdDefault();   /* as imagens são de outros */
+    materialDoCeu.maps[MATERIAL_MAP_METALNESS].texture.id = rlGetTextureIdDefault();
+    materialDoCeu.shader.id = rlGetShaderIdDefault();
+    UnloadMaterial(materialDoCeu);
+    UnloadShader(shaderDoCeu);
     UnloadShader(shader);
     UnloadShader(shaderDosMapasDeDia);
     for (int d = 0; d < TOTAL_DE_DESENHOS; d++) {
@@ -2470,12 +2576,14 @@ static void desenharQuemFazSombra(IdPista id) {
  * prepararSombras
  * Desenha o cenário visto do sol, num quadrado em volta da câmera, e passa o resultado
  * aos shaders do cenário. Chamar antes de BeginMode3D. À noite, e com a opção desligada,
- * não há sombra do sol.
+ * não há sombra do sol. O sol é o da luz do dia aplicada (hora.c): no passeio ele anda com a
+ * hora, e o mapa é refeito quando ele anda um pouco.
  * Recebe: a pista, a câmera e se as sombras estão ligadas nas configurações.
  * Devolve: nada.
  */
 void prepararSombras(IdPista id, Camera3D camera, int ligadas) {
-    sombraLigadaAgora = ligadas && temMapaDeSombra && id != PISTA_COPA_PISTAO;
+    const LuzDoDia *luzDoDia = luzAplicada();
+    sombraLigadaAgora = ligadas && temMapaDeSombra && id != PISTA_COPA_PISTAO && luzDoDia->sombra > 0.005f;
     float ligada = sombraLigadaAgora ? 1.0f : 0.0f;
     /* O valor quase nunca muda: mandá-lo de novo não faz nada */
     static float ultimaLigada = -1.0f;
@@ -2500,13 +2608,16 @@ void prepararSombras(IdPista id, Camera3D camera, int ligadas) {
 
     /* O cenário não se mexe: o mapa só é refeito quando a câmera anda bastante (ou muda a pista) */
     static Vector3 meioAnterior = { 1e9f, 0.0f, 1e9f };
+    static Vector3 solAnterior = { 0.0f, 0.0f, 0.0f };
     static int pistaAnterior = -1;
-    if ((int) id == pistaAnterior && hypotf(meio.x - meioAnterior.x, meio.z - meioAnterior.z) < REFAZER_A_SOMBRA) {
+    Vector3 sol = luzDoDia->sol;
+    if ((int) id == pistaAnterior && hypotf(meio.x - meioAnterior.x, meio.z - meioAnterior.z) < REFAZER_A_SOMBRA
+        && Vector3DotProduct(sol, solAnterior) > SOL_ANDOU) {
         return;   /* luzVP e o mapa continuam valendo */
     }
     meioAnterior = meio;
+    solAnterior = sol;
     pistaAnterior = id;
-    Vector3 sol = Vector3Normalize((Vector3){ 0.35f, 0.8f, 0.45f });
     Camera3D luz = { 0 };
     luz.position = Vector3Add(meio, Vector3Scale(sol, ALTURA_DO_SOL));
     luz.target = meio;
@@ -2587,8 +2698,7 @@ void desenharCenario(IdPista id, Vector3 camera) {
     Matrix naCamera = MatrixTranslate(camera.x, camera.y, camera.z);
 
     if ((int) id == (int) CENARIO_DO_MUNDO_ABERTO) {
-        desenharMalha(ceuDeDia, texturaCeu, naCamera);
-        desenharMalha(tampaDoCeu, semTextura, naCamera);
+        desenharCeuDoPasseio(naCamera);
         if (temMundoAberto) {
             DrawModel(mundoAberto, (Vector3){ 0.0f, 0.0f, 0.0f }, 1.0f, WHITE);
         }

@@ -29,7 +29,7 @@ int carregarMundoAberto(void);
 void desenharMapaDoMundoAberto(void);
 /* Modelos a mais no mundo aberto (o Mack e as rodas dele): com a luz e a sombra do mapa, e fazendo
  * sombra nele. Cada malha tem a sua matriz (as rodas giram cada uma em volta do próprio eixo) */
-#define MODELOS_NO_MUNDO_ABERTO 3   /* o Mack, as rodas e a porta da carreta */
+#define MODELOS_NO_MUNDO_ABERTO 4   /* o Mack, as rodas, a porta da carreta e os postes da rua */
 void prepararModeloDoMundoAberto(Model *modelo);
 void colocarNoMundoAberto(int qual, const Model *modelo, const Matrix *matrizDeCadaMalha);   /* modelo NULL tira */
 void desenharModelosNoMundoAberto(void);

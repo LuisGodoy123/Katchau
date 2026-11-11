@@ -99,6 +99,8 @@ void iniciarMoradores(MalhaDeColisao *malha, int carroDoJogador);
 void atualizarMoradores(MalhaDeColisao *malha, float jogadorX, float jogadorZ, float jogadorRumo,
                         float jogadorVelocidade, float tempo);
 int totalDeMoradores(void);
+/* A hora do dia (0 a 24): de noitinha só se vai ao café da Flo, e tarde da noite todo mundo fica em casa */
+void definirHoraDaCidade(float hora);
 Morador *morador(int i);
 
 #endif

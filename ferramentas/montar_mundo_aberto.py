@@ -35,7 +35,14 @@ O que o script faz:
   7. cria o chão de base (o deserto entre tudo) e, com COM_RUA_DO_TREINO
      (desligado: a pista de treino fica ligada à cidade pela areia), a rua
      da pista de treino (de asfalto, saindo em "T" da rua da cidade mais
-     perto, reta até a curva de cima da pista de treino);
+     perto, reta até a curva de cima da pista de treino); e abre os prédios
+     em que o carro entra (a Casa Della Tires, os cones e a recepção do Cozy
+     Cone): tira da casca deles as portas pintadas (do desenho e da colisão:
+     o carro entra dirigindo) e os vidros pintados (do desenho), e põe na
+     colisão o lado de dentro de cada um (recursos/modelos/<interior>.json e
+     <interior>_colisao.glb, das ferramentas montar_loja_do_luigi.py,
+     montar_quartos_do_cozy_cone.py e montar_recepcao_do_cozy_cone.py; o
+     desenho deles o jogo faz à parte, em src/interiores.c);
   8. passa as texturas JPEG para PNG (a raylib do jogo não lê JPEG: a pedra
      da mesa e as placas da cidade saíam cinza ou brancas) e exporta
      recursos/modelos/radiator_springs.glb (o desenho) e
@@ -51,7 +58,7 @@ Uso (Blender 4.x ou 5.x, sem abrir a janela):
 ------------------------------------------------------------------
 """
 
-import bpy, bmesh, sys, os, math, struct, tempfile
+import bpy, bmesh, sys, os, math, struct, tempfile, json
 import numpy as np
 from mathutils import Vector, Matrix
 from mathutils.bvhtree import BVHTree
@@ -1372,6 +1379,158 @@ for material, (vs, fs, uvs) in por_material.items():
 print('Mato na cidade: %d partes, %d faces' % (carimbadas, sum(len(o.data.polygons) for o in mato_da_cidade)))
 
 # ------------------------------------------------------------------
+# 7e. Os prédios em que o carro entra: a Casa Della Tires (a loja do Luigi), os quartos dos cones e a recepção
+# do Cozy Cone. O lado de dentro de cada um é um modelo à parte (recursos/modelos/<interior>.glb, de
+# ferramentas/montar_loja_do_luigi.py, montar_quartos_do_cozy_cone.py e montar_recepcao_do_cozy_cone.py), que o
+# jogo desenha no lugar do prédio (src/interiores.c); no Race-O-Rama os prédios são cascas fechadas, com as
+# portas e os vidros só pintados. Saem da casca as aberturas do <interior>.json: as portas, do desenho e da
+# colisão (o carro entra dirigindo, pela porta de verdade), e os vidros, só do desenho (de dentro se vê a rua,
+# e de fora, o lado de dentro; a colisão deles fica, além da que o interior já tem). Uma abertura é uma peça
+# inteira da casca (as faces ligadas por vértices) dentro de uma caixa, ou um recorte na superfície da casca
+# (um vão de 4 cantos atravessado até uma profundidade). A colisão do lado de dentro (o piso, as paredes e os
+# móveis, <interior>_colisao.glb) entra no .col (8a)
+# ------------------------------------------------------------------
+INTERIORES = ('loja_do_luigi', 'cozy_cone_quartos', 'cozy_cone_recepcao')
+MODELOS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'recursos', 'modelos')
+FOLGA_DA_ABERTURA = 0.05   # metros em volta da caixa de cada abertura
+FORA_DO_RECORTE = 0.3      # metros: o recorte começa assim fora da face de fora da casca (ela é curva num cone)
+
+
+def no_blender(p):
+    """Um ponto nos eixos do jogo, nos do Blender (y = -z do jogo, z = y do jogo)"""
+    return Vector((p[0], -p[2], p[1]))
+
+
+def coordenadas(o):
+    co = np.empty(len(o.data.vertices) * 3, dtype=np.float32)   # (o bound_box fica velho depois do transform)
+    o.data.vertices.foreach_get('co', co)
+    return co.reshape(-1, 3)
+
+
+def tirar_pecas(a, mexidas):
+    """Apaga, das malhas do Race-O-Rama, as peças inteiras dentro da caixa da abertura. Devolve quantas faces"""
+    folga = Vector((FOLGA_DA_ABERTURA,) * 3)
+    p0, p1 = no_blender(a['caixa_min']), no_blender(a['caixa_max'])
+    mn = Vector(map(min, p0, p1)) - folga; mx = Vector(map(max, p0, p1)) + folga
+    dentro = lambda p: all(mn[i] <= p[i] <= mx[i] for i in range(3))
+    tiradas = 0
+    for o in ror:
+        if not o.data.vertices:
+            continue
+        co = coordenadas(o)
+        if (co.max(0) < np.array(mn)).any() or (co.min(0) > np.array(mx)).any():
+            continue
+        bm = bmesh.new(); bm.from_mesh(o.data)
+        vistas, apagar = set(), []
+        for f in bm.faces:
+            if f in vistas:
+                continue
+            peca, pilha = [], [f]; vistas.add(f)
+            while pilha:
+                g = pilha.pop(); peca.append(g)
+                for v in g.verts:
+                    for h in v.link_faces:
+                        if h not in vistas:
+                            vistas.add(h); pilha.append(h)
+            if all(dentro(v.co) for g in peca for v in g.verts):
+                apagar.extend(peca)
+        if apagar:
+            bmesh.ops.delete(bm, geom=apagar, context='FACES')
+            bm.to_mesh(o.data)
+            tiradas += len(apagar); mexidas.append(o)
+        bm.free()
+    return tiradas
+
+
+def recortar(a, mexidas):
+    """Abre um vão na superfície da casca: corta as faces pelos 4 lados do vão e apaga as de dentro dele, de
+    FORA_DO_RECORTE fora da face de fora até a profundidade. Devolve quantas faces"""
+    cantos = [no_blender(c) for c in a['recorte']['cantos']]
+    profundidade = a['recorte']['profundidade']
+    meio = sum(cantos, Vector()) / 4
+    normal = (cantos[1] - cantos[0]).cross(cantos[3] - cantos[0]).normalized()
+    lados = []   # os 4 planos dos lados do vão: (um ponto, a normal para dentro do vão)
+    for i in range(4):
+        aresta = cantos[(i + 1) % 4] - cantos[i]
+        para_dentro = normal.cross(aresta).normalized()
+        if para_dentro.dot(meio - cantos[i]) < 0:
+            para_dentro = -para_dentro
+        lados.append((cantos[i], para_dentro))
+    # dos dois lados do plano dos cantos (para fora, a folga da curva; para dentro, a profundidade)
+    def no_vao(p, folga=1e-4):
+        if any((p - c).dot(n) < -folga for c, n in lados):
+            return False
+        return abs((p - meio).dot(normal)) <= profundidade + FORA_DO_RECORTE
+    raio = max((c - meio).length for c in cantos) + profundidade + FORA_DO_RECORTE
+    tiradas = 0
+    for o in ror:
+        if not o.data.vertices:
+            continue
+        co = coordenadas(o)
+        if (co.max(0) < np.array(meio) - raio).any() or (co.min(0) > np.array(meio) + raio).any():
+            continue
+        bm = bmesh.new(); bm.from_mesh(o.data)
+        perto = lambda f: any((v.co - meio).length < raio for v in f.verts)
+        if not any(perto(f) for f in bm.faces):
+            bm.free(); continue
+        for c, n in lados:
+            faces = [f for f in bm.faces if perto(f)]
+            geom = faces + list({e for f in faces for e in f.edges}) + list({v for f in faces for v in f.verts})
+            bmesh.ops.bisect_plane(bm, geom=geom, plane_co=c, plane_no=n)
+        apagar = [f for f in bm.faces if perto(f) and no_vao(f.calc_center_median())]
+        if apagar:
+            bmesh.ops.delete(bm, geom=apagar, context='FACES')
+            bm.to_mesh(o.data)
+            tiradas += len(apagar); mexidas.append(o)
+        bm.free()
+    return tiradas
+
+
+def abrir(aberturas):
+    """Tira da casca cada abertura. Devolve as malhas de onde tirou"""
+    mexidas = []
+    for a in aberturas:
+        if 'recorte' in a:
+            tiradas = recortar(a, mexidas)
+            print('Interiores: %s, recorte, %d faces tiradas' % (a['nome'], tiradas))
+        else:
+            tiradas = tirar_pecas(a, mexidas)
+            print('Interiores: %s, %d faces tiradas (%d esperadas)' % (a['nome'], tiradas, a['faces']))
+    return mexidas
+
+
+def sai_da_colisao(a):
+    return a.get('sai_da_colisao', a['nome'] == 'painel_da_porta')   # (o json da loja, de antes, não diz)
+
+
+vidros_dos_interiores, colisoes_dos_interiores = [], []
+for interior in INTERIORES:
+    arquivo = os.path.join(MODELOS, interior)
+    if not (os.path.exists(arquivo + '.json') and os.path.exists(arquivo + '_colisao.glb')):
+        print('Interiores: sem %s.json/_colisao.glb, o prédio fica fechado' % arquivo)
+        continue
+    with open(arquivo + '.json') as f:
+        aberturas = json.load(f)['aberturas_para_tirar_da_casca']
+    casca = abrir([a for a in aberturas if sai_da_colisao(a)])
+    vidros_dos_interiores += [a for a in aberturas if not sai_da_colisao(a)]
+    antes = set(bpy.data.objects)
+    bpy.ops.import_scene.gltf(filepath=arquivo + '_colisao.glb')
+    importados = [o for o in bpy.data.objects if o not in antes]
+    colisao = [o for o in importados if o.type == 'MESH']
+    aplicar_transformacao(colisao, Matrix.Identity(4))
+    for o in importados:
+        if o not in colisao:
+            bpy.data.objects.remove(o)
+    # o piso de dentro tem o tipo de chão e a cor do chão da casca do prédio
+    for o in colisao:
+        o.data.materials.clear()
+        if casca and casca[0].data.materials:
+            o.data.materials.append(casca[0].data.materials[0])
+    colisoes_dos_interiores += colisao
+    print('Interiores: %s, colisão do lado de dentro, %d faces (a casca é %s)' % (
+        interior, sum(len(o.data.polygons) for o in colisao), casca[0].name if casca else '?'))
+
+# ------------------------------------------------------------------
 # 8a. Colisão: tudo menos vegetação e placas que flutuam, com o tipo de chão de cada triângulo
 # ------------------------------------------------------------------
 def tem_colisao(o):
@@ -1407,7 +1566,8 @@ def entrada_da_paleta(im, plana=False):
     return indice_da_imagem[nome]
 
 
-solidos = [o for o in ror + c2 if tem_colisao(o)] + [base, emenda] + ([ligacao] if ligacao else []) + ([saias] if saias else [])
+solidos = [o for o in ror + c2 if tem_colisao(o)] + [base, emenda] + ([ligacao] if ligacao else []) + ([saias] if saias else []) \
+    + colisoes_dos_interiores
 tris, chaos = [], []
 for o in solidos:
     imagens = [imagem_do_material(m) for m in o.data.materials] or [None]
@@ -1437,6 +1597,11 @@ with open(SAIDA + '.col', 'wb') as f:
     f.write(np.array(chaos, dtype=np.uint8).tobytes())
 print('Colisão: %d triângulos, %d entradas na paleta (%s.col)' % (len(arr) // 3, len(paleta), SAIDA))
 print('Largada', tuple(round(v, 1) for v in largada), '; arena', tuple(round(v, 1) for v in arena))
+
+# A colisão dos interiores não vai para o desenho (o lado de dentro deles é outro modelo), e os vidros saem do desenho
+for o in colisoes_dos_interiores:
+    bpy.data.objects.remove(o)
+abrir(vidros_dos_interiores)
 
 # ------------------------------------------------------------------
 # 8b. O desenho

@@ -42,6 +42,8 @@ typedef struct {
     int raspando;               /* 1 enquanto encosta numa parede */
     float segundosNoAr;
     int acelerando, freando, freioDeMao;   /* os comandos do último quadro (fumaça e marcas) */
+    int segurado;               /* 1: parado com o freio de mão puxado (o acelerador só faz o motor roncar) */
+    float roncando;             /* 0 a 1: o quanto o motor está roncando assim, parado (os tratores escutam) */
     int quedas;                 /* quantas vezes caiu do mundo e voltou ao começo */
     float doDriftAntes;         /* m/s para o lado que o drift somou no passo anterior */
 
