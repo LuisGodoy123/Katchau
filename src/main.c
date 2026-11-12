@@ -47,6 +47,7 @@
 #include "recordes.h"
 #include "controle.h"
 #include "passeio.h"
+#include "espera.h"
 #include <ctype.h>
 #include <math.h>
 
@@ -149,6 +150,21 @@ static void medirQuadro(float tempoQuadro, int agora) {
 }
 
 /*
+ * marcarEtapa
+ * Escreve no log quanto tempo levou cada etapa do carregamento (desde a anterior).
+ * Recebe: o nome da etapa. Devolve: nada.
+ */
+static void marcarEtapa(const char *nome) {
+    static double anterior = -1.0;
+    double agora = GetTime();
+    if (anterior < 0.0) {
+        anterior = 0.0;
+    }
+    TraceLog(LOG_INFO, "CARGA: %-22s %6.2f s (total %.2f s)", nome, agora - anterior, agora);
+    anterior = agora;
+}
+
+/*
  * atualizarTelaDaCorrida
  * Um quadro da corrida: o jogador dirige, a IA dirige os rivais.
  * ESC (ou START) pausa: a corrida e os sons congelam e o jogador escolhe
@@ -192,7 +208,7 @@ static Tela atualizarTelaDaCorrida(Corrida *corrida, EstadoMenu *menu, int *paus
      * começa depois); ENTER (ou o botão de confirmar) pula */
     if (apresentacaoAtiva(apresentacao)) {
         int pular = IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER) || IsKeyPressed(KEY_SPACE) ||
-                    controleApertou(BOTAO_CONFIRMAR);
+                    controleApertou(BOTAO_CONFIRMAR) || getenv("KATCHAU_CORRIDA") != NULL;   /* o teste automático pula */
         for (int v = 1; v < corrida->totalDeHumanos; v++) {
             pular = pular || controleDoJogadorApertou(&entradas[v], BOTAO_CONFIRMAR);
         }
@@ -343,22 +359,39 @@ int main(int argc, char *argv[]) {
      * Mudar para a pasta do executável faz o jogo achá-las mesmo quando
      * é aberto de outro lugar (por exemplo, com duplo clique). */
     ChangeDirectory(GetApplicationDirectory());
+    quadroPretoDaEspera();   /* a janela nasce preta, e não branca */
+    iniciarSinteseDosEfeitos();   /* os sons sintetizados nascem numa thread enquanto os gráficos carregam */
+    marcarEtapa("janela");
     carregarVisual();   /* fontes e logo dos menus */
-    carregarAudio();    /* música dos menus */
+    marcarEtapa("visual");
+    faixaDaEspera(0.0f, 1.0f);
+    passoDaEspera("CARREGANDO VIDEOS", 0.02f);   /* daqui em diante, a tela de carregamento mostra o andamento */
     /* Os vídeos de fundo: a tela de entrada e o menu principal (em loop; se faltarem, a tela segue sem vídeo) */
     VideoDeFundo *videoDaEntrada = abrirVideoDeFundo("recursos/video/tela_entrada.mjpeg");
     VideoDeFundo *videoDoMenu = abrirVideoDeFundo("recursos/video/tela_menu.mjpeg");
+    marcarEtapa("videos de fundo");
     float transicaoAlfa = 0.0f;   /* 1 logo depois de sair da entrada: a tela clareia do preto até o menu */
 
     Pista *pistas[TOTAL_PISTAS];
     for (int i = 0; i < TOTAL_PISTAS; i++) {
         pistas[i] = criarPistaPorId((IdPista) i);
     }
-    carregarMundo(pistas);
+    marcarEtapa("pistas");
+    faixaDaEspera(0.12f, 0.50f);
+    carregarMundo(pistas);   /* informa o andamento dele à tela de carregamento */
+    marcarEtapa("mundo (cenarios)");
+    faixaDaEspera(0.50f, 0.95f);
     carregarCarros3D();
+    faixaDaEspera(0.0f, 1.0f);
+    marcarEtapa("carros 3D");
+    passoDaEspera("CARREGANDO SONS", 0.96f);
+    carregarAudio();    /* música dos menus (por último: a thread dos sons sintetizados já acabou) */
+    marcarEtapa("audio");
+    passoDaEspera("QUASE PRONTO", 0.99f);
     carregarFumaca();
     carregarMarcas();
     carregarPosProcesso();
+    marcarEtapa("fumaca/marcas/pos");
     Corrida corrida;
     EstadoMenu menu;
     iniciarMenu(&menu);
@@ -379,6 +412,7 @@ int main(int argc, char *argv[]) {
     EstadoDaVibracao estadoDaVibracao;
     iniciarEstadoDaVibracao(&estadoDaVibracao);
     iniciarVibracao();
+    marcarEtapa("menu/recordes/resto");
 
     /* O vídeo de abertura: passa só quando o jogo abre (não a cada corrida); qualquer botão pula */
     int naIntro = diretoNoPasseio ? 0 : iniciarIntro();
@@ -389,8 +423,21 @@ int main(int argc, char *argv[]) {
         comecarAbertura();   /* sem o vídeo, a abertura toca no menu mesmo assim */
     }
 
+    marcarEtapa("intro");
+    /* KATCHAU_CORRIDA=N: abre direto numa corrida na pista N (0 Interlagos, 1 Copa Pistão, 2 Oval, 3 Splat), para medir */
+    int corridaDeTeste = (getenv("KATCHAU_CORRIDA") != NULL) ? atoi(getenv("KATCHAU_CORRIDA")) : -1;
+    if (corridaDeTeste >= 0 && corridaDeTeste < TOTAL_PISTAS) {
+        menu.pistaEscolhida = corridaDeTeste;
+        tela = TELA_MENU;
+        naIntro = 0;
+    } else {
+        corridaDeTeste = -1;
+    }
+    /* KATCHAU_SAIR_EM=N: fecha o jogo sozinho N segundos depois do primeiro quadro (para medir sem teclado) */
+    const char *sairEm = getenv("KATCHAU_SAIR_EM");
+    double fimDaMedicao = (sairEm != NULL) ? GetTime() + atof(sairEm) : -1.0;
     /* Laço principal: roda uma vez por quadro até escolher SAIR ou fechar a janela */
-    while (tela != TELA_SAIR && !WindowShouldClose()) {
+    while (tela != TELA_SAIR && !WindowShouldClose() && (fimDaMedicao < 0.0 || GetTime() < fimDaMedicao)) {
         /* Tempo do último quadro, para a velocidade não depender do FPS */
         float tempoQuadro = GetFrameTime();
 
@@ -454,6 +501,10 @@ int main(int argc, char *argv[]) {
                 break;
         }
 
+        if (corridaDeTeste >= 0) {
+            proxima = TELA_CORRIDA;
+            corridaDeTeste = -1;
+        }
         /* A escolha da corrida abre no Mack: escolhida, o carro entra na carreta e o Mack parte
          * (o mundo aberto leva à corrida no fim da cena); desistindo, o carro fica na vaga */
         if (tela == TELA_PISTAS && proxima == TELA_CORRIDA) {
@@ -741,6 +792,13 @@ int main(int argc, char *argv[]) {
             transicaoAlfa -= tempoQuadro * 1.6f;
         }
         EndDrawing();
+        /* KATCHAU_FOTO=arquivo.png tira uma foto da tela depois de KATCHAU_FOTO_EM segundos (para comparar imagens) */
+        static int tirouAFoto = 0;
+        if (!tirouAFoto && getenv("KATCHAU_FOTO") != NULL
+            && GetTime() >= fimDaMedicao - atof(sairEm != NULL ? sairEm : "0") + atof(getenv("KATCHAU_FOTO_EM") != NULL ? getenv("KATCHAU_FOTO_EM") : "8")) {
+            tirouAFoto = 1;
+            TakeScreenshot(getenv("KATCHAU_FOTO"));
+        }
         medirQuadro(tempoQuadro, 0);
     }
     medirQuadro(0.0f, 1);   /* o resumo do que foi medido até aqui */

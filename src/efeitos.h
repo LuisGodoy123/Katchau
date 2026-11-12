@@ -30,6 +30,7 @@
 
 #include "corrida.h"
 
+void iniciarSinteseDosEfeitos(void);   /* sintetiza os sons numa thread; chamar cedo, antes de carregarAudio */
 void carregarEfeitos(void);
 void iniciarEfeitosDaCorrida(void);
 void atualizarEfeitosDaCorrida(Corrida *corrida, int ativo, float tempoQuadro);

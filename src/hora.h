@@ -34,9 +34,19 @@
  * fica no escuro. Quadro -1: sem a vista, ilumina tudo */
 #define MAIS_LAMPADAS         64
 #define SLOT_DA_VISTA_DAS_LAMPADAS 14   /* a unidade de textura da imagem das vistas (a sombra do sol é a 15) */
+#define SLOT_DA_LISTA_DAS_LAMPADAS 12   /* a unidade da imagem com as listas de lâmpadas de cada célula */
+#define SLOT_DA_GRADE_DAS_LAMPADAS 13   /* a unidade da imagem com (começo, quantas) de cada célula */
+#define LADO_DA_GRADE         64        /* células de cada lado da grade de lâmpadas */
+#define LARGURA_DA_LISTA      256       /* a lista é uma imagem de LARGURA_DA_LISTA x ALTURA_DA_LISTA entradas */
+#define ALTURA_DA_LISTA       8
+/* A grade: vista de cima, cada célula guarda as lâmpadas cujo raio a alcança (na ordem das lâmpadas, então a
+ * soma sai igual à do laço sobre todas). "gradeMedidas" = canto x, canto z, 1 / lado da célula, e 1 se a
+ * grade vale (0: o laço percorre todas, como antes). Fora da grade nenhuma lâmpada chega. Cada célula é
+ * começo * 64 + quantas, e a lista guarda os números das lâmpadas */
 #define GLSL_DAS_LAMPADAS \
     "uniform int totalDeLampadas; uniform vec4 lampadas[64]; uniform vec4 coresDasLampadas[64];\n" \
-    "uniform sampler2D vistaDasLampadas;\n" \
+    "uniform sampler2D vistaDasLampadas; uniform sampler2D gradeDasLampadas; uniform sampler2D listaDasLampadas;\n" \
+    "uniform vec4 gradeMedidas;\n" \
     "float lampadaVe(float quadro, vec3 deLa, float distancia) {\n" \
     "    if (quadro < 0.0) return 1.0;\n" \
     "    vec3 u = deLa / max(distancia, 0.0001);\n" \
@@ -48,7 +58,17 @@
     "}\n" \
     "vec3 luzDasLampadas(vec3 p, vec3 n) {\n" \
     "    vec3 soma = vec3(0.0);\n" \
-    "    for (int i = 0; i < totalDeLampadas; i++) {\n" \
+    "    bool porGrade = gradeMedidas.w > 0.5;\n" \
+    "    int primeira = 0, quantas = totalDeLampadas;\n" \
+    "    if (porGrade) {\n" \
+    "        ivec2 celula = ivec2(floor((p.xz - gradeMedidas.xy) * gradeMedidas.z));\n" \
+    "        if (celula.x < 0 || celula.y < 0 || celula.x >= 64 || celula.y >= 64) return soma;\n" \
+    "        int guardado = int(texelFetch(gradeDasLampadas, celula, 0).r + 0.5);\n" \
+    "        primeira = guardado / 64; quantas = guardado - primeira * 64;\n" \
+    "    }\n" \
+    "    for (int k = 0; k < quantas; k++) {\n" \
+    "        int i = k;\n" \
+    "        if (porGrade) { int lugar = primeira + k; i = int(texelFetch(listaDasLampadas, ivec2(lugar & 255, lugar >> 8), 0).r + 0.5); }\n" \
     "        vec3 d = lampadas[i].xyz - p;\n" \
     "        float q = dot(d, d) / (lampadas[i].w * lampadas[i].w);\n" \
     "        if (q >= 1.0) continue;\n" \
@@ -103,5 +123,6 @@ void registrarShaderDoDia(Shader shader);
 void aplicarLuzDoDia(const LuzDoDia *luz);   /* NULL: a do meio-dia */
 /* As lâmpadas (até MAIS_LAMPADAS). Fora do passeio: nenhuma */
 void aplicarLampadas(const Lampada *lista, int total);
+void ligarGradeDasLampadas(void);   /* liga as imagens da grade (chamar a cada quadro, junto da vista) */
 
 #endif

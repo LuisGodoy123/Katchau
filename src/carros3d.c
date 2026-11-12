@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "carros3d.h"
+#include "espera.h"
 #include "raymath.h"
 #include "rlgl.h"
 #include "corrida.h"
@@ -1600,7 +1601,13 @@ static unsigned char *medirTranslucidos(Model modelo) {
             translucido[m] = 1;
             continue;
         }
-        if (mapa.texture.id != 0 && mapa.texture.id != rlGetTextureIdDefault()) {
+        /* Uma textura sem canal alfa (RGB, cinza) tem alfa 255 em todo pixel: não há o que procurar, e ler a
+         * imagem de volta da placa (o que custa) seria à toa */
+        int semAlfa = (mapa.texture.format == PIXELFORMAT_UNCOMPRESSED_R8G8B8 || mapa.texture.format == PIXELFORMAT_UNCOMPRESSED_GRAYSCALE
+                       || mapa.texture.format == PIXELFORMAT_UNCOMPRESSED_R5G6B5 || mapa.texture.format == PIXELFORMAT_UNCOMPRESSED_R32G32B32
+                       || mapa.texture.format == PIXELFORMAT_UNCOMPRESSED_R16G16B16 || mapa.texture.format == PIXELFORMAT_UNCOMPRESSED_R32
+                       || mapa.texture.format == PIXELFORMAT_UNCOMPRESSED_R16);
+        if (!semAlfa && mapa.texture.id != 0 && mapa.texture.id != rlGetTextureIdDefault()) {
             Image imagem = LoadImageFromTexture(mapa.texture);
             Color *pixels = LoadImageColors(imagem);
             for (int i = 0; i < imagem.width * imagem.height; i++) {
@@ -2086,6 +2093,7 @@ void carregarCarros3D(void) {
     shaderDaSombra = LoadShaderFromMemory(VERTICES_DO_SHADER, PIXELS_DA_SOMBRA_TEXTO("0.82"));
 
     for (int numero = 0; numero < TOTAL_DE_MODELOS; numero++) {
+        passoDaEspera("CARREGANDO CARROS", (float) numero / TOTAL_DE_MODELOS);
         modelos[numero] = LoadModel(TextFormat("%s%s", PASTA_DOS_MODELOS, arquivoDoModelo(numero)));
         reflexos[numero] = 1.0f;   /* todos refletem o céu do mesmo jeito (o Mack, nos olhos, menos) */
         carregarOlhos(numero, tabelaDosOlhos);

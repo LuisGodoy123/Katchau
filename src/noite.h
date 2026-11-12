@@ -16,16 +16,20 @@
 
 /* O pedaço de GLSL da luz, usado também pelo shader dos carros (carros3d.c): uma
  * luz fraca do céu mais os refletores, cada um pesando conforme a distância e
- * o quanto a superfície está virada para ele. */
+ * o quanto a superfície está virada para ele.
+ *
+ * O laço vai sempre até 32 (o tamanho de "luzes") e as luzes além de totalLuzes entram multiplicadas por 0
+ * (a soma é a mesma). Com o limite constante o driver desenrola o laço; com "i < totalLuzes", que só se
+ * sabe na hora de desenhar, cada volta custava caro (o estádio perdia 14 ms por quadro nisso). */
 #define GLSL_DA_LUZ_DA_NOITE \
     "uniform float noite; uniform int totalLuzes; uniform vec3 luzes[32];\n" \
     "vec3 luzDaNoite(vec3 p, vec3 n) {\n" \
     "    vec3 luz = vec3(0.13, 0.16, 0.23);\n" \
-    "    for (int i = 0; i < totalLuzes; i++) {\n" \
+    "    for (int i = 0; i < 32; i++) {\n" \
     "        vec3 d = luzes[i] - p;\n" \
     "        float quadrado = dot(d, d);\n" \
-    "        float virado = max(dot(n, d / sqrt(quadrado)), 0.0) * 0.82 + 0.18;\n" \
-    "        luz += vec3(0.80, 0.88, 1.0) * 0.25 * virado / (1.0 + quadrado / 490000.0);\n" \
+    "        float virado = max(dot(n, d / sqrt(max(quadrado, 1.0e-6))), 0.0) * 0.82 + 0.18;\n" \
+    "        luz += (i < totalLuzes ? 1.0 : 0.0) * vec3(0.80, 0.88, 1.0) * 0.25 * virado / (1.0 + quadrado / 490000.0);\n" \
     "    }\n" \
     "    return luz;\n" \
     "}\n"

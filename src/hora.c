@@ -18,10 +18,12 @@
 #include "hora.h"
 
 #include <math.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "raymath.h"
+#include "rlgl.h"
 
 #define HORA_DE_COMECO        10.0f
 #define NASCE_AS              6.5f      /* horas: o sol no horizonte, nascendo... */
@@ -119,6 +121,7 @@ typedef struct {
     Shader shader;
     int locSol, locBase, locCeu, locLuzDoSol, locSombra, locCeuDeBaixo, locCeuDeCima;
     int locTotalDeLampadas, locLampadas, locCoresDasLampadas, locVistaDasLampadas;
+    int locGradeMedidas, locGrade, locLista;
 } ShaderDoDia;
 
 static float hora = HORA_DE_COMECO;
@@ -128,6 +131,7 @@ static int meioDiaPronto = 0;
 static float horaDaLuz = -1.0f;
 static ShaderDoDia shaders[MAIS_SHADERS];
 static int totalDeShaders = 0;
+static int lampadasMandadas = -1;   /* quantas lâmpadas os shaders têm agora (-1: não se sabe) */
 
 /* A direção de sempre do sol (a das corridas): é onde ele está às 11h29 */
 static Vector3 solDeSempre(void) {
@@ -376,27 +380,149 @@ void registrarShaderDoDia(Shader shader) {
     s->locLampadas = GetShaderLocation(shader, "lampadas");
     s->locCoresDasLampadas = GetShaderLocation(shader, "coresDasLampadas");
     s->locVistaDasLampadas = GetShaderLocation(shader, "vistaDasLampadas");
+    s->locGradeMedidas = GetShaderLocation(shader, "gradeMedidas");
+    s->locGrade = GetShaderLocation(shader, "gradeDasLampadas");
+    s->locLista = GetShaderLocation(shader, "listaDasLampadas");
     mandarAoShader(s, &aplicada);
+    int slotDaGrade = SLOT_DA_GRADE_DAS_LAMPADAS, slotDaLista = SLOT_DA_LISTA_DAS_LAMPADAS;
+    if (s->locGrade >= 0) SetShaderValue(shader, s->locGrade, &slotDaGrade, SHADER_UNIFORM_INT);
+    if (s->locLista >= 0) SetShaderValue(shader, s->locLista, &slotDaLista, SHADER_UNIFORM_INT);
+    lampadasMandadas = -1;   /* o shader novo ainda não recebeu as lâmpadas: a próxima chamada manda a todos */
     int nenhuma = 0, slot = SLOT_DA_VISTA_DAS_LAMPADAS;
     if (s->locTotalDeLampadas >= 0) SetShaderValue(shader, s->locTotalDeLampadas, &nenhuma, SHADER_UNIFORM_INT);
     if (s->locVistaDasLampadas >= 0) SetShaderValue(shader, s->locVistaDasLampadas, &slot, SHADER_UNIFORM_INT);
 }
 
+/* ---------- A grade das lâmpadas ----------
+ * O laço do shader percorria as 64 lâmpadas em cada pixel (de noite, a tela inteira), quase todas longe
+ * demais para contar. A grade vê o mapa de cima: cada célula guarda só as lâmpadas que a alcançam. */
+#define MAIS_ENTRADAS_NA_LISTA (LARGURA_DA_LISTA * ALTURA_DA_LISTA)
+#define LADO_MINIMO_DA_CELULA  4.0f   /* metros */
+static Texture2D imagemDaGrade, imagemDaLista;
+static int temGrade = 0, tentouCriarGrade = 0;
+static float lugaresMandados[MAIS_LAMPADAS * 4], coresMandadas[MAIS_LAMPADAS * 4];
+
+static void criarImagensDaGrade(void) {
+    tentouCriarGrade = 1;
+    if (getenv("KATCHAU_SEM_GRADE") != NULL) {
+        return;   /* para comparar: o laço de sempre */
+    }
+    static float vazia[LADO_DA_GRADE * LADO_DA_GRADE];
+    static float vaziaDaLista[MAIS_ENTRADAS_NA_LISTA];
+    Image g = { vazia, LADO_DA_GRADE, LADO_DA_GRADE, 1, PIXELFORMAT_UNCOMPRESSED_R32 };
+    Image l = { vaziaDaLista, LARGURA_DA_LISTA, ALTURA_DA_LISTA, 1, PIXELFORMAT_UNCOMPRESSED_R32 };
+    imagemDaGrade = LoadTextureFromImage(g);
+    imagemDaLista = LoadTextureFromImage(l);
+    if (imagemDaGrade.id == 0 || imagemDaLista.id == 0) {
+        TraceLog(LOG_WARNING, "HORA: sem a grade das lâmpadas: o shader percorre todas");
+        return;
+    }
+    SetTextureFilter(imagemDaGrade, TEXTURE_FILTER_POINT);
+    SetTextureFilter(imagemDaLista, TEXTURE_FILTER_POINT);
+    SetTextureWrap(imagemDaGrade, TEXTURE_WRAP_CLAMP);
+    SetTextureWrap(imagemDaLista, TEXTURE_WRAP_CLAMP);
+    temGrade = 1;
+}
+
+/*
+ * montarGrade
+ * Põe cada lâmpada nas células que o quadrado dela (x e z, o raio para cada lado) toca, na ordem das lâmpadas,
+ * e manda as duas imagens para a placa.
+ * Recebe: os lugares (x, y, z, raio), quantas lâmpadas e onde guardar as medidas (canto x, canto z, 1 / lado, 1).
+ * Devolve: 1 se montou; 0 se a lista não coube (aí o shader percorre todas as lâmpadas).
+ */
+static int montarGrade(const float *lugares, int total, Vector4 *medidas) {
+    static float tabela[LADO_DA_GRADE * LADO_DA_GRADE], lista[MAIS_ENTRADAS_NA_LISTA];
+    static int quantas[LADO_DA_GRADE * LADO_DA_GRADE], comeco[LADO_DA_GRADE * LADO_DA_GRADE];
+    float menorX = 1e30f, menorZ = 1e30f, maiorX = -1e30f, maiorZ = -1e30f;
+    for (int i = 0; i < total; i++) {
+        menorX = fminf(menorX, lugares[i * 4] - lugares[i * 4 + 3]);
+        maiorX = fmaxf(maiorX, lugares[i * 4] + lugares[i * 4 + 3]);
+        menorZ = fminf(menorZ, lugares[i * 4 + 2] - lugares[i * 4 + 3]);
+        maiorZ = fmaxf(maiorZ, lugares[i * 4 + 2] + lugares[i * 4 + 3]);
+    }
+    float lado = fmaxf(fmaxf(maiorX - menorX, maiorZ - menorZ) / (float) LADO_DA_GRADE * 1.001f, LADO_MINIMO_DA_CELULA);
+tentar:
+    for (int c = 0; c < LADO_DA_GRADE * LADO_DA_GRADE; c++) {
+        quantas[c] = 0;
+    }
+    /* Duas passadas: contar quantas lâmpadas caem em cada célula, e depois guardá-las uma depois da outra */
+    for (int passada = 0; passada < 2; passada++) {
+        if (passada == 1) {
+            int soma = 0;
+            for (int c = 0; c < LADO_DA_GRADE * LADO_DA_GRADE; c++) {
+                comeco[c] = soma;
+                soma += quantas[c];
+                quantas[c] = 0;
+            }
+            if (soma > MAIS_ENTRADAS_NA_LISTA) {
+                /* A lista não cabe (lâmpadas de raio grande tocam muitas células pequenas): células maiores */
+                if (lado > 4000.0f) {
+                    return 0;
+                }
+                lado *= 1.4f;
+                goto tentar;
+            }
+        }
+        for (int i = 0; i < total; i++) {
+            float x = lugares[i * 4], z = lugares[i * 4 + 2], r = lugares[i * 4 + 3];
+            int x0 = (int) floorf((x - r - menorX) / lado), x1 = (int) floorf((x + r - menorX) / lado);
+            int z0 = (int) floorf((z - r - menorZ) / lado), z1 = (int) floorf((z + r - menorZ) / lado);
+            x0 = (x0 < 0) ? 0 : x0;
+            z0 = (z0 < 0) ? 0 : z0;
+            x1 = (x1 >= LADO_DA_GRADE) ? LADO_DA_GRADE - 1 : x1;
+            z1 = (z1 >= LADO_DA_GRADE) ? LADO_DA_GRADE - 1 : z1;
+            for (int cz = z0; cz <= z1; cz++) {
+                for (int cx = x0; cx <= x1; cx++) {
+                    int c = cz * LADO_DA_GRADE + cx;
+                    if (passada == 1) {
+                        lista[comeco[c] + quantas[c]] = (float) i;
+                    }
+                    quantas[c]++;
+                }
+            }
+        }
+    }
+    for (int c = 0; c < LADO_DA_GRADE * LADO_DA_GRADE; c++) {
+        tabela[c] = (float) (comeco[c] * 64 + quantas[c]);
+    }
+    UpdateTexture(imagemDaGrade, tabela);
+    UpdateTexture(imagemDaLista, lista);
+    *medidas = (Vector4){ menorX, menorZ, 1.0f / lado, 1.0f };
+    return 1;
+}
+
+/*
+ * ligarGradeDasLampadas
+ * Liga as duas imagens da grade nas unidades delas (como a vista das lâmpadas). Chamar a cada quadro.
+ */
+void ligarGradeDasLampadas(void) {
+    if (!temGrade) {
+        return;
+    }
+    rlActiveTextureSlot(SLOT_DA_LISTA_DAS_LAMPADAS);
+    rlEnableTexture(imagemDaLista.id);
+    rlActiveTextureSlot(SLOT_DA_GRADE_DAS_LAMPADAS);
+    rlEnableTexture(imagemDaGrade.id);
+    rlActiveTextureSlot(0);
+}
+
 /*
  * aplicarLampadas
- * Manda as lâmpadas aos shaders registrados que as usam.
+ * Manda as lâmpadas aos shaders registrados que as usam. Se são as mesmas do quadro anterior, não manda nada.
  * Recebe: a lista (pode ser NULL com total 0) e quantas.
  * Devolve: nada.
  */
 void aplicarLampadas(const Lampada *lista, int total) {
-    static int totalAntes = -1;
     if (total > MAIS_LAMPADAS) {
         total = MAIS_LAMPADAS;
     }
-    if (total == 0 && totalAntes == 0) {
+    if (total < 0) {
+        total = 0;
+    }
+    if (total == 0 && lampadasMandadas == 0) {
         return;   /* de dia, nada muda de um quadro para o outro */
     }
-    totalAntes = total;
     float lugares[MAIS_LAMPADAS * 4], cores[MAIS_LAMPADAS * 4];
     for (int i = 0; i < total; i++) {
         lugares[i * 4] = lista[i].lugar.x;
@@ -409,12 +535,30 @@ void aplicarLampadas(const Lampada *lista, int total) {
         /* a força (até 7,9) e, por cima, o quadro da vista: forca + 8 × (quadro + 1) */
         cores[i * 4 + 3] = fminf(fmaxf(lista[i].forca, 0.0f), 7.9f) + 8.0f * (float) (lista[i].quadro + 1);
     }
+    if (total == lampadasMandadas && memcmp(lugares, lugaresMandados, sizeof(float) * 4 * (size_t) total) == 0
+        && memcmp(cores, coresMandadas, sizeof(float) * 4 * (size_t) total) == 0) {
+        return;   /* os mesmos valores já estão nos shaders */
+    }
+    memcpy(lugaresMandados, lugares, sizeof(float) * 4 * (size_t) total);
+    memcpy(coresMandadas, cores, sizeof(float) * 4 * (size_t) total);
+    lampadasMandadas = total;
+
+    if (total > 0 && !tentouCriarGrade) {
+        criarImagensDaGrade();
+    }
+    Vector4 medidas = { 0.0f, 0.0f, 0.0f, 0.0f };   /* o último valor 0: o shader percorre todas as lâmpadas */
+    if (total > 0 && temGrade) {
+        if (!montarGrade(lugares, total, &medidas)) {
+            medidas = (Vector4){ 0.0f, 0.0f, 0.0f, 0.0f };
+        }
+    }
     for (int i = 0; i < totalDeShaders; i++) {
         const ShaderDoDia *s = &shaders[i];
         if (s->locTotalDeLampadas < 0) {
             continue;
         }
-        if (s->locTotalDeLampadas >= 0) SetShaderValue(s->shader, s->locTotalDeLampadas, &total, SHADER_UNIFORM_INT);
+        SetShaderValue(s->shader, s->locTotalDeLampadas, &total, SHADER_UNIFORM_INT);
+        if (s->locGradeMedidas >= 0) SetShaderValue(s->shader, s->locGradeMedidas, &medidas, SHADER_UNIFORM_VEC4);
         if (total > 0 && s->locLampadas >= 0) SetShaderValueV(s->shader, s->locLampadas, lugares, SHADER_UNIFORM_VEC4, total);
         if (total > 0 && s->locCoresDasLampadas >= 0) {
             SetShaderValueV(s->shader, s->locCoresDasLampadas, cores, SHADER_UNIFORM_VEC4, total);

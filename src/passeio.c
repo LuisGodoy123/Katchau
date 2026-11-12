@@ -18,6 +18,7 @@
  */
 
 #include <math.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
@@ -25,6 +26,7 @@
 #include "rlgl.h"
 #include "raymath.h"
 #include "passeio.h"
+#include "espera.h"
 #include "livre.h"
 #include "carreta.h"
 #include "interiores.h"
@@ -695,13 +697,10 @@ static void prepararMapa(void) {
         return;
     }
     tentouCarregar = 1;
+    double t0 = GetTime();
     /* São alguns segundos: um quadro avisando, antes de travar carregando */
-    BeginDrawing();
-    ClearBackground(BLACK);
-    comecarInterface(1);
-    escreverCentralizado(FONTE_TITULO, "CARREGANDO RADIATOR SPRINGS...", LARGURA_TELA / 2.0f, 280.0f, 30.0f, WHITE);
-    terminarInterface();
-    EndDrawing();
+    faixaDaEspera(0.0f, 1.0f);
+    passoDaEspera("CARREGANDO RADIATOR SPRINGS", 0.0f);
     malha = carregarMalhaDeColisao(ARQUIVO_DA_COLISAO);
     if (malha == NULL) {
         TraceLog(LOG_WARNING, "PASSEIO: falta %s (gere com ferramentas/montar_mundo_aberto.py)", ARQUIVO_DA_COLISAO);
@@ -709,17 +708,28 @@ static void prepararMapa(void) {
         TraceLog(LOG_INFO, "PASSEIO: %d triângulos de colisão", triangulosDaMalha(malha));
         pontosDaMalha(malha, largada, treino);
     }
+    TraceLog(LOG_INFO, "CARGA-PASSEIO: colisao %.2f s", GetTime() - t0);
+    passoDaEspera("CARREGANDO O MAPA", 0.08f);
     pronto = carregarMundoAberto() && malha != NULL;
+    TraceLog(LOG_INFO, "CARGA-PASSEIO: mapa %.2f s", GetTime() - t0);
     if (pronto) {
+        passoDaEspera("PREPARANDO O MAPA", 0.40f);
         fotografarMapa();
+        passoDaEspera("CARREGANDO O MACK", 0.55f);
         carregarMack();
+        TraceLog(LOG_INFO, "CARGA-PASSEIO: foto+mack %.2f s", GetTime() - t0);
+        passoDaEspera("CARREGANDO OS INTERIORES", 0.65f);
         carregarInteriores();   /* a loja do Luigi e o Cozy Cone por dentro, no lugar dos prédios */
+        TraceLog(LOG_INFO, "CARGA-PASSEIO: interiores %.2f s", GetTime() - t0);
+        passoDaEspera("ACENDENDO A CIDADE", 0.80f);
         carregarLuzesDaCidade(malha);   /* os neons e as lâmpadas da noite */
+        TraceLog(LOG_INFO, "CARGA-PASSEIO: luzes %.2f s", GetTime() - t0);
         luzesDoMack = registrarLuzesMoveis("recursos/modelos/mack_luzes.glb", "recursos/modelos/mack_luzes.json", 0);
         luzesDoBau = registrarLuzesMoveis("recursos/modelos/mack_interior_luzes.glb", NULL, 1);
         carregarPostes();               /* os postes de luz da rua e o semáforo */
         carregarTratores();             /* os tratores-vaca dos pastos */
         carregarGrilos();
+        TraceLog(LOG_INFO, "CARGA-PASSEIO: tudo %.2f s", GetTime() - t0);
     }
 }
 
@@ -745,6 +755,9 @@ void iniciarPasseio(int numeroDoCarro) {
     iniciarMoradores(malha, numero);   /* cada um em casa (menos quem tem o carro do jogador) */
     colocarNoMundoAberto(LUGAR_DOS_POSTES, modeloDosPostes(), matrizesDosPostes());   /* com sombra, como o Mack */
     sortearHoraDoDia();   /* cada vez que entra no jogo, uma hora do dia */
+    if (getenv("KATCHAU_HORA") != NULL) {
+        definirHoraDoDia((float) atof(getenv("KATCHAU_HORA")));   /* para medir sempre a mesma luz */
+    }
     definirHoraDaCidade(horaDoDia());
     atualizarLuzesDaCidade(luzDaHora()->luzesDaCidade, 0.0f, 1);   /* já acesas, se for de noite */
     sono = ACORDADO;
@@ -1118,7 +1131,9 @@ Tela atualizarPasseio(EstadoMenu *menu, float tempoQuadro) {
     if (!pausado && !mapaAberto) {
         /* a cidade segue, até nas cenas do Mack; e o dia passa (dormindo, o relógio pula de uma vez) */
         if (sono == ACORDADO) {
-            avancarRelogio(tempoQuadro);
+            if (getenv("KATCHAU_HORA") == NULL) {   /* com a hora fixada para medir, o relógio não anda */
+                avancarRelogio(tempoQuadro);
+            }
         }
         definirHoraDaCidade(horaDoDia());   /* de noite os moradores ficam em casa */
         atualizarMoradores(malha, carro.x, carro.z, carro.rumo, velocidadeDoCarroLivre(&carro), tempoQuadro);
@@ -1610,6 +1625,7 @@ static void prepararLampadas(Camera3D camera) {
     int quantas = escolherLampadas(camera, todas, total, escolhidas, MAIS_LAMPADAS);
     aplicarLampadas(escolhidas, quantas);
     ligarVistaDasLampadas();
+    ligarGradeDasLampadas();
 }
 
 /*

@@ -29,6 +29,7 @@
 #include "noite.h"
 #include "hora.h"
 #include "corte.h"
+#include "espera.h"
 
 #define PASTA_TEXTURAS        "recursos/texturas/"
 #define ARQUIVO_DO_ESTADIO    "recursos/modelos/copa_pistao.glb"
@@ -175,6 +176,37 @@ static const char *PIXELS_DA_PROFUNDIDADE =
     "uniform sampler2D texture0; uniform vec4 colDiffuse;\n"
     "out vec4 finalColor;\n"
     "void main() { if (texture(texture0, fragTexCoord).a * colDiffuse.a < 0.5) discard; finalColor = vec4(1.0); }\n";
+
+/* O pré-passe de profundidade do mundo aberto: o mapa é desenhado antes só na profundidade, com este shader
+ * (o mesmo furo dos pixels transparentes do shader dos mapas de dia) e empurrado um tiquinho para trás. Daí o
+ * desenho de verdade só sombreia o que está à frente: sem isto, cada pixel era sombreado várias vezes (o shader
+ * tem "discard", e o mapa é de dupla face e sem ordem), e de noite cada vez custava as lâmpadas. O empurrão
+ * garante que o desenho de verdade nunca fique atrás da profundidade guardada (nada some por arredondamento). */
+#define EMPURRAO_DO_PREPASSE "4.0e-6"
+static const char *VERTICES_DO_PREPASSE =
+    "#version 330\n"
+    "in vec3 vertexPosition; in vec2 vertexTexCoord;\n"
+    "uniform mat4 mvp;\n"
+    "out vec2 fragTexCoord;\n"
+    "void main() { fragTexCoord = vertexTexCoord; vec4 p = mvp * vec4(vertexPosition, 1.0);\n"
+    "              p.z += " EMPURRAO_DO_PREPASSE " * p.w; gl_Position = p; }\n";
+/* A variante para o estádio: o shader da noite multiplica a cor dos vértices antes de descartar, e o pré-passe
+ * tem de descartar tudo o que o desenho de verdade descarta (senão escreveria profundidade onde nada é desenhado) */
+static const char *VERTICES_DO_PREPASSE_COM_COR =
+    "#version 330\n"
+    "in vec3 vertexPosition; in vec2 vertexTexCoord; in vec4 vertexColor;\n"
+    "uniform mat4 mvp;\n"
+    "out vec2 fragTexCoord; out vec4 fragColor;\n"
+    "void main() { fragTexCoord = vertexTexCoord; fragColor = vertexColor; vec4 p = mvp * vec4(vertexPosition, 1.0);\n"
+    "              p.z += " EMPURRAO_DO_PREPASSE " * p.w; gl_Position = p; }\n";
+static const char *PIXELS_DO_PREPASSE_COM_COR =
+    "#version 330\n"
+    "in vec2 fragTexCoord; in vec4 fragColor;\n"
+    "uniform sampler2D texture0; uniform vec4 colDiffuse;\n"
+    "out vec4 finalColor;\n"
+    "void main() { if ((texture(texture0, fragTexCoord) * colDiffuse * fragColor).a < 0.5) discard; finalColor = vec4(1.0); }\n";
+static Shader shaderDoPrepasse, shaderDoPrepasseComCor;
+static int prepasseLigado = -1;   /* KATCHAU_SEM_PREPASSE desliga (para comparar) */
 
 /* Os modelos dos objetos que os mapas põem no cenário (cenario_mapas.h) */
 typedef enum {
@@ -1401,6 +1433,38 @@ static void desenharSombraDeInterlagos(MapaDeDia *mapa) {
 }
 
 /*
+ * caixaDaMalhaEmCache
+ * A caixa de uma malha do modelo, medida uma vez só: GetMeshBoundingBox percorre todos os vértices, e
+ * as perguntas de chão e altura são feitas centenas de vezes (uma por medida das arquibancadas e dos
+ * telões), cada uma para todas as malhas do modelo. O cache vale enquanto o vetor de malhas for o mesmo
+ * (acrescentarMalhasAoModelo o troca, e o cache é refeito).
+ * Recebe: o modelo e o número da malha.
+ * Devolve: a caixa (nas medidas do modelo).
+ */
+static BoundingBox caixaDaMalhaEmCache(const Model *modelo, int m) {
+    static const Mesh *deQuem = NULL;
+    static int quantas = 0;
+    static BoundingBox *caixas = NULL;
+    static unsigned char *prontas = NULL;
+    if (deQuem != modelo->meshes || quantas != modelo->meshCount) {
+        free(caixas);
+        free(prontas);
+        deQuem = modelo->meshes;
+        quantas = modelo->meshCount;
+        caixas = malloc(sizeof(BoundingBox) * (size_t) (quantas > 0 ? quantas : 1));
+        prontas = calloc((size_t) (quantas > 0 ? quantas : 1), 1);
+    }
+    if (caixas == NULL || prontas == NULL) {
+        return GetMeshBoundingBox(modelo->meshes[m]);
+    }
+    if (!prontas[m]) {
+        caixas[m] = GetMeshBoundingBox(modelo->meshes[m]);
+        prontas[m] = 1;
+    }
+    return caixas[m];
+}
+
+/*
  * alturaNoModelo
  * O ponto mais alto do modelo embaixo de (x, z): o chão, ou o telhado do que estiver ali.
  * Árvores e o que é recortado (alambrados, folhas) não contam.
@@ -1416,7 +1480,7 @@ static float alturaNoModelo(const Model *modelo, float x, float z) {
             continue;
         }
         const Mesh *malha = &modelo->meshes[m];
-        BoundingBox caixa = GetMeshBoundingBox(*malha);
+        BoundingBox caixa = caixaDaMalhaEmCache(modelo, m);
         if (x < caixa.min.x || x > caixa.max.x || z < caixa.min.z || z > caixa.max.z) {
             continue;
         }
@@ -1580,7 +1644,7 @@ static int recortarModuloDaArquibancada(const Model *modelo, PecaDoModulo *pecas
             continue;
         }
         const Mesh *malha = &modelo->meshes[m];
-        BoundingBox caixa = GetMeshBoundingBox(*malha);
+        BoundingBox caixa = caixaDaMalhaEmCache(modelo, m);
         if (caixa.min.x > MODULO_FRENTE_X || caixa.max.x < MODULO_FUNDO_X || caixa.max.z < MODULO_INICIO_Z
             || caixa.min.z > MODULO_INICIO_Z + MODULO_COMPRIMENTO || malha->normals == NULL) {
             continue;
@@ -1693,6 +1757,31 @@ static void prepararTrechoDaArquibancada(Pista *pista, const Model *modelo, cons
 }
 
 /*
+ * ancoraDaSecao
+ * O lugar na pista (por metros) do começo de uma seção de arquibancada, medido uma vez e guardado.
+ * Recebe: a pista, o trecho, a seção e os metros do começo dela.
+ * Devolve: o lugar (vale para sempre, no carregamento), ou NULL se o cache está cheio.
+ */
+#define MAXIMO_DE_ANCORAS 256
+static PosicaoNaPista *ancoraDaSecao(Pista *pista, const TrechoDaArquibancada *trecho, int secao, float metros) {
+    static struct { const TrechoDaArquibancada *trecho; int secao; PosicaoNaPista lugar; } ancoras[MAXIMO_DE_ANCORAS];
+    static int total = 0;
+    for (int i = 0; i < total; i++) {
+        if (ancoras[i].trecho == trecho && ancoras[i].secao == secao) {
+            return &ancoras[i].lugar;
+        }
+    }
+    if (total == MAXIMO_DE_ANCORAS) {
+        return NULL;
+    }
+    ancoras[total].trecho = trecho;
+    ancoras[total].secao = secao;
+    ancoras[total].lugar = (PosicaoNaPista){ pista->largada, 0.0f };
+    moverNaPista(&ancoras[total].lugar, metros * UNIDADES_POR_METRO);
+    return &ancoras[total++].lugar;
+}
+
+/*
  * noTrecho
  * Leva um ponto do módulo (fora, cima, ao longo, em metros do modelo) de uma das seções para o
  * mundo: o "ao longo" anda pela pista, o "fora" se afasta dela, e a altura parte do chão na frente.
@@ -1706,8 +1795,23 @@ static Vector3 noTrecho(Pista *pista, const TrechoDaArquibancada *trecho, int se
         aoLongo = 1.0f - aoLongo;
     }
     float metros = trecho->inicio + (trecho->fim - trecho->inicio) * aoLongo;
+    /* moverNaPista anda segmento por segmento a partir de onde está: partir da largada para cada vértice
+     * de cada triângulo de cada seção levava segundos. Cada seção guarda o lugar do começo dela (o menor
+     * dos metros que ela alcança) e só anda o resto. */
     PosicaoNaPista onde = { pista->largada, 0.0f };
-    moverNaPista(&onde, metros * UNIDADES_POR_METRO);
+    float metrosDoComeco = 0.0f;
+    float noInicio = (secao + 0.0f) / trecho->secoes, noFim = (secao + 1.0f) / trecho->secoes;
+    if (trecho->sentido < 0) {
+        noInicio = 1.0f - noInicio;
+        noFim = 1.0f - noFim;
+    }
+    float menorMetros = trecho->inicio + (trecho->fim - trecho->inicio) * fminf(noInicio, noFim);
+    PosicaoNaPista *ancora = ancoraDaSecao(pista, trecho, secao, menorMetros);
+    if (ancora != NULL && metros >= menorMetros) {
+        onde = *ancora;
+        metrosDoComeco = menorMetros;
+    }
+    moverNaPista(&onde, (metros - metrosDoComeco) * UNIDADES_POR_METRO);
     float lateral = trecho->distancia + p[0] * e;
     PontoNoMundo ponto = pontoNoMundo(onde, lateral / onde.segmento->larguraDireita);
     float medida = fminf(fmaxf((metros - trecho->inicio) / PASSO_DO_CHAO_DA_ARQUIBANCADA, 0.0f), trecho->medidas - 1.001f);
@@ -1865,7 +1969,7 @@ static float chaoNoModelo(const Model *modelo, float escala, float x, float z) {
             continue;
         }
         const Mesh *malha = &modelo->meshes[m];
-        BoundingBox caixa = GetMeshBoundingBox(*malha);
+        BoundingBox caixa = caixaDaMalhaEmCache(modelo, m);
         if (x < caixa.min.x || x > caixa.max.x || z < caixa.min.z || z > caixa.max.z) {
             continue;
         }
@@ -2167,6 +2271,8 @@ static void ligarTeloesDoCenario(void) {
  * O shader e o material do céu do passeio (veja PIXELS_DO_CEU).
  */
 static void carregarCeuDoPasseio(void) {
+    shaderDoPrepasse = LoadShaderFromMemory(VERTICES_DO_PREPASSE, PIXELS_DA_PROFUNDIDADE);
+    shaderDoPrepasseComCor = LoadShaderFromMemory(VERTICES_DO_PREPASSE_COM_COR, PIXELS_DO_PREPASSE_COM_COR);
     shaderDoCeu = LoadShaderFromMemory(VERTICES_DO_CEU, PIXELS_DO_CEU);
     materialDoCeu = LoadMaterialDefault();
     materialDoCeu.shader = shaderDoCeu;
@@ -2214,6 +2320,7 @@ static void desenharCeuDoPasseio(Matrix naCamera) {
  * Devolve: nada.
  */
 void carregarMundo(Pista *pistas[]) {
+    double tInicio = GetTime();
     shader = LoadShaderFromMemory(VERTICES_DO_SHADER, PIXELS_DO_SHADER);
     shaderDosMapasDeDia = LoadShaderFromMemory(VERTICES_DOS_MAPAS_DE_DIA, PIXELS_DOS_MAPAS_DE_DIA);
     totalQueRecebemSombra = 0;
@@ -2239,16 +2346,28 @@ void carregarMundo(Pista *pistas[]) {
     rlTextureParameters(texturaCeu.id, RL_TEXTURE_WRAP_T, RL_TEXTURE_WRAP_CLAMP);
     carregarCeuDoPasseio();
 
+    TraceLog(LOG_INFO, "CARGA-MUNDO: shaders/texturas/ceu %.2f s", GetTime() - tInicio); tInicio = GetTime();
+    passoDaEspera("CARREGANDO CENARIOS", 0.02f);
     carregarModelosDosObjetos();
+    TraceLog(LOG_INFO, "CARGA-MUNDO: objetos %.2f s", GetTime() - tInicio); tInicio = GetTime();
+    passoDaEspera("CARREGANDO INTERLAGOS", 0.08f);
     carregarMapaDeDia(pistas[PISTA_INTERLAGOS], ARQUIVO_DE_INTERLAGOS, ESCALA_INTERLAGOS, TORCIDA_INTERLAGOS,
                       TOTAL_TORCIDA_INTERLAGOS, FIGURA_DE_INTERLAGOS * ESCALA_INTERLAGOS, NULL, 0);
+    TraceLog(LOG_INFO, "CARGA-MUNDO: interlagos %.2f s", GetTime() - tInicio); tInicio = GetTime();
+    passoDaEspera("CARREGANDO COPA PISTAO", 0.70f);
     carregarEstadio(pistas[PISTA_COPA_PISTAO]);
+    passoDaEspera("CARREGANDO OVAL", 0.80f);
+    TraceLog(LOG_INFO, "CARGA-MUNDO: estadio %.2f s", GetTime() - tInicio); tInicio = GetTime();
     carregarMapaDeDia(pistas[PISTA_OVAL], ARQUIVO_DO_OVAL, ESCALA_OVAL, TORCIDA_OVAL, TOTAL_TORCIDA_OVAL, FIGURA_DO_OVAL,
                       CENARIO_OVAL, TOTAL_CENARIO_OVAL);
+    TraceLog(LOG_INFO, "CARGA-MUNDO: oval %.2f s", GetTime() - tInicio); tInicio = GetTime();
+    passoDaEspera("CARREGANDO SPLAT", 0.92f);
     carregarMapaDeDia(pistas[PISTA_SPLAT], ARQUIVO_DO_SPLAT, ESCALA_SPLAT, TORCIDA_SPLAT, TOTAL_TORCIDA_SPLAT, FIGURA_DO_SPLAT,
                       CENARIO_SPLAT, TOTAL_CENARIO_SPLAT);
+    TraceLog(LOG_INFO, "CARGA-MUNDO: splat %.2f s", GetTime() - tInicio); tInicio = GetTime();
     iniciarTorcida3D();
     ligarTeloesDoCenario();
+    TraceLog(LOG_INFO, "CARGA-MUNDO: torcida/telões %.2f s", GetTime() - tInicio); tInicio = GetTime();
 }
 
 /*
@@ -2417,6 +2536,8 @@ void descarregarMundo(void) {
     materialDoCeu.shader.id = rlGetShaderIdDefault();
     UnloadMaterial(materialDoCeu);
     UnloadShader(shaderDoCeu);
+    UnloadShader(shaderDoPrepasse);
+    UnloadShader(shaderDoPrepasseComCor);
     UnloadShader(shader);
     UnloadShader(shaderDosMapasDeDia);
     for (int d = 0; d < TOTAL_DE_DESENHOS; d++) {
@@ -2672,6 +2793,35 @@ int teloesAVista(IdPista id) {
     return 0;
 }
 
+/*
+ * prepasseDoEstadio
+ * O estádio só na profundidade (veja VERTICES_DO_PREPASSE), só as malhas à vista. Chamar dentro de BeginMode3D,
+ * depois de prepararCorte e antes do desenho de verdade.
+ * Recebe: nada. Devolve: nada.
+ */
+static void prepasseDoEstadio(void) {
+    if (prepasseLigado < 0) {
+        prepasseLigado = (getenv("KATCHAU_SEM_PREPASSE") == NULL);
+    }
+    if (!prepasseLigado || shaderDoPrepasseComCor.id == 0 || estadio.meshCount <= 0) {
+        return;
+    }
+    Matrix noMundo = MatrixMultiply(estadio.transform,
+                                    MatrixScale(ESCALA_COPA_PISTAO, ESCALA_COPA_PISTAO, ESCALA_COPA_PISTAO));
+    rlDrawRenderBatchActive();
+    rlColorMask(false, false, false, false);
+    for (int i = 0; i < estadio.meshCount; i++) {
+        if (caixasDoEstadio != NULL && !caixaAVista(caixasDoEstadio[i])) {
+            continue;
+        }
+        Material material = estadio.materials[estadio.meshMaterial[i]];
+        material.shader = shaderDoPrepasseComCor;
+        DrawMesh(estadio.meshes[i], material, noMundo);
+    }
+    rlDrawRenderBatchActive();
+    rlColorMask(true, true, true, true);
+}
+
 static void desenharEstadioCortado(void) {
     if (caixasDoEstadio == NULL) {
         DrawModel(estadio, (Vector3){ 0.0f, 0.0f, 0.0f }, ESCALA_COPA_PISTAO, WHITE);
@@ -2687,6 +2837,35 @@ static void desenharEstadioCortado(void) {
     }
 }
 
+/*
+ * prepasseDoMundoAberto
+ * O mapa do passeio só na profundidade (veja VERTICES_DO_PREPASSE). Chamar dentro de BeginMode3D, antes do
+ * desenho de verdade.
+ * Recebe: nada. Devolve: nada.
+ */
+static void prepasseDoMundoAberto(void) {
+    if (prepasseLigado < 0) {
+        prepasseLigado = (getenv("KATCHAU_SEM_PREPASSE") == NULL);
+    }
+    if (!prepasseLigado || !temMundoAberto || shaderDoPrepasse.id == 0) {
+        return;
+    }
+    Shader originais[256];
+    int total = mundoAberto.materialCount < 256 ? mundoAberto.materialCount : 256;
+    for (int i = 0; i < total; i++) {
+        originais[i] = mundoAberto.materials[i].shader;
+        mundoAberto.materials[i].shader = shaderDoPrepasse;
+    }
+    rlDrawRenderBatchActive();
+    rlColorMask(false, false, false, false);
+    DrawModel(mundoAberto, (Vector3){ 0.0f, 0.0f, 0.0f }, 1.0f, WHITE);
+    rlDrawRenderBatchActive();
+    rlColorMask(true, true, true, true);
+    for (int i = 0; i < total; i++) {
+        mundoAberto.materials[i].shader = originais[i];
+    }
+}
+
 void desenharCenario(IdPista id, Vector3 camera) {
     if (sombraLigadaAgora) {
         rlActiveTextureSlot(SLOT_DA_SOMBRA);
@@ -2698,6 +2877,7 @@ void desenharCenario(IdPista id, Vector3 camera) {
     Matrix naCamera = MatrixTranslate(camera.x, camera.y, camera.z);
 
     if ((int) id == (int) CENARIO_DO_MUNDO_ABERTO) {
+        prepasseDoMundoAberto();
         desenharCeuDoPasseio(naCamera);
         if (temMundoAberto) {
             DrawModel(mundoAberto, (Vector3){ 0.0f, 0.0f, 0.0f }, 1.0f, WHITE);
@@ -2706,6 +2886,7 @@ void desenharCenario(IdPista id, Vector3 camera) {
     }
 
     if (id == PISTA_COPA_PISTAO) {
+        prepasseDoEstadio();
         desenharMalha(ceuDeNoite, texturaDoCeuNoturno(), naCamera);
         desenharEstadioCortado();
         material.shader = shaderDaNoite();

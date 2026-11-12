@@ -7,6 +7,7 @@
 
 #include <math.h>
 #include <stdlib.h>
+#include <pthread.h>
 #include "raylib.h"
 #include "efeitos.h"
 #include "motor.h"
@@ -328,6 +329,49 @@ static float filtrar(FiltroDeBanda *f, float x) {
     return y;
 }
 
+/* ---------- Síntese em segundo plano ----------
+ * Sintetizar os sons que não têm arquivo (as batidas de lata, o estouro do pneu, os fogos) leva mais de
+ * um segundo de matemática. Ela roda numa thread enquanto o jogo carrega os gráficos: a thread só gera as
+ * amostras (nada de raylib), e depois carregarEfeitos repete a mesma sequência de chamadas, entregando
+ * cada vez o som que a thread já fez. Sem a thread iniciada, tudo se sintetiza na hora, como sempre. */
+typedef struct {
+    short *dados;
+    int n;
+} SomSintetizado;
+#define MAIS_SONS_SINTETIZADOS 48
+typedef enum { SINTESE_NORMAL, SINTESE_CAPTURANDO, SINTESE_REPRODUZINDO } ModoDaSintese;
+static SomSintetizado sintetizados[MAIS_SONS_SINTETIZADOS];
+static int totalSintetizados = 0, proximoSintetizado = 0;
+static ModoDaSintese modoDaSintese = SINTESE_NORMAL;
+static pthread_t threadDaSintese;
+static int sinteseIniciada = 0;
+
+/* O fim de todo gerador: vira Sound (as amostras passam a ser daqui), ou, na thread, fica guardado */
+static Sound somDeAmostras(short *dados, int n) {
+    if (modoDaSintese == SINTESE_CAPTURANDO) {
+        if (totalSintetizados < MAIS_SONS_SINTETIZADOS) {
+            sintetizados[totalSintetizados++] = (SomSintetizado){ dados, n };
+        } else {
+            free(dados);
+        }
+        return (Sound){ 0 };
+    }
+    Wave onda = { (unsigned int) n, TAXA_DA_LATA, 16, 1, dados };
+    Sound som = LoadSoundFromWave(onda);
+    free(dados);
+    return som;
+}
+
+/* O começo de todo gerador: se a thread já fez este som, devolve ele (e diz 1) */
+static int jaSintetizado(Sound *som) {
+    if (modoDaSintese != SINTESE_REPRODUZINDO || proximoSintetizado >= totalSintetizados) {
+        return 0;
+    }
+    SomSintetizado *feito = &sintetizados[proximoSintetizado++];
+    *som = somDeAmostras(feito->dados, feito->n);
+    return 1;
+}
+
 /*
  * gerarBatidaDeLata
  * Sintetiza o som de uma batida de carro: o tranco grave (o peso do carro), o ruído da lata
@@ -337,6 +381,10 @@ static float filtrar(FiltroDeBanda *f, float x) {
  * Devolve: o som.
  */
 static Sound gerarBatidaDeLata(unsigned int semente, int forte) {
+    Sound pronto;
+    if (jaSintetizado(&pronto)) {
+        return pronto;
+    }
     sementeDaLata = semente * 2654435761u + 12345u;
     float duracao = forte ? 0.95f : 0.5f;
     int n = (int) (duracao * TAXA_DA_LATA);
@@ -407,11 +455,7 @@ static Sound gerarBatidaDeLata(unsigned int semente, int forte) {
         dados[i] = (short) (y * 32767.0f);
     }
     free(x);
-
-    Wave onda = { (unsigned int) n, TAXA_DA_LATA, 16, 1, dados };
-    Sound som = LoadSoundFromWave(onda);
-    free(dados);
-    return som;
+    return somDeAmostras(dados, n);
 }
 
 /*
@@ -501,15 +545,16 @@ static Sound somDeBuffer(float *x, int n, float duracao, float ganho) {
         dados[i] = (short) (y * 32767.0f);
     }
     free(x);
-    Wave onda = { (unsigned int) n, TAXA_DA_LATA, 16, 1, dados };
-    Sound som = LoadSoundFromWave(onda);
-    free(dados);
-    return som;
+    return somDeAmostras(dados, n);
 }
 
 /* O estouro do pneu: o tiro seco (grave que cai + estalo largo), o ar saindo (chiado agudo) e a borracha
  * batendo no asfalto nas primeiras voltas da roda. */
 static Sound gerarEstouroDePneu(void) {
+    Sound pronto;
+    if (jaSintetizado(&pronto)) {
+        return pronto;
+    }
     sementeDaLata = 777u;
     float duracao = 1.3f;
     int n = (int) (duracao * TAXA_DA_LATA);
@@ -547,6 +592,10 @@ static Sound gerarEstouroDePneu(void) {
 
 /* A pancada da borracha solta batendo no chão: uma só, curtinha (a corrida repete conforme a roda gira) */
 static Sound gerarBatidaDeBorracha(void) {
+    Sound pronto;
+    if (jaSintetizado(&pronto)) {
+        return pronto;
+    }
     sementeDaLata = 4242u;
     float duracao = 0.13f;
     int n = (int) (duracao * TAXA_DA_LATA);
@@ -568,6 +617,10 @@ static Sound gerarBatidaDeBorracha(void) {
 
 /* O foguete subindo: assobio que sobe de tom + o rastro de fogo (ruído) */
 static Sound gerarFoguete(void) {
+    Sound pronto;
+    if (jaSintetizado(&pronto)) {
+        return pronto;
+    }
     sementeDaLata = 31337u;
     float duracao = 1.4f;
     int n = (int) (duracao * TAXA_DA_LATA);
@@ -592,6 +645,10 @@ static Sound gerarFoguete(void) {
 /* A explosão do fogo: o estrondo (grave que cai, mais longo que o do pneu), o estouro de ruído e
  * os estalinhos das faíscas caindo, cada vez menos. */
 static Sound gerarExplosaoDeFogo(unsigned int semente) {
+    Sound pronto;
+    if (jaSintetizado(&pronto)) {
+        return pronto;
+    }
     sementeDaLata = semente * 2654435761u + 99u;
     float duracao = 2.0f;
     int n = (int) (duracao * TAXA_DA_LATA);
@@ -757,6 +814,42 @@ static void tocarCurto(int som, float volume, float tom) {
  * ================================================================== */
 
 /*
+ * gerarTodosOsSons
+ * A sequência de sons sintetizados (a mesma ordem na thread e em carregarEfeitos, que é o que casa uma com a outra).
+ */
+static void gerarTodosOsSons(void) {
+    for (int v = 0; v < VARIACOES_DE_LATA; v++) {
+        latasFortes[v] = gerarBatidaDeLata(100u + (unsigned int) v, 1);
+        latasLeves[v] = gerarBatidaDeLata(200u + (unsigned int) v, 0);
+    }
+    somDoEstouro = gerarEstouroDePneu();
+    somDaBorracha = gerarBatidaDeBorracha();
+    somDoFoguete = gerarFoguete();
+    for (int v = 0; v < VARIACOES_DE_FOGO; v++) {
+        somDeFogoExplodindo[v] = gerarExplosaoDeFogo(300u + (unsigned int) v);
+    }
+}
+
+static void *sintetizarEmSegundoPlano(void *nada) {
+    (void) nada;
+    modoDaSintese = SINTESE_CAPTURANDO;
+    gerarTodosOsSons();
+    return NULL;
+}
+
+/*
+ * iniciarSinteseDosEfeitos
+ * Começa a sintetizar os sons numa thread. Chamar cedo (logo que o jogo abre) e carregarAudio mais tarde:
+ * carregarEfeitos espera a thread acabar, se for preciso.
+ * Recebe: nada. Devolve: nada.
+ */
+void iniciarSinteseDosEfeitos(void) {
+    if (!sinteseIniciada && pthread_create(&threadDaSintese, NULL, sintetizarEmSegundoPlano, NULL) == 0) {
+        sinteseIniciada = 1;
+    }
+}
+
+/*
  * carregarEfeitos
  * Lê todos os sons. Chamar depois de abrir o dispositivo de som. Arquivo que falta deixa só
  * aquele som mudo.
@@ -765,21 +858,22 @@ static void tocarCurto(int som, float volume, float tom) {
  */
 void carregarEfeitos(void) {
     carregarMotorGranular();
-    for (int v = 0; v < VARIACOES_DE_LATA; v++) {
-        latasFortes[v] = gerarBatidaDeLata(100u + (unsigned int) v, 1);
-        latasLeves[v] = gerarBatidaDeLata(200u + (unsigned int) v, 0);
+    if (sinteseIniciada) {
+        pthread_join(threadDaSintese, NULL);
+        sinteseIniciada = 0;
+        modoDaSintese = SINTESE_REPRODUZINDO;
+        proximoSintetizado = 0;
     }
+    gerarTodosOsSons();   /* na reprodução, só cria os Sound com as amostras que a thread já fez */
+    modoDaSintese = SINTESE_NORMAL;
+    totalSintetizados = 0;
     latasProntas = 1;
     for (int v = 0; v < VARIACOES_DE_LATA; v++) {
         latasProntas = latasProntas && IsSoundValid(latasFortes[v]) && IsSoundValid(latasLeves[v]);
     }
-    somDoEstouro = gerarEstouroDePneu();
-    somDaBorracha = gerarBatidaDeBorracha();
     somDePneuPronto = IsSoundValid(somDoEstouro) && IsSoundValid(somDaBorracha);
-    somDoFoguete = gerarFoguete();
     somDeFogosPronto = IsSoundValid(somDoFoguete);
     for (int v = 0; v < VARIACOES_DE_FOGO; v++) {
-        somDeFogoExplodindo[v] = gerarExplosaoDeFogo(300u + (unsigned int) v);
         somDeFogosPronto = somDeFogosPronto && IsSoundValid(somDeFogoExplodindo[v]);
     }
     for (int i = 0; i < FAIXAS_ACELERANDO; i++) {
