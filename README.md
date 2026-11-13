@@ -142,8 +142,14 @@ lista circular duplamente encadeada de segmentos.
     separa a mandíbula, porque os lábios de cima e de baixo se sobrepõem na boca fechada; a ferramenta a
     escolhe pela malha, partindo do lábio de baixo sem atravessar a fenda da boca, e mais os dentes de baixo e
     a língua. Abre até 20 graus; 15 quando o lábio de baixo é o para-choque ou um friso (o Doc, o Xerife, o
-    Sargento, o Luigi) e 12 no Fillmore. O Mack também fala: a boca dele fica no para-choque, embaixo da grade, e
-    o queixo inteiro desce. Como ele é desenhado com o shader do mapa, e não com o dos carros, a mandíbula dele
+    Sargento, o Luigi) e 12 no Fillmore. Na corrida, a boca do McQueen acompanha a própria voz: ao carregar, cada
+    fala (`audio.c`) tem o volume medido quadro a quadro, e a boca abre nas sílabas fortes e fecha nas pausas;
+    os olhos fazem a cara da fala (contente ao assumir a liderança ou ultrapassar, bravo ao perder ou ser
+    ultrapassado, assustado no grito e nas batidas). E qualquer carro que roda abre a boca de espanto, além de
+    arregalar os olhos (numa batida forte, também, na medida dela). Com o pneu estourado, rodando no aro, a cara é
+    a do filme: aflito, com os olhos bem abertos e a sobrancelha de preocupado, e a careta de dentes cerrados (a
+    boca entreaberta só para mostrar os dentes, batendo com o aro). O Mack também fala: a boca dele fica no
+    para-choque, embaixo da grade, e o queixo inteiro desce. Como ele é desenhado com o shader do mapa, e não com o dos carros, a mandíbula dele
     gira na própria malha (`darBocaAoModelo` e `abrirBocaDoModelo`, em `carros3d.c`), só quando a abertura muda.
 - **Conversar com os moradores e com o Mack:** perto de um deles, na frente ou do lado, o **quadrado** (o X no
   controle de Xbox, ou a tecla **E**) começa a conversa, e o aviso embaixo da tela diz com quem. Dá para conversar

@@ -21,6 +21,7 @@
 #include "pitstop.h"
 #include "mundo.h"
 #include "carros3d.h"
+#include "audio.h"
 #include "fumaca.h"
 #include "faiscas.h"
 #include "fogos.h"
@@ -40,6 +41,17 @@
 #define ATRASO_DA_CAMERA_NO_RUMO 0.22f  /* segundos: o quanto a câmera demora para vir atrás do bico */
 #define CAMERA_NA_FUGA         0.75f    /* quanto do ângulo de fuga do carro a câmera acompanha */
 #define NUMERO_DO_GUIDO        7        /* na tabela FICHAS */
+#define NUMERO_DO_MCQUEEN      0        /* o dono da voz (as falas da corrida, audio.c) */
+#define BOCA_RODANDO           1.0f     /* rodando, a boca toda aberta, de espanto (o "ôôô!")... */
+#define BOCA_NA_BATIDA         0.8f     /* ...e numa batida forte, até tanto */
+#define BOCA_ABRE              22.0f    /* por segundo: a boca abre depressa... */
+#define BOCA_FECHA             9.0f     /* ...e fecha um pouco mais devagar */
+#define MAIS_CARROS_COM_BOCA   64
+#define ESTOURADO_PREOCUPADO   0.70f    /* o pneu estourado: a sobrancelha de preocupado... */
+#define ESTOURADO_ARREGALADO   1.00f    /* ...os olhos bem abertos... */
+#define BOCA_DE_DENTES_CERRADOS 0.46f   /* ...e a boca entreaberta, só os dentes à mostra (a careta)... */
+#define BOCA_BATENDO           0.06f    /* ...batendo um pouco com o aro... */
+#define DENTES_BATENDO_HZ      9.0f     /* ...tantas vezes por segundo */
 #define ALTURA_NA_TROCA        0.10f    /* metros: o macaco levanta o carro */
 #define APERTA_A_PARTIR_DE     0.70f    /* fração da velocidade máxima: dali para cima, o carro aperta os olhos */
 #define CAMERA_DA_TROCA_LADO   4.6f     /* a câmera da troca: à direita do carro, na frente e no alto */
@@ -413,6 +425,27 @@ static void desenharSombraDoCarro(Camera3D camera, Carro *carro) {
 }
 
 /*
+ * bocaSuave
+ * A boca de um carro não pula de fechada para aberta: abre depressa e fecha um pouco mais devagar. Uma vez
+ * por quadro (na tela dividida, o mundo é desenhado duas vezes).
+ * Recebe: o carro e o quanto ela devia abrir agora (0 a 1).
+ * Devolve: o quanto ela abre neste desenho.
+ */
+static float bocaSuave(int numero, float alvo) {
+    static float aberta[MAIS_CARROS_COM_BOCA];
+    static double hora[MAIS_CARROS_COM_BOCA];
+    if (numero < 0 || numero >= MAIS_CARROS_COM_BOCA) {
+        return alvo;
+    }
+    double agora = GetTime();
+    float tempo = (float) fmin(0.1, fmax(0.0, agora - hora[numero]));
+    hora[numero] = agora;
+    float rapidez = (alvo > aberta[numero]) ? BOCA_ABRE : BOCA_FECHA;
+    aberta[numero] += (alvo - aberta[numero]) * (1.0f - expf(-rapidez * tempo));
+    return aberta[numero];
+}
+
+/*
  * carroAVista
  * O teste de distância (atrás e longe) continua primeiro: é mais barato e já tira a maioria.
  * O corte pelo campo de visão é o que pega o carro que está perto mas fora da borda da tela
@@ -451,10 +484,34 @@ static void desenharCarroNoMundo(Camera3D camera, Carro *carro) {
         aperto = fmaxf(aperto, 1.0f);
     }
     float susto = carro->rodando ? 1.0f : (carro->pancada - 0.3f) / 0.4f;
+    /* A boca: rodando (de qualquer um), aberta de espanto; numa batida forte, na medida dela */
+    float boca = fmaxf(carro->rodando ? BOCA_RODANDO : 0.0f, BOCA_NA_BATIDA * Clamp((carro->pancada - 0.3f) / 0.4f, 0.0f, 1.0f));
+    Emocao cara = { 0 };
     if (carro->pneuEstourado && carro->estadoDoPit == PIT_FORA) {
-        susto = fmaxf(susto, 0.6f);   /* rodando no aro, de olho arregalado, como no filme */
+        /* Rodando no aro, aflito, como no filme: os olhos bem abertos com o canto de dentro da pálpebra
+         * erguido (a sobrancelha de preocupado), olhando para a frente, e a careta de dentes cerrados (a boca
+         * entreaberta só para mostrar os dentes, batendo com o aro) */
+        cara.tristeza = ESTOURADO_PREOCUPADO;
+        cara.espanto = ESTOURADO_ARREGALADO;
+        cara.olharParaCima = -0.1f;
+        float batendo = 0.5f + 0.5f * sinf((float) GetTime() * 2.0f * PI * DENTES_BATENDO_HZ + (float) carro->numero);
+        boca = fmaxf(boca, BOCA_DE_DENTES_CERRADOS + BOCA_BATENDO * batendo);
+    }
+    /* O McQueen, falando, abre a boca pelo volume da voz e faz a cara da fala (por cima da aflição) */
+    if (carro->numero == NUMERO_DO_MCQUEEN) {
+        int tipo;
+        boca = fmaxf(boca, vozDoMcQueen(&tipo));
+        if (tipo == VOZ_CONTENTE) {
+            cara = (Emocao){ .alegria = 0.9f, .espanto = 0.2f };
+        } else if (tipo == VOZ_IRRITADA) {
+            cara = (Emocao){ .raiva = 0.85f };
+        } else if (tipo == VOZ_ASSUSTADA) {
+            cara.espanto = fmaxf(cara.espanto, 0.8f);
+        }
     }
     expressaoNoProximoDesenho(carro->numero, aperto, susto);
+    emocaoNoProximoDesenho(carro->numero, &cara);
+    bocaNoProximoDesenho(carro->numero, bocaSuave(carro->numero, boca));
     pneusEstouradosNoProximoDesenho(carro->pneuEstourado);   /* a borracha some, sobra o aro e o canto baixa */
     desenharCarro3D(carro->numero, matrizDoCarro(carro), carro->anguloDasRodas, carro->volante);
 }

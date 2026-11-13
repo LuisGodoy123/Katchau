@@ -38,6 +38,10 @@ void tocarSomDaBatida(float volume, int contraCarro);
 void tocarGritoDeRodada(float volume);
 void tocarFalaDeLideranca(int comecou);
 void tocarFalaDeUltrapassagem(int ultrapassou);
+/* A voz do McQueen agora, para a boca dele: o quanto ela abre (0 a 1, pelo volume da fala que está tocando,
+ * medido quadro a quadro ao carregar) e o tipo da fala (a cara que ele faz; fica um pouco depois dela) */
+enum { VOZ_NENHUMA, VOZ_CONTENTE, VOZ_IRRITADA, VOZ_ASSUSTADA };
+float vozDoMcQueen(int *tipo);
 void atualizarSonsDaCorrida(int motorAtivo, int contagemAtiva, int musicaAtiva);
 void atualizarMusicaDaVitoria(float segundosAteALinha, int venceu);
 int musicaDaVitoriaTocando(void);

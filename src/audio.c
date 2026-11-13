@@ -6,6 +6,7 @@
  */
 
 #include <math.h>
+#include <stdlib.h>
 #include "raylib.h"
 #include "audio.h"
 #include "efeitos.h"
@@ -114,6 +115,82 @@ static int falaCarregada[TOTAL_FALAS];
 static int ultimaFalaDeLider = -1;
 static int ultimaFalaDePerda = -1;
 static double fimDaVoz = 0.0;               /* hora em que a fala atual acaba (mais a pausa) */
+
+/* A boca do McQueen acompanha a voz: o volume de cada fala, quadro a quadro, medido ao carregar */
+#define QUADROS_DA_VOZ        60        /* por segundo */
+#define VOZ_CALADA            0.15f     /* do volume mais alto da fala: abaixo disso, a boca fecha (as pausas) */
+#define VOZ_TODA_ABERTA       0.75f     /* daí para cima, a boca toda aberta */
+#define CARA_DEPOIS_DA_FALA   0.8f      /* segundos: a cara da fala fica mais um pouco */
+typedef struct {
+    unsigned char *abertura;            /* 0 a 255 por quadro */
+    int quadros;
+} VolumeDaVoz;
+static VolumeDaVoz volumeDasFalas[TOTAL_FALAS], volumeDasBatidas[TOTAL_SONS_DE_BATIDA];
+static const VolumeDaVoz *vozTocando = NULL;
+static double inicioDaVoz = 0.0;
+static int tipoDaVoz = VOZ_NENHUMA;
+
+/*
+ * medirVolume
+ * O volume de uma fala, quadro a quadro (o valor eficaz de cada 1/60 s, de todos os canais), em relação
+ * ao mais alto dela, já como a abertura da boca: fechada nas pausas, toda aberta nos picos.
+ * Recebe: a onda e onde pôr o volume.
+ * Devolve: nada.
+ */
+static void medirVolume(Wave onda, VolumeDaVoz *voz) {
+    voz->quadros = 0;
+    voz->abertura = NULL;
+    int porQuadro = (int) onda.sampleRate / QUADROS_DA_VOZ;
+    if (porQuadro < 1 || onda.frameCount == 0 || onda.data == NULL) {
+        return;
+    }
+    int quadros = (int) onda.frameCount / porQuadro + 1;
+    float *eficaz = (float *) malloc((size_t) quadros * sizeof(float));
+    unsigned char *abertura = (unsigned char *) malloc((size_t) quadros);
+    if (eficaz == NULL || abertura == NULL) {
+        free(eficaz);
+        free(abertura);
+        return;
+    }
+    float maior = 1e-6f;
+    for (int q = 0; q < quadros; q++) {
+        double soma = 0.0;
+        int n = 0;
+        for (int f = q * porQuadro; f < (q + 1) * porQuadro && f < (int) onda.frameCount; f++) {
+            for (int c = 0; c < (int) onda.channels; c++) {
+                int i = f * (int) onda.channels + c;
+                float a = (onda.sampleSize == 16) ? ((const short *) onda.data)[i] / 32768.0f
+                        : (onda.sampleSize == 32) ? ((const float *) onda.data)[i]
+                        : (((const unsigned char *) onda.data)[i] - 128) / 128.0f;
+                soma += (double) a * a;
+                n++;
+            }
+        }
+        eficaz[q] = (n > 0) ? sqrtf((float) (soma / n)) : 0.0f;
+        maior = fmaxf(maior, eficaz[q]);
+    }
+    for (int q = 0; q < quadros; q++) {
+        float x = (eficaz[q] / maior - VOZ_CALADA) / (VOZ_TODA_ABERTA - VOZ_CALADA);
+        x = (x < 0.0f) ? 0.0f : (x > 1.0f) ? 1.0f : x;
+        abertura[q] = (unsigned char) (powf(x, 0.7f) * 255.0f);
+    }
+    free(eficaz);
+    voz->abertura = abertura;
+    voz->quadros = quadros;
+}
+
+/* Uma fala: o som e o volume dela, quadro a quadro (para a boca), de uma leitura só do arquivo */
+static Sound carregarVoz(const char *arquivo, VolumeDaVoz *voz) {
+    Sound som = { 0 };
+    Wave onda = LoadWave(arquivo);
+    if (!IsWaveValid(onda)) {
+        return som;
+    }
+    medirVolume(onda, voz);
+    som = LoadSoundFromWave(onda);
+    UnloadWave(onda);
+    return som;
+}
 static double horaDoUltimoGrito = -100.0;
 static double horaDaUltimaFalaDePonta = -100.0;
 static double horaDaUltimaFalaDePosicao = -100.0;
@@ -205,14 +282,14 @@ void carregarAudio(void) {
     for (int i = 0; i < TOTAL_SONS_DE_BATIDA; i++) {
         const char *caminho = TextFormat("recursos/sons/batida_mcqueen_%d.wav", NUMEROS_DAS_BATIDAS[i]);
         if (FileExists(caminho)) {
-            sonsDeBatida[i] = LoadSound(caminho);
+            sonsDeBatida[i] = carregarVoz(caminho, &volumeDasBatidas[i]);
             somDeBatidaCarregado[i] = IsSoundValid(sonsDeBatida[i]);
         }
     }
 
     for (int i = 0; i < TOTAL_FALAS; i++) {
         if (FileExists(ARQUIVOS_FALAS[i])) {
-            falas[i] = LoadSound(ARQUIVOS_FALAS[i]);
+            falas[i] = carregarVoz(ARQUIVOS_FALAS[i], &volumeDasFalas[i]);
             falaCarregada[i] = IsSoundValid(falas[i]);
         }
     }
@@ -400,12 +477,42 @@ void tocarSom(TipoSom som) {
  * Recebe: o som, o volume (0 a 1) e a hora de agora.
  * Devolve: nada.
  */
-static void falar(Sound som, float volume, double agora) {
+static void falar(Sound som, const VolumeDaVoz *voz, int tipo, float volume, double agora) {
     SetSoundVolume(som, volume * fatorDeVolume(configuracoesAtuais()->volumeVozes));   /* o volume das vozes */
     StopSound(som);
     PlaySound(som);
     fimDaVoz = agora + (double) som.frameCount / (double) som.stream.sampleRate + PAUSA_DEPOIS_DA_FALA;
+    vozTocando = voz;
+    inicioDaVoz = agora;
+    tipoDaVoz = tipo;
 }
+
+/*
+ * vozDoMcQueen
+ * O quanto a boca do McQueen abre agora (o volume da fala que está tocando, neste quadro dela) e o tipo da
+ * fala, que fica um pouco depois dela (a cara).
+ * Recebe: onde pôr o tipo (VOZ_...).
+ * Devolve: a abertura (0 a 1).
+ */
+float vozDoMcQueen(int *tipo) {
+    *tipo = VOZ_NENHUMA;
+    if (vozTocando == NULL || vozTocando->quadros <= 0) {
+        return 0.0f;
+    }
+    float t = (float) (GetTime() - inicioDaVoz) * QUADROS_DA_VOZ;
+    if (t < 0.0f || t > vozTocando->quadros + CARA_DEPOIS_DA_FALA * QUADROS_DA_VOZ) {
+        vozTocando = NULL;
+        return 0.0f;
+    }
+    *tipo = tipoDaVoz;
+    int q = (int) t;
+    if (q + 1 >= vozTocando->quadros) {
+        return 0.0f;   /* acabou de falar: a boca fecha, a cara fica */
+    }
+    float k = t - (float) q;
+    return ((1.0f - k) * vozTocando->abertura[q] + k * vozTocando->abertura[q + 1]) / 255.0f;
+}
+
 
 /*
  * sortearFala
@@ -451,7 +558,7 @@ void tocarSomDaBatida(float volume, int contraCarro) {
         int fala = sortearFala(FALA_BATE_1, TOTAL_FALAS_BATE, &ultimaFalaDeBater);
         if (fala >= 0) {
             horaDaUltimaBatida = agora;
-            falar(falas[fala], altura, agora);
+            falar(falas[fala], &volumeDasFalas[fala], VOZ_IRRITADA, altura, agora);
             return;
         }
     }
@@ -469,7 +576,7 @@ void tocarSomDaBatida(float volume, int contraCarro) {
     } while (!somDeBatidaCarregado[escolhido] || (escolhido == ultimaBatida && carregados > 1));
     ultimaBatida = escolhido;
     horaDaUltimaBatida = agora;
-    falar(sonsDeBatida[escolhido], altura, agora);
+    falar(sonsDeBatida[escolhido], &volumeDasBatidas[escolhido], VOZ_ASSUSTADA, altura, agora);
 }
 
 /*
@@ -486,7 +593,7 @@ void tocarGritoDeRodada(float volume) {
         return;
     }
     horaDoUltimoGrito = agora;
-    falar(falas[FALA_GRITO], VOLUME_BATIDA * fminf(volume, 1.0f), agora);
+    falar(falas[FALA_GRITO], &volumeDasFalas[FALA_GRITO], VOZ_ASSUSTADA, VOLUME_BATIDA * fminf(volume, 1.0f), agora);
 }
 
 /*
@@ -516,7 +623,7 @@ void tocarFalaDeLideranca(int comecou) {
     }
     *ultima = escolhida;
     horaDaUltimaFalaDePonta = agora;
-    falar(falas[escolhida], VOLUME_BATIDA, agora);
+    falar(falas[escolhida], &volumeDasFalas[escolhida], comecou ? VOZ_CONTENTE : VOZ_IRRITADA, VOLUME_BATIDA, agora);
 }
 
 /*
@@ -539,7 +646,7 @@ void tocarFalaDeUltrapassagem(int ultrapassou) {
         return;
     }
     horaDaUltimaFalaDePosicao = agora;
-    falar(falas[fala], VOLUME_BATIDA, agora);
+    falar(falas[fala], &volumeDasFalas[fala], ultrapassou ? VOZ_CONTENTE : VOZ_IRRITADA, VOLUME_BATIDA, agora);
 }
 
 /*
@@ -723,17 +830,22 @@ void pausarSonsDaCorrida(int pausar) {
  * Devolve: nada.
  */
 void descarregarAudio(void) {
+    vozTocando = NULL;
     for (int i = 0; i < TOTAL_FALAS; i++) {
         if (falaCarregada[i]) {
             UnloadSound(falas[i]);
             falaCarregada[i] = 0;
         }
+        free(volumeDasFalas[i].abertura);
+        volumeDasFalas[i] = (VolumeDaVoz){ NULL, 0 };
     }
     for (int i = 0; i < TOTAL_SONS_DE_BATIDA; i++) {
         if (somDeBatidaCarregado[i]) {
             UnloadSound(sonsDeBatida[i]);
             somDeBatidaCarregado[i] = 0;
         }
+        free(volumeDasBatidas[i].abertura);
+        volumeDasBatidas[i] = (VolumeDaVoz){ NULL, 0 };
     }
     for (int i = 0; i < TOTAL_SONS; i++) {
         if (somCarregado[i]) {
