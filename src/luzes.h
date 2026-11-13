@@ -42,6 +42,9 @@ void ligarVistaDasLampadas(void);
  * carregarLuzesDaCidade (devolve o número, -1 se não deu) e, a cada quadro, dizer onde estão e se aparecem */
 int registrarLuzesMoveis(const char *glb, const char *json, int sempreAceso);
 void moverLuzes(int qual, Matrix matriz, int visiveis);
+/* Tira de um conjunto que anda as lâmpadas (as ilhas da malha) com o meio além de zMinimo no eixo z do
+ * modelo, num conjunto novo, que anda à parte (a cabine do Mack). Devolve o número dele (-1 se não deu) */
+int separarLuzesMoveis(int qual, float zMinimo);
 
 /* As luzes pontuais acesas agora (da cidade e dos interiores), com a força de agora. Devolve quantas */
 int lampadasAcesas(Lampada *saida, int cabe);

@@ -54,6 +54,8 @@
 #define FOLGA_DENTRO_DA_RODA  1.06f     /* a peça precisa caber no círculo da roda */
 #define FOLGA_DE_LADO_DA_RODA 0.35f     /* e não passar mais que isso (em larguras de roda) para os lados */
 #define GRAUS_DAS_RODAS_DA_FRENTE 24.0f /* com o volante todo */
+#define GRAUS_DAS_MAOS_ABERTAS 14.0f    /* as rodas da frente abertas para fora, cada uma para o seu lado (gestos.c) */
+#define CURSO_DO_BICO         0.22f     /* metros: o quanto o bico de um morador sobe ou desce no eixo da frente */
 
 /* Uma ilha: um pedaço contínuo de triângulos de uma malha */
 typedef struct {
@@ -126,15 +128,28 @@ static float larguraDaFicha(int numero) {
     return largura;
 }
 
+/* Os vértices. A boca: os da mandíbula (o peso de cada um vem no x de vertexTexCoord2, posto por
+ * prepararBoca; nos outros é 0) giram em volta da dobradiça, na horizontal de lado a lado do carro, o
+ * quanto a boca abre vezes o peso: a frente desce. A normal gira junto. O fragNaPeca (o corte do aro do
+ * pneu estourado) continua sendo o ponto parado */
 static const char *VERTICES_DO_SHADER =
     "#version 330\n"
-    "in vec3 vertexPosition; in vec2 vertexTexCoord; in vec3 vertexNormal; in vec4 vertexColor;\n"
+    "in vec3 vertexPosition; in vec2 vertexTexCoord; in vec3 vertexNormal; in vec4 vertexColor; in vec2 vertexTexCoord2;\n"
     "uniform mat4 mvp; uniform mat4 matModel;\n"
+    "uniform vec3 mandibula;\n" /* a dobradiça (y, z) e o ângulo da boca aberta (radianos) */
     "out vec2 fragTexCoord; out vec4 fragColor; out vec3 fragNormal; out vec3 fragPos; out vec3 fragNaPeca;\n"
     "void main() { fragTexCoord = vertexTexCoord; fragColor = vertexColor; fragNaPeca = vertexPosition;\n"
-    "              fragNormal = mat3(matModel) * vertexNormal;\n"
-    "              fragPos = vec3(matModel * vec4(vertexPosition, 1.0));\n"
-    "              gl_Position = mvp * vec4(vertexPosition, 1.0); }\n";
+    "              vec3 p = vertexPosition, n = vertexNormal;\n"
+    "              float a = mandibula.z * vertexTexCoord2.x;\n"
+    "              if (a != 0.0) {\n"
+    "                  float c = cos(a), s = sin(a);\n"
+    "                  vec2 d = p.yz - mandibula.xy;\n"
+    "                  p.yz = mandibula.xy + vec2(d.x * c - d.y * s, d.x * s + d.y * c);\n"
+    "                  n.yz = vec2(n.y * c - n.z * s, n.y * s + n.z * c);\n"
+    "              }\n"
+    "              fragNormal = mat3(matModel) * n;\n"
+    "              fragPos = vec3(matModel * vec4(p, 1.0));\n"
+    "              gl_Position = mvp * vec4(p, 1.0); }\n";
 
 /* Só o contorno do carro, em preto: é a foto da sombra */
 #define PIXELS_DA_SOMBRA_TEXTO(OPACIDADE) \
@@ -200,6 +215,24 @@ static const char *VERTICES_DO_SHADER =
 #define SUSTO_OLHA_PARA_CIMA  0.35f
 #define SUSTO_TREME           0.10f     /* a íris treme de lado (em frações do quanto ela anda) */
 #define SUSTO_PASSA           0.80f     /* segundos para o susto passar */
+/* As emoções dos moradores (gestos.h), cada uma inteira: a pálpebra faz de sobrancelha */
+#define ALEGRIA_FECHA         0.16f     /* contente: os olhos sorriem, um pouco apertados... */
+#define ALEGRIA_INCLINA      -0.18f     /* ...com o canto de dentro erguido (a cara amiga) */
+#define ALEGRIA_ARCO          0.12f
+#define ALEGRIA_IRIS          1.06f
+#define RAIVA_FECHA           0.28f     /* bravo: a pálpebra desce sobre o canto de dentro */
+#define RAIVA_INCLINA         0.60f
+#define RAIVA_ARCO           -0.10f
+#define RAIVA_IRIS            0.90f
+#define TRISTEZA_FECHA        0.28f     /* triste ou tímido: o canto de dentro sobe e o de fora cai */
+#define TRISTEZA_INCLINA     -0.50f
+#define TRISTEZA_IRIS         1.08f
+#define ESPANTO_FECHA        -0.28f     /* curioso, perguntando: arregalado, a sobrancelha em arco */
+#define ESPANTO_ARCO          0.30f
+#define ESPANTO_IRIS          0.94f
+#define SONO_FECHA            0.80f     /* calmo, pensativo, cochilando: as pálpebras caem */
+#define MAIS_FECHADO          0.95f     /* somando tudo, a pálpebra para aqui... */
+#define MAIS_ABERTO          -0.45f     /* ...e aqui */
 /* As molas: cada parte da cara vai até o alvo como uma mola (frequência em Hz e
  * amortecimento: abaixo de 1, passa um pouco do ponto e volta). É isso que dá vida: o olho
  * chega no canto, passa um tico e assenta, em vez de deslizar em linha reta. */
@@ -294,6 +327,7 @@ typedef struct {
 typedef struct {
     Mola olharX, olharY, fechar, inclinar, arco, iris;
     float alvoAperto, alvoSusto;   /* o pedido para o próximo desenho */
+    Emocao emocao;                 /* a emoção pedida para o próximo desenho (os moradores) */
     float susto;                   /* o susto de agora (passa devagar) */
     float piscada;                 /* segundos desde o começo da piscada (< 0: sem piscada) */
     float proximaPiscada;          /* segundos até a próxima */
@@ -315,6 +349,18 @@ static int locDoDesvio, locDosMeios, locDoTamanho, locDaForma;
 static int locsDoReflexo[3];   /* reflexoDaPintura no opaco, no translúcido e no dos olhos */
 static int locsDoCorte[2];     /* corteDoAro no opaco e no translúcido */
 static int locsDoOlho[3];      /* "olho" nos mesmos três: procurar pelo nome a cada quadro é caro */
+static int locsDaMandibula[2]; /* "mandibula" no opaco e no translúcido */
+
+/* A boca de cada modelo (recursos/modelos/carros/bocas.txt, de ferramentas/medir_bocas.py) */
+#define ARQUIVO_DAS_BOCAS     PASTA_DOS_MODELOS "bocas.txt"
+#define MESMO_PONTO           2e-5f     /* unidades do modelo: o vértice da tabela e o da malha são o mesmo */
+typedef struct {
+    int tem;
+    float dobradicaY, dobradicaZ;   /* no modelo como veio */
+    float graus;                    /* a boca toda aberta */
+} BocaDoCarro;
+static BocaDoCarro bocas[TOTAL_DE_MODELOS];
+static float aberturaNoProximo[TOTAL_DE_MODELOS];   /* 0 fechada a 1 aberta: vale só para o próximo desenho */
 
 static Model modelos[TOTAL_DE_MODELOS];
 static Matrix ajuste[TOTAL_DE_MODELOS];     /* do modelo como veio para o modelo normalizado */
@@ -338,6 +384,7 @@ static Vector3 pontaDosGarfosNormal;     /* o meio das pás, em cima, no carro n
 static int rodaEscondida = -1;           /* a roda que não está no carro no próximo desenho */
 static int estouradosNoProximo = 0;      /* os pneus estourados no próximo desenho (bits, como Carro.pneuEstourado) */
 static Matrix corpoInclinado;            /* a suspensão: só o corpo inclina, as rodas não */
+static float aberturaDasRodas = 0.0f;    /* 0 a 1: as rodas da frente abertas (as mãos), no próximo desenho */
 static int temCorpoInclinado = 0;
 
 static unsigned char *translucidos[TOTAL_DE_MODELOS];   /* por material: 1 se tem algo translúcido */
@@ -433,8 +480,9 @@ static void desenharRodas(int numero, Model modelo, Matrix noMundo, float angulo
         }
         int estourado = (estouradosNoProximo & bitDaRoda(roda)) != 0;
         Matrix giro = MatrixRotateX(anguloDasRodas);
-        if (roda->centro.z > 0.0f) {
-            giro = MatrixMultiply(giro, MatrixRotateY(-volante * GRAUS_DAS_RODAS_DA_FRENTE * DEG2RAD));
+        if (roda->centro.z > 0.0f) {   /* a da frente vira com o volante e, abrindo as mãos, cada uma para o seu lado */
+            float abre = (roda->centro.x > 0.0f) ? aberturaDasRodas : -aberturaDasRodas;   /* +x é a esquerda */
+            giro = MatrixMultiply(giro, MatrixRotateY((-volante * GRAUS_DAS_RODAS_DA_FRENTE + abre * GRAUS_DAS_MAOS_ABERTAS) * DEG2RAD));
         }
         float y = roda->centro.y + ((subida != NULL) ? subida[peca->roda] : 0.0f);
         Matrix lugar = MatrixMultiply(giro, MatrixTranslate(roda->centro.x, y, roda->centro.z));
@@ -721,6 +769,38 @@ void inclinarCorpoNoProximoDesenho(int numero, float rolagem, float arfagem) {
 }
 
 /*
+ * posturaNoProximoDesenho
+ * O corpo sobre as rodas, com a suspensão (como inclinarCorpoNoProximoDesenho) e os gestos
+ * (gestos.c), como a Pixar fazia em Carros: o eixo de trás é o quadril, e o bico abaixa e sobe
+ * girando em volta dele (o carro inteiro é a cabeça); o corpo deita de lado em volta do meio, na
+ * altura dos eixos, e sobe ou desce sobre as rodas. As rodas ficam no chão. A arfagem da suspensão
+ * gira no meio, como sempre: assim o carro do jogador não muda de giro quando os gestos entram.
+ * Recebe: o carro, a rolagem (radianos, positivo: o teto vai para a esquerda), a arfagem da
+ *         suspensão e o aceno do gesto (radianos, positivo: o bico desce) e a subida (metros).
+ * Devolve: nada.
+ */
+void posturaNoProximoDesenho(int numero, float rolagem, float arfagem, float aceno, float subida) {
+    float eixo = (totalDeRodas[numero] > 0) ? rodas[numero][0].centro.y : 0.3f;
+    float quadril = -comprimentoDaFicha(numero) * 0.3f;   /* sem rodas achadas: mais ou menos ali */
+    float frente = comprimentoDaFicha(numero) * 0.3f;
+    for (int r = 0; r < totalDeRodas[numero]; r++) {
+        quadril = (r == 0) ? rodas[numero][r].centro.z : fminf(quadril, rodas[numero][r].centro.z);
+        frente = (r == 0) ? rodas[numero][r].centro.z : fmaxf(frente, rodas[numero][r].centro.z);
+    }
+    /* O bico não passa do curso da suspensão no eixo da frente: num carro comprido (o Ruivo), o mesmo
+     * ângulo afundaria a frente nas rodas. O limite é macio, para o gesto não bater num muro */
+    float limite = CURSO_DO_BICO / fmaxf(frente - quadril, 0.5f);
+    aceno = limite * tanhf(aceno / limite);
+    Matrix cabeca = MatrixMultiply(MatrixMultiply(MatrixTranslate(0.0f, -eixo, -quadril), MatrixRotateX(aceno)),
+                                   MatrixTranslate(0.0f, eixo, quadril));
+    Matrix suspensao = MatrixMultiply(MatrixMultiply(MatrixMultiply(MatrixTranslate(0.0f, -eixo, 0.0f), MatrixRotateX(arfagem)),
+                                                     MatrixRotateZ(-rolagem)),
+                                      MatrixTranslate(0.0f, eixo, 0.0f));
+    corpoInclinado = MatrixMultiply(MatrixMultiply(cabeca, suspensao), MatrixTranslate(0.0f, subida, 0.0f));
+    temCorpoInclinado = 1;
+}
+
+/*
  * moverGarfosNoProximoDesenho
  * Os doGuido do Guido: os garfos sobem e inclinam para trás, girando em volta da base deles.
  * Recebe: quanto sobem (metros) e quanto inclinam para trás (radianos).
@@ -782,6 +862,40 @@ void desenharRodaSolta(int numero, int roda, Matrix noMundo) {
 void expressaoNoProximoDesenho(int numero, float aperto, float susto) {
     caras[numero].alvoAperto = fmaxf(0.0f, fminf(1.0f, aperto));
     caras[numero].alvoSusto = fmaxf(0.0f, fminf(1.0f, susto));
+}
+
+/*
+ * emocaoNoProximoDesenho
+ * A emoção da cara no próximo desenho (os moradores: contente, bravo, triste, curioso, com
+ * sono), somada ao aperto e ao susto. A cara vai até lá com as molas; sem chamar, volta à
+ * normal.
+ * Recebe: o carro e a emoção (gestos.h).
+ * Devolve: nada.
+ */
+void emocaoNoProximoDesenho(int numero, const Emocao *emocao) {
+    caras[numero].emocao = *emocao;
+}
+
+/*
+ * abrirRodasNoProximoDesenho
+ * As rodas da frente como mãos abertas (os braços abertos de quem pergunta ou se empolga): cada uma vira
+ * para o seu lado, por cima do volante, no próximo desenho.
+ * Recebe: o quanto (0 a 1).
+ * Devolve: nada.
+ */
+void abrirRodasNoProximoDesenho(float abertura) {
+    aberturaDasRodas = fmaxf(0.0f, fminf(1.0f, abertura));
+}
+
+/*
+ * bocaNoProximoDesenho
+ * O quanto a boca do carro está aberta no próximo desenho (gestos.c: as vogais da fala). Sem chamar, ela
+ * fica fechada. Só os modelos com a boca medida (bocas.txt) abrem.
+ * Recebe: o carro e a abertura (0 fechada a 1 aberta).
+ * Devolve: nada.
+ */
+void bocaNoProximoDesenho(int numero, float abertura) {
+    aberturaNoProximo[numero] = fmaxf(0.0f, fminf(1.0f, abertura));
 }
 
 /*
@@ -849,8 +963,11 @@ static void animarOlhos(int numero, float volante, float tempo) {
     c->susto = fmaxf(c->alvoSusto, c->susto - tempo / SUSTO_PASSA);
     float s = c->susto;
     float a = c->alvoAperto * (1.0f - s);
+    Emocao e = c->emocao;   /* o susto passa por cima de tudo */
+    float semSusto = 1.0f - s;
     c->alvoAperto = 0.0f;
     c->alvoSusto = 0.0f;
+    memset(&c->emocao, 0, sizeof(c->emocao));
 
     /* As piscadas: de tempos em tempos, menos no "modo caça" (concentrado), e no susto */
     c->proximaPiscada -= tempo;
@@ -879,12 +996,22 @@ static void animarOlhos(int numero, float volante, float tempo) {
     float solto = (1.0f - fabsf(olhar)) * (1.0f - a * 0.7f);   /* concentrado, olha menos em volta */
     float tremor = s * SUSTO_TREME * sinf((float) c->hora * 47.0f + (float) numero * 1.7f);
 
+    /* As emoções somam por cima do aperto (a cara de quem não está assustado) */
+    float fechar = CACA_FECHA * a + SUSTO_FECHA * s
+                   + semSusto * (ALEGRIA_FECHA * e.alegria + RAIVA_FECHA * e.raiva + TRISTEZA_FECHA * e.tristeza
+                                 + ESPANTO_FECHA * e.espanto + SONO_FECHA * e.sono);
+    float inclinar = CACA_INCLINA * a + SUSTO_INCLINA * s
+                     + semSusto * (ALEGRIA_INCLINA * e.alegria + RAIVA_INCLINA * e.raiva + TRISTEZA_INCLINA * e.tristeza);
+    float arco = SUSTO_ARCO * s + semSusto * (ALEGRIA_ARCO * e.alegria + RAIVA_ARCO * e.raiva + ESPANTO_ARCO * e.espanto);
+    float iris = 1.0f + (CACA_IRIS - 1.0f) * a + (SUSTO_IRIS - 1.0f) * s
+                 + semSusto * ((ALEGRIA_IRIS - 1.0f) * e.alegria + (RAIVA_IRIS - 1.0f) * e.raiva
+                               + (TRISTEZA_IRIS - 1.0f) * e.tristeza + (ESPANTO_IRIS - 1.0f) * e.espanto);
     molar(&c->olharX, olhar * (1.0f - 0.3f * s) + c->olhadelaX * solto + tremor, MOLA_DO_OLHAR, tempo);
-    molar(&c->olharY, SUSTO_OLHA_PARA_CIMA * s + c->olhadelaY * solto, MOLA_DO_OLHAR, tempo);
-    molar(&c->fechar, CACA_FECHA * a + SUSTO_FECHA * s, MOLA_DA_PALPEBRA, tempo);
-    molar(&c->inclinar, CACA_INCLINA * a + SUSTO_INCLINA * s, MOLA_DA_INCLINACAO, tempo);
-    molar(&c->arco, SUSTO_ARCO * s, MOLA_DO_ARCO, tempo);
-    molar(&c->iris, 1.0f + (CACA_IRIS - 1.0f) * a + (SUSTO_IRIS - 1.0f) * s, MOLA_DA_IRIS, tempo);
+    molar(&c->olharY, SUSTO_OLHA_PARA_CIMA * s + semSusto * e.olharParaCima + c->olhadelaY * solto, MOLA_DO_OLHAR, tempo);
+    molar(&c->fechar, fmaxf(MAIS_ABERTO, fminf(MAIS_FECHADO, fechar)), MOLA_DA_PALPEBRA, tempo);
+    molar(&c->inclinar, fmaxf(-0.7f, fminf(0.7f, inclinar)), MOLA_DA_INCLINACAO, tempo);
+    molar(&c->arco, fmaxf(-0.3f, fminf(0.5f, arco)), MOLA_DO_ARCO, tempo);
+    molar(&c->iris, iris, MOLA_DA_IRIS, tempo);
 }
 
 /*
@@ -943,6 +1070,9 @@ void desenharCarro3D(int numero, Matrix noMundo, float anguloDasRodas, float vol
     int comGarfos = (numero == CARRO_COM_GARFOS && temGarfos);
     if (comGarfos) {
         Matrix pose = temPoseDosGarfos ? MatrixMultiply(ajuste[numero], poseDosGarfos) : ajuste[numero];
+        if (temCorpoInclinado) {
+            pose = MatrixMultiply(pose, corpoInclinado);   /* os garfos vão com o corpo */
+        }
         doGuido.transform = MatrixMultiply(pose, noMundo);
     }
 
@@ -953,6 +1083,14 @@ void desenharCarro3D(int numero, Matrix noMundo, float anguloDasRodas, float vol
     }
     SetShaderValue(shaderOpaco, locsDoReflexo[0], &reflexos[numero], SHADER_UNIFORM_FLOAT);
     SetShaderValue(shaderDosOlhos, locsDoReflexo[2], &reflexos[numero], SHADER_UNIFORM_FLOAT);
+    /* A boca: a mandíbula gira em volta da dobradiça (só neste carro; depois volta a fechada) */
+    Vector3 mandibula = { 0.0f, 0.0f, 0.0f };
+    if (bocas[numero].tem) {
+        mandibula = (Vector3){ bocas[numero].dobradicaY, bocas[numero].dobradicaZ,
+                               aberturaNoProximo[numero] * bocas[numero].graus * DEG2RAD };
+    }
+    SetShaderValue(shaderOpaco, locsDaMandibula[0], &mandibula, SHADER_UNIFORM_VEC3);
+    SetShaderValue(shaderTranslucido, locsDaMandibula[1], &mandibula, SHADER_UNIFORM_VEC3);
     desenharComShader(modelo, shaderOpaco, materialDosOlhos);
     if (comGarfos) {
         desenharComShader(doGuido, shaderOpaco, -1);
@@ -976,6 +1114,13 @@ void desenharCarro3D(int numero, Matrix noMundo, float anguloDasRodas, float vol
     estouradosNoProximo = 0;
     temPoseDosGarfos = 0;
     temCorpoInclinado = 0;
+    aberturaNoProximo[numero] = 0.0f;
+    aberturaDasRodas = 0.0f;
+    if (bocas[numero].tem) {   /* a miniatura e as rodas soltas, desenhadas depois com os mesmos shaders, de boca fechada */
+        Vector3 fechada = { 0.0f, 0.0f, 0.0f };
+        SetShaderValue(shaderOpaco, locsDaMandibula[0], &fechada, SHADER_UNIFORM_VEC3);
+        SetShaderValue(shaderTranslucido, locsDaMandibula[1], &fechada, SHADER_UNIFORM_VEC3);
+    }
 }
 
 /*
@@ -2043,6 +2188,10 @@ int darOlhosAoModelo(Model *modelo, const char *nome) {
  * Recebe: o olhar, o aperto e o susto (0 a 1).
  * Devolve: nada.
  */
+void emocaoDoModelo(const Emocao *emocao) {
+    caras[CARA_DE_OUTRO_MODELO].emocao = *emocao;
+}
+
 void prepararOlhosDoModelo(float olhar, float aperto, float susto) {
     if (!olhos[CARA_DE_OUTRO_MODELO].tem) {
         return;
@@ -2051,6 +2200,243 @@ void prepararOlhosDoModelo(float olhar, float aperto, float susto) {
     prepararOlhos(CARA_DE_OUTRO_MODELO, olhar);
     float reflexo = 0.6f;
     SetShaderValue(shaderDosOlhos, locsDoReflexo[2], &reflexo, SHADER_UNIFORM_FLOAT);
+}
+
+/* Os pontos da mandíbula de um modelo, ordenados pelo x, para achar cada vértice pela posição */
+typedef struct {
+    float x, y, z, peso;
+} PontoDaBoca;
+
+static int compararPontoDaBoca(const void *a, const void *b) {
+    float d = ((const PontoDaBoca *) a)->x - ((const PontoDaBoca *) b)->x;
+    return (d < 0.0f) ? -1 : (d > 0.0f) ? 1 : 0;
+}
+
+/* O peso do vértice na mandíbula (0 se ele não é dela): procura pelo x e confere o y e o z */
+static float pesoNaBoca(const PontoDaBoca *pontos, int total, float x, float y, float z) {
+    int a = 0, b = total;
+    while (a < b) {   /* o primeiro ponto com x >= x - MESMO_PONTO */
+        int meio = (a + b) / 2;
+        if (pontos[meio].x < x - MESMO_PONTO) {
+            a = meio + 1;
+        } else {
+            b = meio;
+        }
+    }
+    for (int i = a; i < total && pontos[i].x <= x + MESMO_PONTO; i++) {
+        if (fabsf(pontos[i].y - y) <= MESMO_PONTO && fabsf(pontos[i].z - z) <= MESMO_PONTO) {
+            return pontos[i].peso;
+        }
+    }
+    return 0.0f;
+}
+
+/* Põe os pesos numa malha que já está na placa de vídeo: no x do vertexTexCoord2 (o atributo 5) */
+static void porPesosNaMalha(Mesh *malha, float *pesos) {
+    int tamanho = malha->vertexCount * 2 * (int) sizeof(float);
+    if (malha->texcoords2 != NULL) {   /* já tinha a segunda coordenada (nenhum carro tem): troca o conteúdo */
+        memcpy(malha->texcoords2, pesos, (size_t) tamanho);
+        RL_FREE(pesos);
+        rlUpdateVertexBuffer(malha->vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_TEXCOORD2], malha->texcoords2, tamanho, 0);
+        return;
+    }
+    malha->texcoords2 = pesos;   /* a UnloadMesh libera junto */
+    rlEnableVertexArray(malha->vaoId);
+    malha->vboId[RL_DEFAULT_SHADER_ATTRIB_LOCATION_TEXCOORD2] = rlLoadVertexBuffer(malha->texcoords2, tamanho, false);
+    rlSetVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_TEXCOORD2, 2, RL_FLOAT, 0, 0, 0);
+    rlEnableVertexAttribute(RL_DEFAULT_SHADER_ATTRIB_LOCATION_TEXCOORD2);
+    rlDisableVertexArray();
+}
+
+/*
+ * prepararBoca
+ * A boca do modelo, da tabela das bocas: a dobradiça, o quanto abre e o peso de cada ponto da mandíbula
+ * (o lábio de baixo, o queixo, os dentes de baixo e a língua; veja ferramentas/medir_bocas.py). Cada
+ * vértice das malhas do modelo que está num ponto da tabela leva o peso dele.
+ * Recebe: o carro e o texto da tabela (NULL: sem tabela).
+ * Devolve: nada.
+ */
+/*
+ * lerBoca
+ * A linha de um modelo na tabela das bocas e os pontos dela, ordenados pelo x.
+ * Recebe: a tabela, o nome do modelo e onde pôr a dobradiça, os graus e o total de pontos lidos.
+ * Devolve: os pontos (RL_FREE depois), ou NULL se o modelo não está na tabela.
+ */
+static PontoDaBoca *lerBoca(const char *tabela, const char *nome, float *y, float *z, float *graus, int *lidos) {
+    if (tabela == NULL) {
+        return NULL;
+    }
+    char procura[80];
+    snprintf(procura, sizeof(procura), "\nboca %s ", nome);
+    const char *linha = strstr(tabela, procura);
+    int total;
+    if (linha == NULL || sscanf(linha + strlen(procura), "%f %f %f %d", y, z, graus, &total) != 4 || total <= 0) {
+        return NULL;
+    }
+    PontoDaBoca *pontos = (PontoDaBoca *) RL_MALLOC((size_t) total * sizeof(PontoDaBoca));
+    const char *p = strchr(linha + 1, '\n');
+    *lidos = 0;
+    while (p != NULL && *lidos < total) {
+        PontoDaBoca q;
+        if (sscanf(p + 1, "%f %f %f %f", &q.x, &q.y, &q.z, &q.peso) != 4) {
+            break;
+        }
+        pontos[(*lidos)++] = q;
+        p = strchr(p + 1, '\n');
+    }
+    qsort(pontos, (size_t) *lidos, sizeof(PontoDaBoca), compararPontoDaBoca);
+    return pontos;
+}
+
+static void prepararBoca(int numero, const char *tabela) {
+    bocas[numero].tem = 0;
+    float y, z, graus;
+    int lidos = 0;
+    PontoDaBoca *pontos = lerBoca(tabela, GetFileNameWithoutExt(arquivoDoModelo(numero)), &y, &z, &graus, &lidos);
+    if (pontos == NULL) {
+        return;
+    }
+    int achados = 0;
+    Model *modelo = &modelos[numero];
+    for (int m = 0; m < modelo->meshCount; m++) {
+        Mesh *malha = &modelo->meshes[m];
+        float *pesos = NULL;
+        for (int v = 0; v < malha->vertexCount; v++) {
+            float w = pesoNaBoca(pontos, lidos, malha->vertices[v * 3], malha->vertices[v * 3 + 1], malha->vertices[v * 3 + 2]);
+            if (w > 0.0f) {
+                if (pesos == NULL) {
+                    pesos = (float *) RL_CALLOC((size_t) malha->vertexCount * 2, sizeof(float));
+                }
+                pesos[v * 2] = w;
+                achados++;
+            }
+        }
+        if (pesos != NULL) {
+            porPesosNaMalha(malha, pesos);
+        }
+    }
+    RL_FREE(pontos);
+    if (achados > 0) {
+        bocas[numero] = (BocaDoCarro){ 1, y, z, graus };
+    }
+    TraceLog(LOG_INFO, "CARRO: %s: a boca tem %d vértices na mandíbula (%d pontos na tabela)", nomeDoModelo(numero), achados, lidos);
+}
+
+/* A boca de um modelo que não é carro (o Mack): ele não usa o shader dos carros, então a mandíbula gira
+ * na própria malha (só quando a abertura muda) */
+#define MAIS_MALHAS_COM_BOCA  4
+typedef struct {
+    int tem;
+    float dobradicaY, dobradicaZ, graus, anguloAgora;
+    Model *modelo;
+    int malhas[MAIS_MALHAS_COM_BOCA], totalDeMalhas;
+    int *vertices[MAIS_MALHAS_COM_BOCA];     /* os da mandíbula em cada malha... */
+    float *pesos[MAIS_MALHAS_COM_BOCA];      /* ...o peso de cada um... */
+    float *parados[MAIS_MALHAS_COM_BOCA];    /* ...e onde ficam de boca fechada: a posição e a normal (6 números) */
+    int quantos[MAIS_MALHAS_COM_BOCA];
+} BocaDeOutroModelo;
+static BocaDeOutroModelo bocaDoOutro;
+
+/*
+ * darBocaAoModelo
+ * A boca da tabela das bocas num modelo que não é carro (o Mack): os vértices da mandíbula em cada
+ * malha, pela posição. Chamar depois de cortar as malhas do modelo, se for cortar.
+ * Recebe: o modelo (fica guardado: tem de durar até descarregarBocaDoModelo) e o nome na tabela.
+ * Devolve: 1 se deu; 0 se o modelo não está na tabela (a boca fica fechada).
+ */
+int darBocaAoModelo(Model *modelo, const char *nome) {
+    descarregarBocaDoModelo();
+    char *tabela = FileExists(ARQUIVO_DAS_BOCAS) ? LoadFileText(ARQUIVO_DAS_BOCAS) : NULL;
+    float y, z, graus;
+    int lidos = 0;
+    PontoDaBoca *pontos = lerBoca(tabela, nome, &y, &z, &graus, &lidos);
+    if (tabela != NULL) {
+        UnloadFileText(tabela);
+    }
+    if (pontos == NULL) {
+        return 0;
+    }
+    BocaDeOutroModelo *b = &bocaDoOutro;
+    for (int m = 0; m < modelo->meshCount && b->totalDeMalhas < MAIS_MALHAS_COM_BOCA; m++) {
+        Mesh *malha = &modelo->meshes[m];
+        int k = b->totalDeMalhas, n = 0;
+        for (int v = 0; v < malha->vertexCount; v++) {
+            n += pesoNaBoca(pontos, lidos, malha->vertices[v * 3], malha->vertices[v * 3 + 1], malha->vertices[v * 3 + 2]) > 0.0f;
+        }
+        if (n == 0 || malha->normals == NULL) {
+            continue;
+        }
+        b->vertices[k] = (int *) RL_MALLOC((size_t) n * sizeof(int));
+        b->pesos[k] = (float *) RL_MALLOC((size_t) n * sizeof(float));
+        b->parados[k] = (float *) RL_MALLOC((size_t) n * 6 * sizeof(float));
+        int i = 0;
+        for (int v = 0; v < malha->vertexCount; v++) {
+            float w = pesoNaBoca(pontos, lidos, malha->vertices[v * 3], malha->vertices[v * 3 + 1], malha->vertices[v * 3 + 2]);
+            if (w > 0.0f) {
+                b->vertices[k][i] = v;
+                b->pesos[k][i] = w;
+                memcpy(&b->parados[k][i * 6], &malha->vertices[v * 3], 3 * sizeof(float));
+                memcpy(&b->parados[k][i * 6 + 3], &malha->normals[v * 3], 3 * sizeof(float));
+                i++;
+            }
+        }
+        b->malhas[k] = m;
+        b->quantos[k] = n;
+        b->totalDeMalhas++;
+    }
+    RL_FREE(pontos);
+    b->tem = b->totalDeMalhas > 0;
+    b->modelo = modelo;
+    b->dobradicaY = y;
+    b->dobradicaZ = z;
+    b->graus = graus;
+    b->anguloAgora = 0.0f;
+    TraceLog(LOG_INFO, "BOCA: %s: a mandíbula em %d malhas", nome, b->totalDeMalhas);
+    return b->tem;
+}
+
+/*
+ * abrirBocaDoModelo
+ * Abre a boca do modelo de darBocaAoModelo: gira os vértices da mandíbula (e as normais) em volta da
+ * dobradiça, o quanto ela abre vezes o peso de cada um, e manda a malha de novo para a placa de vídeo.
+ * Recebe: a abertura (0 fechada a 1 aberta).
+ * Devolve: nada.
+ */
+void abrirBocaDoModelo(float abertura) {
+    BocaDeOutroModelo *b = &bocaDoOutro;
+    if (!b->tem) {
+        return;
+    }
+    float angulo = fmaxf(0.0f, fminf(1.0f, abertura)) * b->graus * DEG2RAD;
+    if (fabsf(angulo - b->anguloAgora) < 0.002f) {
+        return;   /* quase igual: não vale mandar a malha de novo */
+    }
+    b->anguloAgora = angulo;
+    for (int k = 0; k < b->totalDeMalhas; k++) {
+        Mesh *malha = &b->modelo->meshes[b->malhas[k]];
+        for (int i = 0; i < b->quantos[k]; i++) {
+            const float *p = &b->parados[k][i * 6];
+            float a = angulo * b->pesos[k][i], c = cosf(a), s = sinf(a);
+            float dy = p[1] - b->dobradicaY, dz = p[2] - b->dobradicaZ;
+            int v = b->vertices[k][i];
+            malha->vertices[v * 3 + 1] = b->dobradicaY + dy * c - dz * s;
+            malha->vertices[v * 3 + 2] = b->dobradicaZ + dy * s + dz * c;
+            malha->normals[v * 3 + 1] = p[4] * c - p[5] * s;
+            malha->normals[v * 3 + 2] = p[4] * s + p[5] * c;
+        }
+        UpdateMeshBuffer(*malha, 0, malha->vertices, malha->vertexCount * 3 * (int) sizeof(float), 0);
+        UpdateMeshBuffer(*malha, 2, malha->normals, malha->vertexCount * 3 * (int) sizeof(float), 0);
+    }
+}
+
+void descarregarBocaDoModelo(void) {
+    BocaDeOutroModelo *b = &bocaDoOutro;
+    for (int k = 0; k < b->totalDeMalhas; k++) {
+        RL_FREE(b->vertices[k]);
+        RL_FREE(b->pesos[k]);
+        RL_FREE(b->parados[k]);
+    }
+    memset(b, 0, sizeof(*b));
 }
 
 /*
@@ -2088,9 +2474,13 @@ void carregarCarros3D(void) {
             SetShaderValue(comReflexo[i], locsDoCorte[i], &semCorte, SHADER_UNIFORM_FLOAT);
         }
         locsDoOlho[i] = GetShaderLocation(comReflexo[i], "olho");
+        if (i < 2) {
+            locsDaMandibula[i] = GetShaderLocation(comReflexo[i], "mandibula");
+        }
         SetShaderValue(comReflexo[i], locsDoReflexo[i], &reflexoNormal, SHADER_UNIFORM_FLOAT);
     }
     char *tabelaDosOlhos = FileExists(PASTA_DOS_OLHOS "olhos.txt") ? LoadFileText(PASTA_DOS_OLHOS "olhos.txt") : NULL;
+    char *tabelaDasBocas = FileExists(ARQUIVO_DAS_BOCAS) ? LoadFileText(ARQUIVO_DAS_BOCAS) : NULL;
     shaderDaSombra = LoadShaderFromMemory(VERTICES_DO_SHADER, PIXELS_DA_SOMBRA_TEXTO("0.82"));
 
     for (int numero = 0; numero < TOTAL_DE_MODELOS; numero++) {
@@ -2126,6 +2516,7 @@ void carregarCarros3D(void) {
         acharRodas(numero, larguraDaFicha(numero), (caixa.max.y - caixa.min.y) * escala);
         separarRodas(numero);
         separarAros(numero);
+        prepararBoca(numero, tabelaDasBocas);   /* depois das rodas: o corpo já é a malha que fica */
         TraceLog(LOG_INFO, "CARRO: %s tem %d rodas, em %d pecas (o aro vai até %.0f%% do raio)", nomeDoModelo(numero),
                  totalDeRodas[numero], totalDePecas[numero],
                  (totalDeRodas[numero] > 0) ? 100.0f * rodas[numero][0].raioDoAro / fmaxf(rodas[numero][0].raio, 0.01f) : 0.0f);
@@ -2135,6 +2526,9 @@ void carregarCarros3D(void) {
     }
     if (tabelaDosOlhos != NULL) {
         UnloadFileText(tabelaDosOlhos);
+    }
+    if (tabelaDasBocas != NULL) {
+        UnloadFileText(tabelaDasBocas);
     }
 }
 

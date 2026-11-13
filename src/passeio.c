@@ -52,6 +52,7 @@
 #include "audio.h"
 #include "efeitos.h"
 #include "config.h"
+#include "malhas.h"
 
 #define ARQUIVO_DA_COLISAO    "recursos/modelos/radiator_springs.col"
 
@@ -172,6 +173,9 @@ static float treino[3] = { TREINO_X, 0.0f, TREINO_Z };
 #define FUNDO_DA_CARRETA      1.5f      /* metros entre a porta e a traseira do carro, lá dentro */
 #define DESENHA_O_BAU_ATE     150.0f    /* metros: mais longe que isso, o lado de dentro da carreta não aparece */
 #define DESENHA_MORADOR_ATE   320.0f    /* metros: mais longe que isso, os moradores não são desenhados */
+#define MODELO_DO_GUIDO       7         /* na tabela FICHAS: o morador que tem garfos... */
+#define GARFOS_SOBEM          0.20f     /* ...que ele ergue quando se anima (metros)... */
+#define GARFOS_INCLINAM       0.18f     /* ...com as pontas para cima (radianos) */
 #define SOMBRA_DE_MORADOR_ATE 70.0f     /* e a sombra deles, só de perto */
 #define BATIDA_QUE_ASSUSTA    3.0f      /* m/s: batendo mais forte que isso num morador, ele se assusta */
 #define OUVE_ATE              26.0f     /* metros: a fala de um morador mais perto que isso aparece na tela */
@@ -225,6 +229,67 @@ static char destino[64] = "";        /* o nome da pista, para a cena da partida 
 static char recado[96] = "";         /* o resultado da corrida, na volta */
 static float tempoDoRecado = 0.0f;
 static int correrDireto = 0;         /* sem o mapa: a escolha leva direto à corrida */
+
+/* ------------------------------------------------------------------
+ * O corpo do Mack e o do jogador, e as conversas (gestos.c, papo.c)
+ * ------------------------------------------------------------------
+ * A cabine do Mack é a cabeça dele: ela se mexe sobre o chassi como o corpo dos carros sobre as rodas
+ * (o bico girando em volta do eixo de trás da cabine, o quadril), e a carreta fica parada, presa na
+ * quinta roda. O modelo vem inteiro, então o corpo dele é cortado ao carregar (malhas.c): as peças com
+ * o meio à frente de CABINE_A_PARTIR são da cabine (a cabine, o capô, o chassi com os tanques, os
+ * para-lamas, a quinta roda e as chaminés, que ficam embaixo da frente da carreta), menos as que estão
+ * em cima da carreta (o teto e as chapas do alto). As lâmpadas também (luzes.c). */
+#define CABINE_A_PARTIR       3.0f      /* metros, no z do modelo */
+#define TETO_DA_CARRETA       6.0f      /* metros: uma peça toda acima disto... */
+#define FRENTE_DA_CARRETA     8.0f      /* ...e que não passa daqui é da carreta */
+#define LAMPADAS_DA_CABINE    8.0f      /* metros: as lâmpadas com o meio à frente disto vão com a cabine */
+#define CURSO_DA_CABINE       0.22f     /* metros que a frente da cabine sobe ou desce, no eixo da frente */
+#define ROLAGEM_DA_CABINE     0.045f    /* radianos, no máximo */
+#define CONVERSA_COM_O_MACK_ATE 14.0f   /* metros da frente da cabine: o jogador conversa com o Mack */
+#define CONVERSA_ANDANDO_ATE  22.0f     /* m/s (uns 80 km/h): andando mais rápido que isso, não dá para conversar */
+#define NA_FRENTE_PARA_CONVERSAR (-0.3f)   /* cosseno: quem está na frente ou do lado do jogador */
+#define MACK_CUMPRIMENTA_DE_NOVO 45.0f  /* segundos */
+#define GRAUS_DAS_MAOS_DO_MACK 20.0f    /* as rodas da frente dele gesticulando, com a mão toda... */
+#define GRAUS_DAS_MAOS_DO_MACK_ABERTAS 12.0f   /* ...e abertas, cada uma para o seu lado */
+#define FALA_DO_MACK_DURA     3.8f
+
+static const Jeito JEITO_DO_MACK = {
+    /* grandalhão, leal e bonachão; pesado e mole de suspensão; e dorminhoco, como no filme */
+    .frequencia = 1.2f, .amortecimento = 0.5f, .alegria = 0.45f, .agitacao = 0.35f, .conforto = 0.7f,
+    .empatia = 0.8f, .timidez = 0.0f, .sonolencia = 0.9f, .inquietude = 0.3f,
+    .energia = 1.1f, .ritmo = 1.5f, .postura = 0.0f, .altura = 0.0f, .maos = 0.5f, .requebro = 0.4f,
+    .boca = 1.0f, .exclamando = HUMOR_EMPOLGADO, .tique = TIQUE_NENHUM,
+};
+
+static const RoteiroDoPapo PAPOS_DO_MACK[] = {
+    { { "Ei, garoto! Pronto pra próxima corrida?", ">Sempre pronto, Mack!",
+        "É isso aí! O Mack aqui te leva pra qualquer pista.", ">Você é o melhor, Mack.",
+        "Pode entrar quando quiser. A carreta tá prontinha!" } },
+    { { "Sabe, eu dirijo a noite toda e nem canso...", ">Tem certeza, Mack?",
+        "Bom... às vezes eu dou uma cochiladinha.", ">Na estrada?!", "Só uma piscadinha! Tô acordado, tô acordado!" } },
+    { { "Já viu as luzes da carreta de noite?", ">Ainda não!",
+        "Duzentas e oitenta e uma lâmpadas. Brilho de campeão!", ">Que estilo, Mack!", "Hehe. Volta aqui quando escurecer." } },
+};
+static const char *const CUMPRIMENTOS_DO_MACK[] = { "Ei, garoto! Tudo pronto pra viagem?", "Opa! Bom te ver por aqui!",
+                                                   "E aí, campeão! Bora pra pista?" };
+#define MACK_ENTRANDO   "Bora, garoto! Rumo à corrida!"
+#define MACK_PARTINDO   "Segura firme aí atrás, lá vamos nós!"
+#define MACK_VOLTANDO   "Chegamos! Que corrida, hein, garoto?"
+#define MACK_DESISTIU   "Mudou de ideia? Sem problema!"
+#define MACK_BATERAM    "Ei! Cuidado com a pintura, garoto!"
+
+static Corpo corpoDoMack, corpoDoJogador;
+static Pose poseDoMack, poseDoJogador;
+static Jeito jeitoDoJogador;                 /* o do carro dele, sem os tiques e sem sono: quem manda é o jogador */
+static unsigned char cabineDoMack[MAIS_RODAS];   /* 1: a malha do Mack é da cabine */
+static float quadrilDoMack = 6.1f, alturaDosEixosDoMack = 1.05f, eixoDaFrenteDoMack = 13.7f;   /* z, y e z no modelo */
+static int luzesDaCabine = -1;
+static Papo papoDoMack;
+static int papoDoMackDaVez = 0;
+static const char *falaDoMack = NULL;        /* o que o Mack está dizendo agora */
+static float falaDoMackRestante = 0.0f, duracaoDaFalaDoMack = 0.0f;
+static float mackCumprimentou = 0.0f, sustoDoMackAntes = 0.0f, mackAndouAntes = 0.0f;
+static int cenaAntes = CENA_DIRIGINDO;
 
 /* A foto do mapa, de cima: o canto de cima à esquerda é (mapaX0, mapaZ0); cada pixel tem metrosPorPixel */
 static Texture2D fotoDoMapa = { 0 };
@@ -306,6 +371,38 @@ static void chaoDoMack(float x, float z, float *y, float *inclinacao) {
     *inclinacao = atan2f(naFrente - atras, 2.0f * eixo);
 }
 
+/* Uma peça do corpo do Mack (uma ilha da malha) é da cabine? Veja CABINE_A_PARTIR */
+static int daCabineDoMack(Vector3 minimo, Vector3 maximo, void *dados) {
+    (void) dados;
+    if ((minimo.z + maximo.z) * 0.5f < CABINE_A_PARTIR) {
+        return 0;
+    }
+    return !(minimo.y > TETO_DA_CARRETA && maximo.z < FRENTE_DA_CARRETA);
+}
+
+/*
+ * separarCabineDoMack
+ * Corta o corpo do Mack (a malha maior) em carreta e cabine, e marca quais malhas vão com a cabine: a
+ * parte cortada e as que ficam inteiras à frente da carreta (os olhos). Sem dar para cortar, o Mack
+ * fica inteiro e parado como antes.
+ */
+static void separarCabineDoMack(void) {
+    int maior = 0;
+    for (int i = 1; i < mack.meshCount; i++) {
+        if (mack.meshes[i].vertexCount > mack.meshes[maior].vertexCount) {
+            maior = i;
+        }
+    }
+    int cabine = (mack.meshCount < MAIS_RODAS) ? separarModeloPorIlhas(&mack, maior, daCabineDoMack, NULL) : -1;
+    for (int i = 0; i < mack.meshCount && i < MAIS_RODAS; i++) {
+        BoundingBox caixa = GetMeshBoundingBox(mack.meshes[i]);
+        cabineDoMack[i] = (cabine >= 0) && (i == cabine || (i != maior && (caixa.min.z + caixa.max.z) * 0.5f > FRENTE_DA_CARRETA));
+    }
+    if (cabine < 0) {
+        TraceLog(LOG_WARNING, "PASSEIO: não deu para separar a cabine do Mack (ele fica inteiro)");
+    }
+}
+
 /*
  * carregarMack
  * O modelo (com a luz e a sombra do mapa), as medidas dele e a vaga na rua principal.
@@ -315,6 +412,10 @@ static void carregarMack(void) {
     if (FileExists(ARQUIVO_DO_MACK)) {
         mack = LoadModel(ARQUIVO_DO_MACK);
         temMack = mack.meshCount > 0;
+        if (temMack) {
+            separarCabineDoMack();
+            darBocaAoModelo(&mack, "mack");   /* a boca fala (bocas.txt); sem a linha dele, fica fechada */
+        }
     } else {
         TraceLog(LOG_WARNING, "PASSEIO: falta %s (gere com ferramentas/preparar_mack.py)", ARQUIVO_DO_MACK);
     }
@@ -349,6 +450,27 @@ static void carregarMack(void) {
                 BoundingBox roda = GetMeshBoundingBox(rodasDoMack.meshes[i]);
                 eixoDaRoda[i] = Vector3Scale(Vector3Add(roda.min, roda.max), 0.5f);
                 raioDaRodaDoMack[i] = fmaxf((roda.max.y - roda.min.y) / 2.0f, 0.1f);
+            }
+            /* O quadril da cabine: o meio dos eixos de trás dela; e o eixo da frente */
+            float frente = -1e9f, soma = 0.0f, altura = 0.0f;
+            int atras = 0, daCabine = 0;
+            for (int i = 0; i < rodasDoMack.meshCount; i++) {
+                if (eixoDaRoda[i].z > CABINE_A_PARTIR) {
+                    frente = fmaxf(frente, eixoDaRoda[i].z);
+                    altura += eixoDaRoda[i].y;
+                    daCabine++;
+                }
+            }
+            for (int i = 0; i < rodasDoMack.meshCount; i++) {
+                if (eixoDaRoda[i].z > CABINE_A_PARTIR && eixoDaRoda[i].z < frente - 1.0f) {
+                    soma += eixoDaRoda[i].z;
+                    atras++;
+                }
+            }
+            if (atras > 0 && daCabine > 0) {
+                quadrilDoMack = soma / (float) atras;
+                eixoDaFrenteDoMack = frente;
+                alturaDosEixosDoMack = altura / (float) daCabine;
             }
         }
     }
@@ -404,6 +526,24 @@ static Matrix matrizDaPortaDoMack(void) {
 }
 
 /*
+ * poseDaCabine
+ * A cabine do Mack sobre o chassi, no modelo (gestos.c): o bico gira em volta do quadril (o eixo de
+ * trás da cabine), o corpo deita de lado e sobe ou desce. O quanto ela vai é limitado pelo curso da
+ * suspensão (um limite macio, para o gesto não bater num muro).
+ */
+static Matrix poseDaCabine(void) {
+    float limite = CURSO_DA_CABINE / fmaxf(eixoDaFrenteDoMack - quadrilDoMack, 1.0f);
+    float aceno = limite * tanhf(poseDoMack.aceno / limite);
+    float rolagem = ROLAGEM_DA_CABINE * tanhf(poseDoMack.rolagem / ROLAGEM_DA_CABINE);
+    float subida = Clamp(poseDoMack.subida, -0.12f, 0.10f);
+    float y = alturaDosEixosDoMack, z = quadrilDoMack, meio = (quadrilDoMack + eixoDaFrenteDoMack) * 0.5f;
+    Matrix cabeca = MatrixMultiply(MatrixMultiply(MatrixTranslate(0.0f, -y, -z), MatrixRotateX(aceno)), MatrixTranslate(0.0f, y, z));
+    Matrix deLado = MatrixMultiply(MatrixMultiply(MatrixTranslate(0.0f, -y, -meio), MatrixRotateZ(-rolagem)),
+                                   MatrixTranslate(0.0f, y, meio));
+    return MatrixMultiply(MatrixMultiply(cabeca, deLado), MatrixTranslate(0.0f, subida, 0.0f));
+}
+
+/*
  * colocarMack
  * As matrizes do corpo e de cada roda neste quadro (as rodas giram o quanto o Mack andou, cada
  * uma pelo raio dela), para o desenho e a sombra.
@@ -413,15 +553,20 @@ static void colocarMack(void) {
         return;
     }
     Matrix noMundo = matrizDoMack();
+    Matrix daCabine = MatrixMultiply(poseDaCabine(), noMundo);
     for (int i = 0; i < mack.meshCount; i++) {
-        matrizesDoMack[i] = noMundo;
+        matrizesDoMack[i] = cabineDoMack[i] ? daCabine : noMundo;
     }
     colocarNoMundoAberto(0, &mack, matrizesDoMack);
     if (temRodasDoMack) {
         for (int i = 0; i < rodasDoMack.meshCount; i++) {
             Vector3 eixo = eixoDaRoda[i];
-            Matrix giro = MatrixMultiply(MatrixMultiply(MatrixTranslate(-eixo.x, -eixo.y, -eixo.z),
-                                                        MatrixRotateX(mackAndou / raioDaRodaDoMack[i])),
+            Matrix rodar = MatrixRotateX(mackAndou / raioDaRodaDoMack[i]);
+            if (eixo.z > eixoDaFrenteDoMack - 1.0f) {   /* as da frente são as mãos dele (gestos.c): viram e se abrem */
+                float abre = ((eixo.x > 0.0f) ? 1.0f : -1.0f) * poseDoMack.abreAsMaos * GRAUS_DAS_MAOS_DO_MACK_ABERTAS;
+                rodar = MatrixMultiply(rodar, MatrixRotateY((-poseDoMack.maos * GRAUS_DAS_MAOS_DO_MACK + abre) * DEG2RAD));
+            }
+            Matrix giro = MatrixMultiply(MatrixMultiply(MatrixTranslate(-eixo.x, -eixo.y, -eixo.z), rodar),
                                          MatrixTranslate(eixo.x, eixo.y, eixo.z));
             matrizesDasRodas[i] = MatrixMultiply(giro, noMundo);
         }
@@ -512,7 +657,11 @@ static float empurrarDoMack(void) {
 static void empurrarDosMoradores(void) {
     for (int i = 0; i < totalDeMoradores(); i++) {
         Morador *m = morador(i);
-        if (empurrarDaCaixa(m->x, m->z, m->rumo, m->comprimento / 2.0f, m->largura / 2.0f, m->y + 2.5f) > BATIDA_QUE_ASSUSTA) {
+        float bateu = empurrarDaCaixa(m->x, m->z, m->rumo, m->comprimento / 2.0f, m->largura / 2.0f, m->y + 2.5f);
+        if (bateu > BATIDA_QUE_ASSUSTA) {
+            if (m->susto <= 0.0f) {
+                m->batida = Clamp(bateu / (BATIDA_QUE_ASSUSTA * 4.0f), 0.4f, 1.0f);   /* o corpo pula do tamanho da batida */
+            }
             m->susto = 0.9f;
         }
     }
@@ -725,6 +874,7 @@ static void prepararMapa(void) {
         carregarLuzesDaCidade(malha);   /* os neons e as lâmpadas da noite */
         TraceLog(LOG_INFO, "CARGA-PASSEIO: luzes %.2f s", GetTime() - t0);
         luzesDoMack = registrarLuzesMoveis("recursos/modelos/mack_luzes.glb", "recursos/modelos/mack_luzes.json", 0);
+        luzesDaCabine = separarLuzesMoveis(luzesDoMack, LAMPADAS_DA_CABINE);   /* as da cabine vão com ela */
         luzesDoBau = registrarLuzesMoveis("recursos/modelos/mack_interior_luzes.glb", NULL, 1);
         carregarPostes();               /* os postes de luz da rua e o semáforo */
         carregarTratores();             /* os tratores-vaca dos pastos */
@@ -753,6 +903,17 @@ void iniciarPasseio(int numeroDoCarro) {
     iniciarCarroLivre(&carro, fichaDoCarro(numero), largada[0], largada[1], largada[2], largada[3]);
     acordarNoCone();   /* o jogo começa no quarto do cone 8, de frente para a porta */
     iniciarMoradores(malha, numero);   /* cada um em casa (menos quem tem o carro do jogador) */
+    jeitoDoJogador = *jeitoDoModelo(numero);
+    jeitoDoJogador.tique = TIQUE_NENHUM;   /* quem dirige é o jogador: o carro dele respira e conversa, e só */
+    jeitoDoJogador.sonolencia = 0.0f;
+    iniciarCorpo(&corpoDoJogador, &jeitoDoJogador, 101u);
+    iniciarCorpo(&corpoDoMack, &JEITO_DO_MACK, 202u);
+    memset(&poseDoJogador, 0, sizeof(poseDoJogador));
+    memset(&poseDoMack, 0, sizeof(poseDoMack));
+    papoDoMack.roteiro = NULL;
+    falaDoMack = NULL;
+    falaDoMackRestante = mackCumprimentou = sustoDoMackAntes = mackAndouAntes = 0.0f;
+    cenaAntes = CENA_DIRIGINDO;
     colocarNoMundoAberto(LUGAR_DOS_POSTES, modeloDosPostes(), matrizesDosPostes());   /* com sombra, como o Mack */
     sortearHoraDoDia();   /* cada vez que entra no jogo, uma hora do dia */
     if (getenv("KATCHAU_HORA") != NULL) {
@@ -856,6 +1017,7 @@ int cenaDoMackComMusica(void) {
 }
 
 void descarregarPasseio(void) {
+    descarregarBocaDoModelo();
     Model *modelos[3] = { &mack, &rodasDoMack, &modeloDaPorta };
     for (int k = 0; k < 3; k++) {
         colocarNoMundoAberto(k, NULL, NULL);
@@ -1100,11 +1262,247 @@ static Tela atualizarCena(float tempoQuadro) {
     return TELA_PASSEIO;
 }
 
+/* ------------------------------------------------------------------
+ * O corpo do Mack e o do jogador, e as conversas
+ * ------------------------------------------------------------------ */
+
+static void desenharLegenda(const char *quem, const char *fala, float alfa, float centroX, float altura);
+static float olharDoJogador = 0.0f;   /* conversando: para que lado está quem ele ouve (os olhos vão lá) */
+static int jogadorConversando = 0;
+
+/* De noite (0 de dia a 1 tarde da noite): o Mack fica mais calmo e o sono chega mais fácil */
+static float noiteAgora(void) {
+    float h = horaDoDia();
+    if (h >= 19.0f) {
+        return Clamp((h - 19.0f) / 3.0f, 0.0f, 1.0f);
+    }
+    return (h < 6.0f) ? Clamp((6.0f - h) / 1.5f, 0.0f, 1.0f) : 0.0f;
+}
+
+/* Para que lado (-1 à esquerda a +1 à direita) está um ponto, visto de (x, z) olhando para o rumo */
+static float ladoDoPonto(float x, float z, float rumo, float px, float pz) {
+    float dx = px - x, dz = pz - z;
+    float frente = dx * sinf(rumo) - dz * cosf(rumo), direita = dx * cosf(rumo) + dz * sinf(rumo);
+    return Clamp(atan2f(direita, frente) / 1.05f, -1.0f, 1.0f);
+}
+
+/* A frente da cabine do Mack, no mundo (a cara dele) */
+static Vector3 frenteDaCabine(void) {
+    return Vector3Transform((Vector3){ 0.0f, 3.0f, meioDoMack - 2.0f }, matrizDoMack());
+}
+
+static float distanciaDaCabine(void) {
+    Vector3 f = frenteDaCabine();
+    return hypotf(f.x - carro.x, f.z - carro.z);
+}
+
+/* O jogador pode conversar com o Mack: perto da cabine, com ela na frente ou do lado (até andando) */
+static int podeConversarComOMack(void) {
+    if (!temMack || cena != CENA_DIRIGINDO || fabsf(velocidadeDoCarroLivre(&carro)) > CONVERSA_ANDANDO_ATE) {
+        return 0;
+    }
+    Vector3 f = frenteDaCabine();
+    float dx = f.x - carro.x, dz = f.z - carro.z, d = hypotf(dx, dz);
+    return d < CONVERSA_COM_O_MACK_ATE && (dx * sinf(carro.rumo) - dz * cosf(carro.rumo)) > NA_FRENTE_PARA_CONVERSAR * d;
+}
+
+static void mackDiz(const char *fala, float segundos) {
+    falaDoMack = fala;
+    falaDoMackRestante = duracaoDaFalaDoMack = segundos;
+}
+
+/* O que uma fala do Mack quer dizer, pela pontuação */
+static Humor humorDaFalaDoMack(const char *fala) {
+    size_t n = strlen(fala);
+    if (strcmp(fala, MACK_BATERAM) == 0) {
+        return HUMOR_ASSUSTADO;
+    }
+    if (n > 0 && fala[n - 1] == '?') {
+        return HUMOR_CURIOSO;
+    }
+    return (strchr(fala, '!') != NULL) ? HUMOR_EMPOLGADO : HUMOR_FELIZ;
+}
+
+/*
+ * apertouConversar
+ * O quadrado (o X, ou a tecla E): conversando, passa a fala; senão, começa a conversa com quem está na
+ * frente do jogador (o morador ou o Mack, o que estiver mais perto).
+ */
+static void apertouConversar(void) {
+    if (papoAtivo(&papoDoMack)) {
+        avancarPapo(&papoDoMack);
+        return;
+    }
+    if (moradorNaConversa() >= 0) {
+        conversarComJogador();
+        return;
+    }
+    int quem = moradorParaConversar();
+    int comOMack = podeConversarComOMack();
+    if (quem >= 0 && comOMack && hypotf(morador(quem)->x - carro.x, morador(quem)->z - carro.z) > distanciaDaCabine()) {
+        quem = -1;
+    }
+    if (quem >= 0) {
+        conversarComJogador();
+    } else if (comOMack) {
+        comecarPapo(&papoDoMack, &PAPOS_DO_MACK[papoDoMackDaVez++ % (int) (sizeof(PAPOS_DO_MACK) / sizeof(PAPOS_DO_MACK[0]))]);
+        mackCumprimentou = MACK_CUMPRIMENTA_DE_NOVO;
+    }
+}
+
+/*
+ * moverOMack
+ * O corpo do Mack (gestos.c), a cada passo: o que ele diz (a conversa com o jogador, as falas das
+ * cenas, o cumprimento de quem para na frente dele, a reclamação de quem bate nele) e o que está
+ * acontecendo (o jogador de visita ou passando rente e rápido, a batida, a noite, a partida).
+ */
+static void moverOMack(float tempo) {
+    if (!temMack) {
+        return;
+    }
+    Matrix m = matrizDoMack();
+    Vector3 f = frenteDaCabine();
+    float v = fabsf(velocidadeDoCarroLivre(&carro));
+    float d = hypotf(f.x - carro.x, f.z - carro.z);
+    /* do jogador até a lataria: o ponto mais perto no eixo do caminhão */
+    Vector3 eixo = Vector3Normalize((Vector3){ m.m8, 0.0f, m.m10 });
+    float ao = Clamp((carro.x - m.m12) * eixo.x + (carro.z - m.m14) * eixo.z, -meioDoMack, meioDoMack);
+    float rente = fmaxf(0.0f, hypotf(carro.x - (m.m12 + eixo.x * ao), carro.z - (m.m14 + eixo.z * ao)) - meiaLarguraDoMack);
+
+    /* As falas das cenas, a reclamação da batida e o cumprimento */
+    if ((int) cena != cenaAntes) {
+        if (cena == CENA_ENTRANDO) {
+            mackDiz(MACK_ENTRANDO, FALA_DO_MACK_DURA);
+        } else if (cena == CENA_PARTINDO) {
+            mackDiz(MACK_PARTINDO, FALA_DO_MACK_DURA);
+        } else if (cena == CENA_SAINDO) {
+            mackDiz(saindoDaCorrida ? MACK_VOLTANDO : MACK_DESISTIU, FALA_DO_MACK_DURA);
+        }
+        papoDoMack.roteiro = NULL;
+        cenaAntes = (int) cena;
+    }
+    float batida = (sustoDoMack > sustoDoMackAntes + 0.1f) ? 0.8f : 0.0f;
+    sustoDoMackAntes = sustoDoMack;
+    if (batida > 0.0f) {
+        mackDiz(MACK_BATERAM, FALA_DO_MACK_DURA);
+    }
+    mackCumprimentou = fmaxf(0.0f, mackCumprimentou - tempo);
+    float visita = (cena != CENA_DIRIGINDO) ? 1.0f
+                   : ((v < 6.0f && d < 25.0f) ? (1.0f - d / 25.0f) * (1.0f - v / 6.0f) : 0.0f);
+    if (cena == CENA_DIRIGINDO && !papoAtivo(&papoDoMack) && falaDoMack == NULL && visita > 0.5f && v < 1.0f
+        && mackCumprimentou <= 0.0f) {
+        mackDiz(CUMPRIMENTOS_DO_MACK[papoDoMackDaVez % 3], FALA_DO_MACK_DURA);
+        mackCumprimentou = MACK_CUMPRIMENTA_DE_NOVO;
+    }
+
+    /* A conversa com o jogador */
+    Situacao s = { 0 };
+    passarPapo(&papoDoMack, tempo);
+    if (papoAtivo(&papoDoMack) && (d > CONVERSA_COM_O_MACK_ATE + 12.0f || cena != CENA_DIRIGINDO)) {
+        papoDoMack.roteiro = NULL;
+    }
+    if (papoAtivo(&papoDoMack)) {
+        int doJogador = 0;
+        const char *fala = falaDoPapo(&papoDoMack, &doJogador);
+        if (doJogador) {
+            falaDoMack = NULL;
+            s.ouvindo = 1;
+            s.enfaseDoOutro = corpoDoJogador.enfase;
+            s.alegriaDoOutro = corpoDoJogador.animo.alegria;
+            s.agitacaoDoOutro = corpoDoJogador.animo.agitacao;
+        } else {
+            if (falaDoMack != fala) {
+                mackDiz(fala, duracaoDaFalaDoPapo(&papoDoMack));
+            }
+            falaDoMackRestante = papoDoMack.restante + 0.3f;
+        }
+    }
+    falaDoMackRestante -= tempo;
+    if (falaDoMackRestante <= 0.0f) {
+        falaDoMack = NULL;
+    }
+
+    s.parado = (mackAndou <= 0.001f);
+    s.velocidade = (tempo > 0.0f) ? (mackAndou - mackAndouAntes) / tempo : 0.0f;
+    mackAndouAntes = mackAndou;
+    s.fala = falaDoMack;
+    s.duracaoDaFala = duracaoDaFalaDoMack;
+    s.humorDaFala = (falaDoMack != NULL) ? humorDaFalaDoMack(falaDoMack) : HUMOR_NEUTRO;
+    s.atento = (cena == CENA_DIRIGINDO && d < OLHA_ATE);
+    s.lado = ladoDoPonto(f.x, f.z, mackRumo, carro.x, carro.z);
+    s.perto = Clamp(1.0f - d / 30.0f, 0.0f, 1.0f);
+    s.visita = visita;
+    s.perigo = (cena == CENA_DIRIGINDO) ? Clamp((v - 8.0f) / 14.0f, 0.0f, 1.0f) * Clamp(1.0f - rente / 15.0f, 0.0f, 1.0f) : 0.0f;
+    s.ladoDoJogador = s.lado;
+    s.batida = batida;
+    s.sozinho = (cena == CENA_DIRIGINDO && d > 40.0f);
+    s.noite = noiteAgora();
+    moverCorpo(&corpoDoMack, &JEITO_DO_MACK, &s, tempo, &poseDoMack);
+}
+
+/*
+ * moverOJogador
+ * O corpo do carro do jogador (gestos.c), que só aparece com ele parado: respira e, conversando,
+ * fala com o corpo (as falas dele no papo) e ouve (com "uhum" nas ênfases de quem fala).
+ */
+static void moverOJogador(float tempo) {
+    float v = velocidadeDoCarroLivre(&carro);
+    Situacao s = { 0 };
+    s.parado = (fabsf(v) < 0.5f && cena == CENA_DIRIGINDO);
+    s.noite = noiteAgora();   /* a arrancada, a curva e a rua do carro dele já vêm da física (carro.c) */
+    int quem = moradorNaConversa();
+    jogadorConversando = 0;
+    if (papoAtivo(&papoDoMack)) {
+        int doJogador = 0;
+        const char *fala = falaDoPapo(&papoDoMack, &doJogador);
+        if (doJogador) {
+            s.fala = fala;
+            s.duracaoDaFala = duracaoDaFalaDoPapo(&papoDoMack);
+        } else {
+            s.ouvindo = 1;
+            s.enfaseDoOutro = corpoDoMack.enfase;
+            s.alegriaDoOutro = corpoDoMack.animo.alegria;
+            s.agitacaoDoOutro = corpoDoMack.animo.agitacao;
+        }
+        Vector3 f = frenteDaCabine();
+        s.lado = ladoDoPonto(carro.x, carro.z, carro.rumo, f.x, f.z);
+        jogadorConversando = 1;
+    } else if (quem >= 0) {
+        float duracao = 0.0f;
+        const char *fala = falaDoJogador(&duracao);
+        if (fala != NULL) {
+            s.fala = fala;
+            s.duracaoDaFala = duracao;
+        } else {
+            const Animo *a = animoDoMorador(quem);
+            s.ouvindo = 1;
+            s.enfaseDoOutro = enfaseDoMorador(quem);
+            s.alegriaDoOutro = a->alegria;
+            s.agitacaoDoOutro = a->agitacao;
+        }
+        s.lado = ladoDoPonto(carro.x, carro.z, carro.rumo, morador(quem)->x, morador(quem)->z);
+        jogadorConversando = 1;
+    }
+    if (jogadorConversando) {
+        s.atento = 1;
+        s.perto = 1.0f;
+        olharDoJogador = s.lado;
+    }
+    if (s.fala != NULL) {
+        size_t n = strlen(s.fala);
+        s.humorDaFala = (n > 0 && s.fala[n - 1] == '?') ? HUMOR_CURIOSO
+                        : (strchr(s.fala, '!') != NULL) ? jeitoDoJogador.exclamando : HUMOR_FELIZ;
+    }
+    moverCorpo(&corpoDoJogador, &jeitoDoJogador, &s, tempo, &poseDoJogador);
+    enfaseDoJogador(corpoDoJogador.enfase);
+}
+
 /*
  * atualizarPasseio
  * Um quadro do mundo aberto. ESC (ou START) pausa; M (ou LB) abre o mapa; R (ou Y) põe o carro de
  * volta na rua principal; T leva à pista de treino; C (ou o touchpad) troca a câmera. Na vaga
- * atrás do Mack, ENTER (ou Y) entra nele.
+ * atrás do Mack, ENTER (ou Y) entra nele. Na frente de um morador ou da cabine do Mack, E (ou o
+ * quadrado) conversa com ele.
  * Recebe: o estado do menu (para a pausa) e o tempo do quadro.
  * Devolve: a próxima tela.
  */
@@ -1137,6 +1535,8 @@ Tela atualizarPasseio(EstadoMenu *menu, float tempoQuadro) {
         }
         definirHoraDaCidade(horaDoDia());   /* de noite os moradores ficam em casa */
         atualizarMoradores(malha, carro.x, carro.z, carro.rumo, velocidadeDoCarroLivre(&carro), tempoQuadro);
+        moverOMack(tempoQuadro);
+        moverOJogador(tempoQuadro);
         atualizarLuzesDaCidade(luzDaHora()->luzesDaCidade, tempoQuadro, 0);
         /* os tratores dormem de noite; o ronco do motor parado (freio de mão e acelerador) os assusta */
         atualizarTratores(luzDaHora()->luzesDaCidade, (Vector3){ carro.x, carro.y, carro.z },
@@ -1197,6 +1597,10 @@ Tela atualizarPasseio(EstadoMenu *menu, float tempoQuadro) {
     if (IsKeyPressed(KEY_C) || controleApertou(BOTAO_CAMERA)) {
         distanciaEscolhida = (distanciaEscolhida + 1) % 3;
         tocarSom(SOM_CURSOR);
+    }
+    /* O quadrado (o X, ou a tecla E) conversa com quem está na frente */
+    if (IsKeyPressed(KEY_E) || controleApertou(BOTAO_CONVERSAR)) {
+        apertouConversar();
     }
     /* No quarto do cone 8, ENTER (ou Y) dorme */
     if (naCamaDoCone() && (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_KP_ENTER) || controleApertou(BOTAO_LIMPAR))) {
@@ -1520,6 +1924,10 @@ static void desenharCinema(void) {
         escrever(FONTE_FORTE, subtitulo, 48.0f, y, 16.0f, Fade(COR_AMARELO, alfa));
         escrever(FONTE_TITULO, titulo, 46.0f, y + 18.0f, 46.0f, Fade(WHITE, alfa));
     }
+    /* O que o Mack diz na cena (entrando, partindo, voltando), no alto: embaixo fica o nome da pista */
+    if (falaDoMack != NULL) {
+        desenharLegenda("Mack", falaDoMack, Clamp(falaDoMackRestante / 0.4f, 0.0f, 1.0f), largura / 2.0f, faixa + 176.0f);
+    }
     float escuro = escuroDaCena();
     if (escuro > 0.0f) {
         DrawRectangle(-200, -200, (int) largura + 400, (int) altura + 400, Fade(BLACK, escuro));
@@ -1650,13 +2058,22 @@ static void desenharMoradores(Camera3D camera) {
             desenharSombraDoModelo(m->modelo, camera, noMundo);
             terminarSombrasNoChao();
         }
-        float deita = -m->volante * fminf(fabsf(m->velocidade) / 9.0f, 1.0f) * 0.05f;
-        inclinarCorpoNoProximoDesenho(m->modelo, deita, m->aceno);
+        /* O corpo, do jeito de cada um (gestos.c): a suspensão e as rodas da frente como mãos */
+        const Pose *pose = &m->pose;
+        posturaNoProximoDesenho(m->modelo, pose->rolagem, 0.0f, pose->aceno, pose->subida);
         expressaoNoProximoDesenho(m->modelo, m->aperto, (m->susto > 0.0f) ? 1.0f : 0.0f);
+        emocaoNoProximoDesenho(m->modelo, &pose->olhos);
+        bocaNoProximoDesenho(m->modelo, pose->boca);   /* falando, a boca abre nas vogais */
+        abrirRodasNoProximoDesenho(pose->abreAsMaos);  /* e as mãos (as rodas da frente) se abrem */
         if (m->olhaAlgo) {
             olharNoProximoDesenho(m->modelo, m->olhar);   /* estacionado, olhando alguém */
+        } else if (pose->maos != 0.0f) {
+            olharNoProximoDesenho(m->modelo, m->volante);  /* as mãos gesticulam, os olhos não vão junto */
         }
-        desenharCarro3D(m->modelo, noMundo, m->anguloDasRodas, m->volante);
+        if (m->modelo == MODELO_DO_GUIDO && pose->garfos > 0.01f) {
+            moverGarfosNoProximoDesenho(GARFOS_SOBEM * pose->garfos, GARFOS_INCLINAM * pose->garfos);
+        }
+        desenharCarro3D(m->modelo, noMundo, m->anguloDasRodas, m->volante + pose->maos);
     }
 }
 
@@ -1665,15 +2082,34 @@ static void desenharMoradores(Camera3D camera) {
  * O carro do jogador, com o corpo deitando para fora nas curvas e a cara de quem está correndo.
  */
 static void desenharCarro(Matrix noMundo) {
-    /* O corpo deita e o bico abaixa com a suspensão da corrida */
-    inclinarCorpoNoProximoDesenho(numero, carro.corrida.rolagem * DEG2RAD, -carro.corrida.arfagem * DEG2RAD);
+    /* O corpo deita e o bico abaixa com a suspensão da corrida; parado, entra o corpo dele (gestos.c):
+     * respira e, conversando, fala com o corpo */
+    float parado = Clamp(1.0f - fabsf(velocidadeDoCarroLivre(&carro)) / 2.0f, 0.0f, 1.0f);
+    float cabeca = fmaxf(parado, jogadorConversando ? 0.8f : 0.0f);   /* conversando, até andando: a cabeça, a boca e os olhos */
+    posturaNoProximoDesenho(numero, carro.corrida.rolagem * DEG2RAD + cabeca * poseDoJogador.rolagem,
+                            -carro.corrida.arfagem * DEG2RAD, cabeca * poseDoJogador.aceno, cabeca * poseDoJogador.subida);
+    if (cabeca > 0.0f) {
+        Emocao olhos = poseDoJogador.olhos;
+        olhos.alegria *= cabeca;
+        olhos.raiva *= cabeca;
+        olhos.tristeza *= cabeca;
+        olhos.espanto *= cabeca;
+        olhos.sono *= cabeca;
+        olhos.olharParaCima *= cabeca;
+        emocaoNoProximoDesenho(numero, &olhos);
+        bocaNoProximoDesenho(numero, cabeca * poseDoJogador.boca);
+        abrirRodasNoProximoDesenho(parado * poseDoJogador.abreAsMaos);   /* as mãos, só parado: andando, as rodas guiam */
+        if (jogadorConversando) {
+            olharNoProximoDesenho(numero, olharDoJogador);   /* olha para quem conversa com ele */
+        }
+    }
     float rapidez = fabsf(velocidadeParaFrente(&carro)) / carro.velocidadeMaxima;
     float aperto = (rapidez - 0.7f) / 0.3f;
     if ((carro.nitroLigado && rapidez > 0.4f) || carro.naParede) {
         aperto = 1.0f;
     }
     expressaoNoProximoDesenho(numero, aperto, (carro.raspando || (!carro.noChao && carro.segundosNoAr > 0.6f)) ? 0.7f : 0.0f);
-    desenharCarro3D(numero, noMundo, carro.anguloDasRodas, carro.volante);
+    desenharCarro3D(numero, noMundo, carro.anguloDasRodas, carro.volante + parado * poseDoJogador.maos);   /* parado, as mãos */
 }
 
 /* A chama azul do nitro, nos dois escapamentos */
@@ -1850,7 +2286,40 @@ static void desenharMinimapaRedondo(Vector2 centro, float raio) {
  * dele) ou, senão, a de quem está mais perto, se estiver perto o bastante para ouvir. O nome em
  * amarelo, a fala em branco, numa faixa escura; aparece e some aos poucos.
  */
+/* Uma fala como legenda, embaixo: o nome em amarelo e a fala em branco, numa faixa escura */
+static void desenharLegenda(const char *quem, const char *fala, float alfa, float centroX, float altura) {
+    char nome[64];
+    snprintf(nome, sizeof(nome), "%s:", quem);
+    float tamanho = 21.0f;
+    float larguraDoNome = larguraDoTexto(FONTE_FORTE, nome, tamanho);
+    float larguraTotal = larguraDoNome + 10.0f + larguraDoTexto(FONTE_TEXTO, fala, tamanho) + 40.0f;
+    Rectangle caixa = { centroX - larguraTotal / 2.0f, altura - 160.0f, larguraTotal, 40.0f };
+    caixaArredondada(caixa, 10.0f, Fade(COR_PAINEL, 0.85f * alfa));
+    escrever(FONTE_FORTE, nome, caixa.x + 20.0f, caixa.y + 8.0f, tamanho, Fade(COR_AMARELO, alfa));
+    escrever(FONTE_TEXTO, fala, caixa.x + 30.0f + larguraDoNome, caixa.y + 8.0f, tamanho, Fade(WHITE, alfa));
+}
+
 static void desenharFalasDosMoradores(float centroX, float altura) {
+    /* A conversa com o jogador vem antes de tudo: a fala dele, a do morador com quem conversa, a do Mack */
+    const char *doJogador = falaDoJogador(NULL);
+    if (doJogador == NULL && papoAtivo(&papoDoMack)) {
+        int dele = 0;
+        const char *fala = falaDoPapo(&papoDoMack, &dele);
+        doJogador = dele ? fala : NULL;
+    }
+    if (doJogador != NULL) {
+        desenharLegenda(nomeDoModelo(numero), doJogador, 1.0f, centroX, altura);
+        return;
+    }
+    int comQuem = moradorNaConversa();
+    if (comQuem >= 0 && morador(comQuem)->fala != NULL) {
+        desenharLegenda(morador(comQuem)->nome, morador(comQuem)->fala, 1.0f, centroX, altura);
+        return;
+    }
+    if (falaDoMack != NULL && (papoAtivo(&papoDoMack) || cena != CENA_DIRIGINDO || distanciaDaCabine() < OUVE_ATE)) {
+        desenharLegenda("Mack", falaDoMack, Clamp(falaDoMackRestante / 0.4f, 0.0f, 1.0f), centroX, altura);
+        return;
+    }
     const Morador *quem = NULL;
     float menor = OUVE_ATE;
     for (int i = 0; i < totalDeMoradores(); i++) {
@@ -1867,16 +2336,41 @@ static void desenharFalasDosMoradores(float centroX, float altura) {
     if (quem == NULL) {
         return;
     }
-    char nome[64];
-    snprintf(nome, sizeof(nome), "%s:", quem->nome);
-    float alfa = Clamp(quem->falaRestante / 0.4f, 0.0f, 1.0f);
-    float tamanho = 21.0f;
-    float larguraDoNome = larguraDoTexto(FONTE_FORTE, nome, tamanho);
-    float larguraTotal = larguraDoNome + 10.0f + larguraDoTexto(FONTE_TEXTO, quem->fala, tamanho) + 40.0f;
-    Rectangle caixa = { centroX - larguraTotal / 2.0f, altura - 160.0f, larguraTotal, 40.0f };
-    caixaArredondada(caixa, 10.0f, Fade(COR_PAINEL, 0.85f * alfa));
-    escrever(FONTE_FORTE, nome, caixa.x + 20.0f, caixa.y + 8.0f, tamanho, Fade(COR_AMARELO, alfa));
-    escrever(FONTE_TEXTO, quem->fala, caixa.x + 30.0f + larguraDoNome, caixa.y + 8.0f, tamanho, Fade(WHITE, alfa));
+    desenharLegenda(quem->nome, quem->fala, Clamp(quem->falaRestante / 0.4f, 0.0f, 1.0f), centroX, altura);
+}
+
+/* Um aviso de botão embaixo da tela: a tecla (ou o ícone do botão do controle, "@...") e o que ela faz */
+static void desenharAviso(const char *tecla, const char *texto, float centroX, float y) {
+    float daTecla = larguraDaTecla(tecla);
+    float total = daTecla + 12.0f + larguraDoTexto(FONTE_TITULO, texto, 20.0f) + 28.0f;
+    Rectangle caixa = { centroX - total / 2.0f, y, total, 44.0f };
+    caixaArredondada(caixa, 10.0f, COR_PAINEL);
+    desenharTecla(caixa.x + 14.0f, caixa.y + 9.0f, tecla);
+    escrever(FONTE_TITULO, texto, caixa.x + 26.0f + daTecla, caixa.y + 10.0f, 20.0f, WHITE);
+}
+
+/* Na frente de um morador ou do Mack, o botão de conversar; conversando, o de continuar */
+static void desenharBotaoDeConversar(float x, float altura) {
+    char texto[64] = "";
+    if (moradorNaConversa() >= 0 || papoAtivo(&papoDoMack)) {
+        snprintf(texto, sizeof(texto), "CONTINUAR");
+    } else {
+        int quem = moradorParaConversar();
+        int comOMack = podeConversarComOMack();
+        if (quem >= 0 && (!comOMack || hypotf(morador(quem)->x - carro.x, morador(quem)->z - carro.z) <= distanciaDaCabine())) {
+            snprintf(texto, sizeof(texto), "CONVERSAR COM %s", morador(quem)->nome);
+            for (char *c = texto; *c; c++) {
+                *c = (char) toupper((unsigned char) *c);
+            }
+        } else if (comOMack) {
+            snprintf(texto, sizeof(texto), "CONVERSAR COM O MACK");
+        }
+    }
+    if (texto[0] == '\0' || cena != CENA_DIRIGINDO) {
+        return;
+    }
+    const char *tecla = controleConectado() ? nomeDoBotao(GAMEPAD_BUTTON_RIGHT_FACE_LEFT) : "E";
+    desenharAviso(tecla, texto, x, altura - 92.0f - ((naVagaDoMack() || naCamaDoCone()) ? 52.0f : 0.0f));
 }
 
 static void desenharHudDoPasseio(void) {
@@ -1911,32 +2405,17 @@ static void desenharHudDoPasseio(void) {
 
     float x = largura / 2.0f;
 
-    /* Na vaga atrás da carreta: o botão de entrar no Mack */
+    /* Na vaga atrás da carreta, o botão de entrar no Mack; no quarto do cone 8, o de dormir (o triângulo no
+     * controle de PlayStation, o Y no de Xbox, ENTER no teclado) */
+    const char *doTriangulo = controleConectado() ? nomeDoBotao(GAMEPAD_BUTTON_RIGHT_FACE_UP) : "ENTER";
     if (naVagaDoMack()) {
-        const char *tecla = controleConectado() ? "Y" : "ENTER";
-        const char *texto = "ENTRAR NO MACK";
-        float larguraDaTecla = larguraDoTexto(FONTE_TITULO, tecla, 18.0f) + 18.0f;
-        float total = larguraDaTecla + 12.0f + larguraDoTexto(FONTE_TITULO, texto, 20.0f) + 28.0f;
-        Rectangle caixa = { x - total / 2.0f, altura - 92.0f, total, 44.0f };
-        caixaArredondada(caixa, 10.0f, COR_PAINEL);
-        caixaArredondada((Rectangle){ caixa.x + 14.0f, caixa.y + 9.0f, larguraDaTecla, 26.0f }, 6.0f, COR_DO_MACK);
-        escreverCentralizado(FONTE_TITULO, tecla, caixa.x + 14.0f + larguraDaTecla / 2.0f, caixa.y + 11.0f, 18.0f, WHITE);
-        escrever(FONTE_TITULO, texto, caixa.x + 26.0f + larguraDaTecla, caixa.y + 10.0f, 20.0f, WHITE);
+        desenharAviso(doTriangulo, "ENTRAR NO MACK", x, altura - 92.0f);
     }
-
-    /* No quarto do cone 8: o botão de dormir */
     if (naCamaDoCone()) {
-        const char *tecla = controleConectado() ? "Y" : "ENTER";
-        const char *texto = "DORMIR";
-        float larguraDaTecla = larguraDoTexto(FONTE_TITULO, tecla, 18.0f) + 18.0f;
-        float total = larguraDaTecla + 12.0f + larguraDoTexto(FONTE_TITULO, texto, 20.0f) + 28.0f;
-        Rectangle caixa = { x - total / 2.0f, altura - 92.0f, total, 44.0f };
-        caixaArredondada(caixa, 10.0f, COR_PAINEL);
-        caixaArredondada((Rectangle){ caixa.x + 14.0f, caixa.y + 9.0f, larguraDaTecla, 26.0f }, 6.0f, COR_DA_NOITE);
-        escreverCentralizado(FONTE_TITULO, tecla, caixa.x + 14.0f + larguraDaTecla / 2.0f, caixa.y + 11.0f, 18.0f, WHITE);
-        escrever(FONTE_TITULO, texto, caixa.x + 26.0f + larguraDaTecla, caixa.y + 10.0f, 20.0f, WHITE);
+        desenharAviso(doTriangulo, "DORMIR", x, altura - 92.0f);
     }
 
+    desenharBotaoDeConversar(x, altura);
     desenharFalasDosMoradores(x, altura);
 
     /* O resultado da corrida, na volta à cidade */
@@ -1992,6 +2471,7 @@ static void quadrado(Vector3 a, Vector3 b, Vector3 c, Vector3 d, Color ca, Color
 static void moverLuzesDoMack(Vector3 camera) {
     Matrix doMack = matrizDoMack();
     moverLuzes(luzesDoMack, MatrixMultiply(mack.transform, doMack), temMack);
+    moverLuzes(luzesDaCabine, MatrixMultiply(MatrixMultiply(mack.transform, poseDaCabine()), doMack), temMack);
     Matrix deDentro = MatrixMultiply(MatrixTranslate(dobradica.x, dobradica.y + 0.005f, dobradica.z + 0.04f), doMack);
     moverLuzes(luzesDoBau, deDentro, temPortaDoMack && Vector3Distance(camera, (Vector3){ doMack.m12, doMack.m13, doMack.m14 }) < DESENHA_O_BAU_ATE);
 }
@@ -2096,7 +2576,9 @@ void desenharPasseio(EstadoMenu *menu) {
     desenharCenario(CENARIO_DO_MUNDO_ABERTO, camera.position);
     desenharInteriores(camera.position, corDaLuz(luzDoDia->interior), luzDoDia->luzesDaCidade);   /* por dentro */
     desenharLuzesDaCidade(camera, luzDoDia->base);   /* os neons (apagados de dia) */
+    abrirBocaDoModelo(poseDoMack.boca);   /* a mandíbula do Mack (se ele tem a boca medida) */
     if (temOlhosDoMack) {
+        emocaoDoModelo(&poseDoMack.olhos);
         prepararOlhosDoModelo(olharDoMack(camera), (cena == CENA_PARTINDO) ? 0.3f : 0.0f, (sustoDoMack > 0.0f) ? 1.0f : 0.0f);
     }
     desenharModelosNoMundoAberto();   /* o Mack, as rodas e a porta */

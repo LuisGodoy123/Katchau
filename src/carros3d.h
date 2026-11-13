@@ -17,6 +17,7 @@
 #define CARROS3D_H
 
 #include "raylib.h"
+#include "gestos.h"
 
 void carregarCarros3D(void);
 void descarregarCarros3D(void);
@@ -28,6 +29,12 @@ void desenharSombraNoChao(int numero, const Vector3 *grade);
 /* A cara do carro no próximo desenho: aperto (0 a 1, os olhos apertados em alta velocidade)
  * e susto (0 a 1, os olhos arregalados ao rodar). Ela muda aos poucos. */
 void expressaoNoProximoDesenho(int numero, float aperto, float susto);
+/* As rodas da frente abertas para fora no próximo desenho (0 a 1): as mãos abertas (gestos.c) */
+void abrirRodasNoProximoDesenho(float abertura);
+/* O quanto a boca abre no próximo desenho (0 a 1; só os modelos com a boca medida, bocas.txt) */
+void bocaNoProximoDesenho(int numero, float abertura);
+/* A emoção da cara no próximo desenho (os moradores: gestos.h), somada ao aperto e ao susto */
+void emocaoNoProximoDesenho(int numero, const Emocao *emocao);
 /* Para onde os olhos vão no próximo desenho (-1 a +1), no lugar do volante (as rodas seguem o volante) */
 void olharNoProximoDesenho(int numero, float olhar);
 void comecarSombrasNoChao(void);
@@ -43,7 +50,14 @@ void definirOlhoDosCarros(Vector3 olho);
 /* Os olhos vivos dos carros num modelo que não é carro (o Mack, em passeio.c) */
 int darOlhosAoModelo(Model *modelo, const char *nome);
 void prepararOlhosDoModelo(float olhar, float aperto, float susto);
+void emocaoDoModelo(const Emocao *emocao);   /* a emoção dele no próximo desenho (antes de prepararOlhosDoModelo) */
+/* A boca dele (bocas.txt): a mandíbula gira na própria malha. darBocaAoModelo devolve 0 se ele não está na tabela */
+int darBocaAoModelo(Model *modelo, const char *nome);
+void abrirBocaDoModelo(float abertura);   /* 0 fechada a 1 aberta */
+void descarregarBocaDoModelo(void);
 void inclinarCorpoNoProximoDesenho(int numero, float rolagem, float arfagem);
+/* O corpo com a suspensão (a arfagem gira no meio) e os gestos (gestos.c: o aceno gira no eixo de trás) */
+void posturaNoProximoDesenho(int numero, float rolagem, float arfagem, float aceno, float subida);
 void moverGarfosNoProximoDesenho(float subida, float inclinacao);
 Vector3 pontaDosGarfos(void);
 float raioDaRoda(int numero, int roda);

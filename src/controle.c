@@ -131,6 +131,8 @@ int controleApertou(BotaoDoControle botao) {
             return IsGamepadButtonPressed(controle, GAMEPAD_BUTTON_RIGHT_TRIGGER_1);
         case BOTAO_CAMERA:
             return acabouDeApertarOTouchpad || IsGamepadButtonPressed(controle, GAMEPAD_BUTTON_MIDDLE_LEFT);
+        case BOTAO_CONVERSAR:
+            return IsGamepadButtonPressed(controle, GAMEPAD_BUTTON_RIGHT_FACE_LEFT);
         default:
             return 0;
     }
@@ -320,6 +322,7 @@ int controleDoJogadorApertou(const EntradaDoJogador *entrada, BotaoDoControle bo
         case BOTAO_START:     return IsGamepadButtonPressed(oControle, GAMEPAD_BUTTON_MIDDLE_RIGHT);
         case BOTAO_LIMPAR:    return IsGamepadButtonPressed(oControle, GAMEPAD_BUTTON_RIGHT_FACE_UP);
         case BOTAO_CAMERA:    return IsGamepadButtonPressed(oControle, GAMEPAD_BUTTON_MIDDLE_LEFT);
+        case BOTAO_CONVERSAR: return IsGamepadButtonPressed(oControle, GAMEPAD_BUTTON_RIGHT_FACE_LEFT);
         default:              return 0;
     }
 }

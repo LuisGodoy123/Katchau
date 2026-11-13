@@ -20,7 +20,10 @@
  *   - vaga de ré (o carro estacionado olha para a rua): chega de frente até
  *     a entrada, para e entra de ré, virando até o rumo da vaga; na saída,
  *     sai de frente;
- *   - vaga de frente (a Flo, olhando o balcão): entra de frente e sai de ré.
+ *   - vaga de ré com a entrada longe, em linha reta (o café da Flo, todos
+ *     virados para a rua): passa pela frente da vaga, de lado, e entra de ré
+ *     numa curva de 90 graus, com a traseira na frente; sai de frente;
+ *   - vaga de frente (olhando para dentro): entra de frente e sai de ré.
  * Andando, ele mira um ponto um pouco à frente no caminho, vira o volante
  * até lá (com o raio mínimo de um carro), anda devagar nas curvas, freia
  * atrás de quem vai na frente para o mesmo lado e, saindo para a rua,
@@ -71,6 +74,8 @@
 #define VAGA_LONGE_DE_OUTRA   3.4f      /* metros: uma vaga de visita mais perto que isso de outra vaga não entra */
 #define RE_NA_SAIDA           4.0f      /* metros além do meio carro: quanto recua quem sai de ré */
 #define GIRO_NA_SAIDA         1.0f      /* radianos: o quanto ele gira recuando */
+#define FRENTE_DA_VAGA        6.5f      /* metros: a vaga virada para a rua se entra de ré, de um ponto tanto à frente dela... */
+#define LADO_DA_VAGA          6.0f      /* ...e tanto para o lado */
 #define MAIS_NOS              256
 #define MAIS_PROGRAMAS        8
 #define TETO_DA_CIDADE        4.5f      /* metros: o chão da cidade fica abaixo disso (até uns 3 m, o piso dos cones
@@ -174,6 +179,8 @@ typedef struct {
     float rumoDasVisitas;    /* para onde apontam as de visita, em "visitas" */
     unsigned char lados;     /* quais das vagas de visita (LADOS, um bit cada) servem; 0: todas. Dentro de um
                               * prédio, só as que têm o caminho livre até elas (a ré não desvia de nada) */
+    unsigned char reEmCurva;  /* 1: as vagas do lugar (a do dono e as de visita) se entram de ré numa curva, vindo de
+                               * lado pela frente da vaga: a entrada fica longe, em linha reta (o café da Flo) */
 } Lugar;
 
 typedef struct {
@@ -234,6 +241,8 @@ typedef struct {
     float reAteX, reAteZ, reAteRumo;   /* ...até onde */
     float reAndou, reTotal;
     int reNaChegada;               /* 1: o fim do caminho é entrar de ré */
+    int reEmCurva;                 /* 1: a ré de agora segue uma curva (a traseira na frente, como um carro de verdade) */
+    int chegaEmCurva;              /* 1: a chegada é de ré em curva (a vaga de visita virada para a rua) */
     float ignora;                  /* segundos em que ele não espera outro morador (cansou de esperar) */
     float ignoraJogador;           /* segundos em que ele não espera o jogador parado na frente */
     unsigned char marcas[MAIS_PONTOS_NO_CAMINHO];   /* de cada ponto: ENTRA_NA_RUA, NO_TREINO */
@@ -258,11 +267,23 @@ typedef struct {
     float jogadorPerto;            /* segundos com o jogador parado perto */
     float cumprimentou;            /* segundos até poder cumprimentar de novo */
     float reclamou;                /* segundos até poder reclamar de novo */
-    float fase2;                   /* do aceno */
+
+    /* O corpo (gestos.c) */
+    Corpo corpo;
+    Humor humor;                   /* o que a fala de agora quer dizer */
+    float duracaoDaFala;           /* segundos que ela fica na tela inteira */
+    float distanciaAntes;          /* do jogador, no passo anterior (para saber se ele vem chegando) */
+    int papoDaVez;                 /* o próximo papo com o jogador (em rodízio) */
 
     /* O xerife */
     float perseguiu, pegando, descanso;
 } Rotina;
+
+#define CONVERSA_COM_JOGADOR_ATE 8.0f   /* metros além da meia lataria: o jogador conversa com quem está tão perto... */
+#define CONVERSA_NA_FRENTE    -0.3f     /* ...e na frente ou do lado dele (o cosseno: até uns 107 graus para cada lado)... */
+#define CONVERSA_ANDANDO_ATE  22.0f     /* ...com ele andando a menos que isso (m/s, uns 80 km/h): dá para conversar
+                                         * com quem dirige do lado dele */
+#define LARGA_A_CONVERSA      18.0f     /* metros: o jogador indo embora, a conversa acaba */
 
 static Morador moradores[MAIS_MORADORES];
 static Rotina rotinas[MAIS_MORADORES];
@@ -270,6 +291,9 @@ static int total = 0;
 static int moradorDaPessoa[TOTAL_DE_PESSOAS];
 static Vaga vagas[TOTAL_DE_LUGARES][MAIS_VAGAS];
 static float horaDaCidade = 12.0f;   /* a hora do dia (o passeio avisa): de noite, cada um fica em casa */
+static Papo papo;                    /* a conversa com o jogador... */
+static int quemConversa = -1;        /* ...e com quem */
+static float enfaseDoJogadorAgora = 0.0f;
 static int totalDeVagas[TOTAL_DE_LUGARES];
 static int noDaVaga[TOTAL_DE_LUGARES];
 static int vizinhos[MAIS_NOS][6];
@@ -337,6 +361,30 @@ static float olharPara(const Morador *m, float x, float z) {
     return limitar(atan2f(direita, frente) / CANTO_DO_OLHO, -1.0f, 1.0f);
 }
 
+/*
+ * humorDaFala
+ * O humor com que a pessoa diz a fala: o da tabela, se a fala está lá; senão, pela pontuação
+ * ("(" é o Ruivo tímido, "?" é pergunta, "!" é o "!" da pessoa) ou nada de especial.
+ */
+static Humor humorDaFala(int pessoa, const char *fala) {
+    for (size_t k = 0; k < sizeof(HUMORES_DAS_FALAS) / sizeof(HUMORES_DAS_FALAS[0]); k++) {
+        if (strcmp(HUMORES_DAS_FALAS[k].fala, fala) == 0) {
+            return HUMORES_DAS_FALAS[k].humor;
+        }
+    }
+    size_t n = strlen(fala);
+    if (fala[0] == '(') {
+        return HUMOR_TIMIDO;
+    }
+    if (n > 0 && fala[n - 1] == '?') {
+        return HUMOR_CURIOSO;
+    }
+    if (strchr(fala, '!') != NULL) {
+        return JEITOS[pessoa].exclamando;
+    }
+    return HUMOR_NEUTRO;
+}
+
 static void dizer(Morador *m, const char *fala, float segundos, int longe) {
     if (fala == NULL) {
         return;
@@ -344,6 +392,8 @@ static void dizer(Morador *m, const char *fala, float segundos, int longe) {
     m->fala = fala;
     m->falaRestante = segundos;
     m->falaLonge = longe;
+    rotinas[m - moradores].humor = humorDaFala(m->pessoa, fala);
+    rotinas[m - moradores].duracaoDaFala = segundos;
 }
 
 static int noPeloNome(const char *id) {
@@ -566,6 +616,7 @@ static void comecarRe(Rotina *r, const Morador *m, float ateX, float ateZ, float
     r->reAteX = ateX; r->reAteZ = ateZ; r->reAteRumo = ateRumo;
     r->reAndou = 0.0f;
     r->reTotal = fmaxf(hypotf(ateX - m->x, ateZ - m->z), 1.0f);
+    r->reEmCurva = 0;
 }
 
 /*
@@ -594,7 +645,20 @@ static void montarCaminho(Morador *m, Rotina *r, const int *nos, int n, const Va
         porNoCaminho(m, r, RUAS[nos[i]].x, RUAS[nos[i]].z,
                      ((!eRua(nos[i]) && eRua(nos[i + 1])) ? ENTRA_NA_RUA : 0) | (eTreino(nos[i]) ? NO_TREINO : 0));
     }
-    if (v > 0 && n >= 2) {
+    r->chegaEmCurva = 0;
+    if (n >= 2 && LUGARES[lugar].reEmCurva) {
+        /* Virada para a rua, com a entrada longe: ele passa pela frente da vaga, de lado (para fora, longe do
+         * dono; o dono, para um lado qualquer), e dali entra de ré numa curva de 90 graus, como se estaciona de
+         * verdade */
+        const NoDaRua *dono = &RUAS[vaga->no];
+        float fx = sinf(vaga->rumo), fz = -cosf(vaga->rumo);   /* para a rua */
+        float lx = cosf(vaga->rumo), lz = sinf(vaga->rumo);    /* de lado */
+        float fora = ((vaga->x - dono->x) * lx + (vaga->z - dono->z) * lz >= 0.0f) ? 1.0f : -1.0f;
+        porNoCaminho(m, r, vaga->x + fx * FRENTE_DA_VAGA - lx * fora * 1.5f, vaga->z + fz * FRENTE_DA_VAGA - lz * fora * 1.5f, 0);
+        porNoCaminho(m, r, vaga->x + fx * FRENTE_DA_VAGA + lx * fora * LADO_DA_VAGA,
+                     vaga->z + fz * FRENTE_DA_VAGA + lz * fora * LADO_DA_VAGA, 0);
+        r->chegaEmCurva = 1;
+    } else if (v > 0 && n >= 2) {
         const NoDaRua *dono = &RUAS[vaga->no], *ultimo = &RUAS[nos[n - 2]];
         float fx = sinf(vaga->rumo), fz = -cosf(vaga->rumo);
         float fundo = (ultimo->x - dono->x) * fx + (ultimo->z - dono->z) * fz;
@@ -1030,6 +1094,8 @@ static void porNoChao(Morador *m, MalhaDeColisao *malha) {
  */
 void iniciarMoradores(MalhaDeColisao *malha, int carroDoJogador) {
     total = 0;
+    quemConversa = NINGUEM;
+    papo.roteiro = NULL;
     for (int p = 0; p < TOTAL_DE_PESSOAS; p++) {
         moradorDaPessoa[p] = NINGUEM;
     }
@@ -1082,7 +1148,7 @@ void iniciarMoradores(MalhaDeColisao *malha, int carroDoJogador) {
         r->indoLugar = -1;
         r->fase = SEM_PROGRAMA;
         r->sorteio = 2654435761u * (unsigned int) (p + 7);
-        r->fase2 = sortear(r, 0.0f, 10.0f);
+        iniciarCorpo(&r->corpo, &JEITOS[p], (unsigned int) p + 1u);
         r->falaPropria = (unsigned int) sortear(r, 0.0f, 4.0f);
         r->falaDeSempre = (unsigned int) sortear(r, 0.0f, 8.0f);
         m->x = vagas[casa][v].x;
@@ -1175,9 +1241,25 @@ static int manobrarDeRe(Morador *m, Rotina *r, MalhaDeColisao *malha, float temp
     r->reAndou = fminf(r->reAndou + VELOCIDADE_DE_RE * tempo, r->reTotal);
     float t = suave(r->reAndou / r->reTotal);
     float giro = diferencaDeRumo(r->reAteRumo, r->reDeRumo);
-    m->x = r->reDeX + (r->reAteX - r->reDeX) * t;
-    m->z = r->reDeZ + (r->reAteZ - r->reDeZ) * t;
-    m->rumo = r->reDeRumo + giro * t;
+    if (r->reEmCurva) {
+        /* Uma curva de Hermite em que ele anda sempre para trás: sai na direção da traseira de antes e chega na
+         * da traseira da vaga; o bico aponta sempre para o contrário de para onde ele vai */
+        float tras = r->reTotal * 1.1f;
+        float ax = -sinf(r->reDeRumo) * tras, az = cosf(r->reDeRumo) * tras;     /* para onde vai a traseira, saindo */
+        float bx = -sinf(r->reAteRumo) * tras, bz = cosf(r->reAteRumo) * tras;   /* e chegando */
+        float t2 = t * t, t3 = t2 * t;
+        float h00 = 2 * t3 - 3 * t2 + 1, h10 = t3 - 2 * t2 + t, h01 = -2 * t3 + 3 * t2, h11 = t3 - t2;
+        m->x = h00 * r->reDeX + h10 * ax + h01 * r->reAteX + h11 * bx;
+        m->z = h00 * r->reDeZ + h10 * az + h01 * r->reAteZ + h11 * bz;
+        float d00 = 6 * t2 - 6 * t, d10 = 3 * t2 - 4 * t + 1, d01 = -6 * t2 + 6 * t, d11 = 3 * t2 - 2 * t;
+        float vx = d00 * r->reDeX + d10 * ax + d01 * r->reAteX + d11 * bx;
+        float vz = d00 * r->reDeZ + d10 * az + d01 * r->reAteZ + d11 * bz;
+        m->rumo = (vx * vx + vz * vz > 1e-6f) ? rumoDe(-vx, -vz) : r->reDeRumo + giro * t;
+    } else {
+        m->x = r->reDeX + (r->reAteX - r->reDeX) * t;
+        m->z = r->reDeZ + (r->reAteZ - r->reDeZ) * t;
+        m->rumo = r->reDeRumo + giro * t;
+    }
     m->velocidade = -VELOCIDADE_DE_RE;
     m->volante += (limitar(-giro, -0.8f, 0.8f) - m->volante) * fminf(tempo * 4.0f, 1.0f);   /* de ré, o volante vira ao contrário */
     m->anguloDasRodas = fmodf(m->anguloDasRodas - (r->reAndou - antes) / 0.36f + 2.0f * PI_M, 2.0f * PI_M);
@@ -1298,6 +1380,7 @@ static void dirigir(int quem, MalhaDeColisao *malha, float tempo) {
         if (r->reNaChegada) {
             const Vaga *vaga = &vagas[r->lugarAtual][r->vagaAtual];
             comecarRe(r, m, vaga->x, vaga->z, vaga->rumo);
+            r->reEmCurva = r->chegaEmCurva;
             r->estado = ENTRANDO_DE_RE;
         } else {
             chegou(quem);
@@ -1436,13 +1519,13 @@ static void conversar(float tempo) {
     int maisPerto[MAIS_MORADORES];
     for (int i = 0; i < total; i++) {
         maisPerto[i] = NINGUEM;
-        if (rotinas[i].estado != PARADO) {
+        if (rotinas[i].estado != PARADO || i == quemConversa) {
             continue;
         }
         float menor = CONVERSA_ATE;
         for (int j = 0; j < total; j++) {
             float d = distanciaEntre(&moradores[i], moradores[j].x, moradores[j].z);
-            if (j != i && estacionado(j) && d < menor) {
+            if (j != i && j != quemConversa && estacionado(j) && d < menor) {
                 menor = d;
                 maisPerto[i] = j;
             }
@@ -1506,6 +1589,11 @@ static void reagirAoJogador(int i, float tempo) {
     float d = distanciaEntre(m, jogador.x, jogador.z);
     r->cumprimentou = fmaxf(r->cumprimentou - tempo, 0.0f);
     r->reclamou = fmaxf(r->reclamou - tempo, 0.0f);
+    if (i == quemConversa) {   /* conversando com ele: nada de cumprimento nem de reclamação */
+        r->jogadorPerto = 0.0f;
+        r->cumprimentou = CUMPRIMENTA_DE_NOVO;
+        return;
+    }
     if (jogador.velocidade > SUSTO_DE_PASSAGEM && d < SUSTO_ATE + m->comprimento / 2.0f && r->estado != PERSEGUINDO) {
         m->susto = fmaxf(m->susto, 1.0f);
         if (r->reclamou <= 0.0f && m->pessoa != P_RUIVO && m->pessoa != P_XERIFE) {
@@ -1562,6 +1650,228 @@ static void olharQuemPassa(int i) {
     }
 }
 
+/* De noite (0 de dia a 1 tarde da noite): o ânimo de sempre fica mais calmo e o sono chega mais fácil */
+static float noiteDaCidade(void) {
+    float h = horaDaCidade;
+    if (h >= 19.0f) {
+        return limitar((h - 19.0f) / 3.0f, 0.0f, 1.0f);
+    }
+    return (h < 6.0f) ? limitar((6.0f - h) / 1.5f, 0.0f, 1.0f) : 0.0f;
+}
+
+/*
+ * moverOCorpo
+ * Conta para o corpo (gestos.c) o que está acontecendo com o morador, e guarda a pose para o desenho:
+ *   - ele: parado ou andando, a fala de agora e o que ela quer dizer;
+ *   - a conversa: se ouve, a ênfase e o ânimo de quem fala com ele (outro morador ou o jogador);
+ *   - para onde olha, e o quanto quem ele olha está perto;
+ *   - o jogador: de visita (parado ou devagar ali perto), em perigo (vindo rápido e rente, mais
+ *     se está chegando), uma batida, o ar dele passando rente;
+ *   - o xerife atrás de alguém, se está sozinho, a noite.
+ */
+static void moverOCorpo(int i, float tempo) {
+    Morador *m = &moradores[i];
+    Rotina *r = &rotinas[i];
+    float d = distanciaEntre(m, jogador.x, jogador.z);
+    float rente = fmaxf(0.0f, d - m->comprimento * 0.5f);   /* do jogador até a lataria, mais ou menos */
+    float v = jogador.velocidade;
+    Situacao s = { 0 };
+    s.parado = (r->estado == PARADO || r->estado == DANDO_BRONCA || (i == quemConversa && fabsf(m->velocidade) < 0.3f));
+    s.velocidade = m->velocidade;
+    s.volante = m->volante;
+    s.fala = m->fala;
+    s.duracaoDaFala = r->duracaoDaFala;
+    s.humorDaFala = r->humor;
+
+    /* A conversa: com o jogador ou com outro morador */
+    s.perto = 0.5f;
+    if (i == quemConversa) {
+        s.ouvindo = (m->fala == NULL);
+        s.enfaseDoOutro = enfaseDoJogadorAgora;
+        s.alegriaDoOutro = 0.4f;   /* o jogador, puxando conversa, vem de boa */
+        s.agitacaoDoOutro = 0.5f;
+        s.perto = limitar(1.0f - rente / CONVERSA_COM_JOGADOR_ATE, 0.0f, 1.0f);
+    } else if (r->parceiro != NINGUEM) {
+        const Rotina *o = &rotinas[r->parceiro];
+        s.ouvindo = (m->fala == NULL);
+        s.enfaseDoOutro = o->corpo.enfase;
+        s.alegriaDoOutro = o->corpo.animo.alegria;
+        s.agitacaoDoOutro = o->corpo.animo.agitacao;
+        s.perto = limitar(1.0f - distanciaEntre(m, moradores[r->parceiro].x, moradores[r->parceiro].z) / CONVERSA_ATE, 0.0f, 1.0f);
+    } else if (d < OLHA_O_JOGADOR_ATE) {
+        s.perto = limitar(1.0f - d / OLHA_O_JOGADOR_ATE, 0.0f, 1.0f);
+    }
+    s.atento = m->olhaAlgo;
+    s.lado = m->olhaAlgo ? m->olhar : 0.0f;
+    if (m->pessoa == P_RUIVO && r->parceiro == NINGUEM && i != quemConversa && d < CUMPRIMENTA_ATE) {
+        s.lado = olharPara(m, jogador.x, jogador.z);   /* os olhos fogem do jogador, mas o corpo sabe onde ele está */
+    }
+
+    /* O jogador */
+    float chegando = (r->distanciaAntes > 0.0f && tempo > 0.0f) ? (r->distanciaAntes - d) / tempo : 0.0f;
+    r->distanciaAntes = d;
+    if (r->estado != PERSEGUINDO && i != quemConversa) {
+        s.perigo = limitar((v - 8.0f) / 14.0f, 0.0f, 1.0f) * limitar(1.0f - rente / 12.0f, 0.0f, 1.0f) * ((chegando > 0.0f) ? 1.0f : 0.5f);
+    }
+    if (v < DEVAGAR_ATE) {
+        s.visita = limitar(1.0f - d / OLHA_O_JOGADOR_ATE, 0.0f, 1.0f) * limitar(1.0f - v / DEVAGAR_ATE, 0.0f, 1.0f);
+    }
+    if (i == quemConversa) {
+        s.visita = 1.0f;
+    }
+    s.ladoDoJogador = olharPara(m, jogador.x, jogador.z);
+    s.batida = m->batida;
+    m->batida = 0.0f;
+    if (v > 12.0f && rente < 6.0f) {
+        s.vento = s.ladoDoJogador * (v / 30.0f) * (v / 30.0f) * (1.0f - rente / 6.0f);
+    }
+    s.bronca = (r->estado == PERSEGUINDO || r->estado == DANDO_BRONCA) ? 1.0f : 0.0f;
+    s.sozinho = (r->parceiro == NINGUEM && i != quemConversa && d > 25.0f);
+    s.noite = noiteDaCidade();
+    moverCorpo(&r->corpo, &JEITOS[m->pessoa], &s, tempo, &m->pose);
+}
+
+/*
+ * acompanharConversa
+ * A conversa com o jogador, a cada passo: a fala passa sozinha (ou quando ele aperta), o morador olha
+ * para ele e diz as falas dele na vez dele. Acaba no fim do papo, ou se o jogador vai embora.
+ */
+static void acompanharConversa(float tempo) {
+    if (quemConversa == NINGUEM) {
+        return;
+    }
+    Morador *m = &moradores[quemConversa];
+    passarPapo(&papo, tempo);
+    if (!papoAtivo(&papo) || distanciaEntre(m, jogador.x, jogador.z) > LARGA_A_CONVERSA + m->comprimento * 0.5f) {
+        encerrarConversa();
+        return;
+    }
+    int doJogador = 0;
+    const char *fala = falaDoPapo(&papo, &doJogador);
+    m->olhaAlgo = 1;
+    m->olhar = olharPara(m, jogador.x, jogador.z);
+    if (doJogador) {
+        m->fala = NULL;   /* agora ele ouve */
+        m->falaRestante = 0.0f;
+    } else {
+        if (m->fala != fala) {
+            dizer(m, fala, duracaoDaFalaDoPapo(&papo), 0);
+        }
+        m->falaRestante = papo.restante + 0.3f;   /* some junto com a vez dele */
+    }
+}
+
+const Jeito *jeitoDoModelo(int modelo) {
+    for (int p = 0; p < TOTAL_DE_PESSOAS; p++) {
+        if (PESSOAS[p].modelo == modelo) {
+            return &JEITOS[p];
+        }
+    }
+    return &JEITO_DE_QUALQUER_UM;
+}
+
+int moradorParaConversar(void) {
+    if (quemConversa != NINGUEM) {
+        return quemConversa;
+    }
+    if (jogador.velocidade > CONVERSA_ANDANDO_ATE) {
+        return NINGUEM;
+    }
+    float fx = sinf(jogador.rumo), fz = -cosf(jogador.rumo);
+    int melhor = NINGUEM;
+    float menor = 1e9f;
+    for (int i = 0; i < total; i++) {
+        const Morador *m = &moradores[i];
+        int estado = rotinas[i].estado;
+        if (estado == PERSEGUINDO || estado == DANDO_BRONCA) {
+            continue;   /* o xerife atrás de alguém não está para conversa */
+        }
+        float dx = m->x - jogador.x, dz = m->z - jogador.z, d = hypotf(dx, dz);
+        if (d > CONVERSA_COM_JOGADOR_ATE + m->comprimento * 0.5f || (dx * fx + dz * fz) < CONVERSA_NA_FRENTE * d) {
+            continue;
+        }
+        if (d < menor) {
+            menor = d;
+            melhor = i;
+        }
+    }
+    return melhor;
+}
+
+int conversarComJogador(void) {
+    if (quemConversa != NINGUEM) {
+        avancarPapo(&papo);
+        if (!papoAtivo(&papo)) {
+            encerrarConversa();
+        }
+        return 1;
+    }
+    int i = moradorParaConversar();
+    if (i == NINGUEM) {
+        return 0;
+    }
+    /* Os papos dele, em rodízio */
+    int pessoa = moradores[i].pessoa, quantos = 0;
+    for (size_t k = 0; k < sizeof(PAPOS) / sizeof(PAPOS[0]); k++) {
+        quantos += (PAPOS[k].pessoa == pessoa);
+    }
+    if (quantos == 0) {
+        return 0;
+    }
+    int vez = rotinas[i].papoDaVez++ % quantos;
+    for (size_t k = 0; k < sizeof(PAPOS) / sizeof(PAPOS[0]); k++) {
+        if (PAPOS[k].pessoa == pessoa && vez-- == 0) {
+            comecarPapo(&papo, &PAPOS[k].roteiro);
+            break;
+        }
+    }
+    quemConversa = i;
+    rotinas[i].parceiro = NINGUEM;
+    moradores[i].fala = NULL;   /* larga o que estava dizendo */
+    moradores[i].falaRestante = 0.0f;
+    return 1;
+}
+
+int moradorNaConversa(void) {
+    return quemConversa;
+}
+
+const char *falaDoJogador(float *duracao) {
+    int doJogador = 0;
+    const char *fala = (quemConversa != NINGUEM) ? falaDoPapo(&papo, &doJogador) : NULL;
+    if (fala == NULL || !doJogador) {
+        return NULL;
+    }
+    if (duracao != NULL) {
+        *duracao = duracaoDaFalaDoPapo(&papo);
+    }
+    return fala;
+}
+
+void encerrarConversa(void) {
+    if (quemConversa != NINGUEM) {
+        Morador *m = &moradores[quemConversa];
+        m->fala = NULL;
+        m->falaRestante = 0.0f;
+        rotinas[quemConversa].cumprimentou = CUMPRIMENTA_DE_NOVO;
+        m->espera = fmaxf(m->espera, 4.0f);   /* não sai correndo logo depois */
+    }
+    quemConversa = NINGUEM;
+    papo.roteiro = NULL;
+}
+
+void enfaseDoJogador(float enfase) {
+    enfaseDoJogadorAgora = fmaxf(enfaseDoJogadorAgora, enfase);
+}
+
+const Animo *animoDoMorador(int i) {
+    return &rotinas[i].corpo.animo;
+}
+
+float enfaseDoMorador(int i) {
+    return rotinas[i].corpo.enfase;
+}
+
 /*
  * atualizarMoradores
  * Cada um: estacionado, espera e, na hora, decide o que fazer; manobrando, de ré; andando, pelo caminho;
@@ -1591,6 +1901,11 @@ void atualizarMoradores(MalhaDeColisao *malha, float jogadorX, float jogadorZ, f
         r->ignora = fmaxf(r->ignora - tempo, 0.0f);
         r->ignoraJogador = fmaxf(r->ignoraJogador - tempo, 0.0f);
         r->descanso = fmaxf(r->descanso - tempo, 0.0f);
+        if (i == quemConversa && r->estado == PARADO) {   /* estacionado, conversando: não sai no meio da conversa */
+            m->velocidade = 0.0f;
+            m->volante *= expf(-tempo * 3.0f);
+            continue;
+        }   /* andando, segue o caminho conversando */
         switch (r->estado) {
             case SAINDO_DE_RE:
                 if (manobrarDeRe(m, r, malha, tempo)) {
@@ -1646,7 +1961,6 @@ void atualizarMoradores(MalhaDeColisao *malha, float jogadorX, float jogadorZ, f
     conversar(tempo);
     for (int i = 0; i < total; i++) {
         Morador *m = &moradores[i];
-        Rotina *r = &rotinas[i];
         reagirAoJogador(i, tempo);
         olharQuemPassa(i);
         if (m->falaRestante > 0.0f) {
@@ -1656,10 +1970,10 @@ void atualizarMoradores(MalhaDeColisao *malha, float jogadorX, float jogadorZ, f
                 m->falaLonge = 0;
             }
         }
-        /* Falando, o bico sobe e desce aos pouquinhos; ouvindo, quase parado */
-        r->fase2 += tempo;
-        float falando = (m->fala != NULL && r->estado == PARADO) ? 1.0f : 0.0f;
-        m->aceno = falando * 0.022f * sinf(r->fase2 * 10.0f) * fmaxf(0.0f, sinf(r->fase2 * 2.1f))
-                   + (r->parceiro != NINGUEM) * (1.0f - falando) * 0.006f * sinf(r->fase2 * 2.7f);
     }
+    acompanharConversa(tempo);
+    for (int i = 0; i < total; i++) {
+        moverOCorpo(i, tempo);
+    }
+    enfaseDoJogadorAgora = 0.0f;
 }

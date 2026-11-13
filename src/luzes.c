@@ -44,6 +44,7 @@
 #include "raymath.h"
 #include "rlgl.h"
 #include "leitor_json.h"
+#include "malhas.h"
 
 #define PASTA_DAS_LUZES       "recursos/modelos/luzes"
 #define MAIS_CONJUNTOS        24
@@ -371,6 +372,42 @@ int registrarLuzesMoveis(const char *glb, const char *json, int sempreAceso) {
     }
     c->acesa = sempreAceso ? FIM_DO_ACENDER : (ligadas ? FIM_DO_ACENDER : 0.0f);
     TraceLog(LOG_INFO, "LUZES: %s (anda), %d malhas, %d luzes pontuais", c->nome, c->modelo.meshCount, c->totalDeLampadas);
+    return totalDeConjuntos++;
+}
+
+/* Uma ilha de lâmpadas vai para o conjunto novo se o meio dela passa de zMinimo */
+static int alemDoZ(Vector3 minimo, Vector3 maximo, void *dados) {
+    return (minimo.z + maximo.z) * 0.5f > *(const float *) dados;
+}
+
+int separarLuzesMoveis(int qual, float zMinimo) {
+    if (qual < 0 || qual >= totalDeConjuntos || !conjuntos[qual].movel || totalDeConjuntos == MAIS_CONJUNTOS) {
+        return -1;
+    }
+    Conjunto *c = &conjuntos[qual];
+    if (!c->temModelo || c->modelo.meshCount != 1) {
+        return -1;   /* as lâmpadas acesas vêm numa malha só (ferramentas/luzes) */
+    }
+    Mesh fica, vai;
+    if (!separarMalhaPorIlhas(c->modelo.meshes[0], alemDoZ, &zMinimo, &fica, &vai)) {
+        return -1;
+    }
+    UnloadMesh(c->modelo.meshes[0]);
+    c->modelo.meshes[0] = fica;
+    c->caixa = GetModelBoundingBox(c->modelo);
+    Conjunto *novo = &conjuntos[totalDeConjuntos];
+    memset(novo, 0, sizeof(*novo));
+    snprintf(novo->nome, sizeof(novo->nome), "%.40s_2", c->nome);
+    novo->modelo = LoadModelFromMesh(vai);
+    novo->modelo.materials[0].shader = shaderDasLuzes;
+    novo->temModelo = 1;
+    novo->caixa = GetModelBoundingBox(novo->modelo);
+    novo->acenderEm = c->acenderEm;
+    novo->acesa = c->acesa;
+    novo->movel = 1;
+    novo->sempreAceso = c->sempreAceso;
+    novo->matriz = c->matriz;
+    TraceLog(LOG_INFO, "LUZES: %s separado em dois (%d e %d triângulos)", c->nome, fica.triangleCount, vai.triangleCount);
     return totalDeConjuntos++;
 }
 

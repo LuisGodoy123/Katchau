@@ -18,6 +18,16 @@
  * assustam quando ele passa rápido rente a eles, e o xerife vai atrás de
  * quem passa correndo perto do esconderijo dele.
  *
+ * Cada um se mexe do seu jeito (gestos.c), pelo ânimo dele, que sobe e
+ * desce com o que acontece: o jogador chegando devagar (companhia) ou
+ * passando rente e rápido (perigo), uma batida, a fala dele e a de quem
+ * conversa com ele, a noite.
+ *
+ * O jogador conversa com eles: apertando o botão de conversar perto de um,
+ * na frente ou do lado (o quadrado, o X, ou a tecla E), até andando, os
+ * dois trocam as falas de um dos papos dele (papo.h). Estacionado, o morador
+ * fica até a conversa acabar; dirigindo, segue o caminho conversando.
+ *
  * Entre um lugar e outro, andam pelas ruas, na faixa da direita, seguindo
  * o grafo das ruas, freiam atrás de quem vai na frente e esperam a vez de
  * entrar na rua.
@@ -35,6 +45,8 @@
 
 #include "carro.h"
 #include "colisao.h"
+#include "gestos.h"
+#include "papo.h"
 
 /* Os figurantes: modelos de carros que não correm (os números deles vêm depois dos da corrida) */
 #define TOTAL_DE_FIGURANTES 4
@@ -70,12 +82,13 @@ typedef struct {
     float anguloDasRodas;    /* radianos */
     float comprimento, largura;
     float susto;             /* segundos: alguém bateu nele ou passou raspando */
+    float batida;            /* 0 a 1: o jogador bateu nele agora (passeio.c conta; o corpo pula) */
     int buzinou;             /* 1 no quadro em que ele buzina (o jogador parado na frente dele) */
 
     /* A cara e o corpo, para o desenho */
     int olhaAlgo;            /* 1: os olhos vão para "olhar" (estacionado, olhando alguém), não para o volante */
     float olhar;             /* -1 (todo à esquerda) a +1 (todo à direita) */
-    float aceno;             /* radianos: o bico sobe e desce falando (a arfagem do corpo) */
+    Pose pose;               /* o corpo (gestos.c): a suspensão, as rodas da frente como mãos e a emoção dos olhos */
     float aperto;            /* 0 a 1: os olhos apertados (o xerife atrás de alguém) */
     int perseguindo;         /* 1: o xerife atrás do jogador (no minimapa, em vermelho) */
 
@@ -102,5 +115,16 @@ int totalDeMoradores(void);
 /* A hora do dia (0 a 24): de noitinha só se vai ao café da Flo, e tarde da noite todo mundo fica em casa */
 void definirHoraDaCidade(float hora);
 Morador *morador(int i);
+
+/* A conversa com o jogador */
+int moradorParaConversar(void);              /* quem está na frente ou do lado do jogador e pode conversar, até andando (-1: ninguém) */
+int conversarComJogador(void);               /* o jogador apertou: começa a conversa ou passa a fala (1: há conversa) */
+int moradorNaConversa(void);                 /* quem conversa com o jogador agora (-1: ninguém) */
+const char *falaDoJogador(float *duracao);   /* a fala do jogador na conversa, agora (NULL: não é a vez dele) */
+void encerrarConversa(void);
+void enfaseDoJogador(float enfase);          /* a ênfase que o jogador deu agora: o morador responde com um "uhum" */
+const Animo *animoDoMorador(int i);
+float enfaseDoMorador(int i);
+const Jeito *jeitoDoModelo(int modelo);      /* o jeito do carro (o do jogador, se ele é um dos moradores) */
 
 #endif

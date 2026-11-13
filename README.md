@@ -87,7 +87,9 @@ lista circular duplamente encadeada de segmentos.
   Flo, o xerife faz a ronda pela rua principal, o Doc chama o McQueen para treinar no oval, a Sally chama o
   McQueen para passear pela rodovia, o Mate passa no Cozy Cone para buscar o McQueen, o Sargento chama o
   Fillmore para o café, e o Guido vai sempre atrás do Luigi. Quem vai buscar alguém para na casa dele, os
-  dois conversam e saem juntos; acabado o programa, cada um volta para a sua casa. Estacionados perto, eles
+  dois conversam e saem juntos; acabado o programa, cada um volta para a sua casa. No café da Flo, todos
+  estacionam virados para a rua, a Flo também (quem chega é recebido de frente): passam pela frente da vaga, de
+  lado, e entram de ré numa curva, com a traseira na frente, como se estaciona de verdade. Estacionados perto, eles
   conversam: olham um para o outro e falam na vez de cada um (o Luigi e o Guido, o Sargento e o Fillmore
   discutindo, a Flo e o Ramone...), e o jogador lê a conversa embaixo da tela quando chega perto. Com o
   jogador: olham para ele quando ele chega devagar, cumprimentam quando ele para do lado (o Ruivo, tímido, se
@@ -98,6 +100,67 @@ lista circular duplamente encadeada de segmentos.
   `lizzie.glb`) saem de `ferramentas/preparar_figurantes.py` (que passa as texturas JPEG para PNG, porque a
   raylib do jogo não lê JPEG, separa os olhos pintados de cada um nas três camadas dos olhos vivos, redesenha
   os do Ruivo como os do filme e desvira a Lizzie, que vem do avesso) e entram em `carros3d.c` depois dos carros da corrida.
+- **A linguagem do corpo dos moradores e do Mack** (`src/gestos.c`; o jeito de cada um, o humor das falas e os
+  papos no fim de `src/moradores_mapa.h`). A regra é a da Pixar em Carros, a "verdade do material": o carro é de
+  metal e pesa mais de uma tonelada, então não estica nem se dobra, e não fica em pé nas rodas de trás para
+  gesticular com as da frente. Tudo o que o corpo faz é o que a suspensão deixa: sobe e desce sobre as rodas,
+  deita de lado e abaixa ou ergue o bico **girando em volta do eixo de trás** (o eixo de trás é o quadril e o
+  carro inteiro é a cabeça). As rodas da frente são as mãos. O resto está nos olhos, com a pálpebra fazendo de
+  sobrancelha (contente, bravo, triste ou sem graça, espantado, com sono).
+  - **Nada é animação pronta.** Há duas camadas ao mesmo tempo. A involuntária é física: a suspensão de cada um
+    (o mesmo gesto no Mate, mole, balança e demora a parar; no Sargento sai seco), a respiração do motor em
+    marcha lenta (mais rápida agitado), o corpo que nunca fica parado de todo (um ruído suave, diferente em cada
+    um), o reflexo do susto, o tremor do medo, o ar de um carro passando rente, a arrancada, a freada e a rua. A
+    voluntária nasce do **ânimo** de cada um (alegria, agitação, conforto, interesse e sono), que sobe e desce com
+    o que acontece e volta devagar ao temperamento da pessoa: o jogador de visita (chegando devagar e parando
+    perto) alegra e, nos tímidos, deixa sem graça; o jogador passando rápido e rente assusta, na medida da
+    velocidade e da distância; uma batida, do tamanho dela; a fala de cada um e a de quem conversa com ele (quem
+    ouve pega o ânimo de quem fala, conforme a empatia: o Fillmore não pega a braveza do Sargento); o xerife
+    atrás de alguém fica bravo; de noite todos ficam mais calmos e, sozinhos, cochilam. A postura, os olhos e o
+    tamanho e o jeito de cada gesto saem do ânimo de agora.
+  - **Falando**, o bico sobe antes da primeira palavra (a antecipação) e as ênfases caem **nas palavras da frase**,
+    na hora em que são ditas (as maiores, e mais forte a que vem antes de um "!"); contente e agitado, a ênfase é um
+    pulinho; bravo, um aceno seco e o corpo sacudindo de lado; numa pergunta, a cabeça deita no fim. As rodas da
+    frente são as mãos: a cada palavra viram para um lado e para o outro (até perto do volante todo), puxando
+    para o lado de quem ouve, e entre as palavras apontam para ele; numa pergunta, numa palavra forte com "!" ou
+    contente, as duas se abrem para fora, como braços abertos. Todo mundo gesticula um pouco; o Luigi, o Guido e
+    o Mate, muito (o Guido também ergue os garfos).
+    **Ouvindo**, o "uhum" vem logo depois de uma ênfase de quem fala, se ele está prestando atenção e concorda.
+    Os gestos são dados pelo quanto o corpo vai, e a mola diz só como ele vai: um carro de suspensão dura
+    gesticula do mesmo tamanho que um de suspensão mole, só que mais seco.
+  - **Os tiques nascem de vontades** que o ânimo enche, sem hora marcada: o McQueen agitado e parado acelera o
+    motor (o corpo torce com o torque); o Ramone contente bombeia a hidráulica (ou, tranquilo, ergue um lado); o
+    Sargento desleixa aos poucos e se apruma quando alguém chega ou vai dar uma ordem; a lataria solta do Mate
+    chacoalha quando o corpo mexe forte; o Fillmore à vontade balança devagar; o motor velho da Lizzie treme
+    (mais quando ela se agita), e sozinha ela cochila e acorda num susto; o Guido agitado não para quieto; o
+    Ruivo, com gente perto, se encolhe, olha para baixo e deita para longe.
+  - **A boca fala.** Todos os moradores têm a boca modelada (os lábios, o lado de dentro, os dentes e a língua),
+    e falando a mandíbula abre nas vogais e fecha no m, no b e no p, no ritmo da frase. Ela gira em volta de uma
+    dobradiça de lado a lado do carro, no vertex shader dos carros (`carros3d.c`), pelo peso de cada vértice,
+    que vai num atributo livre dele (o `vertexTexCoord2`). Os pesos vêm de `recursos/modelos/carros/bocas.txt`,
+    feito por `ferramentas/medir_bocas.py` (rode com o Python do Blender, que tem o numpy): uma caixa não
+    separa a mandíbula, porque os lábios de cima e de baixo se sobrepõem na boca fechada; a ferramenta a
+    escolhe pela malha, partindo do lábio de baixo sem atravessar a fenda da boca, e mais os dentes de baixo e
+    a língua. Abre até 20 graus; 15 quando o lábio de baixo é o para-choque ou um friso (o Doc, o Xerife, o
+    Sargento, o Luigi) e 12 no Fillmore. O Mack também fala: a boca dele fica no para-choque, embaixo da grade, e
+    o queixo inteiro desce. Como ele é desenhado com o shader do mapa, e não com o dos carros, a mandíbula dele
+    gira na própria malha (`darBocaAoModelo` e `abrirBocaDoModelo`, em `carros3d.c`), só quando a abertura muda.
+- **Conversar com os moradores e com o Mack:** perto de um deles, na frente ou do lado, o **quadrado** (o X no
+  controle de Xbox, ou a tecla **E**) começa a conversa, e o aviso embaixo da tela diz com quem. Dá para conversar
+  andando (até uns 80 km/h), até com quem está dirigindo do lado: estacionado, o morador fica até a conversa
+  acabar; dirigindo, segue o caminho conversando. Ele olha para o jogador, e os dois trocam as falas de um dos
+  papos dele (`PAPOS` em `moradores_mapa.h`, em
+  rodízio; `src/papo.c`), cada uma na legenda com o nome de quem fala. A fala passa sozinha no tempo de ser lida,
+  ou na hora, apertando de novo. O carro do jogador também fala com o corpo e ouve com "uhum" (andando, com
+  a cabeça, a boca e os olhos: as rodas estão guiando). Afastando-se, a conversa acaba. O Mack tem os papos dele, cumprimenta quem para na frente da cabine, reclama de quem bate nele
+  e fala nas cenas (entrando, partindo e na volta da corrida).
+- **A cabine do Mack é a cabeça dele:** ela se mexe sobre o chassi como o corpo dos carros sobre as rodas, girando
+  em volta do eixo de trás da cabine, e a carreta fica parada, presa na quinta roda. O modelo vem inteiro, então o
+  corpo é cortado ao carregar, pelas ilhas da malha (`src/malhas.c`). A cabine leva o capô, o chassi com os
+  tanques, os para-lamas, a quinta roda e as chaminés; o teto, o "pescoço" e o baú ficam com a carreta. As
+  lâmpadas da cabine também vão com ela (`separarLuzesMoveis`, em `src/luzes.c`). O Mack é grandalhão e
+  bonachão, e dorminhoco como no filme: sozinho de noite, a cabine cai e os olhos fecham. Os garfos do Guido
+  agora acompanham o corpo dele (também na corrida).
 - **Passeio livre:** um mundo aberto de Radiator Springs (a cidade, o Willy's Butte, os cânions e, colada na
   cidade, a pista de treino de terra que veio do Cars 2), sem pista: o carro anda em qualquer direção
   (`src/livre.c`, que dirige com a direção livre da corrida, `dirigirSemPista` em `src/carro.c`) e o "para
@@ -184,7 +247,8 @@ também os triângulos da colisão.
 **T** vai para a pista de treino, **M** (ou LB) abre o mapa (lá, **Z**/RB aproxima e **ENTER**/A leva à pista
 de treino), **C** troca a câmera e **ESC** pausa. O velocímetro é o mesmo da corrida; no canto de baixo à
 esquerda fica o minimapa (redondo, com o Mack marcado em laranja), com a hora do dia em cima. Na vaga atrás do
-Mack, **ENTER** (ou Y) entra nele. **O dia passa**: um dia inteiro de Radiator Springs dura 48 minutos (28 de dia, 6
+Mack, **ENTER** (ou o triângulo, Y no controle de Xbox) entra nele. Perto de um morador ou da cabine do Mack, até
+andando, **E** (ou o quadrado, X no controle de Xbox) conversa com ele, e de novo passa a fala. **O dia passa**: um dia inteiro de Radiator Springs dura 48 minutos (28 de dia, 6
 de pôr do sol, 10 de noite e 4 de amanhecer). O sol nasce na ponta leste da rua principal, atravessa o céu e se põe
 no fim dela, laranja; de noite a cidade fica azulada, com a lua e as estrelas, e o céu, as sombras, os carros, a
 poeira e o lado de dentro dos prédios acompanham (`src/hora.c`; a luz é o mesmo cálculo de antes, com o sol e as

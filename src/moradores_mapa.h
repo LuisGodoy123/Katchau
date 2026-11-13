@@ -33,28 +33,29 @@
 
 /* Os lugares: a vaga do dono (um nó do grafo) e para onde o carro aponta, estacionado. Quem
  * estaciona de ré (olhando para a rua) entra de ré e sai de frente; quem estaciona de frente
- * (a Flo, olhando o balcão) entra de frente e sai de ré */
+ * (olhando para dentro) entra de frente e sai de ré. No café da Flo, todos olham a rua (quem chega é
+ * recebido de frente) e entram de ré numa curva, vindo de lado pela frente da vaga */
 enum {
     LUGAR_LUIGI, LUGAR_GUIDO, LUGAR_RAMONE, LUGAR_FLO, LUGAR_CURIOS, LUGAR_DOC, LUGAR_MCQUEEN,
     LUGAR_SALLY, LUGAR_SARGENTO, LUGAR_FILLMORE, LUGAR_MATE, LUGAR_XERIFE, LUGAR_RUIVO
 };
 
 static const Lugar LUGARES[] = {
-    [LUGAR_LUIGI]    = { "Casa Della Tires (Luigi)", "vaga_luigi",    0.525f, NULL, 0.0f, 0 },
-    [LUGAR_GUIDO]    = { "Casa Della Tires (Guido)", "vaga_guido",    0.525f, NULL, 0.0f, 0 },
-    [LUGAR_RAMONE]   = { "Ramone's House of Body Art", "vaga_ramone", 3.142f, NULL, 0.0f, 0 },
-    [LUGAR_FLO]      = { "Flo's V8 Café",            "vaga_flo",      0.000f, NULL, 0.0f, 0 },
-    [LUGAR_CURIOS]   = { "Radiator Springs Curios",  "vaga_lizzie",   0.000f, NULL, 0.0f, 0 },
-    [LUGAR_DOC]      = { "Clínica do Doc Hudson",    "vaga_doc",      3.142f, NULL, 0.0f, 0 },
+    [LUGAR_LUIGI]    = { "Casa Della Tires (Luigi)", "vaga_luigi",    0.525f, NULL, 0.0f, 0, 0 },
+    [LUGAR_GUIDO]    = { "Casa Della Tires (Guido)", "vaga_guido",    0.525f, NULL, 0.0f, 0, 0 },
+    [LUGAR_RAMONE]   = { "Ramone's House of Body Art", "vaga_ramone", 3.142f, NULL, 0.0f, 0, 0 },
+    [LUGAR_FLO]      = { "Flo's V8 Café",            "vaga_flo",      3.142f, NULL, 0.0f, 0, 1 },   /* todos olham a rua */
+    [LUGAR_CURIOS]   = { "Radiator Springs Curios",  "vaga_lizzie",   0.000f, NULL, 0.0f, 0, 0 },
+    [LUGAR_DOC]      = { "Clínica do Doc Hudson",    "vaga_doc",      3.142f, NULL, 0.0f, 0, 0 },
     [LUGAR_MCQUEEN]  = { "Cozy Cone (o cone do McQueen)", "vaga_mcqueen", 1.5623f,
-                         "visitas_do_cone_do_mcqueen", -1.5623f, 0 },
+                         "visitas_do_cone_do_mcqueen", -1.5623f, 0, 0 },
     [LUGAR_SALLY]    = { "Cozy Cone (a recepção da Sally)", "vaga_sally", 0.000f,
-                         NULL, 0.0f, 0x2 },   /* a visita só cabe a oeste dela: a leste, o balcão e um vaso */
-    [LUGAR_SARGENTO] = { "Sarge's Surplus Hut",      "vaga_sarge",    3.142f, NULL, 0.0f, 0 },
-    [LUGAR_FILLMORE] = { "Fillmore's Taste-In",      "vaga_fillmore", 3.142f, NULL, 0.0f, 0 },
-    [LUGAR_MATE]     = { "Tow Mater Towing & Salvage", "vaga_mater",  6.137f, NULL, 0.0f, 0 },
-    [LUGAR_XERIFE]   = { "atrás do outdoor da entrada leste", "vaga_sheriff", 3.142f, NULL, 0.0f, 0 },
-    [LUGAR_RUIVO]    = { "o quartel, junto da estátua do Stanley", "vaga_red", 1.571f, NULL, 0.0f, 0 },
+                         NULL, 0.0f, 0x2, 0 },   /* a visita só cabe a oeste dela: a leste, o balcão e um vaso */
+    [LUGAR_SARGENTO] = { "Sarge's Surplus Hut",      "vaga_sarge",    3.142f, NULL, 0.0f, 0, 0 },
+    [LUGAR_FILLMORE] = { "Fillmore's Taste-In",      "vaga_fillmore", 3.142f, NULL, 0.0f, 0, 0 },
+    [LUGAR_MATE]     = { "Tow Mater Towing & Salvage", "vaga_mater",  6.137f, NULL, 0.0f, 0, 0 },
+    [LUGAR_XERIFE]   = { "atrás do outdoor da entrada leste", "vaga_sheriff", 3.142f, NULL, 0.0f, 0, 0 },
+    [LUGAR_RUIVO]    = { "o quartel, junto da estátua do Stanley", "vaga_red", 1.571f, NULL, 0.0f, 0, 0 },
 };
 
 /* O grafo das ruas */
@@ -370,3 +371,274 @@ static const char *const SUSTOS[] = { "Ei, olha a velocidade!", "Opa! Mais devag
 #define XERIFE_VAI      "Ei, você aí! Encosta!"
 #define XERIFE_PEGOU    "Devagar, rapaz! Na cidade, o limite é de 30 por hora."
 #define XERIFE_DESISTE  "Hmpf... da próxima vez eu te pego."
+
+/* ------------------------------------------------------------------
+ * O jeito de cada um (gestos.h): como o corpo se mexe
+ * ------------------------------------------------------------------
+ * A suspensão de cada um é a do carro dele, como a Pixar ajustou no filme (a do Mate é mole, a do
+ * McQueen é de carro de corrida); ela diz como o corpo vai, não o quanto. O temperamento (o ânimo de
+ * sempre e o quanto as coisas o mexem) e o jeito de se expressar vêm da personalidade:
+ *   - McQueen: confiante e elétrico; parado e agitado, acelera o motor (o corpo torce).
+ *   - Mate: o guincho enferrujado, bobo e de bom coração, contente quase sempre; pega o ânimo de
+ *     quem fala com ele; a suspensão mole balança e a lataria solta chacoalha.
+ *   - Sally: elegante e esperta, a suspensão firme do Porsche; gestos precisos.
+ *   - Doc: o Hudson Hornet, de cara fechada e econômico nos gestos; pensa antes de falar.
+ *   - Luigi: o Fiat 500, empolgado, fala com as "mãos" (as rodas da frente).
+ *   - Guido: a empilhadeira, elétrico, não para quieto; os garfos sobem quando ele se anima.
+ *   - Ramone: o Impala rebaixado, tranquilo e estiloso; contente, a hidráulica bombeia.
+ *   - Flo: a diva do café, carinhosa, de nariz empinado; rebola falando.
+ *   - Xerife: o carro de polícia de 49, sério, de nariz em pé.
+ *   - Sargento: o jipe do exército, de peito estufado; o corpo desleixa e ele se apruma.
+ *   - Fillmore: a Kombi hippie, calma, de olhos pela metade; não pega a braveza do Sargento e,
+ *     contente, balança no ritmo dele.
+ *   - Lizzie: o Ford T, velhinha; o motor treme e, sozinha, ela cochila.
+ *   - Ruivo: o caminhão de bombeiro enorme, sensível e muito tímido: com gente perto, se encolhe,
+ *     olha para baixo e deita para longe.
+ */
+static const Jeito JEITOS[] = {
+    [P_MCQUEEN]  = { .frequencia = 3.4f, .amortecimento = 0.45f, .alegria = 0.30f, .agitacao = 0.55f, .conforto = 0.5f,
+                     .empatia = 0.6f, .timidez = 0.0f, .sonolencia = 0.2f, .inquietude = 0.5f,
+                     .energia = 1.30f, .ritmo = 2.6f, .postura = -0.006f, .altura = -0.010f, .maos = 0.60f, .requebro = 0.35f,
+                     .boca = 1.0f, .exclamando = HUMOR_EMPOLGADO, .tique = TIQUE_ACELERA },
+    [P_MATE]     = { .frequencia = 1.7f, .amortecimento = 0.22f, .alegria = 0.55f, .agitacao = 0.50f, .conforto = 0.7f,
+                     .empatia = 0.9f, .timidez = 0.0f, .sonolencia = 0.3f, .inquietude = 0.6f,
+                     .energia = 1.50f, .ritmo = 2.2f, .postura = 0.006f, .altura = 0.0f, .maos = 0.80f, .requebro = 0.60f,
+                     .boca = 1.2f, .exclamando = HUMOR_EMPOLGADO, .tique = TIQUE_CHACOALHO },
+    [P_SALLY]    = { .frequencia = 3.0f, .amortecimento = 0.60f, .alegria = 0.30f, .agitacao = 0.40f, .conforto = 0.6f,
+                     .empatia = 0.8f, .timidez = 0.0f, .sonolencia = 0.2f, .inquietude = 0.3f,
+                     .energia = 1.00f, .ritmo = 1.9f, .postura = -0.005f, .altura = 0.0f, .maos = 0.45f, .requebro = 0.45f,
+                     .boca = 0.85f, .exclamando = HUMOR_FELIZ, .tique = TIQUE_NENHUM },
+    [P_DOC]      = { .frequencia = 2.0f, .amortecimento = 0.75f, .alegria = -0.10f, .agitacao = 0.25f, .conforto = 0.5f,
+                     .empatia = 0.4f, .timidez = 0.0f, .sonolencia = 0.35f, .inquietude = 0.12f,
+                     .energia = 0.75f, .ritmo = 1.2f, .postura = 0.0f, .altura = 0.0f, .maos = 0.20f, .requebro = 0.15f,
+                     .boca = 0.75f, .exclamando = HUMOR_SERIO, .tique = TIQUE_NENHUM },
+    [P_LUIGI]    = { .frequencia = 3.8f, .amortecimento = 0.35f, .alegria = 0.45f, .agitacao = 0.65f, .conforto = 0.5f,
+                     .empatia = 0.8f, .timidez = 0.1f, .sonolencia = 0.15f, .inquietude = 0.7f,
+                     .energia = 1.60f, .ritmo = 3.2f, .postura = -0.006f, .altura = 0.0f, .maos = 1.00f, .requebro = 0.50f,
+                     .boca = 1.1f, .exclamando = HUMOR_EMPOLGADO, .tique = TIQUE_NENHUM },
+    [P_GUIDO]    = { .frequencia = 4.5f, .amortecimento = 0.40f, .alegria = 0.50f, .agitacao = 0.75f, .conforto = 0.5f,
+                     .empatia = 0.8f, .timidez = 0.15f, .sonolencia = 0.1f, .inquietude = 0.9f,
+                     .energia = 1.70f, .ritmo = 3.6f, .postura = 0.0f, .altura = 0.0f, .maos = 1.00f, .requebro = 0.40f,
+                     .boca = 1.2f, .exclamando = HUMOR_EMPOLGADO, .tique = TIQUE_INQUIETO },
+    [P_RAMONE]   = { .frequencia = 2.2f, .amortecimento = 0.50f, .alegria = 0.35f, .agitacao = 0.30f, .conforto = 0.8f,
+                     .empatia = 0.6f, .timidez = 0.0f, .sonolencia = 0.3f, .inquietude = 0.35f,
+                     .energia = 1.15f, .ritmo = 1.7f, .postura = -0.006f, .altura = -0.035f, .maos = 0.50f, .requebro = 0.80f,
+                     .boca = 0.9f, .exclamando = HUMOR_FELIZ, .tique = TIQUE_HIDRAULICA },
+    [P_FLO]      = { .frequencia = 1.9f, .amortecimento = 0.50f, .alegria = 0.50f, .agitacao = 0.45f, .conforto = 0.7f,
+                     .empatia = 0.85f, .timidez = 0.0f, .sonolencia = 0.2f, .inquietude = 0.4f,
+                     .energia = 1.30f, .ritmo = 2.1f, .postura = -0.008f, .altura = 0.0f, .maos = 0.45f, .requebro = 1.00f,
+                     .boca = 1.0f, .exclamando = HUMOR_FELIZ, .tique = TIQUE_NENHUM },
+    [P_XERIFE]   = { .frequencia = 1.8f, .amortecimento = 0.75f, .alegria = -0.05f, .agitacao = 0.30f, .conforto = 0.6f,
+                     .empatia = 0.4f, .timidez = 0.0f, .sonolencia = 0.35f, .inquietude = 0.15f,
+                     .energia = 0.90f, .ritmo = 1.4f, .postura = -0.007f, .altura = 0.0f, .maos = 0.25f, .requebro = 0.20f,
+                     .boca = 0.9f, .exclamando = HUMOR_BRAVO, .tique = TIQUE_NENHUM },
+    [P_SARGENTO] = { .frequencia = 2.4f, .amortecimento = 0.55f, .alegria = -0.15f, .agitacao = 0.45f, .conforto = 0.6f,
+                     .empatia = 0.3f, .timidez = 0.0f, .sonolencia = 0.2f, .inquietude = 0.2f,
+                     .energia = 1.10f, .ritmo = 2.0f, .postura = -0.014f, .altura = 0.010f, .maos = 0.20f, .requebro = 0.55f,
+                     .boca = 1.0f, .exclamando = HUMOR_BRAVO, .tique = TIQUE_SENTIDO },
+    [P_FILLMORE] = { .frequencia = 1.3f, .amortecimento = 0.40f, .alegria = 0.35f, .agitacao = 0.10f, .conforto = 0.8f,
+                     .empatia = 0.25f, .timidez = 0.0f, .sonolencia = 0.6f, .inquietude = 0.3f,
+                     .energia = 0.80f, .ritmo = 1.0f, .postura = -0.003f, .altura = 0.0f, .maos = 0.30f, .requebro = 0.70f,
+                     .boca = 0.7f, .exclamando = HUMOR_CALMO, .tique = TIQUE_GINGADO },
+    [P_LIZZIE]   = { .frequencia = 2.6f, .amortecimento = 0.30f, .alegria = 0.10f, .agitacao = 0.20f, .conforto = 0.4f,
+                     .empatia = 0.5f, .timidez = 0.2f, .sonolencia = 1.0f, .inquietude = 0.25f,
+                     .energia = 0.80f, .ritmo = 1.1f, .postura = 0.008f, .altura = 0.0f, .maos = 0.25f, .requebro = 0.25f,
+                     .boca = 0.9f, .exclamando = HUMOR_FELIZ, .tique = TIQUE_MOTOR_VELHO },
+    [P_RUIVO]    = { .frequencia = 1.1f, .amortecimento = 0.60f, .alegria = 0.10f, .agitacao = 0.20f, .conforto = 0.3f,
+                     .empatia = 0.9f, .timidez = 0.9f, .sonolencia = 0.3f, .inquietude = 0.2f,
+                     .energia = 0.70f, .ritmo = 0.9f, .postura = 0.008f, .altura = 0.0f, .maos = 0.10f, .requebro = 0.10f,
+                     .boca = 0.6f, .exclamando = HUMOR_TIMIDO, .tique = TIQUE_NENHUM },
+};
+
+/* O jeito de quem não é morador (os carros da corrida, quando o jogador está com um deles) */
+static const Jeito JEITO_DE_QUALQUER_UM = {
+    .frequencia = 2.6f, .amortecimento = 0.5f, .alegria = 0.2f, .agitacao = 0.45f, .conforto = 0.6f,
+    .empatia = 0.6f, .timidez = 0.0f, .sonolencia = 0.2f, .inquietude = 0.4f,
+    .energia = 1.1f, .ritmo = 2.2f, .postura = 0.0f, .altura = 0.0f, .maos = 0.5f, .requebro = 0.35f,
+    .boca = 1.0f, .exclamando = HUMOR_EMPOLGADO, .tique = TIQUE_NENHUM,
+};
+
+/* ------------------------------------------------------------------
+ * Os papos com o jogador (papo.h): ele aperta para conversar na frente de alguém, e os dois trocam as
+ * falas de um destes, em rodízio. As do jogador começam com ">"
+ * ------------------------------------------------------------------ */
+typedef struct {
+    int pessoa;
+    RoteiroDoPapo roteiro;
+} PapoDaPessoa;
+
+static const PapoDaPessoa PAPOS[] = {
+    { P_MCQUEEN, { { "Katchau! E aí, como vai?", ">Tudo certo! E você, McQueen?",
+                     "Treinando todo dia. A Copa Pistão não se ganha sozinha!", ">Boa sorte na próxima corrida!",
+                     "Valeu! Aparece no oval do Doc, a gente treina junto." } } },
+    { P_MCQUEEN, { { "Sabe o que eu aprendi aqui?", ">O quê?",
+                     "Que às vezes é melhor ir devagar e curtir a estrada.", ">Foi o Doc que te ensinou isso?",
+                     "Ele e essa cidade inteira. Katchau!" } } },
+    { P_MATE, { { "Ô, amigão! Cê sabia que eu sou o melhor de ré do mundo?", ">Sério? Mostra aí!",
+                  "Olha só! ...Bom, quase. Esse poste apareceu do nada.", ">Hahaha! Melhor tomar cuidado.",
+                  "Tô sempre com cuidado! Sou o Mate, M-A-T-E!" } } },
+    { P_MATE, { { "Quer ir tombar trator mais tarde?", ">Tombar trator? Como assim?",
+                  "Cê chega bem devagarinho e... BÉÉÉ! Eles tombam!", ">E o Frank não fica bravo?",
+                  "O Frank? Ih, melhor nem falar do Frank." } } },
+    { P_MATE, { { "Ei, cê tá precisando de um reboque?", ">Hoje não, valeu!",
+                  "Se precisar, é só chamar. Reboque do Mate, vinte e quatro horas!" } } },
+    { P_SALLY, { { "Oi! Bem-vindo ao Cozy Cone.", ">Que lugar bonito! Foi você que montou?",
+                   "Foi sim. Cada cone com o seu charme.", ">Ficou demais.",
+                   "Obrigada! Se quiser descansar, o cone oito é todo seu." } } },
+    { P_SALLY, { { "Já foi até a cachoeira pela rodovia?", ">Ainda não. É longe?",
+                   "Um pouco. Mas a vista lá do alto vale cada curva.", ">Então vou dar uma volta.",
+                   "Vai devagar e repara na paisagem. É o melhor da Rota 66." } } },
+    { P_DOC, { { "Hm. Você de novo.", ">Oi, Doc! Me dá uma dica de pilotagem?",
+                 "Na terra, vira à direita pra ir à esquerda.", ">Como assim?",
+                 "Joga a traseira antes da curva, garoto. Treina no oval que você entende." } } },
+    { P_DOC, { { "Precisa de alguma coisa?", ">Só passei pra dar um oi.",
+                 "Hm. Tá bom. Mas não fica correndo pela cidade, ouviu?", ">Pode deixar, Doc.", "...Bom garoto." } } },
+    { P_LUIGI, { { "Ah! Um cliente! Bem-vindo à Casa Della Tires!", ">Oi, Luigi! Que pneus você tem hoje?",
+                   "Faixa branca, banda larga, esportivos... os melhores da Rota 66!", ">E qual você recomenda?",
+                   "Para você? Pneus italianos, naturalmente! Guido!" } } },
+    { P_LUIGI, { { "Sabe qual é o meu sonho?", ">Qual?", "Uma Ferrari de verdade, aqui na minha loja!",
+                   ">Quem sabe um dia.", "Um dia, um dia... Mamma mia!" } } },
+    { P_GUIDO, { { "Pit stop!", ">Oi, Guido! Rápido como sempre?", "Sì! Velocissimo!", ">Me mostra um pit stop?",
+                   "Pneus! Pneus! Pronto!" } } },
+    { P_GUIDO, { { "Ciao!", ">Ciao, Guido!", "Ferrari? No? ...Peccato." } } },
+    { P_RAMONE, { { "E aí, cara. Gostei da tua lataria.", ">Valeu, Ramone!",
+                    "Mas uma pintura nova ia te deixar ainda mais estiloso.", ">Que cor você sugere?",
+                    "Hoje? Roxo com chamas. Amanhã, quem sabe?" } } },
+    { P_RAMONE, { { "Já viu minha suspensão?", ">Mostra aí!", "Olha só. Sobe, desce... é arte, cara.",
+                    ">Muito estilo!", "Baixo e devagar. Esse é o lema." } } },
+    { P_FLO, { { "Oi, docinho! Vai querer o de sempre?", ">Pode ser! O que é o de sempre?",
+                 "Óleo fresquinho, do jeito que você gosta.", ">Então manda ver!", "Saindo! E fica à vontade, querido." } } },
+    { P_FLO, { { "Viu o Ramone por aí?", ">Acho que ele tá pintando de novo.",
+                 "Aquele lá não para de trocar de cor... mas eu adoro.", ">Vocês formam um belo par.",
+                 "Ah, para, querido! Assim eu fico sem graça." } } },
+    { P_XERIFE, { { "Bom dia, cidadão.", ">Bom dia, xerife!", "Tudo em ordem por aqui. Anda devagar na cidade.",
+                    ">Qual é o limite?", "Trinta por hora. E eu tô de olho." } } },
+    { P_XERIFE, { { "Sabe que eu pego carro correndo há trinta anos?", ">E já pegou muitos?",
+                    "Todos. Bom... quase todos.", ">Eu vou andar na linha, xerife.", "Assim que eu gosto." } } },
+    { P_SARGENTO, { { "Atenção, recruta! Sentido!", ">Sim, senhor!", "Pneus calibrados? Para-choque erguido?",
+                      ">Tudo certo, Sargento!", "Hmpf. Dispensado." } } },
+    { P_SARGENTO, { { "Aquele hippie aí do lado tocou música até tarde de novo.", ">O Fillmore?",
+                      "Ele mesmo. Disciplina! É isso que falta nesta cidade.", ">Quem sabe vocês fazem as pazes.",
+                      "Hmpf. Quem sabe... depois do café." } } },
+    { P_FILLMORE, { { "Paz, irmão.", ">Paz, Fillmore! Tudo tranquilo?", "Tudo flui, cara. Sente essa energia?",
+                      ">Que energia?", "A do combustível orgânico, cara. Quer provar?" } } },
+    { P_FILLMORE, { { "Cê já reparou nas nuvens hoje?", ">Não reparei.",
+                      "Pois é. Ninguém repara. Respira fundo, irmão.", ">...Tá. Respirei.", "Viu? Já tá mais leve." } } },
+    { P_LIZZIE, { { "Ah, oi! Você é novo por aqui?", ">Mais ou menos, já passei aqui antes.",
+                    "Leva um adesivo de lembrança! Tem do Radiator Springs.", ">Valeu, Lizzie!",
+                    "Como é mesmo o seu nome, querido?" } } },
+    { P_LIZZIE, { { "Sabe quem fundou esta cidade?", ">Quem?",
+                    "O meu Stanley. Ele chegou aqui atrás de água pro radiador.", ">Que história bonita.",
+                    "Ele ia adorar ver a cidade assim, cheia de vida." } } },
+    { P_RUIVO, { { "(olha para o chão, sem graça)", ">Oi, Ruivo! Que flores bonitas.", "(sorri tímido)",
+                   ">Foi você que plantou?", "(acena que sim e se esconde um pouco)" } } },
+    { P_RUIVO, { { "(rega as flores com cuidado)", ">Tá tudo bem, Ruivo?", "(funga, emocionado)",
+                   ">Ei, não precisa chorar!", "(sorri e esguicha um pouquinho de água)" } } },
+};
+
+/* O humor das falas que dizem mais que a pontuação. As outras: começando com "(" é tímido (o
+ * Ruivo), terminando com "?" é pergunta (curioso), com "!" é o "!" da pessoa e o resto é a cara
+ * de sempre dela */
+typedef struct {
+    const char *fala;
+    Humor humor;
+} HumorDaFala;
+
+static const HumorDaFala HUMORES_DAS_FALAS[] = {
+    /* O McQueen */
+    { "Essa cidade é melhor que qualquer pista.", HUMOR_FELIZ },
+    { "Katchau! Bora apostar uma corrida?", HUMOR_EMPOLGADO },
+    { "E aí! Curtindo a cidade?", HUMOR_FELIZ },
+    { "Bora! Mas hoje sem tombar trator, hein.", HUMOR_FELIZ },
+    { "Já sei, Mate. Você me conta toda semana.", HUMOR_FELIZ },
+    { "Pra sempre, parceiro.", HUMOR_FELIZ },
+    { "Com você? Sempre.", HUMOR_FELIZ },
+    { "Melhor vista da Rota 66.", HUMOR_FELIZ },
+    { "Pode deixar, Doc.", HUMOR_FELIZ },
+    { "Bora pra pista, então?", HUMOR_EMPOLGADO },
+    /* O Mate */
+    { "E aí, parceiro! Tá precisando de um reboque?", HUMOR_EMPOLGADO },
+    { "Ô, amigão! Já viu meu ferro-velho?", HUMOR_EMPOLGADO },
+    { "Bora dar um rolê, amigão?", HUMOR_EMPOLGADO },
+    { "Sabia que eu sou o melhor de ré do mundo?", HUMOR_EMPOLGADO },
+    { "É de nascença, Sargento!", HUMOR_FELIZ },
+    /* A Sally */
+    { "Bem-vindo ao Cozy Cone! Quer um cone pra descansar?", HUMOR_FELIZ },
+    { "Já deu uma volta pela rodovia? A vista é linda.", HUMOR_FELIZ },
+    { "Vamos dar uma volta pela estrada?", HUMOR_FELIZ },
+    { "Daqui a pouco o sol bate bonito nas montanhas.", HUMOR_FELIZ },
+    /* O Doc */
+    { "Hm.", HUMOR_PENSATIVO },
+    { "Precisa de um check-up? A clínica está aberta.", HUMOR_SERIO },
+    { "Tem muito carro correndo por aí sem pensar.", HUMOR_BRAVO },
+    { "Na terra, quem freia na hora certa ganha.", HUMOR_PENSATIVO },
+    { "E não esquece: corrida não é só velocidade.", HUMOR_PENSATIVO },
+    /* O Luigi e o Guido */
+    { "Um dia ainda vem uma Ferrari aqui na loja.", HUMOR_PENSATIVO },
+    { "Que dia lindo pra vender pneus, hein?", HUMOR_FELIZ },
+    { "Si, si!", HUMOR_FELIZ },
+    /* O Ramone e a Flo */
+    { "Que tal uma pintura nova, cara?", HUMOR_FELIZ },
+    { "Pra você, gata, uma cor nova todo dia.", HUMOR_FELIZ },
+    { "Só se for do seu lado.", HUMOR_FELIZ },
+    { "Oi, querido! Vai querer o de sempre?", HUMOR_FELIZ },
+    /* O Xerife */
+    { "O de sempre, Flo.", HUMOR_FELIZ },
+    { "As flores estão bonitas este ano.", HUMOR_FELIZ },
+    { "Tudo em ordem por aqui. Ande devagar.", HUMOR_SERIO },
+    { XERIFE_DESISTE, HUMOR_BRAVO },
+    /* O Sargento e o Fillmore */
+    { "Atenção, recruta! Pneus calibrados?", HUMOR_BRAVO },
+    { "Nem pensar. Meu tanque é do bom e velho diesel.", HUMOR_BRAVO },
+    { "Hmpf.", HUMOR_BRAVO },
+    { "Já experimentou meu combustível orgânico?", HUMOR_CALMO },
+    /* A Lizzie e o Ruivo */
+    { "Você é novo por aqui? Leva um adesivo de lembrança!", HUMOR_FELIZ },
+    { "O Stanley ia adorar ver a cidade assim.", HUMOR_TRISTE },
+    { "Que dia é hoje mesmo?", HUMOR_CURIOSO },
+    { "(rega as flores com cuidado)", HUMOR_CALMO },
+    { SUSTO_DA_LIZZIE, HUMOR_ASSUSTADO },
+    /* As de todo mundo e os sustos */
+    { "Bom dia! Tudo nos trinques?", HUMOR_FELIZ },
+    { "O pôr do sol hoje vai ser bonito.", HUMOR_FELIZ },
+    { "Precisando de alguma coisa, é só chamar.", HUMOR_FELIZ },
+    { "Essa estrada já viu cada coisa...", HUMOR_PENSATIVO },
+    { "Ei, olha a velocidade!", HUMOR_BRAVO },
+    { "Opa! Mais devagar aí!", HUMOR_BRAVO },
+    { "Quase me acerta!", HUMOR_ASSUSTADO },
+    /* Os papos com o jogador */
+    { "Treinando todo dia. A Copa Pistão não se ganha sozinha!", HUMOR_EMPOLGADO },
+    { "Que às vezes é melhor ir devagar e curtir a estrada.", HUMOR_PENSATIVO },
+    { "Olha só! ...Bom, quase. Esse poste apareceu do nada.", HUMOR_FELIZ },
+    { "O Frank? Ih, melhor nem falar do Frank.", HUMOR_ASSUSTADO },
+    { "Foi sim. Cada cone com o seu charme.", HUMOR_FELIZ },
+    { "Um pouco. Mas a vista lá do alto vale cada curva.", HUMOR_FELIZ },
+    { "Vai devagar e repara na paisagem. É o melhor da Rota 66.", HUMOR_CALMO },
+    { "Hm. Você de novo.", HUMOR_SERIO },
+    { "Na terra, vira à direita pra ir à esquerda.", HUMOR_PENSATIVO },
+    { "Hm. Tá bom. Mas não fica correndo pela cidade, ouviu?", HUMOR_SERIO },
+    { "...Bom garoto.", HUMOR_FELIZ },
+    { "Faixa branca, banda larga, esportivos... os melhores da Rota 66!", HUMOR_EMPOLGADO },
+    { "Um dia, um dia... Mamma mia!", HUMOR_PENSATIVO },
+    { "Ferrari? No? ...Peccato.", HUMOR_TRISTE },
+    { "Mas uma pintura nova ia te deixar ainda mais estiloso.", HUMOR_FELIZ },
+    { "Baixo e devagar. Esse é o lema.", HUMOR_CALMO },
+    { "Óleo fresquinho, do jeito que você gosta.", HUMOR_FELIZ },
+    { "Aquele lá não para de trocar de cor... mas eu adoro.", HUMOR_FELIZ },
+    { "Ah, para, querido! Assim eu fico sem graça.", HUMOR_TIMIDO },
+    { "Bom dia, cidadão.", HUMOR_SERIO },
+    { "Trinta por hora. E eu tô de olho.", HUMOR_SERIO },
+    { "Todos. Bom... quase todos.", HUMOR_PENSATIVO },
+    { "Assim que eu gosto.", HUMOR_FELIZ },
+    { "Aquele hippie aí do lado tocou música até tarde de novo.", HUMOR_BRAVO },
+    { "Hmpf. Quem sabe... depois do café.", HUMOR_SERIO },
+    { "Paz, irmão.", HUMOR_CALMO },
+    { "Pois é. Ninguém repara. Respira fundo, irmão.", HUMOR_CALMO },
+    { "Viu? Já tá mais leve.", HUMOR_FELIZ },
+    { "Como é mesmo o seu nome, querido?", HUMOR_CURIOSO },
+    { "O meu Stanley. Ele chegou aqui atrás de água pro radiador.", HUMOR_PENSATIVO },
+    { "Ele ia adorar ver a cidade assim, cheia de vida.", HUMOR_TRISTE },
+    { "(olha para o chão, sem graça)", HUMOR_TIMIDO },
+    { "(funga, emocionado)", HUMOR_TRISTE },
+    { "(sorri e esguicha um pouquinho de água)", HUMOR_FELIZ },
+};
