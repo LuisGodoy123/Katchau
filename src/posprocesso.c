@@ -19,10 +19,12 @@
  */
 
 #include <stddef.h>
+#include <math.h>
 #include "raylib.h"
 #include "rlgl.h"
 #include "posprocesso.h"
 #include "pista.h"
+#include "configuracoes.h"
 
 #define REDUCAO_DO_HALO   4       /* o halo é feito em 1/4 da tela: barato e mais largo */
 
@@ -76,18 +78,51 @@ static const char *PIXELS_FINAL =
     "#version 330\n"
     "in vec2 fragTexCoord; uniform sampler2D texture0; uniform sampler2D halo;\n"
     "uniform vec3 tom; uniform float contraste, saturacao, forcaDoHalo, vinheta, desfoque, virarHalo;\n"
+    "uniform vec2 pixel; uniform float tempo, granulado, campo, distorcao, nitidez, suavizacao, oclusao;\n"
     "out vec4 finalColor;\n"
+    "vec3 amostra(vec2 p) { return texture(texture0, p).rgb; }\n"
+    "float brilho(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }\n"
     "void main() {\n"
     "    vec2 uv = fragTexCoord;\n"
+    "    vec2 cc = uv - 0.5;\n"
+    "    float r2 = dot(cc, cc);\n"
+    "    if (distorcao > 0.5) uv = 0.5 + cc * (1.0 + 0.16 * r2) / 1.08;\n"   /* a distorção da lente: o meio um pouco maior, as bordas curvas */
     "    vec3 c;\n"
     "    if (desfoque > 0.001) {\n"   /* desfoque de velocidade: só nas bordas, puxando para o centro */
     "        vec2 d = uv - vec2(0.5, 0.48);\n"
     "        float bordas = smoothstep(0.18, 0.75, length(d));\n"
     "        c = vec3(0.0);\n"
-    "        for (int i = 0; i < 8; i++) c += texture(texture0, uv - d * desfoque * bordas * float(i) * 0.016).rgb;\n"
+    "        for (int i = 0; i < 8; i++) c += amostra(uv - d * desfoque * bordas * float(i) * 0.016);\n"
     "        c /= 8.0;\n"
+    "    } else if (distorcao > 1.5) {\n"   /* a aberração cromática: o vermelho e o azul se separam, mais nas bordas */
+    "        vec2 o = cc * (0.004 + 0.022 * r2);\n"
+    "        c = vec3(amostra(uv + o).r, amostra(uv).g, amostra(uv - o).b);\n"
     "    } else {\n"
-    "        c = texture(texture0, uv).rgb;\n"
+    "        c = amostra(uv);\n"
+    "    }\n"
+    "    if (campo > 0.5) {\n"   /* profundidade de campo simulada: o fundo distante (a parte de cima da imagem) fica macio */
+    "        float quanto = smoothstep(0.50, 0.08, uv.y);\n"
+    "        if (quanto > 0.02) {\n"
+    "            vec2 r = pixel * (2.0 + 5.0 * quanto);\n"
+    "            vec3 b = amostra(uv + vec2(r.x, 0.0)) + amostra(uv - vec2(r.x, 0.0)) + amostra(uv + vec2(0.0, r.y)) + amostra(uv - vec2(0.0, r.y))\n"
+    "                   + amostra(uv + r) + amostra(uv - r) + amostra(uv + vec2(r.x, -r.y)) + amostra(uv + vec2(-r.x, r.y));\n"
+    "            c = mix(c, b * 0.125, 0.8 * quanto);\n"
+    "        }\n"
+    "    }\n"
+    "    if (suavizacao > 0.5 || nitidez > 0.0) {\n"
+    "        vec3 n = amostra(uv + vec2(0.0, -pixel.y)), s = amostra(uv + vec2(0.0, pixel.y));\n"
+    "        vec3 e = amostra(uv + vec2(pixel.x, 0.0)), w = amostra(uv + vec2(-pixel.x, 0.0));\n"
+    "        if (suavizacao > 0.5) {\n"   /* FXAA simples: onde há uma borda forte, mistura com os vizinhos */
+    "            float lc = brilho(c), ln = brilho(n), ls = brilho(s), le = brilho(e), lw = brilho(w);\n"
+    "            float contr = max(max(max(ln, ls), max(le, lw)), lc) - min(min(min(ln, ls), min(le, lw)), lc);\n"
+    "            if (contr > 0.05) c = mix(c, (n + s + e + w + 2.0 * c) / 6.0, clamp(contr * 3.0, 0.0, 0.7));\n"
+    "        }\n"
+    "        if (nitidez > 0.0) c += (c - (n + s + e + w) * 0.25) * nitidez;\n"   /* afiar a imagem, como o FidelityFX CAS */
+    "    }\n"
+    "    if (oclusao > 0.5) {\n"
+    "        vec2 r = pixel * 6.0;\n"
+    "        vec3 m = (amostra(uv + vec2(r.x, 0.0)) + amostra(uv - vec2(r.x, 0.0)) + amostra(uv + vec2(0.0, r.y)) + amostra(uv - vec2(0.0, r.y))) * 0.25;\n"
+    "        c *= 1.0 + clamp(brilho(c) - brilho(m), -0.25, 0.0) * 1.6;\n"
     "    }\n"
     "    vec2 uvHalo = (virarHalo > 0.5) ? vec2(uv.x, 1.0 - uv.y) : uv;\n"
     "    c += texture(halo, uvHalo).rgb * forcaDoHalo;\n"
@@ -96,6 +131,10 @@ static const char *PIXELS_FINAL =
     "    c = mix(vec3(l), c, saturacao);\n"
     "    c = (c - 0.5) * contraste + 0.5;\n"
     "    c *= 1.0 - vinheta * smoothstep(0.42, 0.95, length((uv - 0.5) * vec2(1.25, 1.0)));\n"
+    "    if (granulado > 0.0) {\n"   /* granulado de filme: ruído que muda a cada quadro */
+    "        float g = fract(sin(dot(fragTexCoord * vec2(1731.0, 1371.0) + tempo * vec2(37.0, 17.0), vec2(12.9898, 78.233))) * 43758.5453);\n"
+    "        c += (g - 0.5) * granulado;\n"
+    "    }\n"
     "    finalColor = vec4(clamp(c, 0.0, 1.0), 1.0);\n"
     "}\n";
 
@@ -104,6 +143,7 @@ static RenderTexture2D luzesCheias;   /* do tamanho da cena, com a profundidade 
 static Shader shaderClaros, shaderBorrar, shaderFinal, shaderReduzir;
 static int locLimiar, locPasso, locHalo, locTom, locContraste, locSaturacao, locForca, locVinheta, locDesfoque, locVirar;
 static int locPassoDaReducao;
+static int locPixel, locTempo, locGranulado, locCampo, locDistorcao, locNitidez, locSuavizacao, locOclusao;
 static int largura = 0, altura = 0, carregado = 0;
 static int desenhando = 0;   /* 1 a cena, 2 as luzes (no halo), 3 as luzes (na imagem cheia, com profundidade) */
 /* Onde a cena vai aparecer na tela. Largura 0 = a tela cheia (o normal). Na tela dividida as duas
@@ -133,6 +173,21 @@ void definirAreaDoPosProcesso(int x, int y, int largura, int altura) {
     areaY = y;
     areaLargura = largura;
     areaAltura = altura;
+}
+
+/*
+ * larguraDaCena / alturaDaCena
+ * Recebe: nada.
+ * Devolve: o tamanho da imagem em que o mundo é desenhado: o da área vezes a escala de renderização das
+ *          configurações (a 100% é o da área; abaixo disso o mundo é desenhado menor e ampliado, com mais FPS).
+ */
+static int larguraDaCena(void) {
+    int w = larguraDaArea() * escalaDaImagemEmPorcento(configuracoesAtuais()->escalaDaImagem) / 100;
+    return (w < 16) ? 16 : w;
+}
+static int alturaDaCena(void) {
+    int h = alturaDaArea() * escalaDaImagemEmPorcento(configuracoesAtuais()->escalaDaImagem) / 100;
+    return (h < 16) ? 16 : h;
 }
 
 /* A imagem das luzes do tamanho da cena: a cor dela, e a profundidade emprestada da cena */
@@ -165,7 +220,7 @@ static void descarregarLuzesCheias(void) {
  * As imagens do tamanho da área de agora (refeitas se ela mudar).
  */
 static void criarImagens(void) {
-    if (largura == larguraDaArea() && altura == alturaDaArea()) {
+    if (largura == larguraDaCena() && altura == alturaDaCena()) {
         return;
     }
     if (largura != 0) {
@@ -174,8 +229,8 @@ static void criarImagens(void) {
         UnloadRenderTexture(haloA);
         UnloadRenderTexture(haloB);
     }
-    largura = larguraDaArea();
-    altura = alturaDaArea();
+    largura = larguraDaCena();
+    altura = alturaDaCena();
     cena = LoadRenderTexture(largura, altura);
     criarLuzesCheias();
     haloA = LoadRenderTexture(largura / REDUCAO_DO_HALO, altura / REDUCAO_DO_HALO);
@@ -208,6 +263,14 @@ void carregarPosProcesso(void) {
     locVinheta = GetShaderLocation(shaderFinal, "vinheta");
     locDesfoque = GetShaderLocation(shaderFinal, "desfoque");
     locVirar = GetShaderLocation(shaderFinal, "virarHalo");
+    locPixel = GetShaderLocation(shaderFinal, "pixel");
+    locTempo = GetShaderLocation(shaderFinal, "tempo");
+    locGranulado = GetShaderLocation(shaderFinal, "granulado");
+    locCampo = GetShaderLocation(shaderFinal, "campo");
+    locDistorcao = GetShaderLocation(shaderFinal, "distorcao");
+    locNitidez = GetShaderLocation(shaderFinal, "nitidez");
+    locSuavizacao = GetShaderLocation(shaderFinal, "suavizacao");
+    locOclusao = GetShaderLocation(shaderFinal, "oclusao");
     carregado = 1;
 }
 
@@ -317,19 +380,24 @@ void terminarPosProcesso(int pista, float desfoque, AcabamentoDoPosProcesso acab
     EndTextureMode();
     /* De onde sai e para onde vai: a imagem inteira, no pedaço de tela da área */
     Rectangle daImagem = { 0, 0, (float) largura, (float) -altura };
-    Rectangle naTela = { (float) areaX, (float) areaY, (float) largura, (float) altura };
+    Rectangle naTela = { (float) areaX, (float) areaY, (float) larguraDaArea(), (float) alturaDaArea() };
     if (luzesNaImagemCheia && acabamento == POSPROCESSO_COMPLETO) {
         Vector2 passo = { 1.0f / largura, 1.0f / altura };
         SetShaderValue(shaderReduzir, locPassoDaReducao, &passo, SHADER_UNIFORM_VEC2);
         passar(luzesCheias.texture, haloA, shaderReduzir);
     }
-    if (acabamento == POSPROCESSO_SO_COPIA) {
+    const Configuracoes *config = configuracoesAtuais();
+    float nitidez = (config->nitidez == 1) ? 0.45f : ((config->nitidez >= 2) ? 0.9f : 0.0f);
+    int comExtras = config->suavizacao || nitidez > 0.0f || config->granulado || config->profundidadeDeCampo || config->distorcaoDaLente || config->oclusaoAmbiental;
+    if (acabamento == POSPROCESSO_SO_COPIA && !comExtras) {
         /* Sem os efeitos: só copia a cena para a tela (desenhar direto na janela é mais lento) */
         DrawTexturePro(cena.texture, daImagem, naTela, (Vector2){ 0 }, 0.0f, WHITE);
         return;
     }
-    const TomDaPista *t = &TONS[(pista >= 0 && pista < TOTAL_PISTAS) ? pista : 0];
-    int comHalo = (acabamento == POSPROCESSO_COMPLETO) && comLuzes;
+    /* Com os efeitos da cor desligados mas com algum acabamento (suavização, nitidez...), o shader roda com a cor neutra */
+    static const TomDaPista NEUTRO = { { 1.0f, 1.0f, 1.0f }, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f };
+    const TomDaPista *t = (acabamento == POSPROCESSO_SO_COPIA) ? &NEUTRO : &TONS[(pista >= 0 && pista < TOTAL_PISTAS) ? pista : 0];
+    int comHalo = (acabamento == POSPROCESSO_COMPLETO) && comLuzes && config->bloom;
 
     /* O halo: as luzes, borradas duas vezes em cada direção */
     if (comHalo) {
@@ -352,6 +420,19 @@ void terminarPosProcesso(int pista, float desfoque, AcabamentoDoPosProcesso acab
     SetShaderValue(shaderFinal, locVinheta, &t->vinheta, SHADER_UNIFORM_FLOAT);
     SetShaderValue(shaderFinal, locDesfoque, &desfoque, SHADER_UNIFORM_FLOAT);
     SetShaderValue(shaderFinal, locVirar, &virar, SHADER_UNIFORM_FLOAT);
+    Vector2 pixel = { 1.0f / (float) largura, 1.0f / (float) altura };
+    float tempo = (float) fmod(GetTime(), 100.0);
+    float granulado = config->granulado ? 0.07f : 0.0f;
+    float campo = (float) config->profundidadeDeCampo, distorcao = (float) config->distorcaoDaLente, suavizacao = (float) config->suavizacao;
+    SetShaderValue(shaderFinal, locPixel, &pixel, SHADER_UNIFORM_VEC2);
+    SetShaderValue(shaderFinal, locTempo, &tempo, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(shaderFinal, locGranulado, &granulado, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(shaderFinal, locCampo, &campo, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(shaderFinal, locDistorcao, &distorcao, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(shaderFinal, locNitidez, &nitidez, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(shaderFinal, locSuavizacao, &suavizacao, SHADER_UNIFORM_FLOAT);
+    float oclusao = (float) config->oclusaoAmbiental;
+    SetShaderValue(shaderFinal, locOclusao, &oclusao, SHADER_UNIFORM_FLOAT);
     BeginShaderMode(shaderFinal);
     SetShaderValueTexture(shaderFinal, locHalo, haloA.texture);   /* sem halo, a força é 0: a imagem não pesa */
     DrawTexturePro(cena.texture, daImagem, naTela, (Vector2){ 0 }, 0.0f, WHITE);

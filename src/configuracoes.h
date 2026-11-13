@@ -61,6 +61,14 @@ typedef enum {
 #define TOTAL_LIMITES_DE_QUADROS  6
 #define LIMITE_PADRAO_DE_QUADROS  1     /* índice do 60 */
 
+/* Os pacotes da opção "gráficos" e a tabela de escalas de renderização */
+typedef enum { PRESET_BAIXO, PRESET_MEDIO, PRESET_ALTO, PRESET_PERSONALIZADO, TOTAL_PRESETS } PresetGrafico;
+#define TOTAL_ESCALAS_DA_IMAGEM   6
+#define ESCALA_PADRAO_DA_IMAGEM   5     /* índice do 100% */
+#define TOTAL_QUALIDADES_DE_SOMBRA 5
+#define TOTAL_FILTROS_DE_TEXTURA  5
+#define MAIOR_VOLUME              10
+
 #define MENOR_FORCA_DA_VIBRACAO   10
 #define PASSO_DA_FORCA            10
 #define MENOR_ZONA_MORTA          2
@@ -85,6 +93,26 @@ typedef struct {
     int limiteDeQuadros;      /* índice na tabela de limites de quadros por segundo */
     int mostrarFps;           /* 1: mostra o contador de quadros por segundo no canto da tela */
     int tracadoDeCorrida;     /* 1: a linha de corrida no asfalto: verde acelera, amarelo alivia, vermelho freia */
+    /* ---- Gráficos ---- */
+    int presetGrafico;        /* PresetGrafico: o último pacote escolhido (PRESET_PERSONALIZADO se mexeu depois em alguma opção) */
+    int escalaDaImagem;       /* índice na tabela de escalas de renderização: o mundo é desenhado menor e ampliado (mais FPS) */
+    int bloom;                /* 1: o brilho em volta das luzes */
+    int lensFlare;            /* 1: os raios de luz dos clarões das batidas e das faíscas */
+    int granulado;            /* 1: granulado de filme sobre a imagem */
+    int profundidadeDeCampo;  /* 1: o fundo distante fica levemente desfocado (simulado, sem custo de profundidade) */
+    int distorcaoDaLente;     /* 0 = nenhuma, 1 = distorção, 2 = distorção + aberração cromática */
+    int nitidez;              /* 0 = nenhuma, 1 = leve, 2 = forte (afiar a imagem, como o FidelityFX CAS) */
+    int suavizacao;           /* 0 = nenhuma, 1 = FXAA (suaviza as serrilhas das bordas) */
+    int oclusaoAmbiental;     /* 1: escurece os cantos e as frestas (simulado na imagem, sem profundidade) */
+    int qualidadeDasSombras;  /* 0 = sem sombras, 1 a 4 = tamanho do mapa de sombra (1024, 2048, 3072, 4096); vale ao abrir o jogo */
+    int filtroDeTexturas;     /* 0 = bilinear, 1 = trilinear, 2 = anisotrópico 4x, 3 = 8x, 4 = 16x; vale ao abrir o jogo */
+    /* ---- Som ---- */
+    int volumeVozes;          /* 0 a 10: as falas do McQueen */
+    int volumeMusica;         /* 0 a 10: as músicas */
+    int volumeEfeitos;        /* 0 a 10: motores, batidas, pneus, vento, fogos... */
+    int volumeMenu;           /* 0 a 10: os sons dos menus */
+    int alcanceDinamico;      /* 0 = amplo (do baixinho ao estrondo), 1 = reduzido (sobe o baixo e segura o alto) */
+    int surroundVirtual;      /* 1: abre a imagem do som estéreo, para fones e caixas parecerem mais largos */
 } Configuracoes;
 
 Configuracoes *configuracoesAtuais(void);
@@ -98,5 +126,9 @@ int resolucaoDaTabela(int indice, int *largura, int *altura);
 int resolucaoCabe(int indice, int larguraDoMonitor, int alturaDoMonitor);
 void resolucaoEfetiva(const Configuracoes *config, int larguraDoMonitor, int alturaDoMonitor, int *largura, int *altura);
 int quadrosPorSegundoDoLimite(int indice);
+int escalaDaImagemEmPorcento(int indice);
+int ladoDoMapaDeSombra(int qualidade);
+void aplicarPresetGrafico(Configuracoes *config, PresetGrafico preset);
+float fatorDeVolume(int volume);
 
 #endif

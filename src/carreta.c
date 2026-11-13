@@ -8,6 +8,7 @@
 #include "raylib.h"
 #include "rlgl.h"
 #include "carreta.h"
+#include "exibicao.h"
 
 #define ARQUIVO_DO_INTERIOR   "recursos/modelos/mack_interior.glb"
 
@@ -28,7 +29,7 @@ void carregarInteriorDaCarreta(void) {
         if (t->id != 0 && t->id != rlGetTextureIdDefault()) {
             GenTextureMipmaps(t);
             SetTextureFilter(*t, TEXTURE_FILTER_TRILINEAR);
-            SetTextureFilter(*t, TEXTURE_FILTER_ANISOTROPIC_8X);
+            SetTextureFilter(*t, filtroDeTexturaDaConfig());
         }
     }
     carregado = 1;

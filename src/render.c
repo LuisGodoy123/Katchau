@@ -1013,7 +1013,7 @@ static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
 
     rlEnableBackfaceCulling();
     EndMode3D();
-    if (comEfeitos && configuracoesAtuais()->efeitos && !efeitosAliviados) {
+    if (comEfeitos && configuracoesAtuais()->efeitos && configuracoesAtuais()->bloom && !efeitosAliviados) {
         /* As luzes de novo, sozinhas: é delas que nasce o halo. Na tela dividida isto sai: é um
          * desenho do mundo a mais, com quatro borrões em cima */
         comecarLuzesDoPosProcesso();

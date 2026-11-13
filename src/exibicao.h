@@ -25,5 +25,6 @@ void aplicarDesempenho(const Configuracoes *config);
 void aplicarTela(const Configuracoes *config);
 void tamanhoDoMonitor(int *largura, int *altura);
 int resolucaoCabeNoMonitor(int indice);
+int filtroDeTexturaDaConfig(void);
 
 #endif

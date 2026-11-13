@@ -30,6 +30,8 @@
 #include "hora.h"
 #include "corte.h"
 #include "espera.h"
+#include "exibicao.h"
+#include "configuracoes.h"
 
 #define PASTA_TEXTURAS        "recursos/texturas/"
 #define ARQUIVO_DO_ESTADIO    "recursos/modelos/copa_pistao.glb"
@@ -276,7 +278,8 @@ static Shader shader;
 static Shader shaderDosMapasDeDia;
 
 /* As sombras do sol */
-#define LADO_DO_MAPA_DE_SOMBRA 2048
+static int ladoDoMapaDeSombraAtual = 2048;   /* o lado do mapa de sombra: o da qualidade escolhida, definido ao carregar */
+#define LADO_DO_MAPA_DE_SOMBRA ladoDoMapaDeSombraAtual
 #define AREA_DA_SOMBRA        330.0f   /* metros: o quadrado em volta da câmera que tem sombra */
 #define ADIANTE_DA_SOMBRA     90.0f    /* metros: o meio do quadrado fica à frente da câmera */
 #define ALTURA_DO_SOL         500.0f   /* metros: de onde o sol "olha" */
@@ -949,7 +952,7 @@ static void carregarEstadio(Pista *pista) {
         if (textura->id != 0 && textura->id != rlGetTextureIdDefault()) {
             GenTextureMipmaps(textura);
             SetTextureFilter(*textura, TEXTURE_FILTER_TRILINEAR);
-            SetTextureFilter(*textura, TEXTURE_FILTER_ANISOTROPIC_8X);
+            SetTextureFilter(*textura, filtroDeTexturaDaConfig());
         }
     }
     Construcao pintura = { 0 };
@@ -1093,7 +1096,7 @@ static void carregarMapaDeDia(Pista *pista, const char *arquivo, float escala, c
         if (textura->id != 0 && textura->id != rlGetTextureIdDefault()) {
             GenTextureMipmaps(textura);
             SetTextureFilter(*textura, TEXTURE_FILTER_TRILINEAR);
-            SetTextureFilter(*textura, TEXTURE_FILTER_ANISOTROPIC_8X);
+            SetTextureFilter(*textura, filtroDeTexturaDaConfig());
             SetTextureWrap(*textura, TEXTURE_WRAP_REPEAT);
         }
     }
@@ -2460,7 +2463,7 @@ int carregarMundoAberto(void) {
         if (textura->id != 0 && textura->id != rlGetTextureIdDefault()) {
             GenTextureMipmaps(textura);
             SetTextureFilter(*textura, TEXTURE_FILTER_TRILINEAR);
-            SetTextureFilter(*textura, TEXTURE_FILTER_ANISOTROPIC_8X);
+            SetTextureFilter(*textura, filtroDeTexturaDaConfig());
             SetTextureWrap(*textura, TEXTURE_WRAP_REPEAT);
         }
     }
@@ -2626,6 +2629,10 @@ void desenharTelasQueBrilham(IdPista id) {
  * Devolve: nada.
  */
 static void carregarSombras(void) {
+    ladoDoMapaDeSombraAtual = ladoDoMapaDeSombra(configuracoesAtuais()->qualidadeDasSombras);
+    if (ladoDoMapaDeSombraAtual < 1024) {
+        ladoDoMapaDeSombraAtual = 1024;   /* sem sombras no começo: o mapa pequeno fica, caso elas sejam ligadas depois */
+    }
     shaderDaProfundidade = LoadShaderFromMemory(VERTICES_DA_PROFUNDIDADE, PIXELS_DA_PROFUNDIDADE);
     mapaDeSombra.id = rlLoadFramebuffer();
     mapaDeSombra.texture.width = LADO_DO_MAPA_DE_SOMBRA;

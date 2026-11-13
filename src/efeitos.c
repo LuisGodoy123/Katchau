@@ -13,8 +13,23 @@
 #include "motor.h"
 #include "motorgranular.h"
 #include "pitstop.h"
+#include "configuracoes.h"
 
 /* ---------- Volumes (0 a 1) e ajustes ---------- */
+/*
+ * ajusteDosEfeitos
+ * O volume de um efeito depois das opções de som: o volume dos efeitos (0 a 10) e o alcance dinâmico. Com o alcance
+ * reduzido, o baixinho sobe e o estrondo é segurado (a curva fica mais "achatada").
+ * Recebe: o volume do efeito (0 a 1, ou um pouco mais). Devolve: o volume a tocar.
+ */
+static float ajusteDosEfeitos(float v) {
+    const Configuracoes *c = configuracoesAtuais();
+    if (c->alcanceDinamico) {
+        v = (v > 0.0f) ? powf(fminf(v, 1.5f), 0.7f) * 0.92f : 0.0f;
+    }
+    return v * fatorDeVolume(c->volumeEfeitos);
+}
+
 #define VOLUME_MOTOR_DO_JOGADOR    0.85f
 #define VOLUME_ALIVIADO            0.90f   /* o loop do pé levantado, em relação ao do pé no fundo */
 #define VOLUME_MOTOR_DE_RIVAL      0.60f
@@ -215,9 +230,10 @@ static void atualizarMotorGranular(int v, int marcha, float giro, float volume, 
     for (int bloco = 0; bloco < 4 && IsAudioStreamProcessed(voz->fluxo); bloco++) {
         float mono[PASSO_DO_MOTOR];
         short pcm[PASSO_DO_MOTOR];
+        float fatorDosMotores = fatorDeVolume(configuracoesAtuais()->volumeEfeitos);
         gerarMotorGranular(&voz->motor, mono, PASSO_DO_MOTOR);
         for (int i = 0; i < PASSO_DO_MOTOR; i++) {
-            float x = mono[i] * VOLUME_DO_MOTOR_GRANULAR;
+            float x = mono[i] * VOLUME_DO_MOTOR_GRANULAR * fatorDosMotores;
             x = x > 1.0f ? 1.0f : (x < -1.0f ? -1.0f : x);
             pcm[i] = (short) (x * 32767.0f);
         }
@@ -504,7 +520,7 @@ static void tocarBatidasDeLata(Corrida *corrida, int ativo) {
     } while (variacao == ultimaLata);
     ultimaLata = variacao;
     Sound som = (forcaDaMelhor >= LATA_FORTE) ? latasFortes[variacao] : latasLeves[variacao];
-    SetSoundVolume(som, VOLUME_LATA * melhorVolume);
+    SetSoundVolume(som, ajusteDosEfeitos(VOLUME_LATA * melhorVolume));
     SetSoundPitch(som, 0.9f + 0.2f * (float) GetRandomValue(0, 100) / 100.0f);
     StopSound(som);
     PlaySound(som);
@@ -692,7 +708,7 @@ void tocarSomDeFogos(int explosao, float volume, float lado) {
         return;
     }
     Sound som = explosao ? somDeFogoExplodindo[GetRandomValue(0, VARIACOES_DE_FOGO - 1)] : somDoFoguete;
-    SetSoundVolume(som, fminf(volume, 1.0f));
+    SetSoundVolume(som, ajusteDosEfeitos(fminf(volume, 1.0f)));
     SetSoundPitch(som, 0.88f + 0.24f * (float) GetRandomValue(0, 100) / 100.0f);
     SetSoundPan(som, fminf(fmaxf(lado, 0.0f), 1.0f));
     PlaySound(som);
@@ -715,7 +731,7 @@ static void tocarPneuEstourado(const Carro *jogador, int ativo) {
         return;
     }
     horaDaBorracha = agora;
-    SetSoundVolume(somDaBorracha, 0.55f + 0.3f * f);
+    SetSoundVolume(somDaBorracha, ajusteDosEfeitos(0.55f + 0.3f * f));
     SetSoundPitch(somDaBorracha, 0.8f + 0.5f * f + 0.15f * (float) GetRandomValue(0, 100) / 100.0f);
     PlaySound(somDaBorracha);
 }
@@ -794,7 +810,7 @@ static void misturarFaixas(FaixaDeMotor *faixas, int total, float rpm, float vol
             continue;
         }
         SetMusicPitch(faixas[i].musica, limitar(rpm * tom / centro, PITCH_MINIMO, PITCH_MAXIMO));
-        SetMusicVolume(faixas[i].musica, volume * peso);
+        SetMusicVolume(faixas[i].musica, ajusteDosEfeitos(volume * peso));
         SetMusicPan(faixas[i].musica, lado);
         UpdateMusicStream(faixas[i].musica);
     }
@@ -802,7 +818,7 @@ static void misturarFaixas(FaixaDeMotor *faixas, int total, float rpm, float vol
 
 static void tocarCurto(int som, float volume, float tom) {
     if (curtoCarregado[som]) {
-        SetSoundVolume(curtos[som], limitar(volume, 0.0f, 1.0f) * VOLUME_EFEITOS_CURTOS);
+        SetSoundVolume(curtos[som], ajusteDosEfeitos(limitar(volume, 0.0f, 1.0f) * VOLUME_EFEITOS_CURTOS));
         SetSoundPitch(curtos[som], tom);
         StopSound(curtos[som]);
         PlaySound(curtos[som]);
@@ -1262,7 +1278,7 @@ static void atualizarLoop(LoopDeEfeito *loop, float alvo, float tom, float tempo
         loop->tocando = 0;
     }
     if (loop->tocando) {
-        SetMusicVolume(loop->musica, loop->volume);
+        SetMusicVolume(loop->musica, ajusteDosEfeitos(loop->volume));
         SetMusicPitch(loop->musica, limitar(tom, PITCH_MINIMO, PITCH_MAXIMO));
         UpdateMusicStream(loop->musica);
     }
@@ -1359,7 +1375,7 @@ static void dispararEfeitosCurtos(Carro *jogador) {
     /* O pneu estoura: o tiro e o chiado (depois, a borracha batendo vem de tocarPneuEstourado) */
     if ((jogador->pneuEstourado & ~estado.pneuEstourado) && somDePneuPronto) {   /* cada pneu que estoura faz o seu estouro */
         int primeiro = (estado.pneuEstourado == 0);
-        SetSoundVolume(somDoEstouro, primeiro ? 1.0f : 0.85f);
+        SetSoundVolume(somDoEstouro, ajusteDosEfeitos(primeiro ? 1.0f : 0.85f));
         SetSoundPitch(somDoEstouro, primeiro ? 1.0f : 0.88f + 0.08f * (float) quantosPneusEstourados(jogador));
         PlaySound(somDoEstouro);
     }

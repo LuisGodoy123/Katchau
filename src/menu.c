@@ -1622,17 +1622,38 @@ enum {
     LINHA_LIMITE_DE_QUADROS,
     LINHA_MOSTRAR_FPS,
     LINHA_TRACADO,
-    LINHA_SOMBRAS,
-    /* e esta vale nas duas abas */
+    /* a aba de gráficos começa aqui */
+    LINHA_PRESET,
+    LINHA_ESCALA,
+    LINHA_POS_PROCESSAMENTO,
+    LINHA_BLOOM,
+    LINHA_LENS_FLARE,
+    LINHA_GRANULADO,
+    LINHA_CAMPO,
+    LINHA_LENTE,
+    LINHA_NITIDEZ,
+    LINHA_SUAVIZACAO,
+    LINHA_OCLUSAO,
+    LINHA_QUALIDADE_DAS_SOMBRAS,
+    LINHA_TEXTURAS,
+    /* a aba de som começa aqui */
+    LINHA_VOLUME_VOZES,
+    LINHA_VOLUME_MUSICA,
+    LINHA_VOLUME_EFEITOS,
+    LINHA_VOLUME_MENU,
+    LINHA_ALCANCE,
+    LINHA_SURROUND,
+    /* e esta vale em todas as abas */
     LINHA_PADRAO,
     TOTAL_LINHAS_CONFIG
 };
 
 /* As abas das configurações */
-enum { ABA_CONTROLES, ABA_EXIBICAO, TOTAL_ABAS_CONFIG };
-#define X_ABAS_CONFIG          330.0f
+enum { ABA_CONTROLES, ABA_EXIBICAO, ABA_GRAFICOS, ABA_SOM, TOTAL_ABAS_CONFIG };
+#define X_ABAS_CONFIG          290.0f
 #define Y_ABAS_CONFIG          24.0f
-#define LARGURA_ABA_CONFIG     150.0f
+#define LARGURA_ABA_CONFIG     88.0f
+#define ESPACO_ENTRE_ABAS      6.0f
 #define ALTURA_ABA_CONFIG      30.0f
 #define Y_LINHAS_EXIBICAO      122.0f
 #define ALTURA_LINHA_EXIBICAO  34.0f
@@ -1661,12 +1682,17 @@ static int abaAtualDaConfig = ABA_CONTROLES;   /* a aba que as funções abaixo 
  * Recebe: a linha.
  * Devolve: o topo dela na tela.
  */
+static const int PRIMEIRA_LINHA_DA_ABA[TOTAL_ABAS_CONFIG + 1] = { 0, LINHA_RESOLUCAO, LINHA_PRESET, LINHA_VOLUME_VOZES, LINHA_PADRAO };
+static const float ALTURA_DA_LINHA_DA_ABA[TOTAL_ABAS_CONFIG] = { ALTURA_LINHA_OPCAO, ALTURA_LINHA_EXIBICAO, 28.0f, 36.0f };
+
 static float yDaLinhaConfig(int linha) {
     if (linha < TOTAL_ACOES) {
         return Y_COMANDOS + linha * ALTURA_LINHA_COMANDO;
     }
-    if (abaAtualDaConfig == ABA_EXIBICAO) {
-        return Y_LINHAS_EXIBICAO + (linha - LINHA_RESOLUCAO) * ALTURA_LINHA_EXIBICAO + ((linha == LINHA_PADRAO) ? 14.0f : 0.0f);
+    if (abaAtualDaConfig != ABA_CONTROLES) {
+        int aba = abaAtualDaConfig;
+        int posicao = (linha == LINHA_PADRAO) ? PRIMEIRA_LINHA_DA_ABA[aba + 1] - PRIMEIRA_LINHA_DA_ABA[aba] : linha - PRIMEIRA_LINHA_DA_ABA[aba];
+        return Y_LINHAS_EXIBICAO + posicao * ALTURA_DA_LINHA_DA_ABA[aba] + ((linha == LINHA_PADRAO) ? 14.0f : 0.0f);
     }
     int posicao = (linha == LINHA_PADRAO) ? LINHA_CAMERA_Y - TOTAL_ACOES + 1 : linha - TOTAL_ACOES;
     return Y_OPCOES_CONTROLE + posicao * ALTURA_LINHA_OPCAO;
@@ -1675,13 +1701,13 @@ static float yDaLinhaConfig(int linha) {
 /*
  * linhaNaAba
  * Recebe: a linha e a aba.
- * Devolve: 1 se a linha aparece nessa aba (a de voltar ao padrão aparece nas duas).
+ * Devolve: 1 se a linha aparece nessa aba (a de voltar ao padrão aparece em todas).
  */
 static int linhaNaAba(int linha, int aba) {
     if (linha == LINHA_PADRAO) {
         return 1;
     }
-    return (aba == ABA_EXIBICAO) ? linha >= LINHA_RESOLUCAO : linha < LINHA_RESOLUCAO;
+    return linha >= PRIMEIRA_LINHA_DA_ABA[aba] && linha < PRIMEIRA_LINHA_DA_ABA[aba + 1];
 }
 
 /*
@@ -1712,7 +1738,7 @@ static float alturaDaLinhaConfig(int linha) {
     if (linha < TOTAL_ACOES) {
         return ALTURA_LINHA_COMANDO;
     }
-    return (abaAtualDaConfig == ABA_EXIBICAO) ? ALTURA_LINHA_EXIBICAO : ALTURA_LINHA_OPCAO;
+    return ALTURA_DA_LINHA_DA_ABA[abaAtualDaConfig];
 }
 
 /*
@@ -1762,14 +1788,78 @@ static void mudarOpcao(EstadoMenu *menu, int linha, int sentido) {
         case LINHA_VOLANTE:
             config->respostaDoVolante = (config->respostaDoVolante + sentido + TOTAL_VOLANTES) % TOTAL_VOLANTES;
             break;
-        case LINHA_SOMBRAS: {
-            /* ALTO (sombras e efeitos) -> MÉDIO (só efeitos) -> BAIXO (nada) -> ALTO */
-            int nivel = config->sombras ? 2 : (config->efeitos ? 1 : 0);
-            nivel = (nivel + 2) % 3;
-            config->sombras = (nivel == 2);
-            config->efeitos = (nivel >= 1);
+        case LINHA_PRESET: {
+            /* BAIXO <-> MÉDIO <-> ALTO: de "personalizado" volta ao ALTO */
+            int atual = (config->presetGrafico == PRESET_PERSONALIZADO) ? PRESET_ALTO : config->presetGrafico;
+            atual = (atual + sentido + 3) % 3;
+            aplicarPresetGrafico(config, (PresetGrafico) atual);
             break;
         }
+        case LINHA_ESCALA:
+            config->escalaDaImagem = (config->escalaDaImagem + sentido + TOTAL_ESCALAS_DA_IMAGEM) % TOTAL_ESCALAS_DA_IMAGEM;
+            config->presetGrafico = PRESET_PERSONALIZADO;
+            break;
+        case LINHA_POS_PROCESSAMENTO:
+            config->efeitos = !config->efeitos;
+            config->presetGrafico = PRESET_PERSONALIZADO;
+            break;
+        case LINHA_BLOOM:
+            config->bloom = !config->bloom;
+            config->presetGrafico = PRESET_PERSONALIZADO;
+            break;
+        case LINHA_LENS_FLARE:
+            config->lensFlare = !config->lensFlare;
+            config->presetGrafico = PRESET_PERSONALIZADO;
+            break;
+        case LINHA_GRANULADO:
+            config->granulado = !config->granulado;
+            config->presetGrafico = PRESET_PERSONALIZADO;
+            break;
+        case LINHA_CAMPO:
+            config->profundidadeDeCampo = !config->profundidadeDeCampo;
+            config->presetGrafico = PRESET_PERSONALIZADO;
+            break;
+        case LINHA_LENTE:
+            config->distorcaoDaLente = (config->distorcaoDaLente + sentido + 3) % 3;
+            config->presetGrafico = PRESET_PERSONALIZADO;
+            break;
+        case LINHA_NITIDEZ:
+            config->nitidez = (config->nitidez + sentido + 3) % 3;
+            config->presetGrafico = PRESET_PERSONALIZADO;
+            break;
+        case LINHA_SUAVIZACAO:
+            config->suavizacao = !config->suavizacao;
+            config->presetGrafico = PRESET_PERSONALIZADO;
+            break;
+        case LINHA_OCLUSAO:
+            config->oclusaoAmbiental = !config->oclusaoAmbiental;
+            config->presetGrafico = PRESET_PERSONALIZADO;
+            break;
+        case LINHA_QUALIDADE_DAS_SOMBRAS:
+            config->qualidadeDasSombras = (config->qualidadeDasSombras + sentido + TOTAL_QUALIDADES_DE_SOMBRA) % TOTAL_QUALIDADES_DE_SOMBRA;
+            config->sombras = (config->qualidadeDasSombras > 0);   /* sem sombras nesta opção = sombras desligadas */
+            config->presetGrafico = PRESET_PERSONALIZADO;
+            break;
+        case LINHA_TEXTURAS:
+            config->filtroDeTexturas = (config->filtroDeTexturas + sentido + TOTAL_FILTROS_DE_TEXTURA) % TOTAL_FILTROS_DE_TEXTURA;
+            config->presetGrafico = PRESET_PERSONALIZADO;
+            break;
+        case LINHA_VOLUME_VOZES:
+        case LINHA_VOLUME_MUSICA:
+        case LINHA_VOLUME_EFEITOS:
+        case LINHA_VOLUME_MENU: {
+            int *volume = (linha == LINHA_VOLUME_VOZES) ? &config->volumeVozes : (linha == LINHA_VOLUME_MUSICA) ? &config->volumeMusica
+                          : (linha == LINHA_VOLUME_EFEITOS) ? &config->volumeEfeitos : &config->volumeMenu;
+            *volume += sentido;
+            *volume = (*volume < 0) ? 0 : (*volume > MAIOR_VOLUME ? MAIOR_VOLUME : *volume);
+            break;
+        }
+        case LINHA_ALCANCE:
+            config->alcanceDinamico = !config->alcanceDinamico;
+            break;
+        case LINHA_SURROUND:
+            config->surroundVirtual = !config->surroundVirtual;
+            break;
         case LINHA_RESOLUCAO: {
             /* anda pela tabela, pulando o que não cabe no monitor */
             int indice = config->resolucao;
@@ -1919,11 +2009,13 @@ Tela atualizarConfiguracoes(EstadoMenu *menu) {
     float abaMouseX, abaMouseY;
     posicaoDoMouseNaInterface(&abaMouseX, &abaMouseY);
     int novaAba = menu->abaConfig;
-    if (IsKeyPressed(KEY_TAB) || controleApertou(BOTAO_ABA_SEGUINTE) || controleApertou(BOTAO_ABA_ANTERIOR)) {
+    if (IsKeyPressed(KEY_TAB) || controleApertou(BOTAO_ABA_SEGUINTE)) {
         novaAba = (menu->abaConfig + 1) % TOTAL_ABAS_CONFIG;
+    } else if (controleApertou(BOTAO_ABA_ANTERIOR)) {
+        novaAba = (menu->abaConfig + TOTAL_ABAS_CONFIG - 1) % TOTAL_ABAS_CONFIG;
     }
     for (int aba = 0; aba < TOTAL_ABAS_CONFIG; aba++) {
-        Rectangle r = { X_ABAS_CONFIG + aba * (LARGURA_ABA_CONFIG + 10.0f), Y_ABAS_CONFIG, LARGURA_ABA_CONFIG, ALTURA_ABA_CONFIG };
+        Rectangle r = { X_ABAS_CONFIG + aba * (LARGURA_ABA_CONFIG + ESPACO_ENTRE_ABAS), Y_ABAS_CONFIG, LARGURA_ABA_CONFIG, ALTURA_ABA_CONFIG };
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && dentroDoRetangulo(abaMouseX, abaMouseY, r.x, r.y, r.width, r.height)) {
             novaAba = aba;
         }
@@ -1931,7 +2023,7 @@ Tela atualizarConfiguracoes(EstadoMenu *menu) {
     if (novaAba != menu->abaConfig) {
         menu->abaConfig = novaAba;
         abaAtualDaConfig = novaAba;
-        menu->linhaConfig = (novaAba == ABA_EXIBICAO) ? LINHA_RESOLUCAO : 0;
+        menu->linhaConfig = PRIMEIRA_LINHA_DA_ABA[novaAba];
         menu->colunaConfig = 0;
         menu->confirmarPadrao = 0.0f;
         tocarSom(SOM_CURSOR);
@@ -2092,17 +2184,47 @@ static void desenharLinhaDeOpcao(EstadoMenu *menu, int linha, const char *nome, 
  * Devolve: nada.
  */
 static void desenharAbasDaConfig(int aberta) {
-    static const char *NOMES[TOTAL_ABAS_CONFIG] = { "CONTROLES", "EXIBIÇÃO" };
+    static const char *NOMES[TOTAL_ABAS_CONFIG] = { "CONTROLES", "EXIBIÇÃO", "GRÁFICOS", "SOM" };
     float mouseX, mouseY;
     posicaoDoMouseNaInterface(&mouseX, &mouseY);
     for (int aba = 0; aba < TOTAL_ABAS_CONFIG; aba++) {
-        Rectangle r = { X_ABAS_CONFIG + aba * (LARGURA_ABA_CONFIG + 10.0f), Y_ABAS_CONFIG, LARGURA_ABA_CONFIG, ALTURA_ABA_CONFIG };
+        Rectangle r = { X_ABAS_CONFIG + aba * (LARGURA_ABA_CONFIG + ESPACO_ENTRE_ABAS), Y_ABAS_CONFIG, LARGURA_ABA_CONFIG, ALTURA_ABA_CONFIG };
         int sobre = dentroDoRetangulo(mouseX, mouseY, r.x, r.y, r.width, r.height);
         Color fundo = (aba == aberta) ? COR_VERMELHO : Fade(COR_GRAFITE, sobre ? 0.98f : 0.85f);
         caixaArredondada(r, raioDoTamanho(r.width, r.height), fundo);
-        escreverCentralizado(FONTE_FORTE, NOMES[aba], r.x + r.width / 2.0f, r.y + 6.0f, 16.0f, (aba == aberta || sobre) ? WHITE : COR_CROMO);
+        escreverCentralizado(FONTE_FORTE, NOMES[aba], r.x + r.width / 2.0f, r.y + 8.0f, 13.0f, (aba == aberta || sobre) ? WHITE : COR_CROMO);
     }
     escrever(FONTE_FORTE, controleConectado() ? "LB / RB TROCA DE ABA" : "TAB TROCA DE ABA", X_ABAS_CONFIG + 4.0f, Y_ABAS_CONFIG + ALTURA_ABA_CONFIG + 4.0f, 11.0f, COR_TEXTO_FRACO);
+}
+
+/*
+ * descricaoDaLinha
+ * Recebe: a linha marcada.
+ * Devolve: a frase que diz o que ela faz (embaixo da tela), ou "" se não tem.
+ */
+static const char *descricaoDaLinha(int linha) {
+    switch (linha) {
+        case LINHA_PRESET: return "TROCA VÁRIAS OPÇÕES DE UMA VEZ: BAIXO PARA PCS FRACOS, ALTO PARA O MELHOR VISUAL.";
+        case LINHA_ESCALA: return "O MUNDO É DESENHADO MENOR E AMPLIADO: MENOS %, MAIS QUADROS POR SEGUNDO.";
+        case LINHA_POS_PROCESSAMENTO: return "A COR DE CADA PISTA, O CONTRASTE E AS BORDAS ESCURAS DA IMAGEM.";
+        case LINHA_BLOOM: return "ATIVA OU DESATIVA O BRILHO EM VOLTA DAS LUZES FORTES (FAZ A IMAGEM RODAR UM POUCO MAIS PESADA).";
+        case LINHA_LENS_FLARE: return "OS RAIOS DE LUZ QUE SAEM DOS CLARÕES DAS BATIDAS E DAS FAÍSCAS.";
+        case LINHA_GRANULADO: return "UM GRÃO DE FILME SOBRE A IMAGEM, QUE MUDA A CADA QUADRO.";
+        case LINHA_CAMPO: return "O FUNDO LONGE (A PARTE DE CIMA DA IMAGEM) FICA LEVEMENTE DESFOCADO.";
+        case LINHA_LENTE: return "CURVA AS BORDAS DA IMAGEM COMO UMA LENTE E, NA ÚLTIMA OPÇÃO, SEPARA AS CORES NAS BORDAS.";
+        case LINHA_NITIDEZ: return "AFIA A IMAGEM: BOA COMBINADA COM UMA ESCALA DE RENDERIZAÇÃO MENOR QUE 100%.";
+        case LINHA_SUAVIZACAO: return "FXAA: SUAVIZA AS SERRILHAS DAS BORDAS, QUASE SEM CUSTO.";
+        case LINHA_OCLUSAO: return "ESCURECE LEVEMENTE AS FRESTAS E OS CANTOS, DANDO MAIS PESO ÀS FORMAS (EFEITO SIMULADO NA IMAGEM).";
+        case LINHA_QUALIDADE_DAS_SOMBRAS: return "O TAMANHO DO MAPA DE SOMBRA. VALE QUANDO O JOGO É ABERTO DE NOVO.";
+        case LINHA_TEXTURAS: return "A NITIDEZ DAS TEXTURAS VISTAS DE LADO (ASFALTO, MUROS). VALE QUANDO O JOGO É ABERTO DE NOVO.";
+        case LINHA_VOLUME_VOZES: return "AS FALAS DO MCQUEEN.";
+        case LINHA_VOLUME_MUSICA: return "AS MÚSICAS DO MENU E DA CORRIDA.";
+        case LINHA_VOLUME_EFEITOS: return "OS MOTORES, AS BATIDAS, OS PNEUS, O VENTO E OS FOGOS.";
+        case LINHA_VOLUME_MENU: return "OS SONS DE MOVER E ESCOLHER NOS MENUS.";
+        case LINHA_SURROUND: return "ALARGA A IMAGEM DO SOM ESTÉREO: MAIS EM VOLTA EM FONES E CAIXAS.";
+        case LINHA_ALCANCE: return "REDUZIDO: OS SONS BAIXOS SOBEM E OS ESTRONDOS FICAM MAIS SUAVES.";
+        default: return "";
+    }
 }
 
 /*
@@ -2141,13 +2263,47 @@ void desenharConfiguracoes(EstadoMenu *menu) {
         desenharLinhaDeOpcao(menu, LINHA_LIMITE_DE_QUADROS, "LIMITE DE QUADROS POR SEGUNDO", fps > 0 ? TextFormat("%d FPS", fps) : "SEM LIMITE", 0);
         desenharLinhaDeOpcao(menu, LINHA_MOSTRAR_FPS, "MOSTRAR O CONTADOR DE FPS", config->mostrarFps ? "SIM" : "NÃO", 0);
         desenharLinhaDeOpcao(menu, LINHA_TRACADO, "TRAÇADO DE CORRIDA (LINHA NO ASFALTO)", config->tracadoDeCorrida ? "LIGADO" : "DESLIGADO", 0);
-        desenharLinhaDeOpcao(menu, LINHA_SOMBRAS, "GRÁFICOS (SOMBRAS E EFEITOS)",
-                             config->sombras ? "ALTO" : (config->efeitos ? "MÉDIO" : "BAIXO"), 0);
         desenharLinhaDeOpcao(menu, LINHA_PADRAO, "VOLTAR TUDO AO PADRÃO", (menu->confirmarPadrao > 0.0f) ? "APERTE DE NOVO" : "", 0);
         escrever(FONTE_FORTE, TextFormat("AGORA: %d x %d%s  |  A MAIOR RESOLUÇÃO É %d x %d", GetScreenWidth(), GetScreenHeight(),
                                          IsWindowFullscreen() ? " (TELA CHEIA)" : (IsWindowState(FLAG_BORDERLESS_WINDOWED_MODE) ? " (SEM BORDAS)" : " (JANELA)"),
                                          MAIOR_LARGURA, MAIOR_ALTURA),
-                 X_LINHAS_CONFIG + 12.0f, Y_LINHAS_EXIBICAO + 9.0f * ALTURA_LINHA_EXIBICAO + 8.0f, 13.0f, COR_TEXTO_FRACO);
+                 X_LINHAS_CONFIG + 12.0f, Y_LINHAS_EXIBICAO + 8.0f * ALTURA_LINHA_EXIBICAO + 8.0f, 13.0f, COR_TEXTO_FRACO);
+        return;
+    }
+    if (menu->abaConfig == ABA_GRAFICOS) {
+        static const char *PRESETS[TOTAL_PRESETS] = { "BAIXO", "MÉDIO", "ALTO", "PERSONALIZADO" };
+        static const char *LENTES[3] = { "DESLIGADA", "DISTORÇÃO", "DISTORÇÃO + ABERRAÇÃO CROMÁTICA" };
+        static const char *NITIDEZES[3] = { "DESLIGADA", "LEVE", "FORTE" };
+        static const char *SOMBRAS[TOTAL_QUALIDADES_DE_SOMBRA] = { "DESLIGADAS", "BAIXA (1024)", "MÉDIA (2048)", "ALTA (3072)", "MÁXIMA (4096)" };
+        static const char *FILTROS[TOTAL_FILTROS_DE_TEXTURA] = { "BILINEAR", "TRILINEAR", "ANISOTRÓPICO 4x", "ANISOTRÓPICO 8x", "ANISOTRÓPICO 16x" };
+        desenharTituloDeSecao("GRÁFICOS", Y_TITULO_COMANDOS);
+        desenharLinhaDeOpcao(menu, LINHA_PRESET, "PACOTE DE GRÁFICOS", PRESETS[config->presetGrafico], 0);
+        desenharLinhaDeOpcao(menu, LINHA_ESCALA, "QUALIDADE DA IMAGEM (ESCALA DE RENDERIZAÇÃO)", TextFormat("%d%%", escalaDaImagemEmPorcento(config->escalaDaImagem)), 0);
+        desenharLinhaDeOpcao(menu, LINHA_POS_PROCESSAMENTO, "COR E VINHETA (PÓS-PROCESSAMENTO)", config->efeitos ? "LIGADO" : "DESLIGADO", 0);
+        desenharLinhaDeOpcao(menu, LINHA_BLOOM, "BLOOM (BRILHO EM VOLTA DAS LUZES)", config->bloom ? "LIGADO" : "DESLIGADO", !config->efeitos);
+        desenharLinhaDeOpcao(menu, LINHA_LENS_FLARE, "LENS FLARE (RAIOS DE LUZ DAS FAÍSCAS)", config->lensFlare ? "LIGADO" : "DESLIGADO", 0);
+        desenharLinhaDeOpcao(menu, LINHA_GRANULADO, "GRANULADO DE FILME", config->granulado ? "LIGADO" : "DESLIGADO", 0);
+        desenharLinhaDeOpcao(menu, LINHA_CAMPO, "PROFUNDIDADE DE CAMPO", config->profundidadeDeCampo ? "LIGADA" : "DESLIGADA", 0);
+        desenharLinhaDeOpcao(menu, LINHA_LENTE, "DISTORÇÃO DA LENTE", LENTES[config->distorcaoDaLente], 0);
+        desenharLinhaDeOpcao(menu, LINHA_NITIDEZ, "NITIDEZ (COMO O FIDELITYFX CAS)", NITIDEZES[config->nitidez], 0);
+        desenharLinhaDeOpcao(menu, LINHA_SUAVIZACAO, "SUAVIZAÇÃO (AA)", config->suavizacao ? "FXAA" : "DESLIGADA", 0);
+        desenharLinhaDeOpcao(menu, LINHA_OCLUSAO, "OCLUSÃO AMBIENTAL (SIMULADA)", config->oclusaoAmbiental ? "LIGADA" : "DESLIGADA", 0);
+        desenharLinhaDeOpcao(menu, LINHA_QUALIDADE_DAS_SOMBRAS, "QUALIDADE DAS SOMBRAS (AO REABRIR)", SOMBRAS[config->qualidadeDasSombras], 0);
+        desenharLinhaDeOpcao(menu, LINHA_TEXTURAS, "FILTRO DE TEXTURAS (AO REABRIR)", FILTROS[config->filtroDeTexturas], 0);
+        desenharLinhaDeOpcao(menu, LINHA_PADRAO, "VOLTAR TUDO AO PADRÃO", (menu->confirmarPadrao > 0.0f) ? "APERTE DE NOVO" : "", 0);
+        escrever(FONTE_FORTE, descricaoDaLinha(menu->linhaConfig), X_LINHAS_CONFIG + 12.0f, 570.0f, 13.0f, COR_TEXTO_CLARO);
+        return;
+    }
+    if (menu->abaConfig == ABA_SOM) {
+        desenharTituloDeSecao("SOM", Y_TITULO_COMANDOS);
+        desenharLinhaDeOpcao(menu, LINHA_VOLUME_VOZES, "VOLUME DAS VOZES", TextFormat("%d", config->volumeVozes), 0);
+        desenharLinhaDeOpcao(menu, LINHA_VOLUME_MUSICA, "VOLUME DA MÚSICA", TextFormat("%d", config->volumeMusica), 0);
+        desenharLinhaDeOpcao(menu, LINHA_VOLUME_EFEITOS, "VOLUME DOS EFEITOS SONOROS", TextFormat("%d", config->volumeEfeitos), 0);
+        desenharLinhaDeOpcao(menu, LINHA_VOLUME_MENU, "VOLUME DO MENU", TextFormat("%d", config->volumeMenu), 0);
+        desenharLinhaDeOpcao(menu, LINHA_ALCANCE, "ALCANCE DINÂMICO", config->alcanceDinamico ? "REDUZIDO" : "AMPLO", 0);
+        desenharLinhaDeOpcao(menu, LINHA_SURROUND, "SURROUND VIRTUAL", config->surroundVirtual ? "LIGADO" : "DESLIGADO", 0);
+        desenharLinhaDeOpcao(menu, LINHA_PADRAO, "VOLTAR TUDO AO PADRÃO", (menu->confirmarPadrao > 0.0f) ? "APERTE DE NOVO" : "", 0);
+        escrever(FONTE_FORTE, descricaoDaLinha(menu->linhaConfig), X_LINHAS_CONFIG + 12.0f, 570.0f, 13.0f, COR_TEXTO_CLARO);
         return;
     }
 

@@ -9,6 +9,7 @@
 #include "raylib.h"
 #include "audio.h"
 #include "efeitos.h"
+#include "configuracoes.h"
 
 #define ARQUIVO_MUSICA_MENU   "recursos/sons/real_gone.mp3"   /* Real Gone: a mesma do vídeo de abertura */
 #define VOLUME_SONS           0.7f   /* volume dos efeitos (0 a 1) */
@@ -164,11 +165,32 @@ static Music *musicaAtual(void) {
  * Recebe: nada.
  * Devolve: nada.
  */
+/*
+ * surroundVirtual
+ * O processador da mistura final: com a opção ligada, alarga a imagem estéreo (a diferença entre o canal esquerdo e o direito
+ * ganha força e o centro fica como está), o que dá a impressão de um som mais "em volta" nos fones e nas caixas.
+ * Roda na thread de áudio, por isso só lê um número da configuração.
+ * Recebe: as amostras (float, estéreo intercaladas) e quantos quadros.
+ */
+static void surroundVirtual(void *dados, unsigned int quadros) {
+    if (!configuracoesAtuais()->surroundVirtual) {
+        return;
+    }
+    float *x = (float *) dados;
+    for (unsigned int i = 0; i < quadros; i++) {
+        float e = x[2 * i], d = x[2 * i + 1];
+        float meio = (e + d) * 0.5f, lado = (e - d) * 0.5f * 1.8f;
+        x[2 * i] = meio + lado;
+        x[2 * i + 1] = meio - lado;
+    }
+}
+
 void carregarAudio(void) {
     InitAudioDevice();
     if (!IsAudioDeviceReady()) {
         return;
     }
+    AttachAudioMixedProcessor(surroundVirtual);
 
     for (int i = 0; i < TOTAL_SONS; i++) {
         if (FileExists(ARQUIVOS_SONS[i])) {
@@ -245,7 +267,7 @@ void comecarAbertura(void) {
     iniciada = 1;
     pausada = 0;
     fade = 1.0f;
-    SetMusicVolume(abertura, fade * VOLUME_MUSICA_MENU);
+    SetMusicVolume(abertura, fade * (VOLUME_MUSICA_MENU * fatorDeVolume(configuracoesAtuais()->volumeMusica)));
 }
 
 /*
@@ -268,7 +290,7 @@ void pularAbertura(void) {
     iniciada = 1;
     pausada = 0;
     fade = 1.0f;
-    SetMusicVolume(musicaMenu, fade * VOLUME_MUSICA_MENU);
+    SetMusicVolume(musicaMenu, fade * (VOLUME_MUSICA_MENU * fatorDeVolume(configuracoesAtuais()->volumeMusica)));
 }
 
 /*
@@ -341,7 +363,7 @@ void atualizarAudio(int musicaDoMenu) {
         }
     }
 
-    SetMusicVolume(*musicaAtual(), fade * volumeExtra * VOLUME_MUSICA_MENU);
+    SetMusicVolume(*musicaAtual(), fade * volumeExtra * (VOLUME_MUSICA_MENU * fatorDeVolume(configuracoesAtuais()->volumeMusica)));
     if (iniciada && !pausada) {
         UpdateMusicStream(*musicaAtual());   /* alimenta o som; precisa de uma chamada por quadro */
         if (naAbertura && !IsMusicStreamPlaying(abertura)) {
@@ -349,7 +371,7 @@ void atualizarAudio(int musicaDoMenu) {
             naAbertura = 0;
             if (musicaCarregada) {
                 PlayMusicStream(musicaMenu);
-                SetMusicVolume(musicaMenu, fade * volumeExtra * VOLUME_MUSICA_MENU);
+                SetMusicVolume(musicaMenu, fade * volumeExtra * (VOLUME_MUSICA_MENU * fatorDeVolume(configuracoesAtuais()->volumeMusica)));
             } else {
                 iniciada = 0;
             }
@@ -367,6 +389,7 @@ void atualizarAudio(int musicaDoMenu) {
 void tocarSom(TipoSom som) {
     if (somCarregado[som]) {
         StopSound(sons[som]);
+        SetSoundVolume(sons[som], VOLUME_SONS * fatorDeVolume(configuracoesAtuais()->volumeMenu));   /* o volume do menu */
         PlaySound(sons[som]);
     }
 }
@@ -378,7 +401,7 @@ void tocarSom(TipoSom som) {
  * Devolve: nada.
  */
 static void falar(Sound som, float volume, double agora) {
-    SetSoundVolume(som, volume);
+    SetSoundVolume(som, volume * fatorDeVolume(configuracoesAtuais()->volumeVozes));   /* o volume das vozes */
     StopSound(som);
     PlaySound(som);
     fimDaVoz = agora + (double) som.frameCount / (double) som.stream.sampleRate + PAUSA_DEPOIS_DA_FALA;
@@ -548,7 +571,10 @@ static void atualizarSomDeCorrida(SomDeCorrida *som, int ativo) {
     som->ativoAntes = ativo;
 
     if (som->tocando) {
-        SetMusicVolume(som->musica, som->volume * som->volumeMaximo);
+        /* a música da corrida obedece o volume da música; o motor aquecendo e a contagem, o dos efeitos */
+        int ehMusica = (som == &somCorrida[CORRIDA_MUSICA]);
+        float categoria = ehMusica ? fatorDeVolume(configuracoesAtuais()->volumeMusica) : fatorDeVolume(configuracoesAtuais()->volumeEfeitos);
+        SetMusicVolume(som->musica, som->volume * som->volumeMaximo * categoria);
         UpdateMusicStream(som->musica);
     }
 }
@@ -640,7 +666,7 @@ void atualizarMusicaDaVitoria(float segundosAteALinha, int venceu) {
     }
 
     if (estadoVitoria != VITORIA_PARADA) {
-        SetMusicVolume(musicaVitoria, volumeVitoria * VOLUME_VITORIA);
+        SetMusicVolume(musicaVitoria, volumeVitoria * VOLUME_VITORIA * fatorDeVolume(configuracoesAtuais()->volumeMusica));
         UpdateMusicStream(musicaVitoria);
     }
 }

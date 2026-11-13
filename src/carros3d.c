@@ -22,6 +22,7 @@
 #include "moradores.h"
 #include "noite.h"
 #include "hora.h"
+#include "exibicao.h"
 
 #define PASTA_DOS_MODELOS     "recursos/modelos/carros/"
 #define LADO_DA_MINIATURA     512
@@ -1641,7 +1642,7 @@ static void prepararTexturas(Model modelo) {
         if (textura->id != 0 && textura->id != rlGetTextureIdDefault()) {
             GenTextureMipmaps(textura);
             SetTextureFilter(*textura, TEXTURE_FILTER_TRILINEAR);
-            SetTextureFilter(*textura, TEXTURE_FILTER_ANISOTROPIC_8X);
+            SetTextureFilter(*textura, filtroDeTexturaDaConfig());
         }
     }
 }

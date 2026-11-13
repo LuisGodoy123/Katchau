@@ -129,3 +129,20 @@ void aplicarTela(const Configuracoes *config) {
     ToggleBorderlessWindowed();   /* fora do Windows, a tela cheia fica sempre no tamanho do monitor */
 #endif
 }
+
+/*
+ * filtroDeTexturaDaConfig
+ * O filtro das texturas do jogo, o que o jogador escolheu: bilinear, trilinear ou anisotrópico 4x, 8x ou 16x. Quem carrega
+ * uma textura chama isto em vez de fixar um filtro; vale para as texturas carregadas daí em diante (ou seja, ao abrir o jogo).
+ * Recebe: nada.
+ * Devolve: o TEXTURE_FILTER_* da raylib.
+ */
+int filtroDeTexturaDaConfig(void) {
+    switch (configuracoesAtuais()->filtroDeTexturas) {
+        case 0: return TEXTURE_FILTER_BILINEAR;
+        case 1: return TEXTURE_FILTER_TRILINEAR;
+        case 2: return TEXTURE_FILTER_ANISOTROPIC_4X;
+        case 4: return TEXTURE_FILTER_ANISOTROPIC_16X;
+        default: return TEXTURE_FILTER_ANISOTROPIC_8X;
+    }
+}

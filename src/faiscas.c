@@ -11,6 +11,7 @@
 #include "rlgl.h"
 #include "faiscas.h"
 #include "fumaca.h"
+#include "configuracoes.h"
 
 #define MAXIMO_DE_FAISCAS      1800
 #define MAXIMO_DE_CLAROES      72
@@ -581,7 +582,7 @@ void desenharFaiscas(Camera3D camera) {
             rlVertex3f(p1.x, p1.y, p1.z);
             rlEnd();
         }
-        if (c->espinhos) {   /* o flare: um raio na horizontal e um na vertical, finos, e dois na diagonal, mais curtos */
+        if (c->espinhos && configuracoesAtuais()->lensFlare) {   /* o flare: um raio na horizontal e um na vertical, finos, e dois na diagonal, mais curtos */
             Color raioDeLuz = { 255, 235, 190, (unsigned char) (200 * resta) };
             Vector3 d1 = Vector3Normalize(Vector3Add(direita, cima)), d2 = Vector3Normalize(Vector3Subtract(direita, cima));
             brilho(c->posicao, Vector3Scale(direita, raio * 4.2f), Vector3Scale(cima, raio * 0.16f), raioDeLuz);

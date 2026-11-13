@@ -19,6 +19,7 @@
 #include "raymath.h"
 #include "rlgl.h"
 #include "interiores.h"
+#include "exibicao.h"
 
 static const char *ARQUIVOS[] = {
     "recursos/modelos/loja_do_luigi.glb",
@@ -134,7 +135,7 @@ void carregarInteriores(void) {
             if (t->id != 0 && t->id != rlGetTextureIdDefault()) {
                 GenTextureMipmaps(t);
                 SetTextureFilter(*t, TEXTURE_FILTER_TRILINEAR);
-                SetTextureFilter(*t, TEXTURE_FILTER_ANISOTROPIC_8X);
+                SetTextureFilter(*t, filtroDeTexturaDaConfig());
             }
         }
         in->caixa = GetModelBoundingBox(in->modelo);

@@ -3300,6 +3300,33 @@ static void testarConfiguracoes(void) {
     v = vibracaoAoGosto(cheia, &config);
     verificar(v.grave == cheia.grave && v.noAcelerador == 0.0f, "sem o tremor no gatilho, as maos continuam vibrando");
 
+    /* Graficos e som: pacotes, escalas, volumes e o que vai e volta do arquivo */
+    configuracoesPadrao(&config);
+    verificar(config.presetGrafico == PRESET_ALTO && config.escalaDaImagem == ESCALA_PADRAO_DA_IMAGEM && config.bloom && config.qualidadeDasSombras == 2
+              && config.filtroDeTexturas == 3 && config.volumeVozes == 10 && config.volumeMusica == 10 && config.volumeEfeitos == 10 && config.volumeMenu == 10,
+              "padrao: pacote ALTO, imagem a 100%, sombras medias, anisotropico 8x e todos os volumes no maximo");
+    aplicarPresetGrafico(&config, PRESET_BAIXO);
+    verificar(!config.sombras && config.qualidadeDasSombras == 0 && !config.efeitos && !config.bloom && escalaDaImagemEmPorcento(config.escalaDaImagem) < 100, "pacote BAIXO: sem sombras nem efeitos e imagem menor");
+    aplicarPresetGrafico(&config, PRESET_MEDIO);
+    verificar(config.sombras && config.qualidadeDasSombras == 1 && config.suavizacao && config.presetGrafico == PRESET_MEDIO, "pacote MEDIO: sombras baixas e suavizacao");
+    verificar(escalaDaImagemEmPorcento(0) == 50 && escalaDaImagemEmPorcento(5) == 100 && escalaDaImagemEmPorcento(99) == 100, "as escalas vao de 50% a 100%");
+    verificar(ladoDoMapaDeSombra(0) == 0 && ladoDoMapaDeSombra(2) == 2048 && ladoDoMapaDeSombra(4) == 4096, "o mapa de sombra vai de 1024 a 4096 (0 = sem sombras)");
+    verificar(fatorDeVolume(0) == 0.0f && fabsf(fatorDeVolume(10) - 1.0f) < 0.0001f && fatorDeVolume(5) > 0.5f && fatorDeVolume(5) < fatorDeVolume(6) && fatorDeVolume(99) == 1.0f && fatorDeVolume(-3) == 0.0f,
+              "o volume: 0 muda, 10 e o maximo, no meio nao e metade (curva do ouvido) e fora da escala nao estoura");
+    configuracoesPadrao(&config);
+    config.presetGrafico = PRESET_PERSONALIZADO; config.escalaDaImagem = 2; config.granulado = 1; config.profundidadeDeCampo = 1; config.distorcaoDaLente = 2;
+    config.nitidez = 2; config.suavizacao = 0; config.qualidadeDasSombras = 3; config.filtroDeTexturas = 4; config.volumeVozes = 3; config.volumeMusica = 0;
+    config.volumeEfeitos = 7; config.volumeMenu = 5; config.alcanceDinamico = 1; config.lensFlare = 0; config.bloom = 0; config.oclusaoAmbiental = 1; config.surroundVirtual = 1;
+    verificar(salvarConfiguracoes(&config, arquivo) && carregarConfiguracoes(&lida, arquivo) && memcmp(&config, &lida, sizeof(Configuracoes)) == 0, "graficos e som voltam iguais do arquivo");
+    estragado = fopen(arquivo, "w");
+    fprintf(estragado, "bloom 5%cnitidez 9%cvolume_musica 99%cvolume_vozes 4%cfiltro_de_texturas 9%cescala_da_imagem -1%csombras 0%c", 10, 10, 10, 10, 10, 10, 10);
+    fclose(estragado);
+    carregarConfiguracoes(&lida, arquivo);
+    verificar(lida.bloom == 1 && lida.nitidez == 1 && lida.volumeMusica == 10 && lida.volumeVozes == 4 && lida.filtroDeTexturas == 3 && lida.escalaDaImagem == ESCALA_PADRAO_DA_IMAGEM,
+              "valores absurdos ficam no padrao e o que esta certo vale");
+    verificar(lida.sombras == 0 && lida.qualidadeDasSombras == 0, "sombras desligadas no arquivo: a qualidade das sombras acompanha");
+    remove(arquivo);
+
     /* A exibicao: resolucao, modo de tela, vsync, limite de quadros e FPS */
     configuracoesPadrao(&config);
     verificar(config.resolucao == 0 && config.modoDeTela == MODO_TELA_CHEIA && config.sincroniaVertical == 1

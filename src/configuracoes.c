@@ -94,8 +94,6 @@ void configuracoesPadrao(Configuracoes *config) {
     config->zonaMorta = 12;
     config->respostaDoVolante = VOLANTE_NORMAL;
     config->direcaoGuiada = 0;   /* a direção guiada saiu do jogo; só os testes automáticos a ligam */
-    config->sombras = 1;
-    config->efeitos = 1;
     config->inverterCameraX = 0;
     config->inverterCameraY = 0;
     config->resolucao = 0;
@@ -104,6 +102,71 @@ void configuracoesPadrao(Configuracoes *config) {
     config->limiteDeQuadros = LIMITE_PADRAO_DE_QUADROS;
     config->mostrarFps = 0;
     config->tracadoDeCorrida = 1;
+    aplicarPresetGrafico(config, PRESET_ALTO);   /* o padrão: tudo como o jogo sempre foi, mais a suavização e a nitidez leves */
+    config->volumeVozes = config->volumeMusica = config->volumeEfeitos = config->volumeMenu = MAIOR_VOLUME;
+    config->alcanceDinamico = 0;
+    config->surroundVirtual = 0;
+}
+
+/* A escala de renderização: do que o mundo desenha, em % de cada lado da tela */
+static const int ESCALAS_DA_IMAGEM[TOTAL_ESCALAS_DA_IMAGEM] = { 50, 60, 70, 80, 90, 100 };
+static const int LADOS_DO_MAPA_DE_SOMBRA[TOTAL_QUALIDADES_DE_SOMBRA] = { 0, 1024, 2048, 3072, 4096 };
+
+/*
+ * escalaDaImagemEmPorcento
+ * Recebe: o índice. Devolve: a escala, em % (100 se o índice não existe).
+ */
+int escalaDaImagemEmPorcento(int indice) {
+    return (indice >= 0 && indice < TOTAL_ESCALAS_DA_IMAGEM) ? ESCALAS_DA_IMAGEM[indice] : 100;
+}
+
+/*
+ * ladoDoMapaDeSombra
+ * Recebe: a qualidade das sombras. Devolve: o lado do mapa de sombra em pixels (0 = sem sombras).
+ */
+int ladoDoMapaDeSombra(int qualidade) {
+    return (qualidade >= 0 && qualidade < TOTAL_QUALIDADES_DE_SOMBRA) ? LADOS_DO_MAPA_DE_SOMBRA[qualidade] : 2048;
+}
+
+/*
+ * fatorDeVolume
+ * Recebe: o volume da opção (0 a 10). Devolve: o fator a multiplicar no som (0 a 1; a curva é quadrática,
+ * que é mais parecida com o ouvido: o meio da escala não fica "quase no máximo").
+ */
+float fatorDeVolume(int volume) {
+    float f = (float) (volume < 0 ? 0 : (volume > MAIOR_VOLUME ? MAIOR_VOLUME : volume)) / (float) MAIOR_VOLUME;
+    return f * (2.0f - f);
+}
+
+/*
+ * aplicarPresetGrafico
+ * Põe de uma vez todas as opções gráficas de um pacote:
+ *   BAIXO: sem sombras nem efeitos, imagem a 70%, sem suavização, filtro trilinear: para PCs fracos;
+ *   MÉDIO: sombras baixas, efeitos e brilho, imagem a 90%, suavização, filtro anisotrópico 4x;
+ *   ALTO:  sombras médias, tudo ligado, imagem a 100%, suavização e nitidez leve, anisotrópico 8x.
+ * A resolução, o modo de tela e o limite de quadros não mudam: são da exibição.
+ * Recebe: as configurações e o pacote.
+ * Devolve: nada.
+ */
+void aplicarPresetGrafico(Configuracoes *config, PresetGrafico preset) {
+    config->presetGrafico = preset;
+    config->granulado = 0;
+    config->oclusaoAmbiental = 0;
+    config->profundidadeDeCampo = 0;
+    config->distorcaoDaLente = 0;
+    if (preset == PRESET_BAIXO) {
+        config->sombras = 0; config->efeitos = 0; config->qualidadeDasSombras = 0;
+        config->escalaDaImagem = 2; config->bloom = 0; config->lensFlare = 0;
+        config->nitidez = 0; config->suavizacao = 0; config->filtroDeTexturas = 1;
+    } else if (preset == PRESET_MEDIO) {
+        config->sombras = 1; config->efeitos = 1; config->qualidadeDasSombras = 1;
+        config->escalaDaImagem = 4; config->bloom = 1; config->lensFlare = 0;
+        config->nitidez = 0; config->suavizacao = 1; config->filtroDeTexturas = 2;
+    } else {
+        config->sombras = 1; config->efeitos = 1; config->qualidadeDasSombras = 2;
+        config->escalaDaImagem = ESCALA_PADRAO_DA_IMAGEM; config->bloom = 1; config->lensFlare = 1;
+        config->nitidez = 1; config->suavizacao = 1; config->filtroDeTexturas = 3;
+    }
 }
 
 /* A tabela de resoluções (a automática é a primeira) e a de limites de quadros */
@@ -245,11 +308,14 @@ int salvarConfiguracoes(const Configuracoes *config, const char *arquivo) {
         fprintf(saida, "comando %s %d %d %d %d\n", CHAVES_DAS_ACOES[a], config->comandos[a][0], config->comandos[a][1],
                 config->comandos[a][2], config->comandos[a][3]);
     }
-    fprintf(saida, "vibracao %d\nforca %d\ngatilhos %d\nzona_morta %d\nvolante %d\nsombras %d\nefeitos %d\ncamera_x %d\ncamera_y %d\nresolucao %d\nmodo_de_tela %d\nsincronia_vertical %d\nlimite_de_quadros %d\nmostrar_fps %d\ntracado_de_corrida %d\n",
+    fprintf(saida, "vibracao %d\nforca %d\ngatilhos %d\nzona_morta %d\nvolante %d\nsombras %d\nefeitos %d\ncamera_x %d\ncamera_y %d\nresolucao %d\nmodo_de_tela %d\nsincronia_vertical %d\nlimite_de_quadros %d\nmostrar_fps %d\ntracado_de_corrida %d\npreset_grafico %d\nescala_da_imagem %d\nbloom %d\nlens_flare %d\ngranulado %d\nprofundidade_de_campo %d\ndistorcao_da_lente %d\nnitidez %d\nsuavizacao %d\nqualidade_das_sombras %d\nfiltro_de_texturas %d\nvolume_vozes %d\nvolume_musica %d\nvolume_efeitos %d\nvolume_menu %d\nalcance_dinamico %d\noclusao_ambiental %d\nsurround_virtual %d\n",
             config->vibracaoLigada, config->forcaDaVibracao, config->gatilhosAdaptativos, config->zonaMorta,
             config->respostaDoVolante, config->sombras, config->efeitos, config->inverterCameraX, config->inverterCameraY,
             config->resolucao, config->modoDeTela, config->sincroniaVertical, config->limiteDeQuadros, config->mostrarFps,
-            config->tracadoDeCorrida);
+            config->tracadoDeCorrida, config->presetGrafico, config->escalaDaImagem, config->bloom, config->lensFlare, config->granulado,
+            config->profundidadeDeCampo, config->distorcaoDaLente, config->nitidez, config->suavizacao, config->qualidadeDasSombras,
+            config->filtroDeTexturas, config->volumeVozes, config->volumeMusica, config->volumeEfeitos, config->volumeMenu, config->alcanceDinamico,
+            config->oclusaoAmbiental, config->surroundVirtual);
     fclose(saida);
     return 1;
 }
@@ -330,10 +396,52 @@ int carregarConfiguracoes(Configuracoes *config, const char *arquivo) {
                 valorValido(valor, 0, 1, &config->mostrarFps);
             } else if (strcmp(chave, "tracado_de_corrida") == 0) {
                 valorValido(valor, 0, 1, &config->tracadoDeCorrida);
+            } else if (strcmp(chave, "preset_grafico") == 0) {
+                valorValido(valor, 0, TOTAL_PRESETS - 1, &config->presetGrafico);
+            } else if (strcmp(chave, "escala_da_imagem") == 0) {
+                valorValido(valor, 0, TOTAL_ESCALAS_DA_IMAGEM - 1, &config->escalaDaImagem);
+            } else if (strcmp(chave, "bloom") == 0) {
+                valorValido(valor, 0, 1, &config->bloom);
+            } else if (strcmp(chave, "lens_flare") == 0) {
+                valorValido(valor, 0, 1, &config->lensFlare);
+            } else if (strcmp(chave, "granulado") == 0) {
+                valorValido(valor, 0, 1, &config->granulado);
+            } else if (strcmp(chave, "profundidade_de_campo") == 0) {
+                valorValido(valor, 0, 1, &config->profundidadeDeCampo);
+            } else if (strcmp(chave, "distorcao_da_lente") == 0) {
+                valorValido(valor, 0, 2, &config->distorcaoDaLente);
+            } else if (strcmp(chave, "nitidez") == 0) {
+                valorValido(valor, 0, 2, &config->nitidez);
+            } else if (strcmp(chave, "suavizacao") == 0) {
+                valorValido(valor, 0, 1, &config->suavizacao);
+            } else if (strcmp(chave, "qualidade_das_sombras") == 0) {
+                valorValido(valor, 0, TOTAL_QUALIDADES_DE_SOMBRA - 1, &config->qualidadeDasSombras);
+            } else if (strcmp(chave, "filtro_de_texturas") == 0) {
+                valorValido(valor, 0, TOTAL_FILTROS_DE_TEXTURA - 1, &config->filtroDeTexturas);
+            } else if (strcmp(chave, "volume_vozes") == 0) {
+                valorValido(valor, 0, MAIOR_VOLUME, &config->volumeVozes);
+            } else if (strcmp(chave, "volume_musica") == 0) {
+                valorValido(valor, 0, MAIOR_VOLUME, &config->volumeMusica);
+            } else if (strcmp(chave, "volume_efeitos") == 0) {
+                valorValido(valor, 0, MAIOR_VOLUME, &config->volumeEfeitos);
+            } else if (strcmp(chave, "volume_menu") == 0) {
+                valorValido(valor, 0, MAIOR_VOLUME, &config->volumeMenu);
+            } else if (strcmp(chave, "alcance_dinamico") == 0) {
+                valorValido(valor, 0, 1, &config->alcanceDinamico);
+            } else if (strcmp(chave, "oclusao_ambiental") == 0) {
+                valorValido(valor, 0, 1, &config->oclusaoAmbiental);
+            } else if (strcmp(chave, "surround_virtual") == 0) {
+                valorValido(valor, 0, 1, &config->surroundVirtual);
             }
         }
     }
     fclose(entrada);
+    /* As sombras: o liga/desliga antigo e a qualidade nova dizem a mesma coisa; se discordam, vale o liga/desliga */
+    if (!config->sombras) {
+        config->qualidadeDasSombras = 0;
+    } else if (config->qualidadeDasSombras == 0) {
+        config->qualidadeDasSombras = 2;
+    }
 
     /* Nenhum comando pode ficar sem tecla, nem sem botão */
     for (int a = 0; a < TOTAL_ACOES; a++) {
