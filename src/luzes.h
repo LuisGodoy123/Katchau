@@ -27,6 +27,7 @@ void descarregarLuzesDaCidade(void);
 /* Um passo: "acesas" é o quanto a hora pede as luzes (0 de dia, 1 de noite, luzDoDia->luzesDaCidade).
  * pular: sem a sequência (o começo do passeio, depois de dormir) */
 void atualizarLuzesDaCidade(float acesas, float tempoQuadro, int pular);
+int luzesDaCidadeLigadas(void);   /* 1 do momento em que a cidade acende até ela apagar, no amanhecer */
 
 /* Dentro do BeginMode3D, depois do mapa: os tubos (apagados de dia, acesos de noite). "luzDoDia" é a
  * luz que cai no tubo apagado (a base da luz da hora) */

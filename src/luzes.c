@@ -455,6 +455,10 @@ void descarregarLuzesDaCidade(void) {
  * Acender
  * ------------------------------------------------------------------ */
 
+int luzesDaCidadeLigadas(void) {
+    return ligadas;
+}
+
 void atualizarLuzesDaCidade(float acesas, float tempoQuadro, int pular) {
     tempo += tempoQuadro;
     acesasAgora = Clamp(acesas, 0.0f, 1.0f);

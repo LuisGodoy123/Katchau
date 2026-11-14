@@ -49,6 +49,12 @@ static SomDeCorrida somCorrida[TOTAL_SONS_CORRIDA] = {
  * hora em que o carro cruza; aí ela sobe de vez. Se o jogador perde a
  * liderança antes da linha, ela some. */
 #define ARQUIVO_MUSICA_VITORIA   "recursos/sons/life_is_a_highway.mp3"
+/* A noite da cidade: quando os neons de Radiator Springs acendem, toca a Sh-Boom, como no filme, repetindo até
+ * as luzes apagarem no amanhecer */
+#define ARQUIVO_MUSICA_DA_NOITE  "recursos/sons/sh_boom.mp3"
+#define VOLUME_MUSICA_DA_NOITE   0.7f
+#define NOITE_ENTRA_EM           1.0f    /* segundos subindo... */
+#define NOITE_SAI_EM             3.0f    /* ...e sumindo */
 #define MOMENTO_DO_REFRAO        85.0f   /* segundos: 1:25 */
 #define ANTECEDENCIA_DO_REFRAO   6.0f    /* segundos antes da linha em que a música entra */
 #define VOLUME_VITORIA           1.9f    /* volume máximo: acima de 1 porque o arquivo foi gravado
@@ -63,6 +69,12 @@ static SomDeCorrida somCorrida[TOTAL_SONS_CORRIDA] = {
 typedef enum { VITORIA_PARADA, VITORIA_CHEGANDO, VITORIA_REFRAO, VITORIA_SAINDO } EstadoDaVitoria;
 
 static Music musicaVitoria;
+static Music musicaDaNoite;
+static int temMusicaDaNoite = 0;
+static int noiteTocando = 0;            /* quer tocar agora (as luzes acesas, na cidade) */
+static int luzesAcesasAntes = 0, naCidadeAntes = 0;
+static int noiteComecou = 0;            /* já tocou (pausada, continua de onde parou) */
+static float volumeDaNoite = 0.0f;      /* 0 a 1: sobe e some aos poucos */
 static int musicaVitoriaCarregada = 0;
 static EstadoDaVitoria estadoVitoria = VITORIA_PARADA;
 static float volumeVitoria = 0.0f;   /* 0 a 1, multiplicado por VOLUME_VITORIA */
@@ -306,6 +318,12 @@ void carregarAudio(void) {
 
     carregarEfeitos();   /* os motores NASCAR e os efeitos da corrida (efeitos.c) */
 
+    if (FileExists(ARQUIVO_MUSICA_DA_NOITE)) {
+        musicaDaNoite = LoadMusicStream(ARQUIVO_MUSICA_DA_NOITE);
+        temMusicaDaNoite = IsMusicValid(musicaDaNoite);
+        musicaDaNoite.looping = true;   /* a noite inteira */
+    }
+
     if (FileExists(ARQUIVO_MUSICA_VITORIA)) {
         musicaVitoria = LoadMusicStream(ARQUIVO_MUSICA_VITORIA);
         musicaVitoriaCarregada = IsMusicValid(musicaVitoria);
@@ -454,6 +472,50 @@ void atualizarAudio(int musicaDoMenu) {
             }
         }
     }
+}
+
+/*
+ * atualizarMusicaDaNoite
+ * Chamar uma vez por quadro. A Sh-Boom começa do início quando as luzes da cidade acendem e repete até
+ * elas apagarem, no amanhecer (aí some aos poucos). Fora da cidade (a corrida, os menus, as cenas do Mack,
+ * em que toca a música do menu) ela some e fica parada onde estava; voltando para a cidade de noite, continua
+ * de onde parou.
+ * Recebe: se as luzes da cidade estão acesas e se o jogador está na cidade.
+ * Devolve: nada.
+ */
+void atualizarMusicaDaNoite(int luzesAcesas, int naCidade) {
+    if (!temMusicaDaNoite) {
+        return;
+    }
+    int acenderam = naCidade && luzesAcesas && !luzesAcesasAntes;   /* a noite começou agora */
+    int voltou = naCidade && luzesAcesas && !naCidadeAntes;         /* voltou para a cidade já de noite */
+    if (naCidade) {
+        luzesAcesasAntes = luzesAcesas;
+    }
+    naCidadeAntes = naCidade;
+    if (acenderam) {
+        StopMusicStream(musicaDaNoite);
+        PlayMusicStream(musicaDaNoite);   /* do começo */
+        noiteComecou = 1;
+    } else if (voltou) {
+        if (noiteComecou) {
+            ResumeMusicStream(musicaDaNoite);   /* de onde parou */
+        } else {
+            PlayMusicStream(musicaDaNoite);
+            noiteComecou = 1;
+        }
+    }
+    noiteTocando = naCidade && luzesAcesas;
+    float passo = GetFrameTime() / (noiteTocando ? NOITE_ENTRA_EM : -NOITE_SAI_EM);
+    volumeDaNoite = fminf(1.0f, fmaxf(0.0f, volumeDaNoite + passo));
+    if (!noiteTocando && volumeDaNoite <= 0.0f) {
+        if (!luzesAcesas || !naCidade) {
+            PauseMusicStream(musicaDaNoite);   /* fica onde estava (no amanhecer, a próxima noite começa do início) */
+        }
+        return;
+    }
+    SetMusicVolume(musicaDaNoite, volumeDaNoite * VOLUME_MUSICA_DA_NOITE * fatorDeVolume(configuracoesAtuais()->volumeMusica));
+    UpdateMusicStream(musicaDaNoite);   /* alimenta o som; precisa de uma chamada por quadro */
 }
 
 /*
@@ -863,6 +925,10 @@ void descarregarAudio(void) {
     if (musicaVitoriaCarregada) {
         UnloadMusicStream(musicaVitoria);
         musicaVitoriaCarregada = 0;
+    }
+    if (temMusicaDaNoite) {
+        UnloadMusicStream(musicaDaNoite);
+        temMusicaDaNoite = 0;
     }
     if (musicaCarregada) {
         UnloadMusicStream(musicaMenu);

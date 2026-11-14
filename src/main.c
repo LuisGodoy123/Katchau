@@ -39,6 +39,7 @@
 #include "configuracoes.h"
 #include "visual.h"
 #include "audio.h"
+#include "luzes.h"
 #include "efeitos.h"
 #include "exibicao.h"
 #include "apresentacao.h"
@@ -613,6 +614,8 @@ int main(int argc, char *argv[]) {
         atualizarAudio(tela == TELA_ENTRADA || tela == TELA_MENU || tela == TELA_GARAGEM || tela == TELA_PISTAS || tela == TELA_CONFIGURACOES || tela == TELA_COMO_JOGAR
                        || (tela == TELA_PASSEIO && cenaDoMackComMusica())   /* da escolha da corrida, a música segue na estrada com o Mack */
                        || apresentando);   /* e na apresentação da largada */
+        /* A noite da cidade: os neons acendem e toca a Sh-Boom, até amanhecer (nas cenas do Mack, a música do menu) */
+        atualizarMusicaDaNoite(luzesDaCidadeLigadas(), tela == TELA_PASSEIO && !cenaDoMackComMusica());
 
         /* Sons da corrida:
          *  - antes do GO, o motor em marcha lenta (som provisório) e o "3... 2... 1... GO!",

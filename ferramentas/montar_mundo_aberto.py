@@ -43,6 +43,10 @@ O que o script faz:
      <interior>_colisao.glb, das ferramentas montar_loja_do_luigi.py,
      montar_quartos_do_cozy_cone.py e montar_recepcao_do_cozy_cone.py; o
      desenho deles o jogo faz à parte, em src/interiores.c);
+  7f. põe as calçadas da cidade no nível do asfalto: ampliadas, as guias do
+     Race-O-Rama viravam degraus de 20 a 40 cm; a beira da calçada fica rente
+     à rua e ela sobe devagar até a altura de antes só longe dela, perto dos
+     prédios, e o que estava apoiado nela (paredes, cercas, postes) desce junto;
   8. passa as texturas JPEG para PNG (a raylib do jogo não lê JPEG: a pedra
      da mesa e as placas da cidade saíam cinza ou brancas) e exporta
      recursos/modelos/radiator_springs.glb (o desenho) e
@@ -1529,6 +1533,201 @@ for interior in INTERIORES:
     colisoes_dos_interiores += colisao
     print('Interiores: %s, colisão do lado de dentro, %d faces (a casca é %s)' % (
         interior, sum(len(o.data.polygons) for o in colisao), casca[0].name if casca else '?'))
+
+# ------------------------------------------------------------------
+# 7f. As calçadas no nível do asfalto. Ampliadas 4,5 vezes, as do Race-O-Rama ficaram com uma guia de
+# 20 a 40 cm (um degrau quase em pé e uma faixa de 60 cm em cima dele) e ainda subiam até meio metro
+# acima da rua: grossas e altas. Agora a beira da calçada fica rente ao asfalto, e ela sobe devagar até a
+# altura de antes só longe da rua, perto dos prédios.
+#   1. Cada vértice da calçada (menos os da beira, que ela divide com a rua), até CALCADA_ATE acima da
+#      rua do lado, desce pela mesma regra, só da distância até a rua: rente até RENTE_ATE, como era depois
+#      de RAMPA_DA_CALCADA, e no meio uma subida suave. A malha da calçada tem poucos vértices (os triângulos
+#      são compridos, ao longo da rua): uma regra só da distância deixa iguais as faixas paralelas à rua,
+#      sem ondular.
+#      Uma parede que divide vértices com a calçada estica para baixo junto. O pé da guia (o bloco da
+#      calçada desce abaixo do asfalto) sobe até a rua, para não abrir uma fresta entre as duas.
+#   0. Uma laje apoiada na calçada (o lote da loja do Luigi, com a porta de garagem) ganha um corte a
+#      RAMPA_DA_CALCADA da rua: só a parte da frente desce com a calçada, em rampa, e o resto fica onde estava
+#      (a porta continua no nível do piso de dentro, que é outro modelo).
+#   2. O que estava apoiado na calçada, à parte (o pé de uma parede, de uma cerca, de um poste), desce o
+#      tanto que o chão desceu embaixo dele: estica para baixo e nada fica flutuando.
+# ------------------------------------------------------------------
+CALCADA_ROR = 'ror_Image_17'      # o concreto cinza das calçadas
+CIMENTO_ROR = 'ror_Image_16'      # o cimento bege: no nível da rua é pátio e entrada; acima, calçada (a do Luigi, a do Ramone)
+ASFALTO_DA_RUA = {'ror_Image_61', 'ror_Image_30'}   # a rua principal e a rodovia
+NIVEL_DA_RUA_ATE = 1.56    # metros: a cidade é plana (as ruas a 1,42-1,50 m); o cimento até aqui é rua
+CALCADA_ATE = 0.8          # metros acima da rua: mais alto que isso não é calçada (varanda, telhado)
+RENTE_ATE = 4.0            # metros da rua: até aqui, a calçada fica rente ao asfalto...
+RAMPA_DA_CALCADA = 8.0     # ...e daqui em diante, como era (no meio, sobe devagar)
+APOIADO_ATE = 0.15         # metros: um vértice tão perto do chão da calçada (de antes) está apoiado nela
+PE_DA_GUIA = 1.0           # metros da rua: o pé da guia (o bloco da calçada desce abaixo do asfalto) que fica tão
+FUNDO_DA_GUIA = 0.8        # perto e até tanto abaixo dela sobe até o asfalto: senão, baixado o topo, abria uma fresta
+PISO_ACIMA = 0.03          # metros: uma laje (o piso de um lote) apoiada na calçada fica pelo menos isso acima dela
+ACIMA_DO_ASFALTO = 0.01    # metros: a calçada rente fica um tantinho acima, sem brigar com a rua
+
+
+def faces_por_imagem(o):
+    """Para cada face, o nome da imagem do material dela"""
+    nomes = [(imagem_do_material(m).name if imagem_do_material(m) else '') for m in o.data.materials] or ['']
+    return [nomes[p.material_index] if p.material_index < len(nomes) else '' for p in o.data.polygons]
+
+
+def classes_das_faces(o):
+    """Para cada face: 'rua', 'calcada' ou None (o resto). Medido antes de mexer: a calçada baixada continua calçada"""
+    classes = []
+    for f, im in zip(o.data.polygons, faces_por_imagem(o)):
+        if im in ASFALTO_DA_RUA:
+            classes.append('rua')
+        elif im == CIMENTO_ROR:
+            alto = max(o.data.vertices[i].co.z for i in f.vertices)
+            classes.append('rua' if alto <= NIVEL_DA_RUA_ATE else 'calcada')
+        elif im == CALCADA_ROR:
+            classes.append('calcada')
+        else:
+            classes.append(None)
+    return classes
+
+
+def arvore_das_faces(objs, classes, qual, na_cidade, achatar=False):
+    """Uma árvore de raios com as faces da classe pedida, na cidade"""
+    bm = bmesh.new()
+    for o in objs:
+        for f, c in zip(o.data.polygons, classes[o.name]):
+            vs = [o.data.vertices[i].co for i in f.vertices]
+            if c == qual and any(na_cidade(v) for v in vs):
+                novos = [bm.verts.new((v.x, v.y, 0.0) if achatar else v.copy()) for v in vs]
+                try:
+                    bm.faces.new(novos)
+                except ValueError:
+                    pass
+    arv = BVHTree.FromBMesh(bm)
+    bm.free()
+    return arv
+
+
+def nivelar_calcadas():
+    na_cidade = lambda p: 200.0 < p.x < 1400.0 and -260.0 < p.y < -20.0
+    objs = [o for o in ror if o.type == 'MESH' and o.name in bpy.data.objects]
+    classes = {o.name: classes_das_faces(o) for o in objs}
+    arv_deitada = arvore_das_faces(objs, classes, 'rua', na_cidade, achatar=True)
+    arv_da_rua = arvore_das_faces(objs, classes, 'rua', na_cidade)
+    calcada_antes = arvore_das_faces(objs, classes, 'calcada', na_cidade)
+
+    def rua_perto(v):
+        """A distância de lado até a rua mais perto e a altura dela ali (None se não há rua perto)"""
+        perto = arv_deitada.find_nearest(Vector((v.x, v.y, 0.0)), RAMPA_DA_CALCADA)
+        if perto[0] is None:
+            return None
+        # a altura da rua ali: o ponto da rua mais perto (um raio em pé escapava pelas emendas, na beira dela)
+        rua = arv_da_rua.find_nearest(Vector((perto[0].x, perto[0].y, v.z)), 3.0)
+        return None if rua[0] is None else (perto[3], rua[0].z + ACIMA_DO_ASFALTO)
+
+    def sobre_a_calcada(v):
+        hit = calcada_antes.ray_cast(Vector((v.x, v.y, v.z + 0.01)), Vector((0, 0, -1)), APOIADO_ATE + 0.02)
+        return hit[0] is not None and PISO_ACIMA <= v.z - hit[0].z <= APOIADO_ATE
+
+    # 0. As lajes apoiadas na calçada: cortadas a RAMPA_DA_CALCADA da rua
+    import bmesh
+    cortes = 0
+    for o in objs:
+        vs = o.data.vertices
+        planos = {}
+        for f, c in zip(o.data.polygons, classes[o.name]):
+            if c is not None or f.normal.z < 0.9 or not all(na_cidade(vs[k].co) for k in f.vertices):
+                continue
+            pts = [vs[k].co for k in f.vertices]
+            if max(p.z for p in pts) - min(p.z for p in pts) > 0.05 or not any(sobre_a_calcada(p) for p in pts):
+                continue
+            ds = [(arv_deitada.find_nearest(Vector((p.x, p.y, 0.0)), 80.0), p) for p in pts]
+            ds = [(hit, p) for hit, p in ds if hit[0] is not None]
+            if not ds or min(h[3] for h, _ in ds) >= RAMPA_DA_CALCADA or max(h[3] for h, _ in ds) <= RAMPA_DA_CALCADA:
+                continue
+            hit, p = min(ds, key=lambda e: e[0][3])
+            n = Vector((p.x - hit[0].x, p.y - hit[0].y, 0.0))
+            if n.length < 1e-3:
+                continue
+            n.normalize()
+            co = Vector((hit[0].x, hit[0].y, 0.0)) + n * RAMPA_DA_CALCADA
+            chave = (round(co.x, 1), round(co.y, 1), round(n.x, 2), round(n.y, 2))
+            planos.setdefault(chave, (co, n, []))[2].append(f.index)
+        if not planos:
+            continue
+        bm = bmesh.new()
+        bm.from_mesh(o.data)
+        marca = bm.faces.layers.int.new('laje')
+        bm.faces.ensure_lookup_table()
+        for k, (_, _, faces) in enumerate(planos.values()):
+            for i in faces:
+                bm.faces[i][marca] = k + 1
+        for k, (co, n, _) in enumerate(planos.values()):
+            faces = [f for f in bm.faces if f[marca] == k + 1]
+            geom = faces + list({e for f in faces for e in f.edges}) + list({v for f in faces for v in f.verts})
+            bmesh.ops.bisect_plane(bm, geom=geom, plane_co=co, plane_no=n)
+            cortes += 1
+        bm.faces.layers.int.remove(marca)
+        bm.to_mesh(o.data)
+        bm.free()
+        o.data.update()
+        classes[o.name] = classes_das_faces(o)
+    lajes = {}
+    for o in objs:
+        vs = o.data.vertices
+        lajes[o.name] = {k for f, c in zip(o.data.polygons, classes[o.name]) if c is None and f.normal.z >= 0.9
+                         for k in f.vertices if na_cidade(vs[k].co) and sobre_a_calcada(vs[k].co)}
+
+    # 1. A calçada
+    da_calcada, da_rua = {}, {}
+    mexidos = 0
+    for o in objs:
+        de_calcada, de_rua = set(), set()
+        for f, c in zip(o.data.polygons, classes[o.name]):
+            if c == 'calcada':
+                de_calcada.update(f.vertices)
+            elif c == 'rua':
+                de_rua.update(f.vertices)
+        da_calcada[o.name], da_rua[o.name] = de_calcada - de_rua, de_rua
+        for i in da_calcada[o.name]:
+            v = o.data.vertices[i].co
+            achou = rua_perto(v) if na_cidade(v) else None
+            if achou is None:
+                continue
+            d, h = achou
+            if h - FUNDO_DA_GUIA < v.z < h and d < PE_DA_GUIA:
+                v.z = h   # o pé da guia, abaixo da rua: sobe até ela e fecha a fresta entre a rua e a calçada
+                mexidos += 1
+                continue
+            if v.z <= h or v.z - h > CALCADA_ATE:
+                continue
+            v.z = h + (v.z - h) * degrau_suave(RENTE_ATE, RAMPA_DA_CALCADA, d)
+            mexidos += 1
+        o.data.update()
+    calcada_depois = arvore_das_faces(objs, classes, 'calcada', na_cidade)
+
+    # 2. O que estava apoiado nela desce junto (as paredes, as cercas, os postes, a base da torre de pneus)
+    apoiados = 0
+    for o in objs:
+        for i, vert in enumerate(o.data.vertices):
+            v = vert.co
+            if i in da_calcada[o.name] or i in da_rua[o.name] or not na_cidade(v):
+                continue
+            antes = calcada_antes.ray_cast(v + Vector((0, 0, 0.3)), Vector((0, 0, -1)), 0.6)
+            if antes[0] is None or abs(antes[0].z - v.z) > APOIADO_ATE:
+                continue
+            depois = calcada_depois.ray_cast(Vector((v.x, v.y, antes[0].z + 0.3)), Vector((0, 0, -1)), 2.0)
+            if depois[0] is None or depois[0].z >= antes[0].z - 0.005:
+                continue
+            desce = depois[0].z - antes[0].z
+            if i in lajes[o.name]:   # a laje: a frente desce, e para de descer no corte
+                achou = rua_perto(v)
+                desce *= 0.0 if achou is None else 1.0 - degrau_suave(RENTE_ATE, RAMPA_DA_CALCADA, achou[0])
+            v.z += desce
+            apoiados += 1
+        o.data.update()
+    print('Calçadas: %d vértices baixados até o nível do asfalto; %d do que estava apoiado nelas desceram junto; '
+          '%d cortes em lajes' % (mexidos, apoiados, cortes))
+
+
+nivelar_calcadas()
 
 # ------------------------------------------------------------------
 # 8a. Colisão: tudo menos vegetação e placas que flutuam, com o tipo de chão de cada triângulo

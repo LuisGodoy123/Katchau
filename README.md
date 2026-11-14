@@ -179,7 +179,13 @@ lista circular duplamente encadeada de segmentos.
   lado da cidade, a pista de treino tem a mesa de pedra da arena, inteira e com a lombada vermelha em volta
   descendo até o chão da cidade (`ferramentas/montar_mundo_aberto.py` guarda as rochas da arena por peça e
   encaixa as beiradas baixas delas no chão, mas não a terra do oval nem o butte no meio dele; as texturas
-  JPEG viram PNG, que a raylib do jogo não lê JPEG).
+  JPEG viram PNG, que a raylib do jogo não lê JPEG). As calçadas da cidade ficam no nível do asfalto: ampliadas
+  4,5 vezes, as guias do Race-O-Rama viravam degraus de 20 a 40 cm com uma faixa de 60 cm em cima; a ferramenta
+  baixa a beira da calçada até rente à rua (uma regra só da distância até ela, para a malha de poucos vértices não
+  ondular), deixa a calçada subir devagar até a altura de antes só perto dos prédios, e o que estava apoiado nela
+  (paredes, cercas, postes, a base da torre de pneus) desce junto, sem flutuar. Vale para as duas calçadas da
+  cidade: a de concreto cinza e a de cimento bege (a do Luigi, a do Ramone; o cimento no nível da rua é pátio e
+  entrada, e conta como rua).
 
 ## 1. Instalar a raylib
 
@@ -254,7 +260,9 @@ também os triângulos da colisão.
 de treino), **C** troca a câmera e **ESC** pausa. O velocímetro é o mesmo da corrida; no canto de baixo à
 esquerda fica o minimapa (redondo, com o Mack marcado em laranja), com a hora do dia em cima. Na vaga atrás do
 Mack, **ENTER** (ou o triângulo, Y no controle de Xbox) entra nele. Perto de um morador ou da cabine do Mack, até
-andando, **E** (ou o quadrado, X no controle de Xbox) conversa com ele, e de novo passa a fala. **O dia passa**: um dia inteiro de Radiator Springs dura 48 minutos (28 de dia, 6
+andando, **E** (ou o quadrado, X no controle de Xbox) conversa com ele, e de novo passa a fala. **A noite tem trilha**: quando os neons da cidade acendem, toca a
+Sh-Boom (`recursos/sons/sh_boom.mp3`), como no filme, repetindo até as luzes apagarem no amanhecer (aí some aos poucos);
+fora da cidade e nas cenas do Mack ela some, e voltando de noite continua de onde parou. **O dia passa**: um dia inteiro de Radiator Springs dura 48 minutos (28 de dia, 6
 de pôr do sol, 10 de noite e 4 de amanhecer). O sol nasce na ponta leste da rua principal, atravessa o céu e se põe
 no fim dela, laranja; de noite a cidade fica azulada, com a lua e as estrelas, e o céu, as sombras, os carros, a
 poeira e o lado de dentro dos prédios acompanham (`src/hora.c`; a luz é o mesmo cálculo de antes, com o sol e as

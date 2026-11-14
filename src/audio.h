@@ -43,6 +43,8 @@ void tocarFalaDeUltrapassagem(int ultrapassou);
 enum { VOZ_NENHUMA, VOZ_CONTENTE, VOZ_IRRITADA, VOZ_ASSUSTADA };
 float vozDoMcQueen(int *tipo);
 void atualizarSonsDaCorrida(int motorAtivo, int contagemAtiva, int musicaAtiva);
+/* A Sh-Boom da noite da cidade: toca do início quando as luzes acendem e repete até amanhecer (uma vez por quadro) */
+void atualizarMusicaDaNoite(int luzesAcesas, int naCidade);
 void atualizarMusicaDaVitoria(float segundosAteALinha, int venceu);
 int musicaDaVitoriaTocando(void);
 void pausarSonsDaCorrida(int pausar);
