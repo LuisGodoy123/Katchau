@@ -58,6 +58,10 @@ typedef enum {
 /* Interlagos vem do modelo 3D, que está em metros. Na medida real o asfalto tem de 10 a 16 m de
  * largura e, com 14 carros, quase não dá para ultrapassar: o modelo inteiro (traçado, prédios,
  * pit lane) é usado 40% maior. Para a medida real, é só voltar para 1 */
+/* As tabelas de Interlagos (interlagos.h) começam no meio do pórtico da largada; a linha de chegada é a faixa
+ * branca pintada no asfalto, 13 segmentos (21,7 m) depois (veja criarPista) */
+#define SEGMENTOS_ATE_A_LINHA_PINTADA 13
+#define METROS_DO_PORTICO_A_LINHA_PINTADA (SEGMENTOS_ATE_A_LINHA_PINTADA * COMPRIMENTO_SEGMENTO / UNIDADES_POR_METRO)
 #define ESCALA_INTERLAGOS        1.4f    /* o traçado do modelo, 40% maior: na medida real a pista é estreita demais para 14 carros */
 
 /* A Copa Pistão tem o comprimento real de Daytona (2,5 milhas): a pista do filme
@@ -164,13 +168,16 @@ typedef struct {
 } DadosDoPit;
 
 /* O grid que a pista já traz pintado (o do modelo de Interlagos). Com "existe" em 0,
- * vale o grid padrão do jogo, pintado por ele */
+ * vale o grid padrão do jogo, pintado por ele. Ele é escalonado: em cada fila, o carro do lado da pole
+ * vai na frente e o do outro lado um pouco atrás, cada lado com a sua distância do meio da pista */
 typedef struct {
     int existe;
-    float pole;        /* metros do meio do carro da pole até a linha */
-    float espaco;      /* metros de um lugar ao seguinte (que fica do outro lado) */
-    float lateral;     /* metros da linha da pista até o meio de cada fila */
-    int poleADireita;  /* 1: a pole fica à direita */
+    float pole;            /* metros do meio do colchete da pole até a linha */
+    float segundo;         /* metros do meio do colchete do segundo lugar (do outro lado) até a linha */
+    float fila;            /* metros de uma fila à seguinte (do 1º ao 3º, do 2º ao 4º...) */
+    float lateralDaPole;   /* metros da linha da pista até o meio dos colchetes do lado da pole... */
+    float lateralDoOutro;  /* ...e até o meio dos do outro lado */
+    int poleADireita;      /* 1: a pole fica à direita */
 } GridDaPista;
 
 /* A pista em si guarda só a "porta de entrada" da lista circular.

@@ -64,6 +64,7 @@
 #define VELOCIDADE_DA_TROCA_DE_CAMERA 7.0f   /* 1/s: a câmera leva ~0,3 s para ir de uma distância à outra */
 #define OLHAR_PARA_BAIXO      5.0f     /* graus abaixo do horizonte */
 #define FOLGA_DA_CAMERA_NO_MURO 1.0f   /* metros: a câmera livre não encosta no muro */
+#define ENDIREITA_FORA_DA_PISTA 0.25f  /* da largura: passando tanto da borda, a câmera já não inclina com o chão */
 #define VELOCIDADE_CAMERA_MENU 3000.0f /* a câmera do fundo do menu anda a 75 km/h */
 #define SEGUNDOS_POR_PISTA    14.0f    /* o fundo dos menus troca de pista depois disso */
 #define DURACAO_DA_TROCA_DE_PISTA 0.7f /* segundos escurecendo e clareando */
@@ -172,9 +173,6 @@ static Carro *carroDaVisao = NULL;
 /* 1 quando o mundo é desenhado mais de uma vez por quadro (a tela dividida): os efeitos mais
  * caros saem, para o jogo não andar pela metade. Veja aliviarOsEfeitos. */
 static int efeitosAliviados = 0;
-/* A profundidade de campo das cenas (o pódio, a apresentação da largada): os metros da câmera até o que
- * está em foco neste desenho. 0 = sem (dirigindo, a imagem fica nítida) */
-static float focoDaCena = 0.0f;
 
 /*
  * alturaEmVoltaDoCarro
@@ -208,12 +206,13 @@ static float rumoDesenhado(const Carro *carro, float rumoDaPista) {
  * por isso aparece no centro da tela, e não atravessa os muros do oval. Nas curvas
  * inclinadas ela inclina junto com o chão.
  * Recebe: a posição do carro, o deslocamento lateral dele, o olhar, a distância da câmera, o
- *         campo de visão vertical em graus e, sem a direção guiada, o rumo real do carro
- *         (senão, NULL).
+ *         campo de visão vertical em graus, sem a direção guiada o rumo real do carro (senão,
+ *         NULL) e a altura do chão por onde o carro passou, lá atrás, com o quanto ela vale no
+ *         lugar da medida em volta da pista (0 a 1; veja chaoNoRastro).
  * Devolve: a câmera.
  */
 static Camera3D montarCamera(PosicaoNaPista carro, float lateral, Olhar olhar, DistanciaDaCamera distancia,
-                             float graus, const float *rumoDoCarro) {
+                             float graus, const float *rumoDoCarro, float chaoDoRastro, float pesoDoRastro) {
     PosicaoNaPista atras = carro;
     moverNaPista(&atras, -distancia.atras * UNIDADES_POR_METRO);
     PontoNoMundo deCamera = pontoNoMundo(atras, lateral);
@@ -243,13 +242,14 @@ static Camera3D montarCamera(PosicaoNaPista carro, float lateral, Olhar olhar, D
     float atrasNaPista = comprimento * cosseno;
     float aoLado = -comprimento * seno;
     Segmento *aqui = carro.segmento;
-    float emMetros = lateral * larguraDoLado(aqui, lateral);
+    float emMetros = lateral * larguraNaPosicao(carro, lateral);
     if (aqui->temMuro && fabsf(lateral) <= 1.0f) {   /* no pit lane, o muro fica do outro lado */
         float limiteDireita = aqui->larguraDireita - FOLGA_DA_CAMERA_NO_MURO - emMetros;
         float limiteEsquerda = -aqui->larguraEsquerda + FOLGA_DA_CAMERA_NO_MURO - emMetros;
         aoLado = fminf(fmaxf(aoLado, limiteEsquerda), limiteDireita);
     }
     float chao = alturaEmVoltaDoCarro(carro, emMetros, -atrasNaPista, aoLado);
+    chao += (chaoDoRastro - chao) * pesoDoRastro;
     float ladeira = (doCarro.y - chao) / comprimento;
 
     Camera3D camera = { 0 };
@@ -272,13 +272,66 @@ static Camera3D montarCamera(PosicaoNaPista carro, float lateral, Olhar olhar, D
                                camera.position.y + mira,
                                camera.position.z + olhaZ };
 
-    /* O "para cima" da câmera é perpendicular ao chão inclinado */
+    /* O "para cima" da câmera é perpendicular ao chão inclinado da pista (as curvas inclinadas do oval). Fora do
+     * asfalto dela (o pit lane, a grama), a inclinação medida em volta do carro junta muretas, zebras e barrancos,
+     * e a câmera tombava de lado: saindo da borda, ela volta a ficar de pé */
     float rumo = doCarro.rumo * DEG2RAD;
-    float inclinacao = atanf(doCarro.inclinacao);
+    float naPista = 1.0f - Clamp((fabsf(lateral) - 1.0f) / ENDIREITA_FORA_DA_PISTA, 0.0f, 1.0f);
+    float inclinacao = atanf(doCarro.inclinacao) * naPista;
     camera.up = (Vector3){ -cosf(rumo) * sinf(inclinacao), cosf(inclinacao), -sinf(rumo) * sinf(inclinacao) };
     camera.fovy = graus;
     camera.projection = CAMERA_PERSPECTIVE;
     return camera;
+}
+
+/* ---------- O rastro do carro ----------
+ * Longe da pista, o chão é medido em poucos pontos além da borda, e eles pegam a mureta do pit, as zebras e os
+ * barrancos: medindo a altura ali, a câmera tremia e subia do nada no pit lane. Lá ela se apoia no chão por onde
+ * o carro acabou de passar, que é o asfalto dele. */
+#define ESPACO_NO_RASTRO       0.3f     /* metros entre dois pontos guardados */
+#define SALTO_NO_RASTRO        6.0f     /* metros num quadro: o carro foi levado para outro lugar (o rastro recomeça) */
+#define TEMPO_DO_RASTRO        0.4f     /* segundos: a altura da câmera passa da pista para o rastro (e volta) aos poucos */
+
+/*
+ * guardarNoRastro
+ * Recebe: a visão e onde o carro está agora (no chão).
+ * Devolve: nada.
+ */
+static void guardarNoRastro(VisaoDoJogador *visao, Vector3 ponto) {
+    if (visao->pontosNoRastro > 0) {
+        Vector3 ultimo = visao->rastro[visao->fimDoRastro];
+        float longe = hypotf(ponto.x - ultimo.x, ponto.z - ultimo.z);
+        if (longe > SALTO_NO_RASTRO) {
+            visao->pontosNoRastro = 0;
+        } else if (longe < ESPACO_NO_RASTRO) {
+            return;
+        }
+    }
+    visao->fimDoRastro = (visao->fimDoRastro + 1) % PONTOS_DO_RASTRO;
+    visao->rastro[visao->fimDoRastro] = ponto;
+    if (visao->pontosNoRastro < PONTOS_DO_RASTRO) {
+        visao->pontosNoRastro++;
+    }
+}
+
+/*
+ * chaoNoRastro
+ * Recebe: a visão, onde o carro está agora e quantos metros para trás, pelo caminho dele.
+ * Devolve: a altura do chão por onde ele passou ali (com o rastro curto, a do ponto mais antigo).
+ */
+static float chaoNoRastro(const VisaoDoJogador *visao, Vector3 carro, float metros) {
+    float andou = 0.0f;
+    Vector3 depois = carro;
+    for (int i = 0; i < visao->pontosNoRastro; i++) {
+        Vector3 antes = visao->rastro[(visao->fimDoRastro - i + PONTOS_DO_RASTRO) % PONTOS_DO_RASTRO];
+        float trecho = hypotf(depois.x - antes.x, depois.z - antes.z);
+        if (trecho > 0.0f && andou + trecho >= metros) {
+            return depois.y + (antes.y - depois.y) * (metros - andou) / trecho;
+        }
+        andou += trecho;
+        depois = antes;
+    }
+    return depois.y;
 }
 
 /* ---------- A câmera viva ----------
@@ -377,7 +430,16 @@ static Matrix matrizDoCarro(Carro *carro) {
     PontoNoMundo aqui = pontoNoMundo(carro->posicao, carro->deslocamentoLateral);
     float meiaDistancia = comprimentoDoCarro3D(carro->numero) * ENTRE_EIXOS / 2.0f;
     float meiaBitola = larguraDoCarro3D(carro->numero) * BITOLA / 2.0f;
-    float lateral = carro->deslocamentoLateral * larguraDoLado(carro->posicao.segmento, carro->deslocamentoLateral);
+    /* A largura do ponto exato, como em pontoNoMundo: com a do começo do segmento, longe da linha as rodas
+     * pulavam uns centímetros de lado a cada segmento */
+    float lateral = carro->deslocamentoLateral * larguraNaPosicao(carro->posicao, carro->deslocamentoLateral);
+    /* O pit lane é plano de lado. Além da borda da pista, o chão é medido em poucos pontos, e o degrau da
+     * mureta entre ela e o pit lane (em Interlagos, perto da linha, o pit lane fica 3 m acima da pista) vira
+     * uma rampa entre dois deles: as rodas do lado da pista caíam nela e o carro tombava. Saindo da borda, a
+     * inclinação de lado medida no chão some aos poucos */
+    float deLado = carroNoPit(carro) ? 1.0f - Clamp((fabsf(carro->deslocamentoLateral) - 1.0f) / ENDIREITA_FORA_DA_PISTA, 0.0f, 1.0f)
+                                     : 1.0f;
+    float rodaAoLado = meiaBitola * deLado;
 
     /* Os eixos ficam a meia distância no mundo: longe da linha, numa curva (o pit lane de
      * Interlagos, por dentro do S do Senna), isso é mais ou menos que meia distância na pista */
@@ -388,10 +450,10 @@ static Matrix matrizDoCarro(Carro *carro) {
     PosicaoNaPista eixoDaFrente = carro->posicao, eixoDeTras = carro->posicao;
     moverNaPista(&eixoDaFrente, naPista * UNIDADES_POR_METRO);
     moverNaPista(&eixoDeTras, -naPista * UNIDADES_POR_METRO);
-    float frenteEsquerda = alturaDoChao(eixoDaFrente, lateral - meiaBitola);
-    float frenteDireita = alturaDoChao(eixoDaFrente, lateral + meiaBitola);
-    float trasEsquerda = alturaDoChao(eixoDeTras, lateral - meiaBitola);
-    float trasDireita = alturaDoChao(eixoDeTras, lateral + meiaBitola);
+    float frenteEsquerda = alturaDoChao(eixoDaFrente, lateral - rodaAoLado);
+    float frenteDireita = alturaDoChao(eixoDaFrente, lateral + rodaAoLado);
+    float trasEsquerda = alturaDoChao(eixoDeTras, lateral - rodaAoLado);
+    float trasDireita = alturaDoChao(eixoDeTras, lateral + rodaAoLado);
 
     float ladeira = ((frenteEsquerda + frenteDireita) - (trasEsquerda + trasDireita)) / (4.0f * meiaDistancia);
     float inclinacao = ((frenteDireita + trasDireita) - (frenteEsquerda + trasEsquerda)) / (4.0f * meiaBitola);
@@ -1024,24 +1086,31 @@ static void desenharTracadoDeCorrida(Camera3D camera, Corrida *corrida) {
 }
 
 /* ---------- O sol das pistas de dia ----------
- * Cada pista de dia tem o sol dela, baixo o bastante para aparecer no céu: na reta da largada ele fica um
- * pouco para o lado da frente, então a largada e cada passagem pela reta são contra o sol (ele brilha,
- * solta raios e reflete na lente) e as sombras vêm compridas na direção da câmera. Interlagos é fim de
- * tarde, com a luz mais quente; com o sol mais baixo, o chão recebe menos dele, e a luz direta é mais
- * forte para compensar. Na Copa Pistão é noite: sem sol. */
+ * Interlagos tem o sol de verdade da hora do GP de São Paulo: a largada de 2026 foi no domingo, 8 de novembro,
+ * às 14h de Brasília (17h UTC), e lá (23,70° S, 46,70° O) o sol estava 58,9° acima do horizonte, no azimute
+ * 276,9° (quase no oeste: à direita de quem desce a reta dos boxes, um pouco para trás). Luz branca do começo da
+ * tarde, sombras curtas. O modelo da pista não está com o norte para -z: o norte de verdade fica no rumo 14,2°
+ * do mapa do jogo, o giro que encaixa o traçado do modelo no do OpenStreetMap (5,8 m de diferença média na volta
+ * de 4,31 km, e a mesma escala: 0,9998).
+ * As pistas inventadas têm um sol baixo o bastante para aparecer no céu: na reta da largada ele fica um pouco
+ * para o lado da frente, então a largada e cada passagem pela reta são contra o sol (ele brilha, solta raios e
+ * reflete na lente) e as sombras vêm compridas na direção da câmera; com o sol baixo, o chão recebe menos dele, e
+ * a luz direta é mais forte para compensar. Na Copa Pistão é noite: sem sol. */
+#define NORTE_NO_MAPA_DE_INTERLAGOS 14.2f   /* graus: o rumo do jogo que aponta para o norte de verdade */
 typedef struct {
     float altura;       /* graus acima do horizonte */
-    float desvio;       /* graus para a direita da frente da reta da largada */
+    float desvio;       /* graus para a direita da frente da reta da largada (as pistas inventadas)... */
+    float azimute;      /* ...ou o azimute de verdade (do norte, no sentido horário), na pista que existe (-1: não tem) */
     Vector3 luz;        /* a cor da luz do sol... */
     float forca;        /* ...e quanto ela vale, perto da do meio-dia (1) */
     Vector3 disco;      /* a cor do sol no céu */
 } SolDaPista;
 
 static const SolDaPista SOIS_DAS_PISTAS[TOTAL_PISTAS] = {
-    [PISTA_INTERLAGOS]  = { 17.0f,  24.0f, { 1.10f, 0.97f, 0.82f }, 1.30f, { 1.00f, 0.84f, 0.60f } },
-    [PISTA_COPA_PISTAO] = { 0.0f, 0.0f, { 0.0f, 0.0f, 0.0f }, 0.0f, { 0.0f, 0.0f, 0.0f } },
-    [PISTA_OVAL]        = { 16.0f, -24.0f, { 1.04f, 1.00f, 0.94f }, 1.25f, { 1.00f, 0.94f, 0.80f } },
-    [PISTA_SPLAT]       = { 15.0f,  26.0f, { 1.06f, 0.99f, 0.90f }, 1.30f, { 1.00f, 0.92f, 0.76f } },
+    [PISTA_INTERLAGOS]  = { 58.9f, 0.0f, 276.9f, { 1.00f, 0.99f, 0.96f }, 1.00f, { 1.00f, 0.95f, 0.85f } },
+    [PISTA_COPA_PISTAO] = { 0.0f, 0.0f, -1.0f, { 0.0f, 0.0f, 0.0f }, 0.0f, { 0.0f, 0.0f, 0.0f } },
+    [PISTA_OVAL]        = { 16.0f, -24.0f, -1.0f, { 1.04f, 1.00f, 0.94f }, 1.25f, { 1.00f, 0.94f, 0.80f } },
+    [PISTA_SPLAT]       = { 15.0f,  26.0f, -1.0f, { 1.06f, 0.99f, 0.90f }, 1.30f, { 1.00f, 0.92f, 0.76f } },
 };
 
 /*
@@ -1062,12 +1131,15 @@ static const LuzDoDia *luzDaPista(const Pista *pista) {
         LuzDoDia luz = *luzDoMeioDia();
         PosicaoNaPista largada = { 0 };
         largada.segmento = pista->largada;
-        float rumo = (pontoNoMundo(largada, 0.0f).rumo + s->desvio) * DEG2RAD;
+        float rumo = (s->azimute >= 0.0f ? s->azimute + NORTE_NO_MAPA_DE_INTERLAGOS
+                                         : pontoNoMundo(largada, 0.0f).rumo + s->desvio) * DEG2RAD;
         float alto = s->altura * DEG2RAD;
         luz.sol = (Vector3){ sinf(rumo) * cosf(alto), sinf(alto), -cosf(rumo) * cosf(alto) };
         luz.solNoCeu = luz.sol;
         luz.luzDoSol = Vector3Scale(s->luz, s->forca);
-        luz.base = (Vector3){ 1.05f, 1.04f, 1.03f };   /* um pouco mais de luz do céu: o chão recebe menos sol */
+        if (s->altura < 30.0f) {
+            luz.base = (Vector3){ 1.05f, 1.04f, 1.03f };   /* um pouco mais de luz do céu: o chão recebe menos sol */
+        }
         luz.corDoSol = s->disco;
         luzes[id] = luz;
         prontas[id] = 1;
@@ -1207,8 +1279,6 @@ static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
         cinema.corDoSol = luz->corDoSol;
         cinema.raiosDeSol = comSol ? 0.40f : 0.0f;
         cinema.reflexoDoSol = comSol ? 0.75f : 0.0f;
-        cinema.foco = focoDaCena;
-        cinema.abertura = (focoDaCena > 0.0f) ? 1.0f : 0.0f;
         definirCinemaDoQuadro(&cinema);
         terminarPosProcesso(pista->id, desfoqueDeVelocidade(corrida), acabamento);
     }
@@ -1468,14 +1538,18 @@ void atualizarVisao(Corrida *corrida, VisaoDoJogador *visao) {
     Carro *jogador = carroDoHumano(corrida, visao->humano);
     /* A câmera acompanha o carro, não a pista: sem volante na curva, ela também não vira sozinha */
     Olhar olhar = visao->olhar;
-    int comRumoReal = jogador->direcaoLivre && jogador->temRumoNoMundo && jogador->estadoDoPit == PIT_FORA;
+    int livre = jogador->direcaoLivre && jogador->estadoDoPit == PIT_FORA;
+    int comRumoReal = livre && jogador->temRumoNoMundo;
     /* No pit lane o caminho nem sempre acompanha a pista (em Interlagos, a saída corta por dentro
-     * do S do Senna): a câmera vem atrás do carro, para onde o bico dele aponta */
+     * do S do Senna): a câmera vem atrás do carro, para onde o bico dele aponta. E também no quadro em
+     * que o pit devolve o carro à pista: o rumo dele no mundo só é armado no passo seguinte, e por um
+     * quadro a câmera trocava de jeito (seguia a pista) e pulava de volta */
     int andandoNoPit = (jogador->estadoDoPit == PIT_CHEGANDO || jogador->estadoDoPit == PIT_SAINDO);
-    float rumoNoPit = andandoNoPit ? pontoNoMundo(jogador->posicao, jogador->deslocamentoLateral).rumo + jogador->anguloDeFuga : 0.0f;
-    int seguirORumo = comRumoReal || andandoNoPit;
+    int peloBico = andandoNoPit || (livre && !jogador->temRumoNoMundo && corrida->contagemRegressiva <= 0.0f);
+    float rumoDoBico = peloBico ? pontoNoMundo(jogador->posicao, jogador->deslocamentoLateral).rumo + jogador->anguloDeFuga : 0.0f;
+    int seguirORumo = comRumoReal || peloBico;
     /* sem a guiada, a câmera vai atrás de para onde o carro está indo (no drift, ele aparece de lado) */
-    float rumoSeguido = comRumoReal ? jogador->rumoDaViagem : rumoNoPit;
+    float rumoSeguido = comRumoReal ? jogador->rumoDaViagem : rumoDoBico;
     if (!seguirORumo) {
         olhar.giro += jogador->anguloDeFuga * CAMERA_NA_FUGA;
     }
@@ -1510,10 +1584,19 @@ void atualizarVisao(Corrida *corrida, VisaoDoJogador *visao) {
         visao->tremor = fmaxf(visao->tremor * expf(-dt / TREMOR_PASSA), viva ? jogador->contato : 0.0f);
         visao->relogioDoTremor = fmodf(visao->relogioDoTremor + dt, 1000.0f);
     }
+    /* O rastro: no pit lane, a altura da câmera vem do chão por onde o carro passou */
+    PontoNoMundo noChao = pontoNoMundo(jogador->posicao, jogador->deslocamentoLateral);
+    Vector3 carroNoChao = { noChao.x, noChao.y, noChao.z };
+    if (!cenaPausada) {
+        guardarNoRastro(visao, carroNoChao);
+        float alvoDoRastro = carroNoPit(jogador) ? 1.0f : 0.0f;
+        visao->pesoDoRastro += (alvoDoRastro - visao->pesoDoRastro) * (1.0f - expf(-dt / TEMPO_DO_RASTRO));
+    }
     float grausDaJanela = grausDeVisaoDaJanela(visao->janela);
     Camera3D camera = montarCamera(jogador->posicao, jogador->deslocamentoLateral, olhar, distanciaAtual,
                                    grausDaJanela * (1.0f + visao->grausAMais / GRAUS_DE_VISAO),
-                                   seguirORumo ? &visao->rumoDaCamera : NULL);
+                                   seguirORumo ? &visao->rumoDaCamera : NULL,
+                                   chaoNoRastro(visao, carroNoChao, distanciaAtual.atras), visao->pesoDoRastro);
     if (viva || visao->tremor > 0.001f || fabsf(visao->rolagem) > 0.001f) {
         float metros = TREMOR_MAXIMO * visao->tremor * visao->tremor + TREMOR_NA_VELOCIDADE * rapidez * rapidez * rapidez * (viva ? 1.0f : 0.0f);
         camera = tremerCamera(camera, metros, visao->relogioDoTremor, visao->rolagem);
@@ -1621,12 +1704,7 @@ void desenharVisao(Corrida *corrida, const VisaoDoJogador *visao) {
     carroDaVisao = jogador;
     desenharOTracado = configuracoesAtuais()->tracadoDeCorrida && !visao->festa
                        && jogador->estadoDoPit == PIT_FORA && corrida->contagemRegressiva <= 0.0f;
-    if (visao->festa) {   /* o pódio: o foco no carro do jogador */
-        PontoNoMundo noMundo = pontoNoMundo(jogador->posicao, jogador->deslocamentoLateral);
-        focoDaCena = Vector3Distance(visao->camera.position, (Vector3){ noMundo.x, noMundo.y + 0.6f, noMundo.z });
-    }
     desenharMundo3D(visao->camera, corrida->pista, corrida);
-    focoDaCena = 0.0f;
     desenharOTracado = 0;
     carroDaVisao = NULL;
     efeitosAliviados = 0;
@@ -1661,7 +1739,7 @@ Camera3D cameraDaVisaoDoJogador(Corrida *corrida) {
                                                       DISTANCIAS_DA_CAMERA[visaoDoJogador1.distanciaEscolhida],
                                                       &respiracao);
     return montarCamera(jogador->posicao, jogador->deslocamentoLateral, olharParaAFrente(), distancia,
-                        GRAUS_DE_VISAO, NULL);
+                        GRAUS_DE_VISAO, NULL, 0.0f, 0.0f);
 }
 
 /*
@@ -1673,9 +1751,7 @@ Camera3D cameraDaVisaoDoJogador(Corrida *corrida) {
 void desenharCorridaVistaDe(Corrida *corrida, Camera3D camera) {
     avancarCenario(corrida->pista, corrida);   /* é chamada uma vez por quadro: o cenário anda aqui */
     definirAreaDoPosProcesso(0, 0, 0, 0);
-    focoDaCena = Vector3Distance(camera.position, camera.target);   /* as câmeras da apresentação miram o que mostram */
     desenharMundo3D(camera, corrida->pista, corrida);
-    focoDaCena = 0.0f;
 }
 
 /*
@@ -1696,7 +1772,7 @@ void desenharPistaDeFundo(Pista *pista) {
     avancarCenario(pista, NULL);   /* é chamada uma vez por quadro: a torcida e a noite andam aqui */
     definirAreaDoPosProcesso(0, 0, 0, 0);
     desenharMundo3D(montarCamera(*passeio, 0.0f, olharParaAFrente(), DISTANCIAS_DA_CAMERA[DISTANCIA_MEDIA],
-                                 GRAUS_DE_VISAO, NULL),
+                                 GRAUS_DE_VISAO, NULL, 0.0f, 0.0f),
                     pista, NULL);
 }
 

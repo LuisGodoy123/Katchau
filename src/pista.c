@@ -21,8 +21,12 @@
 #define SUBPASSOS_DO_TRACADO  64      /* entre dois pontos da tabela: bem menor que um segmento */
 #define FOLGA_DA_ZEBRA        0.3f    /* metros: a roda de fora ainda pisa na zebra */
 #define FAIXA_RAPIDA_DE_INTERLAGOS 2.5f  /* metros da borda do pit lane até o meio da faixa rápida */
-#define INICIO_DA_ENTRADA_DO_PIT (-305.0f) /* metros do modelo: onde acaba o guard-rail e começam as faixas */
-#define FIM_DA_ENTRADA_DO_PIT (-275.0f)    /* daqui em diante, as faixas brancas separam o pit lane */
+/* A linha de chegada de Interlagos é a faixa branca pintada no asfalto da reta. As tabelas medidas no modelo
+ * (interlagos.h) começam no meio do pórtico da largada, 15,5 m do modelo antes dela: a largada do jogo anda tantos
+ * segmentos para a frente (13: 21,7 m, 15,48 m do modelo), e o grid pintado fica todo antes da linha. As medidas
+ * de Interlagos "a partir da linha", aqui e em mundo.c, são da faixa pintada */
+#define INICIO_DA_ENTRADA_DO_PIT (-320.5f) /* metros do modelo: onde acaba o guard-rail e começam as faixas */
+#define FIM_DA_ENTRADA_DO_PIT (-290.5f)    /* daqui em diante, as faixas brancas separam o pit lane */
 #define BORDA_NA_ENTRADA_DO_PIT 8.5f      /* metros da linha da pista: onde o carro está, entrando */
 #define DENTRO_DA_LINHA_PARA_ENTRAR 1.2f  /* metros: o meio do carro a tanto da borda (as rodas na linha) */
 #define VEZES_ALISANDO_O_PIT  2
@@ -103,6 +107,24 @@ static void renumerarSegmentos(Pista *pista) {
         contador++;
         atual = atual->proximo;
     } while (atual != pista->largada);
+}
+
+/*
+ * moverALargada
+ * Leva a linha de chegada tantos segmentos para a frente (a volta é a mesma) e renumera a pista a partir dela.
+ * Recebe: a pista e quantos segmentos.
+ * Devolve: nada.
+ */
+static void moverALargada(Pista *pista, int segmentos) {
+    if (pista->largada == NULL) {
+        return;
+    }
+    pista->largada->ehLinhaDeChegada = 0;
+    for (int i = 0; i < segmentos; i++) {
+        pista->largada = pista->largada->proximo;
+    }
+    pista->largada->ehLinhaDeChegada = 1;
+    renumerarSegmentos(pista);
 }
 
 /* ==================================================================
@@ -378,23 +400,23 @@ typedef struct {
 } TrechoDeInterlagos;
 
 static const TrechoDeInterlagos TRECHOS_INTERLAGOS[] = {
-    {  262.0f, "Reta dos Boxes" },
-    {  476.0f, "S do Senna" },
-    {  752.0f, "Curva do Sol" },
-    { 1350.0f, "Reta Oposta" },
-    { 1664.0f, "Descida do Lago" },
-    { 1976.0f, "Reta" },
-    { 2196.0f, "Ferradura" },
-    { 2272.0f, "Reta" },
-    { 2380.0f, "Laranjinha" },
-    { 2560.0f, "Pinheirinho" },
-    { 2680.0f, "Reta" },
-    { 2804.0f, "Bico de Pato" },
-    { 2874.0f, "Reta" },
-    { 3072.0f, "Mergulho" },
-    { 3216.0f, "Reta" },
-    { 3310.0f, "Junção" },
-    { 4078.0f, "Subida dos Boxes" },
+    {  246.5f, "Reta dos Boxes" },
+    {  460.5f, "S do Senna" },
+    {  736.5f, "Curva do Sol" },
+    { 1334.5f, "Reta Oposta" },
+    { 1648.5f, "Descida do Lago" },
+    { 1960.5f, "Reta" },
+    { 2180.5f, "Ferradura" },
+    { 2256.5f, "Reta" },
+    { 2364.5f, "Laranjinha" },
+    { 2544.5f, "Pinheirinho" },
+    { 2664.5f, "Reta" },
+    { 2788.5f, "Bico de Pato" },
+    { 2858.5f, "Reta" },
+    { 3056.5f, "Mergulho" },
+    { 3200.5f, "Reta" },
+    { 3294.5f, "Junção" },
+    { 4062.5f, "Subida dos Boxes" },
     { 1e9f,    "Reta dos Boxes" },
 };
 
@@ -415,6 +437,9 @@ Pista *criarPista(void) {
     const float e = ESCALA_INTERLAGOS;   /* as medidas abaixo são as do modelo, em metros */
     Pista *pista = criarPistaDaTabela(TRACADO_INTERLAGOS, LIMITES_INTERLAGOS, BORDAS_INTERLAGOS, TOTAL_PONTOS_INTERLAGOS,
                                       e, PISTA_INTERLAGOS, "Interlagos");
+    moverALargada(pista, SEGMENTOS_ATE_A_LINHA_PINTADA);
+    /* o quanto as tabelas do modelo (que contam do pórtico) ficam adiantadas, em metros do modelo */
+    const float doPortico = METROS_DO_PORTICO_A_LINHA_PINTADA / e;
     float volta = pista->metrosDaVolta;
     Segmento *atual = pista->largada;
     do {
@@ -427,9 +452,10 @@ Pista *criarPista(void) {
         atual = atual->proximo;
     } while (atual != pista->largada);
 
-    /* O grid do modelo: a frente da pole fica a ~5 m da linha, à direita, e há um lugar a cada
-     * 7,7 m, alternando os lados (as medidas são do meio do carro) */
-    pista->grid = (GridDaPista){ 1, 7.2f * e, 7.7f * e, 4.0f * e, 1 };
+    /* O grid pintado no modelo (medido na tinta do asfalto): a pole à direita, com o meio do colchete a 6,1 m da
+     * linha; o segundo, do outro lado, a 11,8 m; e uma fila a cada 15,35 m. Os colchetes do lado da pole ficam a
+     * 4,0 m do meio da pista, os do outro lado a 4,35 m */
+    pista->grid = (GridDaPista){ 1, 6.1f * e, 11.8f * e, 15.35f * e, 4.0f * e, 4.35f * e, 1 };
     pista->largadaPintadaNoModelo = 1;
 
     /* O caminho do pit. Ele começa onde acaba o guard-rail da Subida dos Boxes, com o carro
@@ -439,11 +465,11 @@ Pista *criarPista(void) {
     caminhoDoPitDeInterlagos[0][1] = BORDA_NA_ENTRADA_DO_PIT * e;
     int pontos = 1;
     for (int i = 0; i < TOTAL_PONTOS_PIT_INTERLAGOS; i++) {
-        if (PIT_INTERLAGOS[i][0] <= INICIO_DA_ENTRADA_DO_PIT + 5.0f) {
+        if (PIT_INTERLAGOS[i][0] - doPortico <= INICIO_DA_ENTRADA_DO_PIT + 5.0f) {
             continue;   /* antes disso, o guard-rail separa o pit lane da pista */
         }
         float dentro = PIT_INTERLAGOS[i][1], fora = PIT_INTERLAGOS[i][2];
-        caminhoDoPitDeInterlagos[pontos][0] = PIT_INTERLAGOS[i][0] * e;
+        caminhoDoPitDeInterlagos[pontos][0] = (PIT_INTERLAGOS[i][0] - doPortico) * e;
         caminhoDoPitDeInterlagos[pontos][1] = (dentro + fminf(FAIXA_RAPIDA_DE_INTERLAGOS, (fora - dentro) / 2.0f)) * e;
         pontos++;
     }
@@ -480,15 +506,15 @@ Pista *criarPista(void) {
     pit.fimDaZona = volta + FIM_DA_ENTRADA_DO_PIT * e;   /* daqui em diante, as faixas separam o pit lane */
     pit.fimDaEntrada = volta + (FIM_DA_ENTRADA_DO_PIT + 10.0f) * e;
     pit.velocidadeNaEntrada = 9000.0f;          /* o pit lane é reto ali: ele só freia para o limite, de uma vez */
-    pit.aviso = volta - 700.0f * e;
-    pit.inicioDoLimite = volta - 60.0f * e;
-    pit.fimDoLimite = 300.0f * e;                 /* depois das garagens */
+    pit.aviso = volta - 715.5f * e;
+    pit.inicioDoLimite = volta - 75.5f * e;
+    pit.fimDoLimite = 284.5f * e;                 /* depois das garagens */
     pit.fim = saida;                              /* na Reta Oposta */
-    pit.primeiraVaga = 20.0f * e;                 /* as garagens ficam logo depois da linha */
-    pit.entreVagas = 15.5f * e;                   /* as 17 vagas até 268 m, na frente das garagens (até 270 m) */
+    pit.primeiraVaga = 4.5f * e;                  /* as garagens ficam logo depois da linha */
+    pit.entreVagas = 15.5f * e;                   /* as 17 vagas até 252,5 m, na frente das garagens (até 254,5 m) */
     pit.encostar = 20.0f * e;
     pit.noCaminhoDaFaixa = pit.entrada + 40.0f * e;
-    pit.deixaAFaixa = 290.0f * e;
+    pit.deixaAFaixa = 274.5f * e;
     pit.borda = 6.0f * e;
     pit.faixa = 15.5f * e;
     pit.vaga = 23.5f * e;                         /* a faixa de trabalho, na frente das portas */
@@ -851,11 +877,12 @@ Superficie superficieNaLateral(PosicaoNaPista posicao, float lateralEmMetros) {
  * Quanto um lugar do grid fica ANTES da linha de chegada.
  * Recebe: a pista e o lugar (0 = pole).
  * Devolve: a distância em unidades de mundo (no grid padrão, sempre múltipla do segmento;
- *          no grid da pista, a do meio do carro até a linha).
+ *          no grid da pista, a do meio do colchete até a linha: o escalonado, fila a fila).
  */
 float distanciaDoLugarAteALinha(const Pista *pista, int lugar) {
     if (pista != NULL && pista->grid.existe) {
-        return (pista->grid.pole + lugar * pista->grid.espaco) * UNIDADES_POR_METRO;
+        float primeiro = (lugar % 2 == 0) ? pista->grid.pole : pista->grid.segundo;
+        return (primeiro + (float) (lugar / 2) * pista->grid.fila) * UNIDADES_POR_METRO;
     }
     return DISTANCIA_DA_POLE + lugar * ESPACO_ENTRE_LUGARES;
 }
@@ -869,8 +896,10 @@ float lateralDoLugar(const Pista *pista, int lugar) {
     if (pista == NULL || !pista->grid.existe) {
         return (lugar % 2 == 0) ? -LATERAL_DO_GRID : LATERAL_DO_GRID;
     }
-    int aDireita = ((lugar % 2 == 0) == (pista->grid.poleADireita != 0));
-    float metros = aDireita ? pista->grid.lateral : -pista->grid.lateral;
+    int doLadoDaPole = (lugar % 2 == 0);
+    int aDireita = (doLadoDaPole == (pista->grid.poleADireita != 0));
+    float doMeio = doLadoDaPole ? pista->grid.lateralDaPole : pista->grid.lateralDoOutro;
+    float metros = aDireita ? doMeio : -doMeio;
     PosicaoNaPista lugarNaPista = { pista->largada, 0.0f };
     moverNaPista(&lugarNaPista, -distanciaDoLugarAteALinha(pista, lugar));
     return metros / larguraDoLado(lugarNaPista.segmento, metros);

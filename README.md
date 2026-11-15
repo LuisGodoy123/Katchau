@@ -562,7 +562,8 @@ uma `habilidade`, de 93% do limite do carro (a pole) a 86% (o último do grid, a
 Em Interlagos, nos níveis médio e difícil, a parada nos boxes é obrigatória: quem cruza a última bandeirada sem parar é desclassificado. As garagens ficam logo depois da linha de chegada: quem entra no pit na última volta cruza a linha antes de parar, então pare antes dela.
 
 - **Entrar:** no fim da Subida dos Boxes, onde acaba o guard-rail da esquerda e começam as faixas brancas que separam o pit lane, com as rodas da esquerda em cima da linha branca (`querEntrarNoPit`). Ali o piloto automático assume, no limite de 100 km/h perto das garagens. A linha de corrida da Subida passa pela esquerda, então só entra quem encosta de propósito na linha (`soEncostadoNaBorda`).
-- **O caminho:** é o pit lane do modelo, medido (`PIT_INTERLAGOS` em `interlagos.h`): passa na frente das garagens, logo depois da linha de chegada, corre por dentro do S do Senna e da Curva do Sol e volta à pista na Reta Oposta. A tabela medida é alisada (média dos vizinhos) e, longe da vaga, o carro anda exatamente por ela, sem atraso; o passo na pista é corrigido para ele andar no mundo o que a velocidade manda (por dentro de uma curva, um metro da linha da pista vale menos), o bico aponta para onde ele andou de verdade (com um giro máximo) e a câmera vem atrás do bico. Nas curvas do caminho ele anda no máximo na velocidade que as faz com 25 m/s² de lado, freando com calma antes delas, e antes da manobra até a vaga já chega devagar: nada de balanço, câmera de lado ou trancos na saída.
+- **O caminho:** é o pit lane do modelo, medido (`PIT_INTERLAGOS` em `interlagos.h`): passa na frente das garagens, logo depois da linha de chegada, corre por dentro do S do Senna e da Curva do Sol e volta à pista na Reta Oposta. A tabela medida é alisada (média dos vizinhos) e, longe da vaga, o carro anda exatamente por ela, sem atraso; o passo na pista é corrigido para ele andar no mundo o que a velocidade manda (por dentro de uma curva, um metro da linha da pista vale menos), o bico aponta para onde ele andou de verdade (com um giro máximo) e a câmera vem atrás do bico. Chegando ao caminho, o que ainda falta até ele some em um quarto de segundo, em vez de um passo de lado num quadro. Nas curvas do caminho ele anda no máximo na velocidade que as faz com 25 m/s² de lado, freando com calma antes delas, e antes da manobra até a vaga já chega devagar: nada de balanço, câmera de lado ou trancos na saída.
+- **O chão do pit lane:** além da borda da pista, o chão é medido em poucos pontos (a 1, 2, 3, 5, 7, 10 m...), e um degrau entre dois deles vira uma rampa. Perto da linha, o pit lane fica 3 m acima da pista, atrás da mureta: as rodas do lado da pista caíam nessa rampa e o carro tombava uns 30°. Por isso, no pit lane (que é plano de lado), a inclinação de lado medida no chão some ao sair da borda, para o carro e para a câmera (ela também não inclina fora do asfalto da pista), e a altura da câmera vem do **rastro** do carro: o chão por onde ele acabou de passar, os metros atrás que ela está (`chaoNoRastro` em `render.c`). Quando o pit devolve o carro, ele segue com o bico para onde já apontava (`andarNoMundo`), e a câmera continua atrás dele, sem trocar de jeito no meio.
 - **A troca:** cada carro tem uma vaga (as 17 cabem na frente das garagens). Na do jogador, o Guido passa por todas as rodas em 3,2 s (`faseDaTroca` e `lugarDoGuido` em `pitstop.c`, desenho em `render.c`), e a imagem corta para uma câmera ao lado do carro.
 - **Rivais:** cada um para numa volta (`voltaDoPit`) e leva mais tempo na troca que o Guido. No pit lane há fila: quem vem atrás reduz, quem sai da vaga espera passar quem já vem na faixa, e a colisão só separa os carros, sem tranco nem rodada; o carro parado na troca nunca é empurrado.
 
@@ -646,8 +647,18 @@ não dá para contar com ela "quase ordenada". Ele custa O(n log n) em qualquer 
 
 O grid fica **antes da linha de chegada**, em zigue-zague, com um colchete pintado no
 asfalto em cada lugar (as medidas estão em `pista.h`: `DISTANCIA_DA_POLE`,
-`ESPACO_ENTRE_LUGARES`). Os carros começam com `voltas = -1`: o primeiro cruzamento da
-linha, logo depois da largada, só abre a volta 1, que (como no F1) conta desde a largada.
+`ESPACO_ENTRE_LUGARES`). Em Interlagos vale o grid pintado no modelo, medido na tinta do asfalto: escalonado, com a
+pole à direita a 6,1 m da linha, o segundo do outro lado a 11,8 m e uma fila a cada 15,35 m (`GridDaPista`). A linha
+de chegada de lá é a faixa branca pintada na reta, e não o meio do pórtico da largada, onde as tabelas do modelo
+começam: a largada do jogo fica 13 segmentos (21,7 m) depois do começo delas (`SEGMENTOS_ATE_A_LINHA_PINTADA`), e
+as medidas "a partir da linha" (o pit lane, os trechos, os telões) contam da faixa. Os carros começam com
+`voltas = -1`: o primeiro cruzamento da linha, logo depois da largada, só abre a volta 1, que (como no F1) conta desde
+a largada.
+
+Antes da largada passa a **apresentação** (`apresentacao.c`): o drone sobre a pista, a grua sobre o grid, a câmera
+que atravessa o grid fila a fila com o nome de cada dupla e a volta em torno do seu carro. A dupla com o nome na tela
+é a que está de fato na frente da câmera (a vez dela vai de quando a dupla da frente sai pelos lados da tela até
+ela mesma sair), e a travessia leva 1,45 s por fila, então cresce junto com o grid.
 
 A volta é dividida em **3 setores** (terços da pista). Em `corrida.c`, cada carro guarda o
 tempo de cada setor, o melhor setor dele e os setores da melhor volta; a corrida guarda o
@@ -791,11 +802,15 @@ cena guarda também a profundidade, e daí saem:
   que brilha em volta e chega no branco aos poucos, por uma curva de cinema, em vez de estourar;
 - **os raios de sol** (opção): com o sol à vista, o céu em volta dele, tapado pelo que está na frente (prédios,
   arquibancadas, nuvens), se espalha em raios; e o **reflexo do sol na lente** (com o LENS FLARE);
-- **a profundidade de campo** (opção): nas cenas do Mack, no pódio e na apresentação da largada, o foco fica no
-  que a câmera mostra e o resto desfoca; na última opção, dirigindo, o fundo bem longe também.
+- **a profundidade de campo** (opção, desligada no padrão): o fundo bem longe (os morros, o horizonte) fica
+  levemente desfocado.
 
-As pistas de dia têm o **sol delas**, baixo o bastante para aparecer no céu (na reta da largada, um pouco para o
-lado da frente; Interlagos é fim de tarde), e um **céu feito no shader** (`mundo.c`), com **nuvens** a 1,8 km de
+As pistas de dia têm o **sol delas** (`SOIS_DAS_PISTAS` em `render.c`). Interlagos tem o sol de verdade da hora do
+GP de São Paulo: domingo, 8 de novembro de 2026, 14h de Brasília, com o sol 58,9° acima do horizonte, no azimute
+276,9° (quase oeste, do lado das arquibancadas da reta). Como o modelo não vem com o norte para -z, o norte de
+verdade fica no rumo 14,2° do mapa do jogo: é o giro que encaixa o traçado do modelo no do OpenStreetMap (5,8 m de
+diferença média na volta, mesma escala). O Oval e o Splat têm um sol baixo o bastante para aparecer no céu (na reta
+da largada, um pouco para o lado da frente). Todas têm um **céu feito no shader** (`mundo.c`), com **nuvens** a 1,8 km de
 altura: a forma sai de um ruído que se repete sem emenda, gerado ao abrir o jogo, e o volume, de duas leituras na
 direção do sol (o lado de lá e o miolo ficam na sombra, a borda fina brilha contra ele). O céu do passeio tem as
 mesmas nuvens, com as cores da hora. A pintura dos carros reflete o mundo em três faixas, como num estúdio de foto

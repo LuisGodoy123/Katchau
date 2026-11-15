@@ -208,6 +208,8 @@ Carro criarCarro(const char *nome, int numero, Segmento *largada, float deslocam
     carro.querParar = 0;
     carro.pitFeito = 0;
     carro.vemAlguemAtras = 0;
+    carro.noCaminhoDoPit = 0;
+    carro.sobraDoCaminho = 0.0f;
     carro.tempoDaTroca = 0.0f;
     carro.duracaoDaTroca = 0.0f;
     carro.ultimaTroca = 0.0f;
@@ -984,7 +986,9 @@ static float girarNoMundo(Carro *carro, float tempoQuadro, float aderenciaDoChao
 static int andarNoMundo(Carro *carro, float tempoQuadro) {
     PontoNoMundo aqui = pontoNoMundo(carro->posicao, carro->deslocamentoLateral);
     if (!carro->temRumoNoMundo) {
-        carro->rumoNoMundo = aqui.rumo;
+        /* O rumo começa para onde o bico já aponta: o pit lane devolve o carro torto, e começar pelo rumo da
+         * pista endireitava o carro num quadro */
+        carro->rumoNoMundo = aqui.rumo + carro->anguloDeFuga;
         carro->temRumoNoMundo = 1;
     }
     float doDrift = girarNoMundo(carro, tempoQuadro, 1.0f);

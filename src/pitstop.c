@@ -23,7 +23,8 @@
 #define GIRO_MAXIMO_NO_PIT    90.0f  /* graus por segundo que o bico gira, no máximo, andando no pit lane */
 #define MENOR_FATOR_NO_PIT    0.1f   /* a saída passa bem por dentro do S do Senna: lá um metro da linha vale uns 25 cm */
 #define ABRINDO_NA_FILA       0.6f   /* colado no da frente, anda a esta fração da velocidade dele */
-#define PERTO_DO_CAMINHO      0.15f  /* metros: daqui para dentro o carro anda exatamente pelo caminho */
+#define PERTO_DO_CAMINHO      0.15f  /* metros: daqui para dentro o carro anda pelo caminho... */
+#define SOBRA_DO_CAMINHO      0.25f  /* ...e o que ainda faltava até ele some aos poucos (segundos) */
 #define ACELERACAO_DE_LADO_NO_PIT 25.0f /* m/s²: nas curvas do caminho, ele anda no máximo tão rápido que isto */
 #define FREADA_ANTES_DA_CURVA 8.0f   /* m/s²: ele chega na curva freando com calma, sem tranco */
 #define OLHAR_A_CURVA         12.0f  /* metros do caminho entre os pontos que medem a curva à frente */
@@ -185,6 +186,8 @@ void entrarNoPit(Carro *carro) {
                     : carro->anguloDeFuga + carro->anguloDeDrift + carro->giro + carro->volante * GRAUS_DO_VOLANTE;
     desenhado -= 360.0f * roundf(desenhado / 360.0f);
     carro->estadoDoPit = PIT_CHEGANDO;
+    carro->noCaminhoDoPit = 0;
+    carro->sobraDoCaminho = 0.0f;
     carro->rodando = 0;
     carro->giro = 0.0f;
     carro->velocidadeDoGiro = 0.0f;
@@ -502,10 +505,18 @@ int atualizarCarroNoPit(Carro *carro, Pista *pista, float tempoQuadro) {
     int voltasGanhas = moverNaPista(&carro->posicao, distancia);
     float larguraDepois = larguraNaPosicao(carro->posicao, pista->pit.lado);
     if (presoAoCaminho) {
-        agora = ladoNoCaminhoEm(pista, metrosDesdeAEntrada(pista, metrosNaVolta(carro)));
+        /* Chegando ao caminho, o que ainda faltava até ele (menos de PERTO_DO_CAMINHO) some aos poucos: grudar
+         * de uma vez era um passo de lado num quadro só, e o bico virava junto. Depois, como sempre, ele anda
+         * pelo caminho (um empurrão de lado, de uma batida, não o tira dele) */
+        if (!carro->noCaminhoDoPit) {
+            carro->sobraDoCaminho = agora - ladoNoCaminhoEm(pista, noPit);
+        }
+        carro->sobraDoCaminho *= expf(-tempoQuadro / SOBRA_DO_CAMINHO);
+        agora = ladoNoCaminhoEm(pista, metrosDesdeAEntrada(pista, metrosNaVolta(carro))) + carro->sobraDoCaminho;
     } else {
         agora += rapidez * tempoQuadro;
     }
+    carro->noCaminhoDoPit = presoAoCaminho;
     carro->deslocamentoLateral = agora / larguraDepois;
     carro->velocidadeDeLado = (tempoQuadro > 0.0f) ? rapidez : 0.0f;
 

@@ -21,6 +21,7 @@
 
 #define TOTAL_DISTANCIAS_DA_CAMERA 3   /* perto, médio e longe */
 #define MAXIMO_DE_VISOES  MAXIMO_DE_JOGADORES_LOCAIS   /* uma visão por jogador do sofá */
+#define PONTOS_DO_RASTRO  96   /* o rastro do carro que a câmera guarda (um ponto a cada 30 cm, ou mais) */
 
 /* Um pedaço da tela, em pixels de verdade. Na tela inteira é 0, 0 e o tamanho da janela. */
 typedef struct {
@@ -46,6 +47,11 @@ typedef struct {
     float tremor;               /* 0 a 1: a força do tremor agora */
     float relogioDoTremor;      /* segundos: a fase do tremor */
     float rolagem;              /* graus: a câmera inclina para dentro da curva */
+    /* O rastro do carro: o chão por onde ele acabou de passar. No pit lane a altura da câmera vem dele (veja
+     * chaoNoRastro em render.c) */
+    Vector3 rastro[PONTOS_DO_RASTRO];
+    int pontosNoRastro, fimDoRastro;
+    float pesoDoRastro;         /* 0 a 1: quanto da altura da câmera vem do rastro (entra e sai aos poucos) */
 
     /* Preenchidos por atualizarVisao, usados por avancarMundoDaCorrida e desenharVisao */
     Camera3D camera;

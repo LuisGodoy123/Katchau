@@ -1827,7 +1827,7 @@ static void mudarOpcao(EstadoMenu *menu, int linha, int sentido) {
             config->presetGrafico = PRESET_PERSONALIZADO;
             break;
         case LINHA_CAMPO:
-            config->profundidadeDeCampo = (config->profundidadeDeCampo + sentido + 3) % 3;
+            config->profundidadeDeCampo = !config->profundidadeDeCampo;
             config->presetGrafico = PRESET_PERSONALIZADO;
             break;
         case LINHA_LENTE:
@@ -2226,7 +2226,7 @@ static const char *descricaoDaLinha(int linha) {
         case LINHA_HDR: return "AS LUZES FORTES (O SOL, OS REFLEXOS) PASSAM DO BRANCO SEM ESTOURAR, COMO NO CINEMA.";
         case LINHA_RAIOS_DE_SOL: return "COM O SOL BAIXO, OS RAIOS DE LUZ ENTRE OS PRÉDIOS E AS PEDRAS (NO PASSEIO).";
         case LINHA_GRANULADO: return "UM GRÃO DE FILME SOBRE A IMAGEM, QUE MUDA A CADA QUADRO.";
-        case LINHA_CAMPO: return "NAS CENAS (O MACK, O PÓDIO, A LARGADA) O FOCO FICA EM QUEM IMPORTA; NA ÚLTIMA, TAMBÉM O FUNDO LONGE.";
+        case LINHA_CAMPO: return "O FUNDO BEM LONGE (OS MORROS, O HORIZONTE) FICA LEVEMENTE DESFOCADO.";
         case LINHA_CAMERA_VIVA: return "A VISÃO ABRE COM A VELOCIDADE E O NITRO, A CÂMERA TREME NAS BATIDAS E INCLINA NAS CURVAS.";
         case LINHA_LENTE: return "CURVA AS BORDAS DA IMAGEM COMO UMA LENTE E, NA ÚLTIMA OPÇÃO, SEPARA AS CORES NAS BORDAS.";
         case LINHA_NITIDEZ: return "AFIA A IMAGEM: BOA COMBINADA COM UMA ESCALA DE RENDERIZAÇÃO MENOR QUE 100%.";
@@ -2292,7 +2292,6 @@ void desenharConfiguracoes(EstadoMenu *menu) {
         static const char *PRESETS[TOTAL_PRESETS] = { "BAIXO", "MÉDIO", "ALTO", "PERSONALIZADO" };
         static const char *LENTES[3] = { "DESLIGADA", "DISTORÇÃO", "DISTORÇÃO + ABERRAÇÃO CROMÁTICA" };
         static const char *NITIDEZES[3] = { "DESLIGADA", "LEVE", "FORTE" };
-        static const char *CAMPOS[3] = { "DESLIGADA", "NAS CENAS", "NAS CENAS E AO LONGE" };
         static const char *SOMBRAS[TOTAL_QUALIDADES_DE_SOMBRA] = { "DESLIGADAS", "BAIXA (1024)", "MÉDIA (2048)", "ALTA (3072)", "MÁXIMA (4096)" };
         static const char *FILTROS[TOTAL_FILTROS_DE_TEXTURA] = { "BILINEAR", "TRILINEAR", "ANISOTRÓPICO 4x", "ANISOTRÓPICO 8x", "ANISOTRÓPICO 16x" };
         desenharTituloDeSecao("GRÁFICOS", Y_TITULO_COMANDOS);
@@ -2304,7 +2303,7 @@ void desenharConfiguracoes(EstadoMenu *menu) {
         desenharLinhaDeOpcao(menu, LINHA_LENS_FLARE, "LENS FLARE (FAÍSCAS E SOL)", config->lensFlare ? "LIGADO" : "DESLIGADO", 0);
         desenharLinhaDeOpcao(menu, LINHA_RAIOS_DE_SOL, "RAIOS DE SOL", config->raiosDeSol ? "LIGADOS" : "DESLIGADOS", !config->efeitos);
         desenharLinhaDeOpcao(menu, LINHA_GRANULADO, "GRANULADO DE FILME", config->granulado ? "LIGADO" : "DESLIGADO", 0);
-        desenharLinhaDeOpcao(menu, LINHA_CAMPO, "PROFUNDIDADE DE CAMPO", CAMPOS[config->profundidadeDeCampo % 3], 0);
+        desenharLinhaDeOpcao(menu, LINHA_CAMPO, "PROFUNDIDADE DE CAMPO", config->profundidadeDeCampo ? "LIGADA" : "DESLIGADA", !config->efeitos);
         desenharLinhaDeOpcao(menu, LINHA_LENTE, "DISTORÇÃO DA LENTE", LENTES[config->distorcaoDaLente], 0);
         desenharLinhaDeOpcao(menu, LINHA_NITIDEZ, "NITIDEZ (COMO O FIDELITYFX CAS)", NITIDEZES[config->nitidez], 0);
         desenharLinhaDeOpcao(menu, LINHA_SUAVIZACAO, "SUAVIZAÇÃO (AA)", config->suavizacao ? "FXAA" : "DESLIGADA", 0);

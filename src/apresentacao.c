@@ -16,15 +16,6 @@
 #include "controle.h"
 #include "corrida.h"
 
-/* Quanto dura cada tomada, em segundos */
-static const float DURACAO_DA_TOMADA[TOTAL_TOMADAS] = {
-    [TOMADA_PISTA] = 5.5f,
-    [TOMADA_GRID] = 4.0f,
-    [TOMADA_PILOTOS] = 11.5f,   /* cerca de 1,5 s por fila do grid, sem parar */
-    [TOMADA_JOGADOR] = 4.5f,
-    [TOMADA_PRONTO] = 1.6f,
-};
-
 #define ESCURECER              0.35f   /* segundos de tela preta entre uma tomada e outra (entrando e saindo) */
 #define DURACAO_DO_PULO        0.45f   /* pulou: a tela escurece nesse tempo e a corrida começa */
 #define ALTURA_DA_TARJA        0.11f   /* as tarjas pretas de cinema, em fração da altura da tela */
@@ -45,15 +36,24 @@ static const float DURACAO_DA_TOMADA[TOTAL_TOMADAS] = {
 #define GRUA_ALTURA_ATE        4.0f
 #define GRUA_LADO              9.0f    /* a grua vai de um lado ao outro do grid */
 #define CAMINHADA_ALTURA       1.15f   /* a câmera que atravessa o grid, quase rente ao chão */
-#define CAMINHADA_OLHA         12.0f   /* metros adiante (para trás no grid) que ela olha */
-#define CAMINHADA_FOLGA        5.0f    /* começa essa distância à frente da pole e acaba essa atrás do último */
+#define CAMINHADA_OLHA         12.0f   /* metros adiante (para trás no grid) que ela olha, no mínimo */
+#define CAMINHADA_GRAUS        62.0f   /* o campo de visão (vertical) dela */
+#define CAMINHADA_FOLGA        4.0f    /* metros: ela começa um pouco antes de a primeira dupla ser a da vez */
 #define FILAS_DO_GRID          ((TOTAL_CARROS + 1) / 2)   /* os carros largam em duplas, lado a lado */
-#define DIANTE_DA_FILA         7.0f    /* metros: o menor recuo da câmera diante de uma dupla */
-#define FOLGA_DOS_LADOS        3.0f    /* metros além do centro de cada carro que precisam caber no quadro */
-#define METADE_DA_VISAO        0.55f   /* tangente da metade do ângulo de visão na horizontal, com margem */
-#define ALCANCE_DO_NOME        1.0f    /* da distância entre filas: o nome fica até a metade do caminho para a próxima */
-#define ATRASO_DO_NOME         1.3f    /* em filas: o nome segue a câmera, não chega antes dos carros */
-#define TROCA_DO_NOME          0.08f   /* e a troca de uma dupla para a outra é rápida, sem se sobrepor */
+#define SEGUNDOS_POR_FILA      1.45f   /* a caminhada leva isso por dupla (o grid cresce, ela cresce junto) */
+#define ENTRADA_DA_CAMINHADA   1.2f    /* segundos a mais: a chegada à primeira dupla e a parada na última */
+#define LADO_DO_CARRO          1.15f   /* metros do centro do carro até o lado dele */
+#define FIM_NA_ULTIMA          0.30f   /* das filas: ela para com a última dupla ainda inteira no quadro */
+#define TROCA_DO_NOME          0.08f   /* a troca de uma dupla para a outra é rápida, sem as duas na tela juntas */
+
+/* Quanto dura cada tomada, em segundos */
+static const float DURACAO_DA_TOMADA[TOTAL_TOMADAS] = {
+    [TOMADA_PISTA] = 5.5f,
+    [TOMADA_GRID] = 4.0f,
+    [TOMADA_PILOTOS] = SEGUNDOS_POR_FILA * FILAS_DO_GRID + ENTRADA_DA_CAMINHADA,   /* sem parar, fila a fila */
+    [TOMADA_JOGADOR] = 4.5f,
+    [TOMADA_PRONTO] = 1.6f,
+};
 #define ORBITA_RAIO_DE         6.8f
 #define ORBITA_RAIO_ATE        5.2f
 #define ORBITA_ALTURA_DE       1.9f
@@ -139,6 +139,18 @@ static const Carro *poleDoGrid(const Corrida *corrida) {
     return corrida->classificacao[0];
 }
 
+/* Quantos metros uma fila do grid está à frente da pole (as de trás dão negativo). O grid é escalonado (o segundo
+ * carro da dupla larga um pouco atrás do primeiro): a fila fica no meio dos dois */
+static float metrosDaFilaDoGrid(const Corrida *corrida, int fila) {
+    float soma = 0.0f;
+    int quantos = 0;
+    for (int i = 2 * fila; i < 2 * fila + 2 && i < TOTAL_CARROS; i++) {
+        soma += corrida->classificacao[i]->distanciaPercorrida;
+        quantos++;
+    }
+    return (soma / (float) quantos - poleDoGrid(corrida)->distanciaPercorrida) / UNIDADES_POR_METRO;
+}
+
 static float metrosDoGrid(const Corrida *corrida) {
     const Carro *ultimo = corrida->classificacao[TOTAL_CARROS - 1];
     return (poleDoGrid(corrida)->distanciaPercorrida - ultimo->distanciaPercorrida) / UNIDADES_POR_METRO;
@@ -169,70 +181,66 @@ static Camera3D cameraDoGrid(const Corrida *corrida, float t) {
     return novaCamera(posicao, alvo, 50.0f);
 }
 
-/* 3) A câmera atravessa o grid de fila em fila, de frente para os carros: anda até a dupla, para
- * diante dela (os dois nomes na tela) e segue para a próxima */
-/*
- * dianteDaDupla
- * Quanto a câmera recua diante de uma dupla para os dois carros caberem inteiros: em pistas de
- * grid largo (Interlagos) ela fica mais longe.
- * Recebe: a corrida.
- * Devolve: metros.
- */
-static float dianteDaDupla(const Corrida *corrida) {
-    float maisLonge = 0.0f;
-    for (int i = 0; i < TOTAL_CARROS; i++) {
-        const Carro *c = corrida->classificacao[i];
-        float lado = fabsf(c->deslocamentoLateral * larguraDoLado(c->posicao.segmento, c->deslocamentoLateral));
-        maisLonge = fmaxf(maisLonge, lado);
-    }
-    return fmaxf(DIANTE_DA_FILA, (maisLonge + FOLGA_DOS_LADOS) / METADE_DA_VISAO);
+/* 3) A câmera atravessa o grid de fila em fila, de frente para os carros, sem parar. A dupla "da vez" (a que tem
+ * os nomes na tela) é a mais perto dela que ainda cabe no quadro: a vez dela começa quando a dupla da frente sai
+ * pelos lados da tela e acaba quando ela mesma sai. Num grid largo (Interlagos) os carros saem pelos lados mais
+ * longe da câmera, e a vez de cada dupla vem junto */
+
+/* A distância entre duas filas do grid, em metros */
+static float entreFilas(const Corrida *corrida) {
+    float e = fabsf(metrosDaFilaDoGrid(corrida, 1) - metrosDaFilaDoGrid(corrida, 0));
+    return (e < 1.0f) ? 8.0f : e;
 }
 
-static float metrosDaFila(const Corrida *corrida, int fila) {
-    const Carro *pole = poleDoGrid(corrida);
-    const Carro *primeiro = corrida->classificacao[2 * fila];
-    return (primeiro->distanciaPercorrida - pole->distanciaPercorrida) / UNIDADES_POR_METRO;
+/*
+ * saidaPelosLados
+ * Recebe: a corrida.
+ * Devolve: a quantos metros da câmera os carros mais abertos do grid saem pelos lados da tela.
+ */
+static float saidaPelosLados(const Corrida *corrida) {
+    float maisAberto = 0.0f;
+    for (int i = 0; i < TOTAL_CARROS; i++) {
+        const Carro *c = corrida->classificacao[i];
+        maisAberto = fmaxf(maisAberto, fabsf(c->deslocamentoLateral * larguraDoLado(c->posicao.segmento, c->deslocamentoLateral)));
+    }
+    float aspecto = (float) GetScreenWidth() / (float) (GetScreenHeight() > 0 ? GetScreenHeight() : 1);
+    float tangente = tanf(CAMINHADA_GRAUS * 0.5f * DEG2RAD) * aspecto;
+    return (maisAberto + LADO_DO_CARRO) / fmaxf(tangente, 0.2f);
+}
+
+/* Onde a câmera fica quando a fila está no meio da vez dela (metros a partir da pole, para a frente) */
+static float meioDaVez(const Corrida *corrida, int fila) {
+    return metrosDaFilaDoGrid(corrida, fila) + saidaPelosLados(corrida) + 0.5f * entreFilas(corrida);
 }
 
 static float ondeEstaACaminhada(const Corrida *corrida, float t) {
     /* Velocidade quase constante, com uma entrada e uma saída suaves: a câmera nunca para */
     float e = misturar(t, suavizar(t), 0.35f);
-    float de = CAMINHADA_FOLGA + dianteDaDupla(corrida);
-    /* termina com o nome da última dupla inteiro na tela (o nome segue a câmera com um atraso) */
-    float entreFilas = fabsf(metrosDaFila(corrida, 1) - metrosDaFila(corrida, 0));
-    float ate = metrosDaFila(corrida, FILAS_DO_GRID - 1) + dianteDaDupla(corrida) - (ATRASO_DO_NOME + 0.3f) * entreFilas;
+    float de = meioDaVez(corrida, 0) + 0.5f * entreFilas(corrida) + CAMINHADA_FOLGA;
+    float ate = meioDaVez(corrida, FILAS_DO_GRID - 1) - FIM_NA_ULTIMA * entreFilas(corrida);
     return misturar(de, ate, e);
 }
 
 /*
  * presencaDaFila
- * O quanto o nome de uma dupla está na tela: cheio quando a câmera passa diante dela, sumindo
- * na metade do caminho até a próxima, numa troca rápida (sem as duas na tela ao mesmo tempo).
+ * O quanto o nome de uma dupla está na tela: cheio durante a vez dela, trocando rápido nas pontas (sem duas
+ * duplas na tela ao mesmo tempo).
  * Recebe: a corrida, a fila, o andamento da tomada e onde guardar de que lado ela sai (+1 entrando, -1 saindo).
  * Devolve: de 0 a 1.
  */
 static float presencaDaFila(const Corrida *corrida, int fila, float t, float *lado) {
-    float onde = ondeEstaACaminhada(corrida, t);
-    float diante = metrosDaFila(corrida, fila) + dianteDaDupla(corrida);
-    float entreFilas = fabsf(metrosDaFila(corrida, 1) - metrosDaFila(corrida, 0));
-    if (entreFilas < 1.0f) {
-        entreFilas = 8.0f;
-    }
-    /* > 0: a câmera ainda vem chegando; < 0: já passou. O nome fica centrado um pouco depois do
-     * ponto diante da dupla, para só entrar quando os dois carros já estão no quadro */
-    float d = (onde - diante) / entreFilas + ATRASO_DO_NOME;
+    float d = (ondeEstaACaminhada(corrida, t) - meioDaVez(corrida, fila)) / entreFilas(corrida);   /* > 0: ainda vem */
     *lado = (d > 0.0f) ? 1.0f : -1.0f;
-    float meio = ALCANCE_DO_NOME / 2.0f;
-    /* termina de sumir exatamente no meio do caminho, onde a próxima começa a entrar: nunca as duas juntas */
-    return 1.0f - suavizar(Clamp((fabsf(d) - (meio - 2.0f * TROCA_DO_NOME)) / (2.0f * TROCA_DO_NOME), 0.0f, 1.0f));
+    return 1.0f - suavizar(Clamp((fabsf(d) - (0.5f - 2.0f * TROCA_DO_NOME)) / (2.0f * TROCA_DO_NOME), 0.0f, 1.0f));
 }
 
 static Camera3D cameraDosPilotos(const Corrida *corrida, float t) {
     PosicaoNaPista pole = poleDoGrid(corrida)->posicao;
     float onde = ondeEstaACaminhada(corrida, t);
     Vector3 posicao = pontoAoLado(naPista(pole, onde), 0.0f, CAMINHADA_ALTURA + 0.6f);
-    Vector3 alvo = pontoAoLado(naPista(pole, onde - fmaxf(CAMINHADA_OLHA, dianteDaDupla(corrida))), 0.0f, 0.5f);   /* mira a dupla */
-    return novaCamera(posicao, alvo, 62.0f);
+    float olha = fmaxf(CAMINHADA_OLHA, saidaPelosLados(corrida) + 0.5f * entreFilas(corrida));   /* mira a dupla da vez */
+    Vector3 alvo = pontoAoLado(naPista(pole, onde - olha), 0.0f, 0.5f);
+    return novaCamera(posicao, alvo, CAMINHADA_GRAUS);
 }
 
 /* 4) A câmera gira em volta do carro do jogador */

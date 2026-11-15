@@ -17,8 +17,8 @@
  *      branco na cena (o sol, o reflexo dele num carro) entra no halo também;
  *   3) os raios de sol (no passeio, com o sol na frente): o céu em volta do sol, tapado pelo que está
  *      na frente dele, é espalhado a partir do sol, numa imagem de 1/4 do tamanho;
- *   4) na tela, um shader junta a cena e o halo, põe a neblina da distância (pela profundidade), a
- *      profundidade de campo das cenas, os raios e o reflexo do sol na lente, passa a luz pela curva
+ *   4) na tela, um shader junta a cena e o halo, põe a neblina da distância (pela profundidade), o
+ *      desfoque do fundo bem longe (opção), os raios e o reflexo do sol na lente, passa a luz pela curva
  *      de cinema (o que passou do branco chega nele aos poucos), corrige a cor (o tom de cada pista,
  *      ou o da hora no passeio, contraste e saturação), escurece as bordas (vinheta) e, em alta
  *      velocidade, borra as bordas na direção do centro.
@@ -39,9 +39,7 @@
 #define LIMIAR_DO_HDR     1.0f    /* o que passa disso na cena (o branco) brilha */
 #define FORCA_DO_HDR_NO_HALO 1.6f
 #define EXPOSICAO         1.04f   /* com a curva de cinema: o meio-tom sobe um tico, o branco desce um tico */
-#define FOCO_DAS_CENAS    0.0072f /* da altura da imagem: o maior borrão da profundidade de campo nas cenas */
-#define ZONA_DO_FOCO      0.28f   /* em volta do foco, o que fica nítido (fração de 1 - foco/distância) */
-#define FOCO_AO_LONGE     160.0f  /* metros: dirigindo, com a opção "ao longe", o que passa disso desfoca... */
+#define FOCO_AO_LONGE     160.0f  /* metros: com a opção da profundidade de campo, o que passa disso desfoca... */
 #define BORRAO_AO_LONGE   0.0030f /* ...até tanto (da altura da imagem) */
 #define ALCANCE_DOS_RAIOS 0.85f   /* da distância até o sol: o comprimento dos raios */
 
@@ -153,7 +151,7 @@ static const char *PIXELS_FINAL =
     "uniform vec2 planos;\n"                                   /* perto e longe da câmera (0: sem profundidade) */
     "uniform vec3 olho, raioFrente, raioDireita, raioCima;\n"  /* a câmera: o raio de cada pixel sai daí */
     "uniform vec4 neblina; uniform vec3 corDaNeblina;\n"        /* densidade, base, 1 / altura, máximo */
-    "uniform vec4 foco;\n"                                     /* metros, borrão máximo (pixels), zona nítida, só o fundo */
+    "uniform vec2 foco;\n"                                     /* metros a partir dos quais desfoca, borrão máximo (pixels) */
     "uniform vec3 solNaTela; uniform vec3 corDosRaios; uniform vec3 corDoReflexo;\n"
     "uniform float exposicao;\n"                               /* 0: sem a curva de cinema (cena de 8 bits) */
     "out vec4 finalColor;\n"
@@ -165,11 +163,8 @@ static const char *PIXELS_FINAL =
     "vec3 raioPor(vec2 p) { return raioFrente + (p.x * 2.0 - 1.0) * raioDireita + (p.y * 2.0 - 1.0) * raioCima; }\n"
     /* o céu: o domo fica a 9 km em toda direção (pela profundidade só, os cantos da tela ficariam aquém) */
     "float ehCeu(vec2 p, float z) { return step(" CEU_A_PARTIR_DE ", z * length(raioPor(p))); }\n"
-    /* o tamanho do borrão de um ponto a z metros, em pixels */
-    "float circulo(float z) {\n"
-    "    if (foco.w > 0.5) return foco.y * smoothstep(foco.x, foco.x * 3.0, z);\n"
-    "    return foco.y * clamp((abs(1.0 - foco.x / z) - foco.z) / (1.0 - foco.z), 0.0, 1.0);\n"
-    "}\n"
+    /* o tamanho do borrão de um ponto a z metros, em pixels: só o fundo bem longe */
+    "float circulo(float z) { return foco.y * smoothstep(foco.x, foco.x * 3.0, z); }\n"
     /* a curva de cinema: igual até o joelho; dali, o que passa do branco chega nele aos poucos */
     "vec3 curva(vec3 c) {\n"
     "    const float J = 0.72, B = 1.18;\n"
@@ -209,8 +204,8 @@ static const char *PIXELS_FINAL =
     "        if (nitidez > 0.0) c += (c - (n + s + e + w) * 0.25) * nitidez;\n"   /* afiar a imagem, como o FidelityFX CAS */
     "    }\n"
     "    float z = (planos.y > 0.0) ? metros(uv) : 1.0e9;\n"
-    /* A profundidade de campo: os vizinhos num disco (a espiral do ângulo de ouro) entram pelo tamanho do
-     * borrão DELES; o fundo não vaza por cima do que está na frente. O que está em foco nem procura */
+    /* O desfoque do fundo longe: os vizinhos num disco (a espiral do ângulo de ouro) entram pelo tamanho do
+     * borrão DELES; o fundo não vaza por cima do que está na frente. O que está nítido nem procura */
     "    if (foco.y > 0.0 && planos.y > 0.0) {\n"
     "        float r = circulo(z);\n"
     "        if (r > 0.5) {\n"
@@ -714,10 +709,9 @@ void terminarPosProcesso(int pista, float desfoque, AcabamentoDoPosProcesso acab
     Rectangle daImagem = { 0, 0, (float) largura, (float) -altura };
     Rectangle naTela = { (float) areaX, (float) areaY, (float) larguraDaArea(), (float) alturaDaArea() };
     const Configuracoes *config = configuracoesAtuais();
-    int focoDeCena = comCinema && config->profundidadeDeCampo >= 1 && cinema.foco > 0.0f && cinema.abertura > 0.0f;
-    int focoAoLonge = comCinema && config->profundidadeDeCampo >= 2 && !focoDeCena && acabamento != POSPROCESSO_SO_COPIA;
+    int focoAoLonge = comCinema && config->profundidadeDeCampo && acabamento != POSPROCESSO_SO_COPIA;
     float nitidez = (config->nitidez == 1) ? 0.45f : ((config->nitidez >= 2) ? 0.9f : 0.0f);
-    int comExtras = config->suavizacao || nitidez > 0.0f || config->granulado || focoDeCena || focoAoLonge || config->distorcaoDaLente || config->oclusaoAmbiental;
+    int comExtras = config->suavizacao || nitidez > 0.0f || config->granulado || focoAoLonge || config->distorcaoDaLente || config->oclusaoAmbiental;
     if (acabamento == POSPROCESSO_SO_COPIA && !comExtras) {
         /* Sem os efeitos: só copia a cena para a tela (desenhar direto na janela é mais lento) */
         DrawTexturePro(cena.texture, daImagem, naTela, (Vector2){ 0 }, 0.0f, WHITE);
@@ -838,16 +832,8 @@ void terminarPosProcesso(int pista, float desfoque, AcabamentoDoPosProcesso acab
                          1.0f / fmaxf(cinema.alturaDaNeblina, 1.0f), cinema.maximoDaNeblina };
     SetShaderValue(shaderFinal, locNeblina, neblina, SHADER_UNIFORM_VEC4);
     SetShaderValue(shaderFinal, locCorDaNeblina, &cinema.corDaNeblina, SHADER_UNIFORM_VEC3);
-    float foco[4] = { 0.0f, 0.0f, ZONA_DO_FOCO, 0.0f };
-    if (focoDeCena) {
-        foco[0] = fmaxf(cinema.foco, 0.5f);
-        foco[1] = FOCO_DAS_CENAS * (float) altura * Clamp(cinema.abertura, 0.0f, 1.0f);
-    } else if (focoAoLonge) {
-        foco[0] = FOCO_AO_LONGE;
-        foco[1] = BORRAO_AO_LONGE * (float) altura;
-        foco[3] = 1.0f;
-    }
-    SetShaderValue(shaderFinal, locFoco, foco, SHADER_UNIFORM_VEC4);
+    float foco[2] = { FOCO_AO_LONGE, focoAoLonge ? BORRAO_AO_LONGE * (float) altura : 0.0f };
+    SetShaderValue(shaderFinal, locFoco, foco, SHADER_UNIFORM_VEC2);
     SetShaderValue(shaderFinal, locSolNaTela, &sol, SHADER_UNIFORM_VEC3);
     SetShaderValue(shaderFinal, locCorDosRaios, &corDosRaios, SHADER_UNIFORM_VEC3);
     SetShaderValue(shaderFinal, locCorDoReflexo, &corDoReflexo, SHADER_UNIFORM_VEC3);

@@ -79,8 +79,6 @@
 #define BASE_DA_NEBLINA       0.0f      /* metros: a cidade fica a ~1,5 m; os morros sobem para fora dela */
 #define ALTURA_DA_NEBLINA     150.0f    /* metros: subindo tanto, ela fica e vezes mais rala */
 #define MAXIMO_DA_NEBLINA     0.55f
-#define PUXADA_DO_FOCO        0.30f     /* segundos: o foco anda até o que a cena mostra */
-#define ENTRADA_DO_FOCO       0.50f     /* segundos: o desfoque das cenas entra e sai aos poucos */
 #define ATRASO_DA_CAMERA      0.22f     /* segundos: a câmera vem atrás do caminho do carro com este atraso */
 #define CAMINHO_DA_CAMERA_DE  2.0f      /* m/s: abaixo disso, a câmera vai atrás do rumo; acima de... */
 #define CAMINHO_DA_CAMERA_ATE 8.0f      /* ...isto, de para onde o carro está indo (como na corrida, carro.c) */
@@ -147,7 +145,6 @@ static const float ZOOMS_DO_MAPA[3] = { 1.0f, 2.5f, 6.0f };
 static Olhar olhar;
 static float rumoDaCamera = 0.0f, alturaDaCamera = 0.0f, noWallride = 0.0f;
 static float grausAMais = 0.0f, tremorDaCamera = 0.0f, relogioDoTremor = 0.0f, rolagemDaCamera = 0.0f;   /* a câmera viva */
-static float focoAgora = 0.0f, aberturaAgora = 0.0f;   /* a profundidade de campo das cenas, chegando aos poucos */
 static float cobertura = 0.0f;                  /* 0 ao ar livre, 1 coberto (com o atraso da cobertura) */
 static Vector3 desvioDaCamera = { 0.0f, 0.0f, 0.0f };   /* o quanto o que há em volta tirou a câmera do lugar dela */
 static Vector3 cimaDaCamera = { 0.0f, 1.0f, 0.0f }, frenteDaCamera = { 0.0f, 0.0f, -1.0f };
@@ -1881,12 +1878,12 @@ static Camera3D montarCamera(void) {
 
 /*
  * cinemaDoPasseio
- * O que o pós-processamento do passeio usa além da cena: a neblina e a cor da hora, o sol (os raios e o
- * reflexo na lente, mais fortes com ele baixo) e, nas cenas do Mack, o foco no que a câmera mostra.
- * Recebe: a câmera, a luz da hora e o tempo do quadro.
+ * O que o pós-processamento do passeio usa além da cena: a neblina e a cor da hora e o sol (os raios e o
+ * reflexo na lente, mais fortes com ele baixo).
+ * Recebe: a câmera e a luz da hora.
  * Devolve: o cinema do quadro.
  */
-static CinemaDoQuadro cinemaDoPasseio(Camera3D camera, const LuzDoDia *luz, float dt) {
+static CinemaDoQuadro cinemaDoPasseio(Camera3D camera, const LuzDoDia *luz) {
     CinemaDoQuadro cinema = { 0 };
     cinema.camera = camera;
     /* a cor do horizonte, menos saturada: no pôr do sol ela é laranja forte, e os morros sumiriam nela */
@@ -1909,25 +1906,6 @@ static CinemaDoQuadro cinemaDoPasseio(Camera3D camera, const LuzDoDia *luz, floa
     cinema.raiosDeSol = acima * (0.14f + 0.42f * baixo);
     cinema.reflexoDoSol = acima * (0.6f + 0.4f * baixo);
 
-    /* O foco: só nas cenas do Mack, no que a câmera mostra (o carro, ou o Mack partindo). Conversando, não:
-     * a imagem continua toda nítida */
-    float foco = 0.0f, abertura = 0.0f;
-    Vector3 doCarro = { carro.x, carro.y + 0.7f, carro.z };
-    if (cena != CENA_DIRIGINDO) {
-        int carroAVista = (cena == CENA_ENTRANDO || cena == CENA_SAINDO);
-        foco = Vector3Distance(camera.position, carroAVista ? doCarro : camera.target);
-        abertura = 1.0f;
-    }
-    if (dt > 0.0f) {
-        if (focoAgora <= 0.0f || aberturaAgora < 0.01f) {
-            focoAgora = foco;   /* entrando agora: o foco já nasce no lugar */
-        } else if (foco > 0.0f) {
-            focoAgora += (foco - focoAgora) * (1.0f - expf(-dt / PUXADA_DO_FOCO));
-        }
-        aberturaAgora += (abertura - aberturaAgora) * (1.0f - expf(-dt / ENTRADA_DO_FOCO));
-    }
-    cinema.foco = focoAgora;
-    cinema.abertura = (focoAgora > 0.0f) ? aberturaAgora : 0.0f;
     return cinema;
 }
 
@@ -2700,7 +2678,7 @@ void desenharPasseio(EstadoMenu *menu) {
     }
     float rapidez = Clamp(velocidadeDoCarroLivre(&carro) / carro.velocidadeMaxima, 0.0f, 1.2f);
     float desfoque = efeitos ? 0.35f * rapidez * rapidez + (carro.nitroLigado ? 0.25f : 0.0f) : 0.0f;
-    CinemaDoQuadro cinema = cinemaDoPasseio(camera, luzDoDia, dt);
+    CinemaDoQuadro cinema = cinemaDoPasseio(camera, luzDoDia);
     definirCinemaDoQuadro(&cinema);
     terminarPosProcesso(PISTA_OVAL, desfoque, efeitos ? POSPROCESSO_COMPLETO : POSPROCESSO_SO_COPIA);
     aplicarLuzDoDia(NULL);   /* fora do passeio (as corridas, os menus), a luz de sempre */

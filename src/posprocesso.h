@@ -7,8 +7,8 @@
  *
  * A imagem da cena guarda também a profundidade (quantos metros até cada
  * pixel) e, com as cores HDR ligadas, a luz acima do branco. Daí saem a
- * neblina da distância, a profundidade de campo de verdade, os raios de sol
- * e o reflexo do sol na lente; a luz acima do branco brilha (bloom) e uma
+ * neblina da distância, o desfoque do fundo bem longe (opção), os raios de
+ * sol e o reflexo do sol na lente; a luz acima do branco brilha (bloom) e uma
  * curva de cinema a suaviza até o branco.
  * ------------------------------------------------------------------
  */
@@ -28,7 +28,7 @@ typedef enum {
 } AcabamentoDoPosProcesso;
 
 /* O que um quadro pede além do tom da pista. Quem desenha preenche antes de terminarPosProcesso
- * (definirCinemaDoQuadro); sem isso, o quadro sai sem neblina, sem sol e sem foco. */
+ * (definirCinemaDoQuadro); sem isso, o quadro sai sem neblina e sem sol. */
 typedef struct {
     Camera3D camera;          /* a do quadro: a profundidade vira metros e o sol vira um ponto na tela */
     /* A neblina da distância (a perspectiva do ar: o longe vai ficando da cor do horizonte) */
@@ -42,9 +42,6 @@ typedef struct {
     Vector3 corDoSol;         /* 0 a 1 */
     float raiosDeSol;         /* 0 a 1: a força dos raios (0: nenhum) */
     float reflexoDoSol;       /* 0 a 1: a força do reflexo na lente (0: nenhum) */
-    /* A profundidade de campo das cenas: o foco em quem importa */
-    float foco;               /* metros da câmera até o que está em foco (0: sem a de cena) */
-    float abertura;           /* 0 a 1: o quanto o que está fora de foco borra */
     /* A cor do quadro, no lugar do tom da pista (o passeio muda com a hora) */
     int temCor;
     Vector3 tom;

@@ -1128,10 +1128,10 @@ static void testarGridDeLargada(void) {
         if (carro->posicao.segmento->indice < total / 2 || carro->voltas != -1) {
             todosAntes = 0;
         }
-        /* O grid de Interlagos é o pintado no modelo: os lugares alternam de lado, a 4 m do meio,
-         * com a pole à direita */
+        /* O grid de Interlagos é o pintado no modelo: os lugares alternam de lado (o da pole a 4 m do meio,
+         * o outro a 4,35 m), com a pole à direita */
         float lateral = carro->deslocamentoLateral * larguraDoLado(carro->posicao.segmento, carro->deslocamentoLateral);
-        float esperado = (i % 2 == 0) ? pista->grid.lateral : -pista->grid.lateral;
+        float esperado = (i % 2 == 0) ? pista->grid.lateralDaPole : -pista->grid.lateralDoOutro;
         if (fabsf(lateral - esperado) > 0.05f) {
             noQuadrado = 0;
         }
@@ -1140,8 +1140,9 @@ static void testarGridDeLargada(void) {
     verificar(noQuadrado, "cada carro larga no quadrado pintado do seu lugar, alternando os lados");
     verificar(corrida.classificacao[0]->distanciaPercorrida == -distanciaDoLugarAteALinha(pista, 0),
               "o pole e quem esta mais perto da linha");
-    verificar(fabsf(distanciaDoLugarAteALinha(pista, 1) - distanciaDoLugarAteALinha(pista, 0) - 7.7f * ESCALA_INTERLAGOS * UNIDADES_POR_METRO) < 1.0f,
-              "um lugar a cada 7,7 m, como os quadrados do modelo");
+    verificar(fabsf(distanciaDoLugarAteALinha(pista, 2) - distanciaDoLugarAteALinha(pista, 0) - 15.35f * ESCALA_INTERLAGOS * UNIDADES_POR_METRO) < 1.0f
+              && fabsf(distanciaDoLugarAteALinha(pista, 1) - distanciaDoLugarAteALinha(pista, 0) - 5.7f * ESCALA_INTERLAGOS * UNIDADES_POR_METRO) < 1.0f,
+              "uma fila a cada 15,35 m, escalonada (o segundo 5,7 m atras da pole), como os colchetes pintados no modelo");
     verificar(voltaAtual(&corrida.jogador) == 1, "no grid o HUD mostra a volta 1");
 
     /* Anda até o jogador cruzar a linha pela primeira vez */
@@ -1755,7 +1756,9 @@ static void ladoALado(Corrida *corrida, Pista *pista, Carro *rival, float aFrent
             outro->velocidadeMaxima = 1.0f;
         }
     }
-    Segmento *reta = buscarSegmento(pista, 600);
+    /* Na saída da Curva do Sol: 1000 m depois da linha do pórtico, que ficava 21,7 m antes da linha pintada
+     * (o lugar de sempre do teste) */
+    Segmento *reta = buscarSegmento(pista, 587);
     PosicaoNaPista lugar = { reta, 0.0f };
     rival->posicao = lugar;
     rival->distanciaPercorrida = 20000.0f;
@@ -2256,7 +2259,7 @@ static void testarPitstop(void) {
             float noPit = metrosDesdeAEntrada(pista, metrosNaVolta(jogador));
             float lado = -jogador->deslocamentoLateral * jogador->posicao.segmento->larguraEsquerda;
             for (int k = 1; k < TOTAL_PONTOS_PIT_INTERLAGOS; k++) {
-                float ali = metrosDesdeAEntrada(pista, PIT_INTERLAGOS[k][0] * ESCALA_INTERLAGOS);
+                float ali = metrosDesdeAEntrada(pista, PIT_INTERLAGOS[k][0] * ESCALA_INTERLAGOS - METROS_DO_PORTICO_A_LINHA_PINTADA);
                 if (ali >= noPit && noPit > 120.0f * ESCALA_INTERLAGOS && ali < metrosDesdeAEntrada(pista, pista->pit.fim) - 60.0f
                     && jogador->estadoDoPit != PIT_TROCANDO) {
                     int fora = (lado < PIT_INTERLAGOS[k][1] * ESCALA_INTERLAGOS - 1.5f
@@ -4659,8 +4662,11 @@ static void testarDoisVolantesNaMesmaCorrida(void) {
         if (!corrida.terminouPara[1] && !corrida.humanos[1]->controladoPeloJogador) {
             roubaramOVolante = 1;
         }
-        /* Depois da largada, e so enquanto os dois ainda estao dirigindo */
-        if (freando && corrida.contagemRegressiva <= 0.0f
+        /* Depois da largada, e so enquanto os dois ainda estao dirigindo (rodando, ou no pit lane, o carro
+         * nao obedece a ninguem: nao e o volante do outro) */
+        int dirigindo = !corrida.humanos[0]->rodando && !corrida.humanos[1]->rodando
+                        && !carroNoPit(corrida.humanos[0]) && !carroNoPit(corrida.humanos[1]);
+        if (freando && dirigindo && corrida.contagemRegressiva <= 0.0f
             && !corrida.terminouPara[0] && !corrida.terminouPara[1]) {
             quadrosSeparados++;
             if (corrida.humanos[0]->ultimosComandos.frear || !corrida.humanos[1]->ultimosComandos.frear) {

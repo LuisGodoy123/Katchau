@@ -140,6 +140,8 @@ typedef struct {
     float tempoDaTroca;            /* segundos parado na vaga */
     float duracaoDaTroca;          /* quanto a troca dele leva */
     int vemAlguemAtras;            /* 1: no pit lane, vem um carro aí atrás (quem está saindo da vaga espera) */
+    int noCaminhoDoPit;            /* 1: andando exatamente pela estrada do pit (o piloto automático)... */
+    float sobraDoCaminho;          /* ...menos estes metros de lado, o que faltava ao chegar nela (somem aos poucos) */
     float ultimaTroca;             /* quanto levou a última (0 = nenhuma) */
 
     /* ---- O que o piloto da IA enxerga (corrida.c preenche a cada quadro) ---- */
