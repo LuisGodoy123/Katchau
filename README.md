@@ -427,6 +427,7 @@ src/
   interiores.c/.h  o lado de dentro dos prédios em que o carro entra (a loja do Luigi, o Cozy Cone)
   hora.c/.h        o relógio do passeio (o dia de 48 minutos) e a luz de cada hora
   luzes.c/.h       as luzes da cidade à noite (neons, lâmpadas, vitrines)
+  desempenho.c/.h  a medição de cada etapa do quadro (CPU e placa), o gráfico na tela e a gravação do benchmark
   grilos.c/.h      o som dos grilos de noite
   postes.c/.h      os postes de luz da rua e o semáforo (o desenho e os troncos sólidos)
   tratores.c/.h    os tratores-vaca dos pastos: dormem de noite e tombam de costas com o ronco do motor
@@ -780,6 +781,39 @@ saber em que segmento ele está e a quantos metros da linha. O carro e a câmera
 Para investigar como o carro se comporta, `KATCHAU_TELEMETRIA=1 ./katchau` grava cada quadro da corrida em `telemetria.csv`.
 
 ### Medir o desempenho
+
+**O gráfico na tela.** Em Configurações, "Desempenho na tela" mostra só o FPS ou o **gráfico** (F3 liga e desliga o
+gráfico em qualquer tela). Cada coluna é um quadro dos últimos 240: as etapas da CPU empilhadas, na ordem em que
+acontecem (lógica, som, preparo das luzes, sombras, mundo, halos, telões, pós e HUD), e em cinza a espera (a CPU
+parada esperando a placa, o VSync ou o limite de quadros); a linha clara é o tempo da placa de vídeo. Em cima, o FPS
+de agora e, dos últimos quadros, o 1% pior, o desvio, o maior e os trancos (quadros com mais que o dobro da mediana);
+embaixo, a média do último segundo de cada etapa na CPU e na placa, e as contas do quadro (lâmpadas acesas e nos
+shaders, quantas vezes as lâmpadas, a grade delas e a luz da hora foram mandadas aos shaders, quadrados de sombra
+refeitos). Na placa, cada etapa tem uma consulta de tempo do OpenGL (`GL_TIME_ELAPSED`), lida uns quadros depois para
+não parar a CPU (`desempenho.c`). Nos chips da Apple a placa pinta os pixels de um passe de desenho só no fim dele,
+então o tempo de uma etapa pode cair na seguinte: o total da placa vale, a divisão é aproximada.
+
+**O benchmark.** `./katchau --benchmark` (com `--janela`, numa janela pequena) leva o carro sozinho pela rua
+principal, de ponta a ponta e de volta, a 30 m/s, em três fases: o dia (12h), o entardecer (18h54, a cidade acendendo
+com o sol ainda fazendo sombra) e a noite (22h30), com o relógio andando como no jogo. Cada quadro é gravado em
+`benchmark-<data>.csv` (a fase, o tempo do quadro, cada etapa na CPU e na placa, as contas), menos o segundo e meio
+depois de o carro ser levado; no fim, o resumo de cada fase (média, mediana, 1% pior, maior, desvio, trancos e a média
+de cada etapa) sai no terminal e em `benchmark-<data>.csv.txt`, e o jogo fecha. Para comparar duas versões, rode as
+duas com as mesmas configurações, uma logo depois da outra, mais de uma vez: o resultado varia de uma rodada para a
+outra, e num notebook bastante.
+
+**O calor.** Num notebook sem ventoinha (um MacBook Air), sem limite de quadros a placa trabalha no máximo o tempo
+todo e, depois de alguns minutos, o chip esquenta e baixa o próprio relógio: o mesmo benchmark, na mesma janela, deu
+188 FPS de dia com a máquina fria e 97 com ela quente. É a queda "do nada" de uns 190 para uns 80 FPS. Acima da taxa
+do monitor (60 Hz no Air) os quadros a mais nem aparecem: com o limite de quadros nela (ou a sincronia vertical), o
+jogo fica nos 60, sem esquentar a ponto de cair.
+
+**O que já foi enxugado**, sem mudar a imagem: as lâmpadas, a grade delas e a luz da hora só vão aos shaders quando
+mudam (o passeio mandava tudo duas vezes por quadro, e voltava à luz de sempre no fim de cada um; agora isso é feito
+uma vez, ao sair dele, `sairDaLuzDoPasseio`), e a grade só é refeita quando os lugares das lâmpadas mudam; as
+luminárias de dentro dos prédios só vão aos shaders perto deles (de dia, na rua, ocupavam as 64 vagas); os neons, os
+halos e os brilhos fora da tela não são desenhados (`luzes.c`); e no máximo um dos dois quadrados do mapa de sombra é
+refeito por quadro (`mundo.c`).
 
 `KATCHAU_QUADROS=1 ./katchau` escreve no log, a cada 5 segundos e no fim, o tempo médio de quadro, o do 1% pior
 (onde aparecem os trancos, que a média esconde) e o maior. Antes de medir, desligue a sincronia vertical e o limite

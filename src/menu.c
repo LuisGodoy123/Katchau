@@ -1897,7 +1897,7 @@ static void mudarOpcao(EstadoMenu *menu, int linha, int sentido) {
             aplicarDesempenho(config);
             break;
         case LINHA_MOSTRAR_FPS:
-            config->mostrarFps = !config->mostrarFps;
+            config->mostrarFps = (config->mostrarFps + sentido + 3) % 3;   /* não, o FPS, o gráfico */
             break;
         case LINHA_TRACADO:
             config->tracadoDeCorrida = !config->tracadoDeCorrida;
@@ -2219,6 +2219,9 @@ static void desenharAbasDaConfig(int aberta) {
 static const char *descricaoDaLinha(int linha) {
     switch (linha) {
         case LINHA_PRESET: return "TROCA VÁRIAS OPÇÕES DE UMA VEZ: BAIXO PARA PCS FRACOS, ALTO PARA O MELHOR VISUAL.";
+        case LINHA_SINCRONIA: return "CADA QUADRO SAI JUNTO COM O MONITOR: SEM CORTES NA IMAGEM, E O JOGO NÃO PASSA DA TAXA DELE.";
+        case LINHA_LIMITE_DE_QUADROS: return "ACIMA DA TAXA DO MONITOR OS QUADROS NÃO APARECEM. EM NOTEBOOK, SEM LIMITE O CHIP ESQUENTA E O FPS CAI.";
+        case LINHA_MOSTRAR_FPS: return "O CONTADOR DE FPS, OU O GRÁFICO DO TEMPO DE CADA ETAPA DO QUADRO. F3 LIGA E DESLIGA O GRÁFICO.";
         case LINHA_ESCALA: return "O MUNDO É DESENHADO MENOR E AMPLIADO: MENOS %, MAIS QUADROS POR SEGUNDO.";
         case LINHA_POS_PROCESSAMENTO: return "A COR DE CADA PISTA, O CONTRASTE E AS BORDAS ESCURAS DA IMAGEM.";
         case LINHA_BLOOM: return "ATIVA OU DESATIVA O BRILHO EM VOLTA DAS LUZES FORTES (FAZ A IMAGEM RODAR UM POUCO MAIS PESADA).";
@@ -2278,7 +2281,8 @@ void desenharConfiguracoes(EstadoMenu *menu) {
         desenharLinhaDeOpcao(menu, LINHA_SINCRONIA, "SINCRONIA VERTICAL (VSYNC)", config->sincroniaVertical ? "LIGADA" : "DESLIGADA", 0);
         int fps = quadrosPorSegundoDoLimite(config->limiteDeQuadros);
         desenharLinhaDeOpcao(menu, LINHA_LIMITE_DE_QUADROS, "LIMITE DE QUADROS POR SEGUNDO", fps > 0 ? TextFormat("%d FPS", fps) : "SEM LIMITE", 0);
-        desenharLinhaDeOpcao(menu, LINHA_MOSTRAR_FPS, "MOSTRAR O CONTADOR DE FPS", config->mostrarFps ? "SIM" : "NÃO", 0);
+        desenharLinhaDeOpcao(menu, LINHA_MOSTRAR_FPS, "DESEMPENHO NA TELA (F3: GRÁFICO)",
+                             config->mostrarFps == 2 ? "GRÁFICO" : (config->mostrarFps == 1 ? "FPS" : "NÃO"), 0);
         desenharLinhaDeOpcao(menu, LINHA_TRACADO, "TRAÇADO DE CORRIDA (LINHA NO ASFALTO)", config->tracadoDeCorrida ? "LIGADO" : "DESLIGADO", 0);
         desenharLinhaDeOpcao(menu, LINHA_CAMERA_VIVA, "MOVIMENTO DA CÂMERA (VELOCIDADE E BATIDAS)", config->cameraViva ? "LIGADO" : "DESLIGADO", 0);
         desenharLinhaDeOpcao(menu, LINHA_PADRAO, "VOLTAR TUDO AO PADRÃO", (menu->confirmarPadrao > 0.0f) ? "APERTE DE NOVO" : "", 0);

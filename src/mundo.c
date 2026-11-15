@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include "desempenho.h"
 #include "mundo.h"
 #include "torcida3d.h"
 #include "telao.h"
@@ -2906,7 +2907,7 @@ static QuadradoDaSombra quadradosDaSombra[2] = {
  * Recebe: o quadrado, a pista, a câmera e o sol.
  * Devolve: 1 se refez (e preenche a matriz da luz), 0 se o de antes continua valendo.
  */
-static int fazerQuadradoDaSombra(QuadradoDaSombra *q, IdPista id, Camera3D camera, Vector3 sol, Matrix *luzVP) {
+static int fazerQuadradoDaSombra(QuadradoDaSombra *q, IdPista id, Camera3D camera, Vector3 sol, Matrix *luzVP, int podeEsperar) {
     /* O meio do quadrado: à frente da câmera, preso à grade do mapa (senão a borda das sombras treme) */
     Vector3 frente = Vector3Subtract(camera.target, camera.position);
     frente.y = 0.0f;
@@ -2919,9 +2920,13 @@ static int fazerQuadradoDaSombra(QuadradoDaSombra *q, IdPista id, Camera3D camer
         && Vector3DotProduct(sol, q->solAnterior) > SOL_ANDOU) {
         return 0;
     }
+    if (podeEsperar && (int) id == q->pistaAnterior) {
+        return 0;   /* o outro quadrado foi refeito neste quadro: este fica para o próximo (veja prepararSombras) */
+    }
     q->meioAnterior = meio;
     q->solAnterior = sol;
     q->pistaAnterior = id;
+    contarNoQuadro(CONTA_SOMBRAS_REFEITAS, 1);
     Camera3D luz = { 0 };
     luz.position = Vector3Add(meio, Vector3Scale(sol, ALTURA_DO_SOL));
     luz.target = meio;
@@ -2967,15 +2972,18 @@ void prepararSombras(IdPista id, Camera3D camera, int ligadas) {
     if (!sombraLigadaAgora) {
         return;
     }
-    /* O cenário não se mexe: cada quadrado só é refeito quando a câmera anda bastante (ou muda a pista) */
+    /* O cenário não se mexe: cada quadrado só é refeito quando a câmera anda bastante (ou muda a pista). E no
+     * máximo um por quadro: quando os dois pedem ao mesmo tempo (o sol andou), o de perto fica para o quadro
+     * seguinte, em vez de os dois somarem um tranco (a folga dele é de metros; um quadro é menos de um) */
     Matrix vp;
-    if (fazerQuadradoDaSombra(&quadradosDaSombra[1], id, camera, luzDoDia->sol, &vp)) {
+    int refezOLonge = fazerQuadradoDaSombra(&quadradosDaSombra[1], id, camera, luzDoDia->sol, &vp, 0);
+    if (refezOLonge) {
         luzVPMandada = vp;
         for (int i = 0; i < totalQueRecebemSombra; i++) {
             SetShaderValueMatrix(recebemSombra[i], locLuzVP[i], vp);
         }
     }
-    if (fazerQuadradoDaSombra(&quadradosDaSombra[0], id, camera, luzDoDia->sol, &vp)) {
+    if (fazerQuadradoDaSombra(&quadradosDaSombra[0], id, camera, luzDoDia->sol, &vp, refezOLonge)) {
         luzVPPertoMandada = vp;
         for (int i = 0; i < totalQueRecebemSombra; i++) {
             SetShaderValueMatrix(recebemSombra[i], locLuzVPPerto[i], vp);

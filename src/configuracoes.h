@@ -91,7 +91,7 @@ typedef struct {
     int modoDeTela;           /* ModoDeTela */
     int sincroniaVertical;    /* 1: cada quadro sai junto com a atualização do monitor (VSync) */
     int limiteDeQuadros;      /* índice na tabela de limites de quadros por segundo */
-    int mostrarFps;           /* 1: mostra o contador de quadros por segundo no canto da tela */
+    int mostrarFps;           /* 0: nada; 1: o contador de quadros por segundo no canto da tela; 2: o gráfico do desempenho */
     int tracadoDeCorrida;     /* 1: a linha de corrida no asfalto: verde acelera, amarelo alivia, vermelho freia */
     /* ---- Gráficos ---- */
     int presetGrafico;        /* PresetGrafico: o último pacote escolhido (PRESET_PERSONALIZADO se mexeu depois em alguma opção) */

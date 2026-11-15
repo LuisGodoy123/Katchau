@@ -54,6 +54,8 @@
 #include "efeitos.h"
 #include "config.h"
 #include "malhas.h"
+#include "desempenho.h"
+#include <time.h>
 
 #define ARQUIVO_DA_COLISAO    "recursos/modelos/radiator_springs.col"
 
@@ -1115,6 +1117,96 @@ static void teleportar(float x, float z, float rumo) {
 }
 
 /*
+ * sairDaLuzDoPasseio
+ * Fora do passeio (as corridas, os menus, a garagem), a luz de sempre e nenhuma lâmpada. Chamar quando o jogo
+ * sai do passeio.
+ */
+void sairDaLuzDoPasseio(void) {
+    aplicarLuzDoDia(NULL);
+    aplicarLampadas(NULL, 0);
+}
+
+/* ---------- O benchmark (--benchmark) ----------
+ * Um percurso sempre igual pela rua principal, de ponta a ponta, indo pela faixa de quem vai para leste e
+ * voltando pela outra, em três fases: o dia, o entardecer (o sol ainda faz sombra e a cidade acende) e a
+ * noite. Ninguém dirige: o carro é levado pelo percurso a velocidade constante, e o relógio anda como no
+ * jogo, a partir da hora da fase. Cada quadro é gravado (desempenho.c), menos o começo de cada trecho, que
+ * é a câmera chegando. No fim, o resumo sai no terminal e num .txt, e o jogo fecha. */
+#define VELOCIDADE_DO_BENCHMARK  30.0f    /* metros por segundo */
+#define ACOMODANDO_NO_BENCHMARK  1.5f     /* segundos do começo de cada trecho que não contam */
+typedef struct {
+    const char *nome;
+    float hora;
+} FaseDoBenchmark;
+static const FaseDoBenchmark FASES_DO_BENCHMARK[] = {
+    { "dia", 12.0f },
+    { "entardecer", 18.9f },   /* as luzes da cidade acendem logo depois, com o sol ainda baixo fazendo sombra */
+    { "noite", 22.5f },
+};
+#define TOTAL_FASES_DO_BENCHMARK (int) (sizeof(FASES_DO_BENCHMARK) / sizeof(FASES_DO_BENCHMARK[0]))
+/* A rua principal (moradores_mapa.h): a faixa para leste em z 138,8, a para oeste em z 131,5 */
+#define RUA_DE_X     300.0f
+#define RUA_ATE_X    780.0f
+#define FAIXA_LESTE  138.8f
+#define FAIXA_OESTE  131.5f
+
+static int benchmarkLigado = 0, faseDoBenchmark = -1, trechoDoBenchmark = 0;
+static float tempoNoTrecho = 0.0f;
+
+static void comecarTrechoDoBenchmark(void) {
+    tempoNoTrecho = 0.0f;
+    int voltando = (trechoDoBenchmark == 1);
+    levarCarroPara(&carro, malha, voltando ? RUA_ATE_X : RUA_DE_X, voltando ? FAIXA_OESTE : FAIXA_LESTE,
+                   voltando ? -PI / 2.0f : PI / 2.0f);
+    reiniciarCamera();
+    faseDaGravacao(NULL);
+}
+
+void comecarBenchmarkDoPasseio(void) {
+    benchmarkLigado = 1;
+    faseDoBenchmark = 0;
+    trechoDoBenchmark = 0;
+    SetRandomSeed(1u);   /* os moradores fazem sempre o mesmo */
+    char arquivo[96];
+    time_t agora = time(NULL);
+    strftime(arquivo, sizeof(arquivo), "benchmark-%Y-%m-%d-%H%M%S.csv", localtime(&agora));
+    gravarDesempenho(arquivo);
+    definirHoraDoDia(FASES_DO_BENCHMARK[0].hora);
+    atualizarLuzesDaCidade(luzDaHora()->luzesDaCidade, 0.0f, 1);
+    comecarTrechoDoBenchmark();
+}
+
+int andarNoBenchmark(float tempoQuadro) {
+    if (!benchmarkLigado) {
+        return 1;
+    }
+    tempoNoTrecho += tempoQuadro;
+    float andou = fmaxf(tempoNoTrecho - ACOMODANDO_NO_BENCHMARK * 0.5f, 0.0f) * VELOCIDADE_DO_BENCHMARK;
+    float comprimento = RUA_ATE_X - RUA_DE_X;
+    if (andou >= comprimento) {
+        /* O fim do trecho: volta pela outra faixa, ou passa para a próxima fase */
+        trechoDoBenchmark++;
+        if (trechoDoBenchmark > 1) {
+            trechoDoBenchmark = 0;
+            faseDoBenchmark++;
+            if (faseDoBenchmark >= TOTAL_FASES_DO_BENCHMARK) {
+                benchmarkLigado = 0;
+                terminarGravacao();
+                return 0;
+            }
+            definirHoraDoDia(FASES_DO_BENCHMARK[faseDoBenchmark].hora);
+        }
+        comecarTrechoDoBenchmark();
+        return 1;
+    }
+    int voltando = (trechoDoBenchmark == 1);
+    float x = voltando ? RUA_ATE_X - andou : RUA_DE_X + andou;
+    levarCarroPara(&carro, malha, x, voltando ? FAIXA_OESTE : FAIXA_LESTE, voltando ? -PI / 2.0f : PI / 2.0f);
+    faseDaGravacao(tempoNoTrecho >= ACOMODANDO_NO_BENCHMARK ? FASES_DO_BENCHMARK[faseDoBenchmark].nome : NULL);
+    return 1;
+}
+
+/*
  * soltarPoeiraEFumaca
  * Na areia e na terra, as rodas de trás levantam poeira da cor do chão (mais rápido, mais
  * poeira; derrapando, muito mais). No asfalto, o drift solta fumaça branca, e a arrancada
@@ -2097,6 +2189,8 @@ static void prepararLampadas(Camera3D camera) {
     int total = lampadasAcesas(todas, 256);
     static Lampada escolhidas[MAIS_LAMPADAS];
     int quantas = escolherLampadas(camera, todas, total, escolhidas, MAIS_LAMPADAS);
+    contarNoQuadro(CONTA_LAMPADAS_ACESAS, total);
+    contarNoQuadro(CONTA_LAMPADAS_NOS_SHADERS, quantas);
     aplicarLampadas(escolhidas, quantas);
     ligarVistaDasLampadas();
     ligarGradeDasLampadas();
@@ -2615,6 +2709,7 @@ void desenharPasseio(EstadoMenu *menu) {
         return;
     }
     float dt = (pausado || mapaAberto) ? 0.0f : GetFrameTime();
+    etapaDoQuadro(ETAPA_LOGICA);   /* o que ainda anda antes do desenho: o Mack, a poeira, a fumaça */
     Camera3D camera = montarCamera();   /* sempre: ela segue o carro mesmo nas cenas, para não dar tranco depois */
     if (cena != CENA_DIRIGINDO) {
         camera = cameraDaCena();
@@ -2628,12 +2723,15 @@ void desenharPasseio(EstadoMenu *menu) {
     atualizarMarcas(dt);
     atualizarMinimapa();
 
+    etapaDoQuadro(ETAPA_PREPARO);
     prepararLuzes(0);
     const LuzDoDia *luzDoDia = luzDaHora();   /* a luz da hora (no fim do quadro volta a do meio-dia) */
     aplicarLuzDoDia(luzDoDia);
     luzDaFumaca(corDaLuz(luzDoDia->base));
     prepararLampadas(camera);
+    etapaDoQuadro(ETAPA_SOMBRAS);
     prepararSombras(CENARIO_DO_MUNDO_ABERTO, camera, configuracoesAtuais()->sombras);
+    etapaDoQuadro(ETAPA_MUNDO);
     definirOlhoDosCarros(camera.position);
     comecarPosProcesso();
     prepararPlanosDaCamera();
@@ -2667,6 +2765,7 @@ void desenharPasseio(EstadoMenu *menu) {
     int efeitos = configuracoesAtuais()->efeitos;
     if (efeitos) {
         /* As luzes de novo, sozinhas: o halo nasce da chama do nitro e dos neons */
+        etapaDoQuadro(ETAPA_LUZES);
         comecarLuzesComProfundidade();   /* o que está na frente (prédios, carros, o Mack) tapa as luzes */
         prepararPlanosDaCamera();
         BeginMode3D(camera);
@@ -2680,9 +2779,11 @@ void desenharPasseio(EstadoMenu *menu) {
     float desfoque = efeitos ? 0.35f * rapidez * rapidez + (carro.nitroLigado ? 0.25f : 0.0f) : 0.0f;
     CinemaDoQuadro cinema = cinemaDoPasseio(camera, luzDoDia);
     definirCinemaDoQuadro(&cinema);
+    etapaDoQuadro(ETAPA_TELA);
     terminarPosProcesso(PISTA_OVAL, desfoque, efeitos ? POSPROCESSO_COMPLETO : POSPROCESSO_SO_COPIA);
-    aplicarLuzDoDia(NULL);   /* fora do passeio (as corridas, os menus), a luz de sempre */
-    aplicarLampadas(NULL, 0);
+    /* A luz da hora e as lâmpadas ficam nos shaders de um quadro para o outro (mandá-las de novo a cada quadro
+     * era refazer a grade das lâmpadas e mandar tudo a todos os shaders): quem volta à luz de sempre é a saída
+     * do passeio (sairDaLuzDoPasseio) */
     luzDaFumaca(WHITE);
 
     comecarInterface(0);

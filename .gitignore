@@ -13,3 +13,7 @@ katchau.zip
 # As escolhas do jogador
 configuracoes.txt
 telemetria.csv
+
+# O que o --benchmark grava
+benchmark-*.csv
+benchmark-*.csv.txt

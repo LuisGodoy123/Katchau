@@ -15,6 +15,7 @@
  * ------------------------------------------------------------------
  */
 
+#include "desempenho.h"
 #include "hora.h"
 
 #include <math.h>
@@ -464,6 +465,7 @@ void registrarShaderDoDia(Shader shader) {
 static Texture2D imagemDaGrade, imagemDaLista;
 static int temGrade = 0, tentouCriarGrade = 0;
 static float lugaresMandados[MAIS_LAMPADAS * 4], coresMandadas[MAIS_LAMPADAS * 4], focosMandados[MAIS_LAMPADAS * 4];
+static Vector4 medidasMandadas;   /* da grade montada para os lugares mandados */
 
 static void criarImagensDaGrade(void) {
     tentouCriarGrade = 1;
@@ -619,11 +621,16 @@ void aplicarLampadas(const Lampada *lista, int total) {
             focos[i * 4 + 3] = -2.0f;
         }
     }
-    if (total == lampadasMandadas && memcmp(lugares, lugaresMandados, sizeof(float) * 4 * (size_t) total) == 0
-        && memcmp(cores, coresMandadas, sizeof(float) * 4 * (size_t) total) == 0
-        && memcmp(focos, focosMandados, sizeof(float) * 4 * (size_t) total) == 0) {
+    /* Só o que mudou vai aos shaders: quando a cidade acende, a força muda a cada quadro, mas os lugares não, e
+     * a grade (montada na CPU e mandada como imagem) só é refeita quando os lugares mudam */
+    int novas = (total != lampadasMandadas);
+    int mudaramOsLugares = novas || memcmp(lugares, lugaresMandados, sizeof(float) * 4 * (size_t) total) != 0;
+    int mudaramAsCores = novas || memcmp(cores, coresMandadas, sizeof(float) * 4 * (size_t) total) != 0;
+    int mudaramOsFocos = novas || memcmp(focos, focosMandados, sizeof(float) * 4 * (size_t) total) != 0;
+    if (!mudaramOsLugares && !mudaramAsCores && !mudaramOsFocos) {
         return;   /* os mesmos valores já estão nos shaders */
     }
+    contarNoQuadro(CONTA_ENVIOS_DE_LAMPADAS, 1);
     memcpy(lugaresMandados, lugares, sizeof(float) * 4 * (size_t) total);
     memcpy(coresMandadas, cores, sizeof(float) * 4 * (size_t) total);
     memcpy(focosMandados, focos, sizeof(float) * 4 * (size_t) total);
@@ -632,10 +639,13 @@ void aplicarLampadas(const Lampada *lista, int total) {
     if (total > 0 && !tentouCriarGrade) {
         criarImagensDaGrade();
     }
-    Vector4 medidas = { 0.0f, 0.0f, 0.0f, 0.0f };   /* o último valor 0: o shader percorre todas as lâmpadas */
-    if (total > 0 && temGrade) {
-        if (!montarGrade(lugares, total, &medidas)) {
-            medidas = (Vector4){ 0.0f, 0.0f, 0.0f, 0.0f };
+    if (mudaramOsLugares) {
+        medidasMandadas = (Vector4){ 0.0f, 0.0f, 0.0f, 0.0f };   /* o último valor 0: o shader percorre todas */
+        if (total > 0 && temGrade) {
+            contarNoQuadro(CONTA_GRADES_MONTADAS, 1);
+            if (!montarGrade(lugares, total, &medidasMandadas)) {
+                medidasMandadas = (Vector4){ 0.0f, 0.0f, 0.0f, 0.0f };
+            }
         }
     }
     for (int i = 0; i < totalDeShaders; i++) {
@@ -643,13 +653,15 @@ void aplicarLampadas(const Lampada *lista, int total) {
         if (s->locTotalDeLampadas < 0) {
             continue;
         }
-        SetShaderValue(s->shader, s->locTotalDeLampadas, &total, SHADER_UNIFORM_INT);
-        if (s->locGradeMedidas >= 0) SetShaderValue(s->shader, s->locGradeMedidas, &medidas, SHADER_UNIFORM_VEC4);
-        if (total > 0 && s->locLampadas >= 0) SetShaderValueV(s->shader, s->locLampadas, lugares, SHADER_UNIFORM_VEC4, total);
-        if (total > 0 && s->locCoresDasLampadas >= 0) {
+        if (mudaramOsLugares) {
+            SetShaderValue(s->shader, s->locTotalDeLampadas, &total, SHADER_UNIFORM_INT);
+            if (s->locGradeMedidas >= 0) SetShaderValue(s->shader, s->locGradeMedidas, &medidasMandadas, SHADER_UNIFORM_VEC4);
+            if (total > 0 && s->locLampadas >= 0) SetShaderValueV(s->shader, s->locLampadas, lugares, SHADER_UNIFORM_VEC4, total);
+        }
+        if (total > 0 && mudaramAsCores && s->locCoresDasLampadas >= 0) {
             SetShaderValueV(s->shader, s->locCoresDasLampadas, cores, SHADER_UNIFORM_VEC4, total);
         }
-        if (total > 0 && s->locFocos >= 0) SetShaderValueV(s->shader, s->locFocos, focos, SHADER_UNIFORM_VEC4, total);
+        if (total > 0 && mudaramOsFocos && s->locFocos >= 0) SetShaderValueV(s->shader, s->locFocos, focos, SHADER_UNIFORM_VEC4, total);
     }
 }
 
@@ -681,6 +693,7 @@ void aplicarLuzDoDia(const LuzDoDia *luz) {
         return;
     }
     aplicada = *luz;
+    contarNoQuadro(CONTA_ENVIOS_DA_LUZ, 1);
     for (int i = 0; i < totalDeShaders; i++) {
         mandarAoShader(&shaders[i], &aplicada);
     }

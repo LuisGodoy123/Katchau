@@ -31,5 +31,10 @@ void voltarDaEscolhaDaCorrida(void);                 /* desistiu na escolha: o c
 void partirComOMack(const char *nomeDaPista);        /* escolheu: o carro entra na carreta e o Mack parte */
 void voltarDaCorrida(int numeroDoCarro, const char *recado);   /* o carro desce da carreta, na cidade */
 int cenaDoMackComMusica(void);                       /* 1 embarcando e na partida do Mack (a música toca) */
+void sairDaLuzDoPasseio(void);                       /* fora dele, a luz de sempre e nenhuma lâmpada */
+
+/* O benchmark (--benchmark): um percurso fixo pela cidade, gravado quadro a quadro (desempenho.c) */
+void comecarBenchmarkDoPasseio(void);
+int andarNoBenchmark(float tempoQuadro);              /* depois de atualizarPasseio; 0 quando terminou */
 
 #endif

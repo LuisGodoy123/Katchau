@@ -45,6 +45,7 @@
 #include "rlgl.h"
 #include "leitor_json.h"
 #include "malhas.h"
+#include "corte.h"
 
 #define PASTA_DAS_LUZES       "recursos/modelos/luzes"
 #define MAIS_CONJUNTOS        24
@@ -67,6 +68,9 @@
 #define QUADROS_POR_LINHA     16        /* ...e quantas lâmpadas por linha da imagem das vistas */
 #define AFASTA_DA_LAMPADA     0.05f     /* metros: o raio começa um pouco fora da lâmpada */
 #define LADO_DO_BRILHO        64        /* pixels da imagem do borrão */
+/* As luminárias de dentro só iluminam os carros lá dentro, e o carro anda perto da câmera: mais longe que o
+ * alcance delas e esta folga, não vão aos shaders (de dia, na rua, nenhuma vai) */
+#define FOLGA_DAS_DE_DENTRO   20.0f
 
 typedef struct {
     char nome[48];
@@ -555,6 +559,12 @@ static float distanciaDoConjunto(Vector3 camera, const Conjunto *c) {
     return fmaxf(Vector3Distance(camera, meio) - Vector3Distance(c->caixa.min, c->caixa.max) * 0.5f, 0.0f);
 }
 
+/* O conjunto pode aparecer na tela? Chamar depois de prepararCorte (os que andam, que são poucos e estão
+ * sempre perto do jogador, não são cortados) */
+static int conjuntoAVista(const Conjunto *c) {
+    return c->movel || caixaAVista(c->caixa);
+}
+
 /* Onde a lâmpada está no mundo */
 static Vector3 lugarDaLampada(const Conjunto *c, const Lampada *l) {
     return c->movel ? Vector3Transform(l->lugar, c->matriz) : l->lugar;
@@ -593,9 +603,10 @@ static void desenharMalhas(const Conjunto *c) {
 
 void desenharLuzesDaCidade(Camera3D camera, Vector3 luzDoDia) {
     rlDrawRenderBatchActive();
+    prepararCorte();   /* os neons fora da tela não são desenhados (eram todos, a cada quadro) */
     for (int i = 0; i < totalDeConjuntos; i++) {
         const Conjunto *c = &conjuntos[i];
-        if (!c->temModelo || !c->visivel || distanciaDoConjunto(camera.position, c) > DESENHA_ATE) {
+        if (!c->temModelo || !c->visivel || distanciaDoConjunto(camera.position, c) > DESENHA_ATE || !conjuntoAVista(c)) {
             continue;
         }
         mandarUniformes(c, 0.0f, luzDoDia);
@@ -605,9 +616,11 @@ void desenharLuzesDaCidade(Camera3D camera, Vector3 luzDoDia) {
 
 void desenharHalosDaCidade(Camera3D camera) {
     rlDrawRenderBatchActive();
+    prepararCorte();
     for (int i = 0; i < totalDeConjuntos; i++) {
         const Conjunto *c = &conjuntos[i];
-        if (!c->temModelo || !c->visivel || (c->acesa <= 0.0f && !c->pisca) || distanciaDoConjunto(camera.position, c) > HALO_ATE) {
+        if (!c->temModelo || !c->visivel || (c->acesa <= 0.0f && !c->pisca) || distanciaDoConjunto(camera.position, c) > HALO_ATE
+            || !conjuntoAVista(c)) {
             continue;
         }
         mandarUniformes(c, 1.0f, (Vector3){ 1.0f, 1.0f, 1.0f });
@@ -636,6 +649,10 @@ void desenharHalosDaCidade(Camera3D camera) {
                           (unsigned char) (Clamp(0.22f * l->forca * forca, 0.0f, 1.0f) * 255.0f) };
             /* de longe ele cresce um pouco, senão some na imagem pequena do halo */
             float tamanho = fmaxf(Clamp(l->raio * 0.45f, 2.5f, 4.5f), distancia * 0.012f);
+            Vector3 meio = { tamanho, tamanho, tamanho };
+            if (!caixaAVista((BoundingBox){ Vector3Subtract(aqui, meio), Vector3Add(aqui, meio) })) {
+                continue;   /* fora da tela */
+            }
             Vector3 paraACamera = Vector3Scale(Vector3Subtract(camera.position, aqui), 1.0f / distancia);
             Vector3 lugar = Vector3Add(aqui, Vector3Scale(paraACamera, fminf(tamanho * 0.5f, distancia * 0.5f)));
             desenharBrilhoNoAr(camera, lugar, tamanho, cor);
@@ -685,6 +702,9 @@ int escolherLampadas(Camera3D camera, const Lampada *todas, int total, Lampada *
          * só se sobrar lugar: o chão iluminado por ela não aparece na tela) */
         Vector3 ate = Vector3Subtract(todas[i].lugar, camera.position);
         float distancia = Vector3Length(ate);
+        if (todas[i].deDentro && distancia > todas[i].raio + FOLGA_DAS_DE_DENTRO) {
+            continue;
+        }
         float nota = distancia - todas[i].raio * 1.5f;
         if (distancia > todas[i].raio && Vector3DotProduct(ate, olhar) < -todas[i].raio) {
             nota += 400.0f;

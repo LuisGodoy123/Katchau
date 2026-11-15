@@ -398,7 +398,7 @@ int carregarConfiguracoes(Configuracoes *config, const char *arquivo) {
             } else if (strcmp(chave, "limite_de_quadros") == 0) {
                 valorValido(valor, 0, TOTAL_LIMITES_DE_QUADROS - 1, &config->limiteDeQuadros);
             } else if (strcmp(chave, "mostrar_fps") == 0) {
-                valorValido(valor, 0, 1, &config->mostrarFps);
+                valorValido(valor, 0, 2, &config->mostrarFps);
             } else if (strcmp(chave, "tracado_de_corrida") == 0) {
                 valorValido(valor, 0, 1, &config->tracadoDeCorrida);
             } else if (strcmp(chave, "preset_grafico") == 0) {

@@ -48,6 +48,7 @@
 #include "recordes.h"
 #include "controle.h"
 #include "passeio.h"
+#include "desempenho.h"
 #include "espera.h"
 #include <ctype.h>
 #include <math.h>
@@ -343,11 +344,13 @@ static int abrirJanela(int emJanela) {
 }
 
 int main(int argc, char *argv[]) {
-    int emJanela = 0, diretoNoPasseio = 0;
+    int emJanela = 0, diretoNoPasseio = 0, benchmark = 0;
     for (int i = 1; i < argc; i++) {
         emJanela |= (strcmp(argv[i], "--janela") == 0);
         diretoNoPasseio |= (strcmp(argv[i], "--passeio") == 0);   /* abre direto no passeio livre (para testar) */
+        benchmark |= (strcmp(argv[i], "--benchmark") == 0);      /* o percurso fixo pela cidade, medido (passeio.c) */
     }
+    diretoNoPasseio |= benchmark;
     /* As configurações (inclusive a exibição) são lidas antes de abrir a janela, para ela já abrir como o jogador quer */
     ChangeDirectory(GetApplicationDirectory());
     carregarConfiguracoes(configuracoesAtuais(), ARQUIVO_DE_CONFIGURACOES);
@@ -361,6 +364,7 @@ int main(int argc, char *argv[]) {
      * é aberto de outro lugar (por exemplo, com duplo clique). */
     ChangeDirectory(GetApplicationDirectory());
     quadroPretoDaEspera();   /* a janela nasce preta, e não branca */
+    iniciarDesempenho();
     iniciarSinteseDosEfeitos();   /* os sons sintetizados nascem numa thread enquanto os gráficos carregam */
     marcarEtapa("janela");
     carregarVisual();   /* fontes e logo dos menus */
@@ -420,6 +424,9 @@ int main(int argc, char *argv[]) {
     if (diretoNoPasseio) {
         tela = TELA_PASSEIO;
         iniciarPasseio(menu.carroEscolhido);
+        if (benchmark) {
+            comecarBenchmarkDoPasseio();
+        }
     } else if (!naIntro) {
         comecarAbertura();   /* sem o vídeo, a abertura toca no menu mesmo assim */
     }
@@ -441,6 +448,7 @@ int main(int argc, char *argv[]) {
     while (tela != TELA_SAIR && !WindowShouldClose() && (fimDaMedicao < 0.0 || GetTime() < fimDaMedicao)) {
         /* Tempo do último quadro, para a velocidade não depender do FPS */
         float tempoQuadro = GetFrameTime();
+        comecarQuadroDeDesempenho();
 
         if (naIntro) {
             naIntro = atualizarIntro(tempoQuadro);
@@ -451,6 +459,7 @@ int main(int argc, char *argv[]) {
             ClearBackground(BLACK);
             desenharIntro();
             EndDrawing();
+            terminarQuadroDeDesempenho();
             continue;   /* quando acaba, a intro se dissolve por cima do menu (desenharSaidaDaIntro) */
         }
         atualizarControle();   /* acha os controles e lê o analógico, antes das telas perguntarem */
@@ -490,6 +499,9 @@ int main(int argc, char *argv[]) {
                 break;
             case TELA_PASSEIO:
                 proxima = atualizarPasseio(&menu, tempoQuadro);
+                if (benchmark && !andarNoBenchmark(tempoQuadro)) {
+                    proxima = TELA_SAIR;   /* o benchmark acabou: o resumo já saiu no terminal */
+                }
                 break;
             case TELA_RESULTADO: {
                 /* A corrida continua ao fundo até todos os rivais chegarem */
@@ -543,6 +555,9 @@ int main(int argc, char *argv[]) {
         }
         /* Troca de tela: o vídeo da tela nova recomeça do início; sair da entrada clareia até o menu */
         if (proxima != tela) {
+            if (tela == TELA_PASSEIO) {
+                sairDaLuzDoPasseio();   /* a luz da hora e as lâmpadas ficam no passeio */
+            }
             if (proxima == TELA_ENTRADA) {
                 reiniciarVideoDeFundo(videoDaEntrada);
             } else if (proxima == TELA_MENU) {
@@ -604,6 +619,7 @@ int main(int argc, char *argv[]) {
             pararVibracao();
         }
 
+        etapaDoQuadro(ETAPA_SOM);
         /* A música toca nos menus e some quando a corrida começa */
         int apresentando = (tela == TELA_CORRIDA && apresentacaoAtiva(&apresentacao));
         if (apresentando) {
@@ -646,6 +662,7 @@ int main(int argc, char *argv[]) {
          * Primeiro o "mundo" (pista e carros), na resolução real da tela.
          * Depois a interface (HUD e menus), na tela virtual 800x600 que
          * comecarInterface() amplia para o tamanho da tela. */
+        etapaDoQuadro(ETAPA_TELA);   /* os menus; a corrida e o passeio marcam as etapas deles */
         BeginDrawing();
         ClearBackground(BLACK);
         congelarCena(tela == TELA_CORRIDA && pausada);
@@ -718,6 +735,7 @@ int main(int argc, char *argv[]) {
                 }
                 /* O mundo anda uma vez por quadro; depois cada jogador tem a sua faixa de tela,
                  * com a câmera e o HUD dele dentro. Com um jogador é uma faixa só: a tela inteira */
+                etapaDoQuadro(ETAPA_LOGICA);   /* as câmeras */
                 repartirJanelas(corrida.totalDeHumanos, janelas);
                 for (int v = 0; v < corrida.totalDeHumanos; v++) {
                     visoes[v].janela = janelas[v];
@@ -784,17 +802,17 @@ int main(int argc, char *argv[]) {
                 break;
         }
         desenharSaidaDaIntro(tempoQuadro);   /* o fim do vídeo se dissolvendo no menu */
-        if (configuracoesAtuais()->mostrarFps) {   /* o contador de quadros por segundo, no canto de cima */
-            comecarInterface(0);
-            escrever(FONTE_FORTE, TextFormat("%d FPS", GetFPS()), larguraVirtual() - 78.0f, 8.0f, 16.0f, COR_AMARELO);
-            terminarInterface();
-        }
+        /* O contador de FPS, ou o gráfico do desempenho (F3 alterna o gráfico) */
+        etapaDoQuadro(ETAPA_TELA);
+        desenharDesempenhoNaTela(configuracoesAtuais()->mostrarFps);
         /* A transição: a tela clareia do preto (depois de sair da entrada) */
         if (transicaoAlfa > 0.0f) {
             DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Fade(BLACK, transicaoAlfa));
             transicaoAlfa -= tempoQuadro * 1.6f;
         }
+        etapaDoQuadro(ETAPA_TROCA);
         EndDrawing();
+        terminarQuadroDeDesempenho();
         /* KATCHAU_FOTO=arquivo.png tira uma foto da tela depois de KATCHAU_FOTO_EM segundos (para comparar imagens) */
         static int tirouAFoto = 0;
         if (!tirouAFoto && getenv("KATCHAU_FOTO") != NULL

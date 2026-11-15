@@ -19,6 +19,7 @@
 #include "rlgl.h"
 #include "render.h"
 #include "pitstop.h"
+#include "desempenho.h"
 #include "mundo.h"
 #include "carros3d.h"
 #include "audio.h"
@@ -1162,9 +1163,19 @@ static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
      * pelo mesmo caminho que o telão usa */
     int semSombras = desenhandoOTelao || efeitosAliviados;
     int semTorcida3D = desenhandoOTelao || efeitosAliviados;
+    if (!desenhandoOTelao) {
+        etapaDoQuadro(ETAPA_PREPARO);   /* o telão já está na etapa dele */
+    }
     aplicarLuzDoDia(luzDaPista(pista));   /* o sol da pista (antes das sombras: elas vêm dele) */
+    aplicarLampadas(NULL, 0);             /* as do passeio não vêm para cá (não custa nada: já são nenhuma) */
     prepararLuzes(ehNoite);
+    if (!desenhandoOTelao) {
+        etapaDoQuadro(ETAPA_SOMBRAS);
+    }
     prepararSombras(pista->id, camera, configuracoesAtuais()->sombras && !semSombras);
+    if (!desenhandoOTelao) {
+        etapaDoQuadro(ETAPA_MUNDO);
+    }
     if (semTorcida3D) {
         esconderTorcidaPintada(camera.position, 0.0f);   /* sem a 3D, a torcida pintada fica inteira */
     } else {
@@ -1280,6 +1291,7 @@ static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
         cinema.raiosDeSol = comSol ? 0.40f : 0.0f;
         cinema.reflexoDoSol = comSol ? 0.75f : 0.0f;
         definirCinemaDoQuadro(&cinema);
+        etapaDoQuadro(ETAPA_TELA);
         terminarPosProcesso(pista->id, desfoqueDeVelocidade(corrida), acabamento);
     }
 }
@@ -1684,7 +1696,9 @@ void avancarMundoDaCorrida(Corrida *corrida, const VisaoDoJogador *principal) {
      * transmissão é desenhar o mundo inteiro uma terceira vez, e as telas ficam de poucos
      * pixels numa faixa de meia altura */
     if (corrida->totalDeHumanos == 1) {
+        etapaDoQuadro(ETAPA_TELOES);
         atualizarTelao(corrida, camera, principal->janela);
+        etapaDoQuadro(ETAPA_LOGICA);
     }
 }
 
