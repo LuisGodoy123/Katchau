@@ -43,6 +43,7 @@
 #include "fumaca.h"
 #include "marcas.h"
 #include "posprocesso.h"
+#include "render.h"
 #include "noite.h"
 #include "configuracoes.h"
 #include "controle.h"
@@ -64,6 +65,22 @@
 #define TREINO_Z              552.9f
 
 #define GRAUS_DE_VISAO        65.0f
+/* A câmera viva (como na corrida, render.c): o campo de visão abre com a velocidade e o nitro, as batidas e
+ * os pousos tremem a câmera, e nas curvas rápidas ela inclina um pouco para dentro */
+#define GRAUS_NA_VELOCIDADE   6.0f
+#define GRAUS_NO_NITRO        5.0f
+#define RESPOSTA_DOS_GRAUS    0.30f
+#define TREMOR_PASSA          0.28f
+#define TREMOR_MAXIMO         0.14f
+#define TREMOR_NA_VELOCIDADE  0.010f
+#define ROLAGEM_NA_CURVA      1.8f
+#define RESPOSTA_DA_ROLAGEM   0.25f
+/* O cinema do passeio: a neblina (a cor é a do horizonte da hora), os raios e o reflexo do sol, e o foco */
+#define BASE_DA_NEBLINA       0.0f      /* metros: a cidade fica a ~1,5 m; os morros sobem para fora dela */
+#define ALTURA_DA_NEBLINA     150.0f    /* metros: subindo tanto, ela fica e vezes mais rala */
+#define MAXIMO_DA_NEBLINA     0.55f
+#define PUXADA_DO_FOCO        0.30f     /* segundos: o foco anda até o que a cena mostra */
+#define ENTRADA_DO_FOCO       0.50f     /* segundos: o desfoque das cenas entra e sai aos poucos */
 #define ATRASO_DA_CAMERA      0.22f     /* segundos: a câmera vem atrás do caminho do carro com este atraso */
 #define CAMINHO_DA_CAMERA_DE  2.0f      /* m/s: abaixo disso, a câmera vai atrás do rumo; acima de... */
 #define CAMINHO_DA_CAMERA_ATE 8.0f      /* ...isto, de para onde o carro está indo (como na corrida, carro.c) */
@@ -129,6 +146,8 @@ static int pausado = 0, mapaAberto = 0, zoomDoMapa = 1;
 static const float ZOOMS_DO_MAPA[3] = { 1.0f, 2.5f, 6.0f };
 static Olhar olhar;
 static float rumoDaCamera = 0.0f, alturaDaCamera = 0.0f, noWallride = 0.0f;
+static float grausAMais = 0.0f, tremorDaCamera = 0.0f, relogioDoTremor = 0.0f, rolagemDaCamera = 0.0f;   /* a câmera viva */
+static float focoAgora = 0.0f, aberturaAgora = 0.0f;   /* a profundidade de campo das cenas, chegando aos poucos */
 static float cobertura = 0.0f;                  /* 0 ao ar livre, 1 coberto (com o atraso da cobertura) */
 static Vector3 desvioDaCamera = { 0.0f, 0.0f, 0.0f };   /* o quanto o que há em volta tirou a câmera do lugar dela */
 static Vector3 cimaDaCamera = { 0.0f, 1.0f, 0.0f }, frenteDaCamera = { 0.0f, 0.0f, -1.0f };
@@ -1647,6 +1666,9 @@ Tela atualizarPasseio(EstadoMenu *menu, float tempoQuadro) {
     if (carro.pancada > PANCADA_QUE_SOA) {
         tocarSomDaBatida(carro.pancada, 0);
     }
+    if (configuracoesAtuais()->cameraViva) {
+        tremorDaCamera = fmaxf(tremorDaCamera, carro.pancada);   /* a câmera treme junto (antes de o som zerar a pancada) */
+    }
     carro.pancada = 0.0f;
     return TELA_PASSEIO;
 }
@@ -1838,9 +1860,75 @@ static Camera3D montarCamera(void) {
         camera.target = Vector3Add(camera.position, Vector3Normalize(Vector3Lerp(olhaNormal, olhaParede, noWallride)));
         camera.up = Vector3Normalize(Vector3Lerp(camera.up, cimaDaCamera, noWallride));
     }
-    camera.fovy = GRAUS_DE_VISAO;
     camera.projection = CAMERA_PERSPECTIVE;
-    return camera;
+
+    /* A câmera viva: o campo de visão, o tremor e a inclinação vão até os alvos deste quadro */
+    int viva = configuracoesAtuais()->cameraViva;
+    float rapidez = Clamp(fabsf(velocidadeDoCarroLivre(&carro)) / fmaxf(carro.velocidadeMaxima, 1.0f), 0.0f, 1.2f);
+    if (dt > 0.0f) {
+        float grausAlvo = viva ? GRAUS_NA_VELOCIDADE * rapidez * rapidez + (carro.nitroLigado ? GRAUS_NO_NITRO : 0.0f) : 0.0f;
+        float rolagemAlvo = (viva && carro.noChao) ? ROLAGEM_NA_CURVA * carro.volante * rapidez * (1.0f - noWallride) : 0.0f;
+        grausAMais += (grausAlvo - grausAMais) * (1.0f - expf(-dt / RESPOSTA_DOS_GRAUS));
+        rolagemDaCamera += (rolagemAlvo - rolagemDaCamera) * (1.0f - expf(-dt / RESPOSTA_DA_ROLAGEM));
+        tremorDaCamera *= expf(-dt / TREMOR_PASSA);
+        relogioDoTremor = fmodf(relogioDoTremor + dt, 1000.0f);
+    }
+    camera.fovy = GRAUS_DE_VISAO + grausAMais;
+    float metros = TREMOR_MAXIMO * tremorDaCamera * tremorDaCamera
+                   + ((viva && carro.noChao) ? TREMOR_NA_VELOCIDADE * rapidez * rapidez * rapidez : 0.0f);
+    return tremerCamera(camera, metros, relogioDoTremor, rolagemDaCamera);
+}
+
+/*
+ * cinemaDoPasseio
+ * O que o pós-processamento do passeio usa além da cena: a neblina e a cor da hora, o sol (os raios e o
+ * reflexo na lente, mais fortes com ele baixo) e, nas cenas do Mack, o foco no que a câmera mostra.
+ * Recebe: a câmera, a luz da hora e o tempo do quadro.
+ * Devolve: o cinema do quadro.
+ */
+static CinemaDoQuadro cinemaDoPasseio(Camera3D camera, const LuzDoDia *luz, float dt) {
+    CinemaDoQuadro cinema = { 0 };
+    cinema.camera = camera;
+    /* a cor do horizonte, menos saturada: no pôr do sol ela é laranja forte, e os morros sumiriam nela */
+    float cinza = 0.2126f * luz->horizonte.x + 0.7152f * luz->horizonte.y + 0.0722f * luz->horizonte.z;
+    cinema.corDaNeblina = Vector3Lerp((Vector3){ cinza, cinza, cinza }, luz->horizonte, 0.6f);
+    cinema.neblina = luz->neblina;
+    cinema.baseDaNeblina = BASE_DA_NEBLINA;
+    cinema.alturaDaNeblina = ALTURA_DA_NEBLINA;
+    cinema.maximoDaNeblina = MAXIMO_DA_NEBLINA;
+    cinema.temCor = 1;
+    cinema.tom = luz->tomDaTela;
+    cinema.contraste = luz->contrasteDaTela;
+    cinema.saturacao = luz->saturacaoDaTela;
+    cinema.vinheta = luz->vinhetaDaTela;
+    /* O sol: só acima do horizonte; quanto mais baixo, mais raios */
+    cinema.sol = luz->solNoCeu;
+    cinema.corDoSol = luz->corDoSol;
+    float acima = Clamp((luz->solNoCeu.y + 0.02f) / 0.08f, 0.0f, 1.0f);
+    float baixo = 1.0f - Clamp((luz->solNoCeu.y - 0.15f) / 0.55f, 0.0f, 1.0f);
+    cinema.raiosDeSol = acima * (0.14f + 0.42f * baixo);
+    cinema.reflexoDoSol = acima * (0.6f + 0.4f * baixo);
+
+    /* O foco: só nas cenas do Mack, no que a câmera mostra (o carro, ou o Mack partindo). Conversando, não:
+     * a imagem continua toda nítida */
+    float foco = 0.0f, abertura = 0.0f;
+    Vector3 doCarro = { carro.x, carro.y + 0.7f, carro.z };
+    if (cena != CENA_DIRIGINDO) {
+        int carroAVista = (cena == CENA_ENTRANDO || cena == CENA_SAINDO);
+        foco = Vector3Distance(camera.position, carroAVista ? doCarro : camera.target);
+        abertura = 1.0f;
+    }
+    if (dt > 0.0f) {
+        if (focoAgora <= 0.0f || aberturaAgora < 0.01f) {
+            focoAgora = foco;   /* entrando agora: o foco já nasce no lugar */
+        } else if (foco > 0.0f) {
+            focoAgora += (foco - focoAgora) * (1.0f - expf(-dt / PUXADA_DO_FOCO));
+        }
+        aberturaAgora += (abertura - aberturaAgora) * (1.0f - expf(-dt / ENTRADA_DO_FOCO));
+    }
+    cinema.foco = focoAgora;
+    cinema.abertura = (focoAgora > 0.0f) ? aberturaAgora : 0.0f;
+    return cinema;
 }
 
 /*
@@ -2612,6 +2700,8 @@ void desenharPasseio(EstadoMenu *menu) {
     }
     float rapidez = Clamp(velocidadeDoCarroLivre(&carro) / carro.velocidadeMaxima, 0.0f, 1.2f);
     float desfoque = efeitos ? 0.35f * rapidez * rapidez + (carro.nitroLigado ? 0.25f : 0.0f) : 0.0f;
+    CinemaDoQuadro cinema = cinemaDoPasseio(camera, luzDoDia, dt);
+    definirCinemaDoQuadro(&cinema);
     terminarPosProcesso(PISTA_OVAL, desfoque, efeitos ? POSPROCESSO_COMPLETO : POSPROCESSO_SO_COPIA);
     aplicarLuzDoDia(NULL);   /* fora do passeio (as corridas, os menus), a luz de sempre */
     aplicarLampadas(NULL, 0);

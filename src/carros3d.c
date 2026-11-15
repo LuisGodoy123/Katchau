@@ -22,6 +22,7 @@
 #include "moradores.h"
 #include "noite.h"
 #include "hora.h"
+#include "mundo.h"
 #include "exibicao.h"
 
 #define PASTA_DOS_MODELOS     "recursos/modelos/carros/"
@@ -160,7 +161,11 @@ static const char *VERTICES_DO_SHADER =
     "void main() { if ((texture(texture0, fragTexCoord) * colDiffuse).a < 0.5) discard;\n" \
     "              finalColor = vec4(0.0, 0.0, 0.0, " OPACIDADE "); }\n"
 
-/* Luz de um sol alto mais o céu, para os carros terem volume. Os shaders
+/* Luz de um sol alto mais o céu, para os carros terem volume. A lataria reflete o mundo em três faixas,
+ * como num estúdio de foto de carro: o chão escuro embaixo, uma linha clara e nítida no horizonte (é ela
+ * que desenha as curvas da carroceria) e o céu em cima; o sol deixa um brilho largo e, no meio dele, um
+ * ponto que passa do branco (com as cores HDR, ele brilha). Na sombra do sol (o mapa de sombra do cenário),
+ * a luz direta e o brilho do sol somem, e a do céu e o reflexo escurecem um pouco. Os shaders
  * só mudam no corte (um desenha só o opaco, o outro só o translúcido) e na
  * leitura da cor (a dos olhos junta três texturas, veja OLHOS_DO_SHADER).
  * No passeio, o sol, a luz e o céu refletido mudam com a hora (hora.c). */
@@ -171,24 +176,29 @@ static const char *VERTICES_DO_SHADER =
     "uniform float corteDoAro;\n" /* na roda de pneu estourado: o que passa desse raio (em volta do eixo x) some */ \
     DECLARACOES \
     "out vec4 finalColor;\n" \
-    GLSL_DA_LUZ_DA_NOITE GLSL_DO_SOL GLSL_DA_LUZ_DO_DIA GLSL_DO_REFLEXO_DO_DIA GLSL_DAS_LAMPADAS \
+    GLSL_DA_LUZ_DA_NOITE GLSL_DO_SOL GLSL_DA_LUZ_DO_DIA GLSL_DO_REFLEXO_DO_DIA GLSL_DAS_LAMPADAS GLSL_DO_MAPA_DE_SOMBRA \
     "void main() { vec4 cor = " LEITURA " * colDiffuse * fragColor;\n" \
     "              " CORTE "\n" \
     "              if (corteDoAro > 0.0 && length(fragNaPeca.yz) > corteDoAro) discard;\n" \
     "              vec3 n = normalize(fragNormal);\n" \
     "              if (!gl_FrontFacing) n = -n;\n" \
     "              float sol = max(dot(n, solDoDia), 0.0);\n" \
-    "              vec3 luz = 0.62 * luzDeBase + 0.28 * (n.y * 0.5 + 0.5) * luzDoCeu + 0.42 * sol * luzDoSol;\n" \
+    "              float sombra = (sombraLigada > 0.5 && noite < 0.5) ? max(sombraNoMapa(fragPos, n, dot(n, solDoDia)), 0.0) * forcaDaSombra : 0.0;\n" \
+    "              vec3 luz = (0.62 * luzDeBase + 0.28 * (n.y * 0.5 + 0.5) * luzDoCeu) * (1.0 - 0.32 * sombra)\n" \
+    "                         + 0.42 * sol * luzDoSol * (1.0 - sombra);\n" \
     "              vec3 comLuz = (noite > 0.5) ? luzDaNoite(fragPos, n) * 1.1 : luz + luzDasLampadas(fragPos, n);\n" \
     "              vec3 v = normalize(olho - fragPos);\n" \
     "              vec3 r = reflect(-v, n);\n" \
     "              float fresnel = pow(1.0 - max(dot(n, v), 0.0), 4.0);\n" \
     "              float lataria = smoothstep(0.12, 0.38, max(cor.r, max(cor.g, cor.b)));\n" \
-    "              vec3 ceu = (noite > 0.5) ? mix(vec3(0.03, 0.04, 0.08), vec3(0.20, 0.26, 0.42), clamp(r.y, 0.0, 1.0))\n" \
-    "                                       : mix(ceuDeBaixo, ceuDeCima, clamp(r.y * 1.5, 0.0, 1.0));\n" \
+    "              float acima = smoothstep(-0.035, 0.015, r.y);\n" \
+    "              vec3 ceu = (noite > 0.5) ? mix(vec3(0.02, 0.02, 0.04), mix(vec3(0.10, 0.12, 0.22), vec3(0.20, 0.26, 0.42), clamp(r.y * 1.5, 0.0, 1.0)), acima)\n" \
+    "                                       : mix(ceuDeBaixo * 0.72, mix(ceuDoHorizonte * 1.22, ceuDeCima, smoothstep(0.0, 0.5, r.y)), acima);\n" \
+    "              ceu *= 1.0 - 0.45 * sombra;\n" \
     "              float reflexo = lataria * (0.08 + 0.50 * fresnel) * reflexoDaPintura;\n" \
-    "              float estrela = (noite > 0.5) ? 0.0 : pow(max(dot(r, solDoDia), 0.0), 60.0) * lataria;\n" \
-    "              vec3 base = mix(cor.rgb * comLuz, ceu, reflexo) + vec3(1.0, 0.97, 0.9) * luzDoSol * estrela * 0.9;\n" \
+    "              float rs = max(dot(r, solDoDia), 0.0);\n" \
+    "              float estrela = (noite > 0.5) ? 0.0 : (0.9 * pow(rs, 60.0) + 2.2 * pow(rs, 1400.0)) * lataria * (1.0 - sombra);\n" \
+    "              vec3 base = mix(cor.rgb * comLuz, ceu, reflexo) + vec3(1.0, 0.97, 0.9) * luzDoSol * estrela;\n" \
     "              finalColor = vec4(base, " SAIDA "); }\n"
 #define PIXELS_DO_SHADER(CORTE, SAIDA) \
     PIXELS_DO_SHADER_LENDO("", "texture(texture0, fragTexCoord)", CORTE, SAIDA)
@@ -2464,6 +2474,12 @@ void carregarCarros3D(void) {
     registrarShaderDoDia(shaderOpaco);
     registrarShaderDoDia(shaderTranslucido);
     registrarShaderDoDia(shaderDosOlhos);
+    verLampadasDeDentro(shaderOpaco);   /* dentro de um prédio, as luminárias dele iluminam o carro, de dia e de noite */
+    verLampadasDeDentro(shaderTranslucido);
+    verLampadasDeDentro(shaderDosOlhos);
+    receberSombraDoSol(shaderOpaco);   /* debaixo de uma cobertura, de um prédio ou do Mack, o carro escurece */
+    receberSombraDoSol(shaderTranslucido);
+    receberSombraDoSol(shaderDosOlhos);
     Shader comReflexo[3] = { shaderOpaco, shaderTranslucido, shaderDosOlhos };
     float reflexoNormal = 1.0f;   /* sem isto o uniform começa em 0: nenhum carro refletiria */
     for (int i = 0; i < 3; i++) {

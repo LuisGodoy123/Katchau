@@ -39,5 +39,9 @@ void prepararPlanosDaCamera(void);
 int teloesAVista(IdPista id);
 void desenharTelasQueBrilham(IdPista id);
 void prepararSombras(IdPista id, Camera3D camera, int ligadas);
+/* Um shader de fora do cenário (os carros) que recebe a sombra do sol: ele tem GLSL_DO_MAPA_DE_SOMBRA (hora.h).
+ * Chamar depois de carregarMundo */
+void receberSombraDoSol(Shader shader);
+void apagarSombraDoSol(void);   /* até o próximo prepararSombras: um carro desenhado fora do mundo (a vitrine) */
 
 #endif

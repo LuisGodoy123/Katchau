@@ -20,6 +20,7 @@
 #include "torcida3d.h"
 #include "noite.h"
 #include "pista.h"
+#include "hora.h"
 
 #define ARQUIVO_DO_CARRINHO   "recursos/modelos/objetos/carro_torcida.glb"
 #define ARQUIVO_DE_LONGE      "recursos/modelos/objetos/carro_torcida_longe.glb"
@@ -95,7 +96,7 @@ static const char *PIXELS =
     "in vec3 fragPos; in vec3 fragNormal; in vec4 fragColor; in float semente;\n"
     "uniform vec3 onda; uniform float frenteDaOnda;\n"
     "out vec4 finalColor;\n"
-    GLSL_DA_LUZ_DA_NOITE
+    GLSL_DA_LUZ_DA_NOITE GLSL_DO_SOL
     "vec3 corDoCarro(float s) {\n"
     "    if (s < 0.22) return vec3(0.20, 0.42, 0.85);\n"
     "    if (s < 0.36) return vec3(0.25, 0.70, 0.80);\n"
@@ -113,9 +114,9 @@ static const char *PIXELS =
     "    bool ehFarol = cor.r > 0.9 && cor.g > 0.9 && cor.b < 0.1;\n"
     "    if (ehCorpo) cor = corDoCarro(semente);\n"
     "    vec3 luz = luzDaNoite(fragPos, n) * 0.95 + vec3(0.05);\n"
-    "    if (noite < 0.5) {\n"   /* de dia, o mesmo sol do cenário */
+    "    if (noite < 0.5) {\n"   /* de dia, o mesmo sol do cenário (o de cada pista: hora.c) */
     "        vec3 m = (n.y < -0.2) ? -n : n;\n"
-    "        luz = vec3(0.58 + 0.30 * (m.y * 0.5 + 0.5) + 0.38 * max(dot(m, normalize(vec3(0.35, 0.8, 0.45))), 0.0)) * 0.92;\n"
+    "        luz = vec3(0.58 + 0.30 * (m.y * 0.5 + 0.5) + 0.38 * max(dot(m, solDoDia), 0.0)) * 0.92;\n"
     "    }\n"
     "    vec3 resultado = cor * luz;\n"
     "    if (ehFarol) {\n"
@@ -359,6 +360,7 @@ void iniciarTorcida3D(void) {
     locOnda = GetShaderLocation(shaderDoCarrinho, "onda");
     locFrente = GetShaderLocation(shaderDoCarrinho, "frenteDaOnda");
     registrarShaderIluminado(shaderDoCarrinho);
+    registrarShaderDoDia(shaderDoCarrinho);   /* o sol */
     temCarrinho = locLugar >= 0;
     if (!temCarrinho) {
         TraceLog(LOG_WARNING, "TORCIDA 3D: o shader não tem instanceLugar");

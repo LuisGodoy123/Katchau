@@ -30,6 +30,7 @@
 #include "torcida3d.h"
 #include "telao.h"
 #include "posprocesso.h"
+#include "hora.h"
 #include "configuracoes.h"
 #include "noite.h"
 #include "corte.h"
@@ -171,6 +172,9 @@ static Carro *carroDaVisao = NULL;
 /* 1 quando o mundo é desenhado mais de uma vez por quadro (a tela dividida): os efeitos mais
  * caros saem, para o jogo não andar pela metade. Veja aliviarOsEfeitos. */
 static int efeitosAliviados = 0;
+/* A profundidade de campo das cenas (o pódio, a apresentação da largada): os metros da câmera até o que
+ * está em foco neste desenho. 0 = sem (dirigindo, a imagem fica nítida) */
+static float focoDaCena = 0.0f;
 
 /*
  * alturaEmVoltaDoCarro
@@ -274,6 +278,45 @@ static Camera3D montarCamera(PosicaoNaPista carro, float lateral, Olhar olhar, D
     camera.up = (Vector3){ -cosf(rumo) * sinf(inclinacao), cosf(inclinacao), -sinf(rumo) * sinf(inclinacao) };
     camera.fovy = graus;
     camera.projection = CAMERA_PERSPECTIVE;
+    return camera;
+}
+
+/* ---------- A câmera viva ----------
+ * Com a opção ligada: em alta velocidade o campo de visão abre (o asfalto passa mais depressa nas bordas),
+ * o nitro dá um chute a mais, as batidas e o muro raspando tremem a câmera, e nas curvas rápidas ela
+ * inclina um pouco para dentro. Tudo chega e sai aos poucos: nada de tranco no quadro. */
+#define GRAUS_NA_VELOCIDADE    6.0f     /* a mais, no topo da velocidade (cresce com o quadrado dela) */
+#define GRAUS_NO_NITRO         5.0f
+#define RESPOSTA_DOS_GRAUS     0.30f    /* segundos para chegar perto do alvo */
+#define TREMOR_PASSA           0.28f    /* segundos: o tremor cai a 1/e nesse tempo */
+#define TREMOR_MAXIMO          0.14f    /* metros, numa batida cheia */
+#define TREMOR_NA_VELOCIDADE   0.010f   /* metros: o zumbido no topo da velocidade */
+#define ROLAGEM_NA_CURVA       1.8f     /* graus, com o volante todo virado no topo da velocidade */
+#define RESPOSTA_DA_ROLAGEM    0.25f
+
+/*
+ * tremerCamera
+ * Mexe a câmera pelo tremor (de lado, para cima e um tico de rolagem) e a inclina.
+ * Recebe: a câmera, a força do tremor em metros, o relógio dele e a inclinação em graus.
+ * Devolve: a câmera mexida.
+ */
+Camera3D tremerCamera(Camera3D camera, float metros, float relogio, float rolagem) {
+    Vector3 frente = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
+    Vector3 direita = Vector3Normalize(Vector3CrossProduct(frente, camera.up));
+    Vector3 cima = Vector3CrossProduct(direita, frente);
+    if (metros > 0.0001f) {
+        /* senos de frequências que não se repetem juntas: parece ruído, e é suave */
+        float lado = (sinf(relogio * 47.0f) + 0.6f * sinf(relogio * 83.0f + 1.3f)) / 1.6f;
+        float sobe = (sinf(relogio * 53.0f + 0.7f) + 0.6f * sinf(relogio * 91.0f + 2.1f)) / 1.6f;
+        float olha = sinf(relogio * 37.0f + 2.4f);
+        Vector3 mexe = Vector3Add(Vector3Scale(direita, lado * metros), Vector3Scale(cima, sobe * metros));
+        camera.position = Vector3Add(camera.position, mexe);
+        camera.target = Vector3Add(camera.target, Vector3Add(mexe, Vector3Scale(cima, olha * metros * 0.6f)));
+        rolagem += sinf(relogio * 61.0f + 0.4f) * metros * 8.0f;
+    }
+    if (fabsf(rolagem) > 0.001f) {
+        camera.up = Vector3RotateByAxisAngle(camera.up, frente, rolagem * DEG2RAD);
+    }
     return camera;
 }
 
@@ -980,6 +1023,58 @@ static void desenharTracadoDeCorrida(Camera3D camera, Corrida *corrida) {
     rlEnableDepthMask();
 }
 
+/* ---------- O sol das pistas de dia ----------
+ * Cada pista de dia tem o sol dela, baixo o bastante para aparecer no céu: na reta da largada ele fica um
+ * pouco para o lado da frente, então a largada e cada passagem pela reta são contra o sol (ele brilha,
+ * solta raios e reflete na lente) e as sombras vêm compridas na direção da câmera. Interlagos é fim de
+ * tarde, com a luz mais quente; com o sol mais baixo, o chão recebe menos dele, e a luz direta é mais
+ * forte para compensar. Na Copa Pistão é noite: sem sol. */
+typedef struct {
+    float altura;       /* graus acima do horizonte */
+    float desvio;       /* graus para a direita da frente da reta da largada */
+    Vector3 luz;        /* a cor da luz do sol... */
+    float forca;        /* ...e quanto ela vale, perto da do meio-dia (1) */
+    Vector3 disco;      /* a cor do sol no céu */
+} SolDaPista;
+
+static const SolDaPista SOIS_DAS_PISTAS[TOTAL_PISTAS] = {
+    [PISTA_INTERLAGOS]  = { 17.0f,  24.0f, { 1.10f, 0.97f, 0.82f }, 1.30f, { 1.00f, 0.84f, 0.60f } },
+    [PISTA_COPA_PISTAO] = { 0.0f, 0.0f, { 0.0f, 0.0f, 0.0f }, 0.0f, { 0.0f, 0.0f, 0.0f } },
+    [PISTA_OVAL]        = { 16.0f, -24.0f, { 1.04f, 1.00f, 0.94f }, 1.25f, { 1.00f, 0.94f, 0.80f } },
+    [PISTA_SPLAT]       = { 15.0f,  26.0f, { 1.06f, 0.99f, 0.90f }, 1.30f, { 1.00f, 0.92f, 0.76f } },
+};
+
+/*
+ * luzDaPista
+ * Recebe: a pista.
+ * Devolve: a luz dela (a do meio-dia com o sol da pista), ou NULL na de noite (vale a do meio-dia, que a
+ *          noite nem usa).
+ */
+static const LuzDoDia *luzDaPista(const Pista *pista) {
+    static LuzDoDia luzes[TOTAL_PISTAS];
+    static int prontas[TOTAL_PISTAS];
+    int id = pista->id;
+    if (id < 0 || id >= TOTAL_PISTAS || SOIS_DAS_PISTAS[id].altura <= 0.0f || pista->largada == NULL) {
+        return NULL;
+    }
+    if (!prontas[id]) {
+        const SolDaPista *s = &SOIS_DAS_PISTAS[id];
+        LuzDoDia luz = *luzDoMeioDia();
+        PosicaoNaPista largada = { 0 };
+        largada.segmento = pista->largada;
+        float rumo = (pontoNoMundo(largada, 0.0f).rumo + s->desvio) * DEG2RAD;
+        float alto = s->altura * DEG2RAD;
+        luz.sol = (Vector3){ sinf(rumo) * cosf(alto), sinf(alto), -cosf(rumo) * cosf(alto) };
+        luz.solNoCeu = luz.sol;
+        luz.luzDoSol = Vector3Scale(s->luz, s->forca);
+        luz.base = (Vector3){ 1.05f, 1.04f, 1.03f };   /* um pouco mais de luz do céu: o chão recebe menos sol */
+        luz.corDoSol = s->disco;
+        luzes[id] = luz;
+        prontas[id] = 1;
+    }
+    return &luzes[id];
+}
+
 /*
  * desenharMundo3D
  * O cenário e os carros, vistos pela câmera. Só desenha: quem anda com o tempo do mundo (a
@@ -995,6 +1090,7 @@ static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
      * pelo mesmo caminho que o telão usa */
     int semSombras = desenhandoOTelao || efeitosAliviados;
     int semTorcida3D = desenhandoOTelao || efeitosAliviados;
+    aplicarLuzDoDia(luzDaPista(pista));   /* o sol da pista (antes das sombras: elas vêm dele) */
     prepararLuzes(ehNoite);
     prepararSombras(pista->id, camera, configuracoesAtuais()->sombras && !semSombras);
     if (semTorcida3D) {
@@ -1100,6 +1196,20 @@ static void desenharMundo3D(Camera3D camera, Pista *pista, Corrida *corrida) {
         if (configuracoesAtuais()->efeitos) {
             acabamento = efeitosAliviados ? POSPROCESSO_SEM_HALO : POSPROCESSO_COMPLETO;
         }
+        /* A neblina da pista e, nas cenas, o foco */
+        CinemaDoQuadro cinema = { 0 };
+        cinema.camera = camera;
+        neblinaDaPista(pista->id, &cinema);
+        /* O sol à vista: os raios pelas frestas das arquibancadas e o reflexo na lente */
+        const LuzDoDia *luz = luzAplicada();
+        int comSol = !ehNoite && luzDaPista(pista) != NULL;
+        cinema.sol = luz->solNoCeu;
+        cinema.corDoSol = luz->corDoSol;
+        cinema.raiosDeSol = comSol ? 0.40f : 0.0f;
+        cinema.reflexoDoSol = comSol ? 0.75f : 0.0f;
+        cinema.foco = focoDaCena;
+        cinema.abertura = (focoDaCena > 0.0f) ? 1.0f : 0.0f;
+        definirCinemaDoQuadro(&cinema);
         terminarPosProcesso(pista->id, desfoqueDeVelocidade(corrida), acabamento);
     }
 }
@@ -1388,9 +1498,26 @@ void atualizarVisao(Corrida *corrida, VisaoDoJogador *visao) {
         }
     }
     visao->cameraComRumo = seguirORumo;
+    /* A câmera viva: o campo de visão, o tremor e a inclinação vão até os alvos deste quadro */
+    float dt = GetFrameTime();
+    int viva = configuracoesAtuais()->cameraViva && !cenaPausada;
+    float rapidez = Clamp(jogador->velocidade / fmaxf(jogador->velocidadeMaxima, 1.0f), 0.0f, 1.2f);
+    float grausAlvo = viva ? GRAUS_NA_VELOCIDADE * rapidez * rapidez + (jogador->nitroLigado ? GRAUS_NO_NITRO : 0.0f) : 0.0f;
+    float rolagemAlvo = viva ? ROLAGEM_NA_CURVA * jogador->volante * rapidez : 0.0f;
+    if (!cenaPausada) {
+        visao->grausAMais += (grausAlvo - visao->grausAMais) * (1.0f - expf(-dt / RESPOSTA_DOS_GRAUS));
+        visao->rolagem += (rolagemAlvo - visao->rolagem) * (1.0f - expf(-dt / RESPOSTA_DA_ROLAGEM));
+        visao->tremor = fmaxf(visao->tremor * expf(-dt / TREMOR_PASSA), viva ? jogador->contato : 0.0f);
+        visao->relogioDoTremor = fmodf(visao->relogioDoTremor + dt, 1000.0f);
+    }
+    float grausDaJanela = grausDeVisaoDaJanela(visao->janela);
     Camera3D camera = montarCamera(jogador->posicao, jogador->deslocamentoLateral, olhar, distanciaAtual,
-                                   grausDeVisaoDaJanela(visao->janela),
+                                   grausDaJanela * (1.0f + visao->grausAMais / GRAUS_DE_VISAO),
                                    seguirORumo ? &visao->rumoDaCamera : NULL);
+    if (viva || visao->tremor > 0.001f || fabsf(visao->rolagem) > 0.001f) {
+        float metros = TREMOR_MAXIMO * visao->tremor * visao->tremor + TREMOR_NA_VELOCIDADE * rapidez * rapidez * rapidez * (viva ? 1.0f : 0.0f);
+        camera = tremerCamera(camera, metros, visao->relogioDoTremor, visao->rolagem);
+    }
     if (jogador->estadoDoPit == PIT_TROCANDO) {
         camera = cameraDaTroca(camera, jogador);
     }
@@ -1494,7 +1621,12 @@ void desenharVisao(Corrida *corrida, const VisaoDoJogador *visao) {
     carroDaVisao = jogador;
     desenharOTracado = configuracoesAtuais()->tracadoDeCorrida && !visao->festa
                        && jogador->estadoDoPit == PIT_FORA && corrida->contagemRegressiva <= 0.0f;
+    if (visao->festa) {   /* o pódio: o foco no carro do jogador */
+        PontoNoMundo noMundo = pontoNoMundo(jogador->posicao, jogador->deslocamentoLateral);
+        focoDaCena = Vector3Distance(visao->camera.position, (Vector3){ noMundo.x, noMundo.y + 0.6f, noMundo.z });
+    }
     desenharMundo3D(visao->camera, corrida->pista, corrida);
+    focoDaCena = 0.0f;
     desenharOTracado = 0;
     carroDaVisao = NULL;
     efeitosAliviados = 0;
@@ -1541,7 +1673,9 @@ Camera3D cameraDaVisaoDoJogador(Corrida *corrida) {
 void desenharCorridaVistaDe(Corrida *corrida, Camera3D camera) {
     avancarCenario(corrida->pista, corrida);   /* é chamada uma vez por quadro: o cenário anda aqui */
     definirAreaDoPosProcesso(0, 0, 0, 0);
+    focoDaCena = Vector3Distance(camera.position, camera.target);   /* as câmeras da apresentação miram o que mostram */
     desenharMundo3D(camera, corrida->pista, corrida);
+    focoDaCena = 0.0f;
 }
 
 /*
@@ -1620,6 +1754,7 @@ Texture2D fotografarVitrine(int numero, float giro, Vector2 *chao) {
     BeginTextureMode(vitrine);
     ClearBackground(BLANK);
     prepararLuzes(0);
+    apagarSombraDoSol();   /* a vitrine não está em lugar nenhum do mundo: sem a sombra do fundo do menu */
     definirOlhoDosCarros(camera.position);
     BeginMode3D(camera);
     rlDisableBackfaceCulling();

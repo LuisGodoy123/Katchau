@@ -48,7 +48,14 @@
 
 #define PASTA_DAS_LUZES       "recursos/modelos/luzes"
 #define MAIS_CONJUNTOS        24
-#define MAIS_LAMPADAS_DO_LUGAR 48
+#define MAIS_LAMPADAS_DO_LUGAR 64
+/* As luminárias de dentro (<interior>_luzes.json): a potência do Cycles (W) vira a força do jogo, que cai com o
+ * quadrado da distância (hora.h). A conta foi acertada para um carro embaixo de uma luminária ficar claro como o
+ * chão assado em volta dele; o raio é onde a luz já ficou fraca */
+#define FORCA_POR_WATT        0.004f
+#define LUZ_QUE_NAO_CONTA     0.015f
+#define MENOR_RAIO_DE_DENTRO  3.0f
+#define MAIOR_RAIO_DE_DENTRO  16.0f
 #define LIMIAR_DE_ACENDER     0.35f     /* da luz da hora: a partir daí a cidade liga */
 #define DURACAO_DO_ACENDER    5.0f      /* segundos para um lugar acender inteiro */
 #define DURACAO_DO_APAGAR     2.5f
@@ -69,7 +76,8 @@ typedef struct {
     float acenderEm;
     float acesa;                  /* o andamento do acender (0 apagado, FIM_DO_ACENDER aceso) */
     int pisca;
-    int interior;                 /* só as luzes pontuais de um interior: acendem junto com a noite */
+    int interior;                 /* só as luzes pontuais que um interior joga para fora: acendem junto com a noite */
+    int dentro;                   /* as luminárias de dentro de um interior: acesas sempre, só para os carros */
     int movel;                    /* anda (o Mack): a matriz diz onde ele está */
     int sempreAceso;              /* aceso de dia e de noite (o lado de dentro da carreta) */
     int visivel;                  /* 0: não desenha nem ilumina (longe, ou escondido) */
@@ -83,6 +91,14 @@ static const char *INTERIORES_DA_NOITE[] = {
     "recursos/modelos/loja_do_luigi_noite.json",
     "recursos/modelos/cozy_cone_quartos_noite.json",
     "recursos/modelos/cozy_cone_recepcao_noite.json",
+};
+
+/* As luminárias de dentro dos interiores, no lugar de cada uma (ferramentas montar_*: --so-luzes): os focos do teto
+ * da loja do Luigi, as luminárias de cone e os abajures da recepção, os abajures e as cúpulas dos quartos */
+static const char *INTERIORES_DE_DENTRO[] = {
+    "recursos/modelos/loja_do_luigi_luzes.json",
+    "recursos/modelos/cozy_cone_quartos_luzes.json",
+    "recursos/modelos/cozy_cone_recepcao_luzes.json",
 };
 
 static Conjunto conjuntos[MAIS_CONJUNTOS];
@@ -164,6 +180,7 @@ static int lerJson(const char *caminho, Conjunto *c) {
                 break;
             }
             Lampada *l = &c->lampadas[c->totalDeLampadas++];
+            memset(l, 0, sizeof(*l));
             l->lugar = (Vector3){ numeroDaChave(abre, fecha, "x", 0.0f), numeroDaChave(abre, fecha, "y", 0.0f),
                                   numeroDaChave(abre, fecha, "z", 0.0f) };
             l->cor = (Vector3){ numeroDaChave(abre, fecha, "r", 1.0f), numeroDaChave(abre, fecha, "g", 1.0f),
@@ -171,6 +188,23 @@ static int lerJson(const char *caminho, Conjunto *c) {
             l->raio = numeroDaChave(abre, fecha, "raio", 10.0f);
             l->forca = numeroDaChave(abre, fecha, "forca", 1.0f);
             l->quadro = -1;   /* sem a vista medida: ilumina tudo em volta */
+            float energia = numeroDaChave(abre, fecha, "energia", -1.0f);
+            if (energia >= 0.0f) {
+                /* Uma luminária de dentro (--so-luzes): a potência de dia e de noite, o facho e o raio da luz */
+                l->deDentro = 1;
+                l->forca = energia * FORCA_POR_WATT;
+                l->forcaDeNoite = numeroDaChave(abre, fecha, "energia_noite", energia) * FORCA_POR_WATT;
+                float maior = fmaxf(l->forca, l->forcaDeNoite);
+                l->raio = Clamp(sqrtf(maior / LUZ_QUE_NAO_CONTA), MENOR_RAIO_DE_DENTRO, MAIOR_RAIO_DE_DENTRO);
+                float abertura = numeroDaChave(abre, fecha, "abertura", 0.0f);
+                if (abertura > 0.0f) {
+                    l->foco = (Vector3){ numeroDaChave(abre, fecha, "dx", 0.0f), numeroDaChave(abre, fecha, "dy", -1.0f),
+                                         numeroDaChave(abre, fecha, "dz", 0.0f) };
+                    float mistura = Clamp(numeroDaChave(abre, fecha, "mistura", 0.2f), 0.0f, 1.0f);
+                    l->cosDoFacho = cosf(abertura * 0.5f);
+                    l->cosDeDentro = cosf(abertura * 0.5f * (1.0f - mistura));
+                }
+            }
             p = fecha + 1;
         }
     }
@@ -342,6 +376,22 @@ void carregarLuzesDaCidade(MalhaDeColisao *malha) {
             totalDeConjuntos++;
         }
     }
+    for (int i = 0; i < (int) (sizeof(INTERIORES_DE_DENTRO) / sizeof(INTERIORES_DE_DENTRO[0])); i++) {
+        if (totalDeConjuntos == MAIS_CONJUNTOS) {
+            TraceLog(LOG_WARNING, "LUZES: conjuntos demais: %s ficou de fora", INTERIORES_DE_DENTRO[i]);
+            break;
+        }
+        Conjunto *c = &conjuntos[totalDeConjuntos];
+        memset(c, 0, sizeof(*c));
+        snprintf(c->nome, sizeof(c->nome), "%s", GetFileNameWithoutExt(INTERIORES_DE_DENTRO[i]));
+        c->dentro = 1;
+        c->matriz = MatrixIdentity();
+        c->visivel = 1;
+        if (lerJson(INTERIORES_DE_DENTRO[i], c) && c->totalDeLampadas > 0) {
+            TraceLog(LOG_INFO, "LUZES: %s, %d luminárias de dentro", c->nome, c->totalDeLampadas);
+            totalDeConjuntos++;
+        }
+    }
     medirVistas(malha);
 }
 
@@ -474,6 +524,8 @@ void atualizarLuzesDaCidade(float acesas, float tempoQuadro, int pular) {
             c->acesa = FIM_DO_ACENDER;
         } else if (c->interior) {
             c->acesa = acesasAgora;
+        } else if (c->dentro) {
+            c->acesa = 1.0f;   /* as luminárias de dentro: acesas de dia e de noite */
         } else if (pular) {
             c->acesa = ligadas ? FIM_DO_ACENDER : 0.0f;
         } else if (ligadas) {
@@ -568,7 +620,7 @@ void desenharHalosDaCidade(Camera3D camera) {
     comecarBrilhos();
     for (int i = 0; i < totalDeConjuntos; i++) {
         const Conjunto *c = &conjuntos[i];
-        float forca = (c->interior || !c->visivel) ? 0.0f : Clamp(c->acesa, 0.0f, 1.0f);
+        float forca = (c->interior || c->dentro || !c->visivel) ? 0.0f : Clamp(c->acesa, 0.0f, 1.0f);
         if (forca <= 0.0f) {
             continue;
         }
@@ -600,14 +652,21 @@ int lampadasAcesas(Lampada *saida, int cabe) {
     int total = 0;
     for (int i = 0; i < totalDeConjuntos && total < cabe; i++) {
         const Conjunto *c = &conjuntos[i];
-        float forca = c->interior ? acesasAgora : Clamp(c->acesa, 0.0f, 1.0f);
+        float forca = c->interior ? acesasAgora : (c->dentro ? 1.0f : Clamp(c->acesa, 0.0f, 1.0f));
         if (forca <= 0.01f || !c->visivel) {
             continue;
         }
         for (int k = 0; k < c->totalDeLampadas && total < cabe; k++) {
             saida[total] = c->lampadas[k];
             saida[total].lugar = lugarDaLampada(c, &c->lampadas[k]);
-            saida[total].forca *= forca;
+            if (c->dentro) {
+                /* de dia a potência do assado de dia, de noite a da noite (as luzes da cidade dizem quanto é noite) */
+                const Lampada *l = &c->lampadas[k];
+                saida[total].forca = l->forca + (l->forcaDeNoite - l->forca) * acesasAgora;
+            } else {
+                saida[total].forca *= forca;
+            }
+            saida[total].soDoCenario = c->interior;   /* a luz que vaza pela porta: os carros têm a das luminárias */
             total++;
         }
     }

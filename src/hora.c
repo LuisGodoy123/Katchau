@@ -117,11 +117,38 @@ static const HoraChave CHAVES[] = {
 };
 #define TOTAL_DE_CHAVES (int) (sizeof(CHAVES) / sizeof(CHAVES[0]))
 
+/* A imagem de cada hora: o tom da tela, o contraste, a saturação e a vinheta (o dia é o tom de sempre do
+ * passeio), e a densidade da neblina. Fim de tarde quente e saturado, crepúsculo e noite frios, a bruma
+ * da manhã mais grossa */
+typedef struct {
+    float hora;
+    float tom[3];
+    float contraste, saturacao, vinheta;
+    float neblina;
+} ImagemDaHora;
+
+static const ImagemDaHora IMAGENS[] = {
+    { 0.0f,  { 0.93f, 0.97f, 1.08f }, 1.08f, 1.00f, 0.34f, 0.00022f },   /* noite */
+    { 4.8f,  { 0.93f, 0.97f, 1.08f }, 1.08f, 1.00f, 0.34f, 0.00022f },
+    { 5.6f,  { 0.98f, 0.96f, 1.04f }, 1.06f, 1.05f, 0.30f, 0.00048f },   /* antes do sol: a bruma */
+    { 6.4f,  { 1.06f, 0.98f, 0.92f }, 1.07f, 1.14f, 0.30f, 0.00052f },   /* o sol nascendo */
+    { 7.4f,  { 1.04f, 1.00f, 0.95f }, 1.05f, 1.14f, 0.27f, 0.00038f },   /* a manhã dourada */
+    { 8.4f,  { 1.02f, 1.00f, 0.97f }, 1.05f, 1.16f, 0.26f, 0.00030f },   /* o dia: o tom de sempre */
+    { 17.0f, { 1.02f, 1.00f, 0.97f }, 1.05f, 1.16f, 0.26f, 0.00030f },
+    { 18.2f, { 1.04f, 1.00f, 0.94f }, 1.07f, 1.16f, 0.28f, 0.00032f },   /* a tarde dourada */
+    { 19.0f, { 1.03f, 0.99f, 0.96f }, 1.08f, 1.10f, 0.32f, 0.00036f },   /* o pôr do sol (a luz já é laranja) */
+    { 19.7f, { 1.00f, 0.95f, 1.02f }, 1.08f, 1.10f, 0.33f, 0.00036f },   /* o sol que se foi */
+    { 20.4f, { 0.95f, 0.95f, 1.08f }, 1.08f, 1.04f, 0.34f, 0.00028f },   /* o crepúsculo */
+    { 21.0f, { 0.93f, 0.97f, 1.08f }, 1.08f, 1.00f, 0.34f, 0.00022f },
+};
+#define TOTAL_DE_IMAGENS (int) (sizeof(IMAGENS) / sizeof(IMAGENS[0]))
+
 typedef struct {
     Shader shader;
-    int locSol, locBase, locCeu, locLuzDoSol, locSombra, locCeuDeBaixo, locCeuDeCima;
+    int locSol, locBase, locCeu, locLuzDoSol, locSombra, locCeuDeBaixo, locCeuDeCima, locCeuDoHorizonte;
     int locTotalDeLampadas, locLampadas, locCoresDasLampadas, locVistaDasLampadas;
     int locGradeMedidas, locGrade, locLista;
+    int locLampadasDeDentro, locFocos;
 } ShaderDoDia;
 
 static float hora = HORA_DE_COMECO;
@@ -177,6 +204,34 @@ static float degrau(float de, float ate, float x) {
 }
 
 /*
+ * imagemDaHora
+ * A imagem de uma hora: as duas da tabela em volta dela, misturadas (como a luz).
+ * Recebe: a hora e onde guardar.
+ * Devolve: nada.
+ */
+static void imagemDaHora(float h, LuzDoDia *luz) {
+    int a = TOTAL_DE_IMAGENS - 1;
+    for (int i = 0; i < TOTAL_DE_IMAGENS; i++) {
+        if (IMAGENS[i].hora <= h) {
+            a = i;
+        }
+    }
+    int b = (a + 1) % TOTAL_DE_IMAGENS;
+    float de = IMAGENS[a].hora, ate = IMAGENS[b].hora;
+    if (ate <= de) {
+        ate += 24.0f;
+    }
+    float agora = (h < de) ? h + 24.0f : h;
+    float t = suave(Clamp((agora - de) / (ate - de), 0.0f, 1.0f));
+    const ImagemDaHora *ia = &IMAGENS[a], *ib = &IMAGENS[b];
+    luz->tomDaTela = misturar3(ia->tom, ib->tom, t);
+    luz->contrasteDaTela = ia->contraste + (ib->contraste - ia->contraste) * t;
+    luz->saturacaoDaTela = ia->saturacao + (ib->saturacao - ia->saturacao) * t;
+    luz->vinhetaDaTela = ia->vinheta + (ib->vinheta - ia->vinheta) * t;
+    luz->neblina = ia->neblina + (ib->neblina - ia->neblina) * t;
+}
+
+/*
  * montarLuz
  * A luz de uma hora: as duas horas-chave em volta dela, misturadas, e o sol (ou a lua).
  * Recebe: a hora e onde guardar.
@@ -224,6 +279,7 @@ static void montarLuz(float h, LuzDoDia *luz) {
     luz->sombra = (ka->sombra + (kb->sombra - ka->sombra) * t) * degrau(0.03f, 0.12f, sol.y);
     luz->solNoCeu = sol;
     luz->luaNoCeu = lua;
+    imagemDaHora(h, luz);
 }
 
 static void prepararMeioDia(void) {
@@ -251,6 +307,7 @@ static void prepararMeioDia(void) {
     meioDia.lua = 0.0f;
     meioDia.interior = cor3(k->interior);
     meioDia.luzesDaCidade = 0.0f;
+    imagemDaHora(12.0f, &meioDia);
     aplicada = meioDia;
 }
 
@@ -360,6 +417,7 @@ static void mandarAoShader(const ShaderDoDia *s, const LuzDoDia *luz) {
     if (s->locSombra >= 0) SetShaderValue(s->shader, s->locSombra, &luz->sombra, SHADER_UNIFORM_FLOAT);
     if (s->locCeuDeBaixo >= 0) SetShaderValue(s->shader, s->locCeuDeBaixo, &luz->ceuDeBaixo, SHADER_UNIFORM_VEC3);
     if (s->locCeuDeCima >= 0) SetShaderValue(s->shader, s->locCeuDeCima, &luz->ceuDeCima, SHADER_UNIFORM_VEC3);
+    if (s->locCeuDoHorizonte >= 0) SetShaderValue(s->shader, s->locCeuDoHorizonte, &luz->horizonte, SHADER_UNIFORM_VEC3);
 }
 
 void registrarShaderDoDia(Shader shader) {
@@ -376,6 +434,7 @@ void registrarShaderDoDia(Shader shader) {
     s->locSombra = GetShaderLocation(shader, "forcaDaSombra");
     s->locCeuDeBaixo = GetShaderLocation(shader, "ceuDeBaixo");
     s->locCeuDeCima = GetShaderLocation(shader, "ceuDeCima");
+    s->locCeuDoHorizonte = GetShaderLocation(shader, "ceuDoHorizonte");
     s->locTotalDeLampadas = GetShaderLocation(shader, "totalDeLampadas");
     s->locLampadas = GetShaderLocation(shader, "lampadas");
     s->locCoresDasLampadas = GetShaderLocation(shader, "coresDasLampadas");
@@ -383,6 +442,10 @@ void registrarShaderDoDia(Shader shader) {
     s->locGradeMedidas = GetShaderLocation(shader, "gradeMedidas");
     s->locGrade = GetShaderLocation(shader, "gradeDasLampadas");
     s->locLista = GetShaderLocation(shader, "listaDasLampadas");
+    s->locLampadasDeDentro = GetShaderLocation(shader, "lampadasDeDentro");
+    s->locFocos = GetShaderLocation(shader, "focosDasLampadas");
+    float nao = 0.0f;   /* as luminárias de dentro: só nos marcados (verLampadasDeDentro) */
+    if (s->locLampadasDeDentro >= 0) SetShaderValue(shader, s->locLampadasDeDentro, &nao, SHADER_UNIFORM_FLOAT);
     mandarAoShader(s, &aplicada);
     int slotDaGrade = SLOT_DA_GRADE_DAS_LAMPADAS, slotDaLista = SLOT_DA_LISTA_DAS_LAMPADAS;
     if (s->locGrade >= 0) SetShaderValue(shader, s->locGrade, &slotDaGrade, SHADER_UNIFORM_INT);
@@ -400,7 +463,7 @@ void registrarShaderDoDia(Shader shader) {
 #define LADO_MINIMO_DA_CELULA  4.0f   /* metros */
 static Texture2D imagemDaGrade, imagemDaLista;
 static int temGrade = 0, tentouCriarGrade = 0;
-static float lugaresMandados[MAIS_LAMPADAS * 4], coresMandadas[MAIS_LAMPADAS * 4];
+static float lugaresMandados[MAIS_LAMPADAS * 4], coresMandadas[MAIS_LAMPADAS * 4], focosMandados[MAIS_LAMPADAS * 4];
 
 static void criarImagensDaGrade(void) {
     tentouCriarGrade = 1;
@@ -523,7 +586,7 @@ void aplicarLampadas(const Lampada *lista, int total) {
     if (total == 0 && lampadasMandadas == 0) {
         return;   /* de dia, nada muda de um quadro para o outro */
     }
-    float lugares[MAIS_LAMPADAS * 4], cores[MAIS_LAMPADAS * 4];
+    float lugares[MAIS_LAMPADAS * 4], cores[MAIS_LAMPADAS * 4], focos[MAIS_LAMPADAS * 4];
     for (int i = 0; i < total; i++) {
         lugares[i * 4] = lista[i].lugar.x;
         lugares[i * 4 + 1] = lista[i].lugar.y;
@@ -532,15 +595,38 @@ void aplicarLampadas(const Lampada *lista, int total) {
         cores[i * 4] = lista[i].cor.x;
         cores[i * 4 + 1] = lista[i].cor.y;
         cores[i * 4 + 2] = lista[i].cor.z;
-        /* a força (até 7,9) e, por cima, o quadro da vista: forca + 8 × (quadro + 1) */
+        /* a força (até 7,9) e, por cima, o quadro da vista: forca + 8 × (quadro + 1); negativo nas de dentro */
         cores[i * 4 + 3] = fminf(fmaxf(lista[i].forca, 0.0f), 7.9f) + 8.0f * (float) (lista[i].quadro + 1);
+        if (lista[i].soDoCenario) {
+            cores[i * 4 + 3] += 4096.0f;
+        }
+        if (lista[i].deDentro) {
+            cores[i * 4 + 3] = -cores[i * 4 + 3];
+        }
+        /* o facho: a direção com o comprimento 1 + a borda macia, e o cosseno da borda de fora (-2: luz em volta) */
+        float tamanho = Vector3Length(lista[i].foco);
+        if (lista[i].deDentro && tamanho > 0.001f) {
+            float borda = fmaxf(lista[i].cosDeDentro - lista[i].cosDoFacho, 0.01f);
+            Vector3 f = Vector3Scale(lista[i].foco, (1.0f + borda) / tamanho);
+            focos[i * 4] = f.x;
+            focos[i * 4 + 1] = f.y;
+            focos[i * 4 + 2] = f.z;
+            focos[i * 4 + 3] = lista[i].cosDoFacho;
+        } else {
+            focos[i * 4] = 0.0f;
+            focos[i * 4 + 1] = -1.0f;
+            focos[i * 4 + 2] = 0.0f;
+            focos[i * 4 + 3] = -2.0f;
+        }
     }
     if (total == lampadasMandadas && memcmp(lugares, lugaresMandados, sizeof(float) * 4 * (size_t) total) == 0
-        && memcmp(cores, coresMandadas, sizeof(float) * 4 * (size_t) total) == 0) {
+        && memcmp(cores, coresMandadas, sizeof(float) * 4 * (size_t) total) == 0
+        && memcmp(focos, focosMandados, sizeof(float) * 4 * (size_t) total) == 0) {
         return;   /* os mesmos valores já estão nos shaders */
     }
     memcpy(lugaresMandados, lugares, sizeof(float) * 4 * (size_t) total);
     memcpy(coresMandadas, cores, sizeof(float) * 4 * (size_t) total);
+    memcpy(focosMandados, focos, sizeof(float) * 4 * (size_t) total);
     lampadasMandadas = total;
 
     if (total > 0 && !tentouCriarGrade) {
@@ -562,6 +648,20 @@ void aplicarLampadas(const Lampada *lista, int total) {
         if (total > 0 && s->locLampadas >= 0) SetShaderValueV(s->shader, s->locLampadas, lugares, SHADER_UNIFORM_VEC4, total);
         if (total > 0 && s->locCoresDasLampadas >= 0) {
             SetShaderValueV(s->shader, s->locCoresDasLampadas, cores, SHADER_UNIFORM_VEC4, total);
+        }
+        if (total > 0 && s->locFocos >= 0) SetShaderValueV(s->shader, s->locFocos, focos, SHADER_UNIFORM_VEC4, total);
+    }
+}
+
+/*
+ * verLampadasDeDentro
+ * Veja hora.h: o shader passa a receber as luminárias de dentro dos prédios.
+ */
+void verLampadasDeDentro(Shader shader) {
+    float sim = 1.0f;
+    for (int i = 0; i < totalDeShaders; i++) {
+        if (shaders[i].shader.id == shader.id && shaders[i].locLampadasDeDentro >= 0) {
+            SetShaderValue(shader, shaders[i].locLampadasDeDentro, &sim, SHADER_UNIFORM_FLOAT);
         }
     }
 }

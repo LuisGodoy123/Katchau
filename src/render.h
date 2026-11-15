@@ -40,6 +40,12 @@ typedef struct {
     float respiracao;           /* a câmera respirando com o pedal */
     float rumoDaCamera;         /* o rumo que ela segue, com atraso */
     int cameraComRumo;          /* 1 se ela já está seguindo um rumo */
+    /* A câmera viva (configurações): o campo de visão que abre com a velocidade, o tremor das batidas e a
+     * inclinação nas curvas, cada um chegando aos poucos */
+    float grausAMais;           /* graus somados ao campo de visão */
+    float tremor;               /* 0 a 1: a força do tremor agora */
+    float relogioDoTremor;      /* segundos: a fase do tremor */
+    float rolagem;              /* graus: a câmera inclina para dentro da curva */
 
     /* Preenchidos por atualizarVisao, usados por avancarMundoDaCorrida e desenharVisao */
     Camera3D camera;
@@ -59,6 +65,8 @@ void desenharRiscoDaDivisao(int totalDeVisoes);
 
 void desenharCorridaVistaDe(Corrida *corrida, Camera3D camera);
 Camera3D cameraDaVisaoDoJogador(Corrida *corrida);   /* a do jogador 1: a apresentação termina nela */
+/* A câmera viva: mexe a câmera pelo tremor (metros, com o relógio dele) e a inclina (graus); o passeio usa também */
+Camera3D tremerCamera(Camera3D camera, float metros, float relogio, float rolagem);
 void congelarCena(int pausada);
 void desenharPistaDeFundo(Pista *pista);
 void desenharFundoAlternado(Pista *pistas[]);

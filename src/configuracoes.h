@@ -97,9 +97,13 @@ typedef struct {
     int presetGrafico;        /* PresetGrafico: o último pacote escolhido (PRESET_PERSONALIZADO se mexeu depois em alguma opção) */
     int escalaDaImagem;       /* índice na tabela de escalas de renderização: o mundo é desenhado menor e ampliado (mais FPS) */
     int bloom;                /* 1: o brilho em volta das luzes */
-    int lensFlare;            /* 1: os raios de luz dos clarões das batidas e das faíscas */
+    int lensFlare;            /* 1: os raios de luz dos clarões das batidas e das faíscas, e o reflexo do sol na lente */
     int granulado;            /* 1: granulado de filme sobre a imagem */
-    int profundidadeDeCampo;  /* 1: o fundo distante fica levemente desfocado (simulado, sem custo de profundidade) */
+    int profundidadeDeCampo;  /* 0 = nenhuma, 1 = nas cenas (o Mack, o pódio, a largada: o foco em quem importa),
+                               * 2 = nas cenas e, dirigindo, o fundo bem longe levemente desfocado */
+    int coresHdr;             /* 1: a cena guarda as luzes acima do branco e uma curva de cinema as suaviza (HDR) */
+    int raiosDeSol;           /* 1: os raios de luz do sol baixo passando pelas frestas (no passeio) */
+    int cameraViva;           /* 1: o campo de visão abre com a velocidade e o nitro, a câmera treme nas batidas e inclina nas curvas */
     int distorcaoDaLente;     /* 0 = nenhuma, 1 = distorção, 2 = distorção + aberração cromática */
     int nitidez;              /* 0 = nenhuma, 1 = leve, 2 = forte (afiar a imagem, como o FidelityFX CAS) */
     int suavizacao;           /* 0 = nenhuma, 1 = FXAA (suaviza as serrilhas das bordas) */

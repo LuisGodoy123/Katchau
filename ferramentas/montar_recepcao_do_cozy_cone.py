@@ -8,7 +8,7 @@ do jogo (x, y para cima, z):
 
     Blender -b --factory-startup -P ferramentas/montar_recepcao_do_cozy_cone.py -- \\
         recursos/modelos/radiator_springs.glb recursos/modelos/cozy_cone_recepcao \\
-        [--previas pasta] [--amostras 384] [--quadros atlas.png] [--noite]
+        [--previas pasta] [--amostras 384] [--quadros atlas.png] [--noite] [--so-luzes]
 
 Grava, com o nome dado no segundo argumento:
   cozy_cone_recepcao.glb          o desenho, com a luz assada nas cores dos vértices
@@ -107,6 +107,12 @@ casca é dada como já aberta. Com --previas, as vistas saem com o dia e a noite
 lado a lado (os dois .glb como o jogo os carrega; de noite, a casca do mapa com a
 luz da meia-noite do jogo e as luzes do _noite.json).
 
+Com --so-luzes, só monta a peça (sem assar nem gravar o desenho) e grava
+<saida>_luzes.json: as luminárias de verdade, cada uma no lugar dela no desenho,
+como o Cycles as usa para assar (eixos do jogo; o lugar, para onde o facho aponta,
+a abertura e a borda dele, a cor e a potência de dia e de noite). O jogo ilumina
+os carros lá dentro com elas (src/luzes.c), de dia e de noite.
+
 Eixos: no Blender, x = x do jogo, y = -z do jogo e z = y do jogo; o .glb sai
 com +Y para cima, ou seja, nas coordenadas do jogo.
 ------------------------------------------------------------------
@@ -139,7 +145,8 @@ argv = sys.argv[sys.argv.index('--') + 1:] if '--' in sys.argv else []
 OPCOES_COM_VALOR = ('--previas', '--amostras', '--quadros')
 opcoes, posicionais = {}, []
 NOITE = '--noite' in argv          # a luz de noite: grava <saida>_noite.glb e <saida>_noite.json (veja 9.)
-argv = [a for a in argv if a != '--noite']
+SO_LUZES = '--so-luzes' in argv    # só as luzes de verdade: grava <saida>_luzes.json e para (veja 4.)
+argv = [a for a in argv if a not in ('--noite', '--so-luzes')]
 i = 0
 while i < len(argv):
     if argv[i] in OPCOES_COM_VALOR and i + 1 < len(argv):
@@ -1265,7 +1272,7 @@ def imagem_do_glb(caminho, nome):
 
 
 print('Pintando os quadros...')
-if NOITE and not ATLAS_GUARDADO:
+if (NOITE or SO_LUZES) and not ATLAS_GUARDADO:
     # de noite, o atlas é o do .glb de dia (a mesma textura; e poupa o passo mais demorado)
     ATLAS_GUARDADO = imagem_do_glb(SAIDA + '.glb', 'recepcao_quadros')
 if ATLAS_GUARDADO and os.path.exists(ATLAS_GUARDADO):
@@ -4166,6 +4173,69 @@ def casca_para_previa(casca):
                 pass
             m['previa'] = 1
 
+
+# As luzes de verdade (--so-luzes): as lâmpadas que o assado usa, cada uma no lugar dela no desenho (a boca da
+# luminária, o foco do teto, o abajur), para o jogo iluminar com elas o que anda lá dentro (os carros, que não
+# têm a luz assada). <saida>_luzes.json, nos eixos do jogo: o lugar, para onde o facho aponta (só nos focos), a
+# abertura dele (radianos, 0 numa luz pontual) e a borda macia, a cor e a potência (W) de dia e de noite. Fica de
+# fora o que não é lâmpada (o sol, o céu, a luz das portas e janelas, os rebatidos) e a lâmpada nua dentro de uma
+# cúpula fechada (a luz dela sai pela boca: é o foco)
+LUZES_DO_JOGO = ('luminaria_', 'de_pe_', 'abajur', 'estante_', 'tampo', 'neon')
+FORA_DO_JOGO = ('de_pe_cupula_',)
+
+
+def luzes_da_cena():
+    bpy.context.view_layer.update()   # a matriz de um objeto novo só vale depois disto
+    luzes = {}
+    for o in bpy.context.scene.objects:
+        if o.type != 'LIGHT' or o.data.type not in ('POINT', 'SPOT'):
+            continue
+        if not o.name.startswith(LUZES_DO_JOGO) or (FORA_DO_JOGO and o.name.startswith(FORA_DO_JOGO)):
+            continue
+        p = o.matrix_world.translation
+        d = o.matrix_world.to_3x3() @ Vector((0.0, 0.0, -1.0))
+        d.normalize()
+        foco = o.data.type == 'SPOT'
+        luzes[o.name] = dict(nome=o.name, x=round(p.x, 3), y=round(p.z, 3), z=round(-p.y, 3),
+                             dx=round(d.x, 4), dy=round(d.z, 4), dz=round(-d.y, 4),
+                             abertura=round(o.data.spot_size, 4) if foco else 0.0,
+                             mistura=round(o.data.spot_blend, 3) if foco else 0.0,
+                             r=round(o.data.color[0], 3), g=round(o.data.color[1], 3), b=round(o.data.color[2], 3),
+                             energia=round(o.data.energy, 2))
+    return luzes
+
+
+def apagar_luzes():
+    for o in list(bpy.context.scene.objects):
+        if o.type == 'LIGHT':
+            dados = o.data
+            bpy.data.objects.remove(o, do_unlink=True)
+            if dados.users == 0:
+                bpy.data.lights.remove(dados)
+
+
+def gravar_luzes_de_dentro():
+    montar_luzes_do_cycles()
+    dia = luzes_da_cena()
+    apagar_luzes()
+    montar_luzes_da_noite()
+    noite = luzes_da_cena()
+    apagar_luzes()
+    luzes = []
+    for nome in sorted(dia):
+        l = dict(dia[nome])
+        l['energia_noite'] = noite[nome]['energia'] if nome in noite else l['energia']
+        luzes.append(l)
+    caminho = SAIDA + '_luzes.json'
+    with open(caminho, 'w') as f:
+        json.dump({'luzes': luzes}, f, indent=2, ensure_ascii=False)
+    print('Gravado %s: %d luzes' % (caminho, len(luzes)))
+
+
+if SO_LUZES:
+    gravar_luzes_de_dentro()
+    shutil.rmtree(PASTA_TEMP, ignore_errors=True)
+    raise SystemExit(0)
 
 print('Assando a luz (Cycles, %d amostras)...' % AMOSTRAS)
 OBJS = criar_objetos()

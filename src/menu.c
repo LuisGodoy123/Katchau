@@ -1622,12 +1622,15 @@ enum {
     LINHA_LIMITE_DE_QUADROS,
     LINHA_MOSTRAR_FPS,
     LINHA_TRACADO,
+    LINHA_CAMERA_VIVA,
     /* a aba de gráficos começa aqui */
     LINHA_PRESET,
     LINHA_ESCALA,
     LINHA_POS_PROCESSAMENTO,
     LINHA_BLOOM,
+    LINHA_HDR,
     LINHA_LENS_FLARE,
+    LINHA_RAIOS_DE_SOL,
     LINHA_GRANULADO,
     LINHA_CAMPO,
     LINHA_LENTE,
@@ -1683,7 +1686,7 @@ static int abaAtualDaConfig = ABA_CONTROLES;   /* a aba que as funções abaixo 
  * Devolve: o topo dela na tela.
  */
 static const int PRIMEIRA_LINHA_DA_ABA[TOTAL_ABAS_CONFIG + 1] = { 0, LINHA_RESOLUCAO, LINHA_PRESET, LINHA_VOLUME_VOZES, LINHA_PADRAO };
-static const float ALTURA_DA_LINHA_DA_ABA[TOTAL_ABAS_CONFIG] = { ALTURA_LINHA_OPCAO, ALTURA_LINHA_EXIBICAO, 28.0f, 36.0f };
+static const float ALTURA_DA_LINHA_DA_ABA[TOTAL_ABAS_CONFIG] = { ALTURA_LINHA_OPCAO, ALTURA_LINHA_EXIBICAO, 26.0f, 36.0f };
 
 static float yDaLinhaConfig(int linha) {
     if (linha < TOTAL_ACOES) {
@@ -1811,12 +1814,20 @@ static void mudarOpcao(EstadoMenu *menu, int linha, int sentido) {
             config->lensFlare = !config->lensFlare;
             config->presetGrafico = PRESET_PERSONALIZADO;
             break;
+        case LINHA_HDR:
+            config->coresHdr = !config->coresHdr;
+            config->presetGrafico = PRESET_PERSONALIZADO;
+            break;
+        case LINHA_RAIOS_DE_SOL:
+            config->raiosDeSol = !config->raiosDeSol;
+            config->presetGrafico = PRESET_PERSONALIZADO;
+            break;
         case LINHA_GRANULADO:
             config->granulado = !config->granulado;
             config->presetGrafico = PRESET_PERSONALIZADO;
             break;
         case LINHA_CAMPO:
-            config->profundidadeDeCampo = !config->profundidadeDeCampo;
+            config->profundidadeDeCampo = (config->profundidadeDeCampo + sentido + 3) % 3;
             config->presetGrafico = PRESET_PERSONALIZADO;
             break;
         case LINHA_LENTE:
@@ -1890,6 +1901,9 @@ static void mudarOpcao(EstadoMenu *menu, int linha, int sentido) {
             break;
         case LINHA_TRACADO:
             config->tracadoDeCorrida = !config->tracadoDeCorrida;
+            break;
+        case LINHA_CAMERA_VIVA:
+            config->cameraViva = !config->cameraViva;
             break;
         case LINHA_CAMERA_X:
             config->inverterCameraX = !config->inverterCameraX;
@@ -2208,9 +2222,12 @@ static const char *descricaoDaLinha(int linha) {
         case LINHA_ESCALA: return "O MUNDO É DESENHADO MENOR E AMPLIADO: MENOS %, MAIS QUADROS POR SEGUNDO.";
         case LINHA_POS_PROCESSAMENTO: return "A COR DE CADA PISTA, O CONTRASTE E AS BORDAS ESCURAS DA IMAGEM.";
         case LINHA_BLOOM: return "ATIVA OU DESATIVA O BRILHO EM VOLTA DAS LUZES FORTES (FAZ A IMAGEM RODAR UM POUCO MAIS PESADA).";
-        case LINHA_LENS_FLARE: return "OS RAIOS DE LUZ QUE SAEM DOS CLARÕES DAS BATIDAS E DAS FAÍSCAS.";
+        case LINHA_LENS_FLARE: return "OS RAIOS DOS CLARÕES DAS BATIDAS E DAS FAÍSCAS, E O REFLEXO DO SOL NA LENTE.";
+        case LINHA_HDR: return "AS LUZES FORTES (O SOL, OS REFLEXOS) PASSAM DO BRANCO SEM ESTOURAR, COMO NO CINEMA.";
+        case LINHA_RAIOS_DE_SOL: return "COM O SOL BAIXO, OS RAIOS DE LUZ ENTRE OS PRÉDIOS E AS PEDRAS (NO PASSEIO).";
         case LINHA_GRANULADO: return "UM GRÃO DE FILME SOBRE A IMAGEM, QUE MUDA A CADA QUADRO.";
-        case LINHA_CAMPO: return "O FUNDO LONGE (A PARTE DE CIMA DA IMAGEM) FICA LEVEMENTE DESFOCADO.";
+        case LINHA_CAMPO: return "NAS CENAS (O MACK, O PÓDIO, A LARGADA) O FOCO FICA EM QUEM IMPORTA; NA ÚLTIMA, TAMBÉM O FUNDO LONGE.";
+        case LINHA_CAMERA_VIVA: return "A VISÃO ABRE COM A VELOCIDADE E O NITRO, A CÂMERA TREME NAS BATIDAS E INCLINA NAS CURVAS.";
         case LINHA_LENTE: return "CURVA AS BORDAS DA IMAGEM COMO UMA LENTE E, NA ÚLTIMA OPÇÃO, SEPARA AS CORES NAS BORDAS.";
         case LINHA_NITIDEZ: return "AFIA A IMAGEM: BOA COMBINADA COM UMA ESCALA DE RENDERIZAÇÃO MENOR QUE 100%.";
         case LINHA_SUAVIZACAO: return "FXAA: SUAVIZA AS SERRILHAS DAS BORDAS, QUASE SEM CUSTO.";
@@ -2263,17 +2280,19 @@ void desenharConfiguracoes(EstadoMenu *menu) {
         desenharLinhaDeOpcao(menu, LINHA_LIMITE_DE_QUADROS, "LIMITE DE QUADROS POR SEGUNDO", fps > 0 ? TextFormat("%d FPS", fps) : "SEM LIMITE", 0);
         desenharLinhaDeOpcao(menu, LINHA_MOSTRAR_FPS, "MOSTRAR O CONTADOR DE FPS", config->mostrarFps ? "SIM" : "NÃO", 0);
         desenharLinhaDeOpcao(menu, LINHA_TRACADO, "TRAÇADO DE CORRIDA (LINHA NO ASFALTO)", config->tracadoDeCorrida ? "LIGADO" : "DESLIGADO", 0);
+        desenharLinhaDeOpcao(menu, LINHA_CAMERA_VIVA, "MOVIMENTO DA CÂMERA (VELOCIDADE E BATIDAS)", config->cameraViva ? "LIGADO" : "DESLIGADO", 0);
         desenharLinhaDeOpcao(menu, LINHA_PADRAO, "VOLTAR TUDO AO PADRÃO", (menu->confirmarPadrao > 0.0f) ? "APERTE DE NOVO" : "", 0);
         escrever(FONTE_FORTE, TextFormat("AGORA: %d x %d%s  |  A MAIOR RESOLUÇÃO É %d x %d", GetScreenWidth(), GetScreenHeight(),
                                          IsWindowFullscreen() ? " (TELA CHEIA)" : (IsWindowState(FLAG_BORDERLESS_WINDOWED_MODE) ? " (SEM BORDAS)" : " (JANELA)"),
                                          MAIOR_LARGURA, MAIOR_ALTURA),
-                 X_LINHAS_CONFIG + 12.0f, Y_LINHAS_EXIBICAO + 8.0f * ALTURA_LINHA_EXIBICAO + 8.0f, 13.0f, COR_TEXTO_FRACO);
+                 X_LINHAS_CONFIG + 12.0f, Y_LINHAS_EXIBICAO + 9.0f * ALTURA_LINHA_EXIBICAO + 8.0f, 13.0f, COR_TEXTO_FRACO);
         return;
     }
     if (menu->abaConfig == ABA_GRAFICOS) {
         static const char *PRESETS[TOTAL_PRESETS] = { "BAIXO", "MÉDIO", "ALTO", "PERSONALIZADO" };
         static const char *LENTES[3] = { "DESLIGADA", "DISTORÇÃO", "DISTORÇÃO + ABERRAÇÃO CROMÁTICA" };
         static const char *NITIDEZES[3] = { "DESLIGADA", "LEVE", "FORTE" };
+        static const char *CAMPOS[3] = { "DESLIGADA", "NAS CENAS", "NAS CENAS E AO LONGE" };
         static const char *SOMBRAS[TOTAL_QUALIDADES_DE_SOMBRA] = { "DESLIGADAS", "BAIXA (1024)", "MÉDIA (2048)", "ALTA (3072)", "MÁXIMA (4096)" };
         static const char *FILTROS[TOTAL_FILTROS_DE_TEXTURA] = { "BILINEAR", "TRILINEAR", "ANISOTRÓPICO 4x", "ANISOTRÓPICO 8x", "ANISOTRÓPICO 16x" };
         desenharTituloDeSecao("GRÁFICOS", Y_TITULO_COMANDOS);
@@ -2281,9 +2300,11 @@ void desenharConfiguracoes(EstadoMenu *menu) {
         desenharLinhaDeOpcao(menu, LINHA_ESCALA, "QUALIDADE DA IMAGEM (ESCALA DE RENDERIZAÇÃO)", TextFormat("%d%%", escalaDaImagemEmPorcento(config->escalaDaImagem)), 0);
         desenharLinhaDeOpcao(menu, LINHA_POS_PROCESSAMENTO, "COR E VINHETA (PÓS-PROCESSAMENTO)", config->efeitos ? "LIGADO" : "DESLIGADO", 0);
         desenharLinhaDeOpcao(menu, LINHA_BLOOM, "BLOOM (BRILHO EM VOLTA DAS LUZES)", config->bloom ? "LIGADO" : "DESLIGADO", !config->efeitos);
-        desenharLinhaDeOpcao(menu, LINHA_LENS_FLARE, "LENS FLARE (RAIOS DE LUZ DAS FAÍSCAS)", config->lensFlare ? "LIGADO" : "DESLIGADO", 0);
+        desenharLinhaDeOpcao(menu, LINHA_HDR, "CORES DE CINEMA (HDR)", config->coresHdr ? "LIGADAS" : "DESLIGADAS", !config->efeitos);
+        desenharLinhaDeOpcao(menu, LINHA_LENS_FLARE, "LENS FLARE (FAÍSCAS E SOL)", config->lensFlare ? "LIGADO" : "DESLIGADO", 0);
+        desenharLinhaDeOpcao(menu, LINHA_RAIOS_DE_SOL, "RAIOS DE SOL", config->raiosDeSol ? "LIGADOS" : "DESLIGADOS", !config->efeitos);
         desenharLinhaDeOpcao(menu, LINHA_GRANULADO, "GRANULADO DE FILME", config->granulado ? "LIGADO" : "DESLIGADO", 0);
-        desenharLinhaDeOpcao(menu, LINHA_CAMPO, "PROFUNDIDADE DE CAMPO", config->profundidadeDeCampo ? "LIGADA" : "DESLIGADA", 0);
+        desenharLinhaDeOpcao(menu, LINHA_CAMPO, "PROFUNDIDADE DE CAMPO", CAMPOS[config->profundidadeDeCampo % 3], 0);
         desenharLinhaDeOpcao(menu, LINHA_LENTE, "DISTORÇÃO DA LENTE", LENTES[config->distorcaoDaLente], 0);
         desenharLinhaDeOpcao(menu, LINHA_NITIDEZ, "NITIDEZ (COMO O FIDELITYFX CAS)", NITIDEZES[config->nitidez], 0);
         desenharLinhaDeOpcao(menu, LINHA_SUAVIZACAO, "SUAVIZAÇÃO (AA)", config->suavizacao ? "FXAA" : "DESLIGADA", 0);

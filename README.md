@@ -185,7 +185,10 @@ lista circular duplamente encadeada de segmentos.
   ondular), deixa a calçada subir devagar até a altura de antes só perto dos prédios, e o que estava apoiado nela
   (paredes, cercas, postes, a base da torre de pneus) desce junto, sem flutuar. Vale para as duas calçadas da
   cidade: a de concreto cinza e a de cimento bege (a do Luigi, a do Ramone; o cimento no nível da rua é pátio e
-  entrada, e conta como rua).
+  entrada, e conta como rua). O piso de um lote apoiado na calçada (a laje da loja do Luigi) é cortado na linha
+  em que a calçada começa a subir: dali para dentro ele fica na altura de antes, rente à porta, e só a frente
+  desce até a rua. Os postes de luz (`ferramentas/luzes/montar_postes.py`) são gerados de novo em cima do mapa
+  nivelado, para a base deles não flutuar.
 
 ## 1. Instalar a raylib
 
@@ -264,9 +267,9 @@ andando, **E** (ou o quadrado, X no controle de Xbox) conversa com ele, e de nov
 Sh-Boom (`recursos/sons/sh_boom.mp3`), como no filme, repetindo até as luzes apagarem no amanhecer (aí some aos poucos);
 fora da cidade e nas cenas do Mack ela some, e voltando de noite continua de onde parou. **O dia passa**: um dia inteiro de Radiator Springs dura 48 minutos (28 de dia, 6
 de pôr do sol, 10 de noite e 4 de amanhecer). O sol nasce na ponta leste da rua principal, atravessa o céu e se põe
-no fim dela, laranja; de noite a cidade fica azulada, com a lua e as estrelas, e o céu, as sombras, os carros, a
-poeira e o lado de dentro dos prédios acompanham (`src/hora.c`; a luz é o mesmo cálculo de antes, com o sol e as
-cores da hora, e ao meio-dia e fora do passeio ela é a de sempre). O jogo começa no quarto do **cone 8 do Cozy
+no fim dela, laranja; de noite a cidade fica azulada, com a lua e as estrelas, e o céu, as nuvens, as sombras, os
+carros, a poeira, o lado de dentro dos prédios, a neblina da distância e a cor da imagem acompanham (`src/hora.c`;
+a manhã tem bruma, o fim de tarde é quente, o crepúsculo e a noite são frios). O jogo começa no quarto do **cone 8 do Cozy
 Cone** (o mais perto do Mack), numa hora sorteada do dia (cada parte do dia sai na proporção dos minutos dela); a
 volta de uma corrida, acabada ou abandonada, também cai numa hora sorteada, e desistir na escolha da corrida, no
 Mack, deixa a hora como estava. No quarto, parado, **ENTER** (ou Y) dorme: a tela escurece, passam oito horas e
@@ -780,9 +783,26 @@ desligar um sistema de cada vez e comparar: `KATCHAU_SEM_CENARIO`, `KATCHAU_SEM_
 
 A cena 3D é desenhada numa imagem e passa por um último shader (`posprocesso.c`): brilho em volta das luzes (os faróis,
 os refletores da Copa, o nitro e os telões), um tom de cor para cada pista (tarde quente em Interlagos, noite azulada
-na Copa), vinheta e, perto da velocidade máxima e no nitro, desfoque nas bordas. A pintura dos carros reflete o céu,
-mais forte nas bordas (`carros3d.c`), e as telas dos telões brilham sozinhas. Em Configurações, GRÁFICOS escolhe entre
-ALTO (sombras e efeitos), MÉDIO (só efeitos) e BAIXO.
+na Copa; no passeio, o da hora), vinheta e, perto da velocidade máxima e no nitro, desfoque nas bordas. A imagem da
+cena guarda também a profundidade, e daí saem:
+
+- **a neblina da distância**: o longe vai ficando da cor do horizonte, mais no chão do que no alto dos morros;
+- **as cores HDR** (opção): a cena guarda a luz acima do branco (o sol, o reflexo dele na lataria, as lâmpadas),
+  que brilha em volta e chega no branco aos poucos, por uma curva de cinema, em vez de estourar;
+- **os raios de sol** (opção): com o sol à vista, o céu em volta dele, tapado pelo que está na frente (prédios,
+  arquibancadas, nuvens), se espalha em raios; e o **reflexo do sol na lente** (com o LENS FLARE);
+- **a profundidade de campo** (opção): nas cenas do Mack, no pódio e na apresentação da largada, o foco fica no
+  que a câmera mostra e o resto desfoca; na última opção, dirigindo, o fundo bem longe também.
+
+As pistas de dia têm o **sol delas**, baixo o bastante para aparecer no céu (na reta da largada, um pouco para o
+lado da frente; Interlagos é fim de tarde), e um **céu feito no shader** (`mundo.c`), com **nuvens** a 1,8 km de
+altura: a forma sai de um ruído que se repete sem emenda, gerado ao abrir o jogo, e o volume, de duas leituras na
+direção do sol (o lado de lá e o miolo ficam na sombra, a borda fina brilha contra ele). O céu do passeio tem as
+mesmas nuvens, com as cores da hora. A pintura dos carros reflete o mundo em três faixas, como num estúdio de foto
+(o chão escuro, uma linha clara no horizonte e o céu), mais forte nas bordas (`carros3d.c`), e as telas dos telões
+brilham sozinhas. Em Configurações, GRÁFICOS escolhe entre ALTO (tudo), MÉDIO (sombras baixas e efeitos) e BAIXO;
+EXIBIÇÃO tem o **movimento da câmera**: o campo de visão abre com a velocidade e o nitro, a câmera treme nas
+batidas e inclina um pouco nas curvas.
 
 ### Telões e placar
 
@@ -821,9 +841,19 @@ Quando o pneu escorrega (drift, derrapagem, arrancada patinando, rodada e freada
 rastro escuro no asfalto, que some aos poucos (`marcas.c`). Na grama não marca.
 
 De dia, o cenário faz sombra do sol (a face que a câmera vê, se estiver de costas para o sol, fica na própria
-sombra: assim os trilhos do guard-rail e os muros finos não ficam serrilhados): a cada quadro, o que fica num quadrado de 280 m em volta da câmera é desenhado
-visto do sol num mapa de profundidade, e o shader do cenário escurece o que estiver atrás de alguma coisa. À noite,
-na Copa Pistão, não há sombra do sol. Dá para desligar em Configurações, se o computador ficar lento.
+sombra: assim os trilhos do guard-rail e os muros finos não ficam serrilhados). O que fica em volta da câmera é
+desenhado visto do sol num mapa de profundidade com duas metades: um quadrado de 64 m, com o detalhe fino (3 cm por
+pixel, no mapa de 2048), e um de 330 m; cada um só é refeito quando a câmera anda (6 m e 25 m) ou o sol se mexe.
+Cada ponto compara 16 pixels do mapa com pesos bilineares, então a borda da sombra é uma linha, e não uma escada.
+A sombra cai também nos carros, nos moradores e no Mack (debaixo da cobertura do posto, o carro escurece junto com
+o chão). Dentro dos prédios (a loja do Luigi, os quartos e a recepção do Cozy Cone), as luminárias de verdade
+iluminam os carros e os moradores, de dia e de noite: os focos do teto da loja, as luminárias de cone, os abajures e
+o neon da recepção, os abajures e as cúpulas dos quartos, cada uma no lugar dela no desenho, com o facho dos focos e
+a potência de dia e de noite com que o Cycles assou a luz do interior (`<interior>_luzes.json`, gerados pelas
+ferramentas com `--so-luzes`; `src/luzes.c` e `GLSL_DAS_LAMPADAS` em `hora.h`). A luz delas passa pela mesma curva
+com que a ferramenta põe a luz assada na cor dos vértices, então o carro clareia como o chão em volta dele, e o
+que a luminária não enxerga (atrás de uma parede) fica no escuro. As luzes que os interiores jogam para fora pelas
+portas, de noite (`<interior>_noite.json`), continuam só para o cenário. À noite, na Copa Pistão, não há sombra do sol. Dá para desligar em Configurações, se o computador ficar lento.
 
 ### A onda da torcida
 

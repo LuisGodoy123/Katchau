@@ -124,26 +124,25 @@
  * mais longe do sol do que o que o mapa guardou ali está na sombra de alguma coisa. A normal sai
  * das derivadas da posição e aponta sempre para a câmera: a face que a gente vê, se estiver de
  * costas para o sol, está na própria sombra (senão, nos trilhos e muros finos, o mapa dá um
- * serrilhado de claro e escuro) */
+ * serrilhado de claro e escuro). Isso vale também longe, fora do quadrado do mapa: senão, com o sol
+ * baixo, a face de um morro de costas para ele mostrava o quadrado como um retângulo escuro. Até uns
+ * 3 km do meio do mapa: o domo do céu das pistas, a 9 km, usa este shader e não tem face (com o sol baixo,
+ * o céu na direção dele cai dentro do quadrado, visto do sol: só a distância o separa) */
+#define METADE_DA_AREA_DA_SOMBRA "165.0"            /* metros: AREA_DA_SOMBRA / 2 */
+#define METADE_DA_PROFUNDIDADE_DA_SOMBRA "500.0"    /* metros: o mapa vê de 1 a 1000 m do sol (ALTURA_DO_SOL * 2) */
 #define GLSL_DA_SOMBRA \
-    GLSL_DO_SOL \
-    "uniform mat4 luzVP; uniform sampler2D mapaDeSombra; uniform float sombraLigada;\n" \
+    GLSL_DO_SOL GLSL_DO_MAPA_DE_SOMBRA \
     "float naSombra(vec3 p) {\n" \
     "    if (sombraLigada < 0.5) return 0.0;\n" \
     "    vec3 n = normalize(cross(dFdx(p), dFdy(p)));\n" \
     "    float deFrente = dot(n, solDoDia);\n" \
-    "    vec4 q = luzVP * vec4(p + n * 0.15, 1.0);\n" \
-    "    q.xyz = q.xyz / q.w * 0.5 + 0.5;\n" \
-    "    if (q.x <= 0.0 || q.x >= 1.0 || q.y <= 0.0 || q.y >= 1.0 || q.z >= 1.0) return 0.0;\n" \
     "    float deCostas = smoothstep(0.02, -0.12, deFrente);\n" \
+    "    vec4 r = luzVP * vec4(p, 1.0);\n" \
+    "    vec3 m = r.xyz / r.w;\n" \
+    "    float metros = length(m * vec3(" METADE_DA_AREA_DA_SOMBRA ", " METADE_DA_AREA_DA_SOMBRA ", " METADE_DA_PROFUNDIDADE_DA_SOMBRA "));\n" \
+    "    if (abs(m.x) >= 1.0 || abs(m.y) >= 1.0 || abs(m.z) >= 1.0) return deCostas * (1.0 - smoothstep(2500.0, 3500.0, metros));\n" \
     "    if (deCostas >= 1.0) return 1.0;\n" \
-    "    float vies = 0.0008 + 0.0030 * (1.0 - clamp(deFrente, 0.0, 1.0));\n" \
-    "    vec2 passo = 1.0 / vec2(textureSize(mapaDeSombra, 0));\n" \
-    "    float s = 0.0;\n" \
-    "    for (int x = -1; x <= 1; x++) for (int y = -1; y <= 1; y++)\n" \
-    "        s += (q.z - vies > texture(mapaDeSombra, q.xy + vec2(x, y) * passo).r) ? 1.0 : 0.0;\n" \
-    "    float borda = min(min(q.x, 1.0 - q.x), min(q.y, 1.0 - q.y));\n" \
-    "    return max(s / 9.0 * smoothstep(0.0, 0.08, borda), deCostas);\n" \
+    "    return max(sombraNoMapa(p, n, deFrente), deCostas);\n" \
     "}\n"
 #define FORCA_DA_SOMBRA "0.50"
 
@@ -282,6 +281,11 @@ static int ladoDoMapaDeSombraAtual = 2048;   /* o lado do mapa de sombra: o da q
 #define LADO_DO_MAPA_DE_SOMBRA ladoDoMapaDeSombraAtual
 #define AREA_DA_SOMBRA        330.0f   /* metros: o quadrado em volta da câmera que tem sombra */
 #define ADIANTE_DA_SOMBRA     90.0f    /* metros: o meio do quadrado fica à frente da câmera */
+/* O quadrado de perto (a metade esquerda do mapa): pequeno, em volta do carro, com o detalhe fino (a 2048,
+ * 3 cm por pixel, contra 16 cm do grande). Ele é refeito com menos caminho andado, e desenha só o que cai nele */
+#define AREA_DA_SOMBRA_DE_PERTO     64.0f
+#define ADIANTE_DA_SOMBRA_DE_PERTO  16.0f
+#define REFAZER_A_SOMBRA_DE_PERTO   6.0f
 #define ALTURA_DO_SOL         500.0f   /* metros: de onde o sol "olha" */
 #define COR_DA_TELA_NO_HALO   (Color){ 215, 215, 215, 255 }   /* as telas brilham, mas menos que um refletor */
 #define REFAZER_A_SOMBRA      25.0f   /* metros que a câmera anda até o mapa de sombra ser refeito */
@@ -388,7 +392,7 @@ static const char *PIXELS_DE_INTERLAGOS[] = {
 static Shader shadersDeInterlagos[TOTAL_DE_DESENHOS];
 
 /* Os shaders que recebem a sombra do sol */
-#define MAXIMO_QUE_RECEBEM_SOMBRA 12
+#define MAXIMO_QUE_RECEBEM_SOMBRA 16
 static Shader recebemSombra[MAXIMO_QUE_RECEBEM_SOMBRA];
 static int totalQueRecebemSombra = 0;
 /* Onde cada um desses shaders guarda "sombraLigada" e "luzVP". Procurar pelo nome é uma
@@ -397,9 +401,13 @@ static int totalQueRecebemSombra = 0;
  * uma vez, no carregamento. */
 static int locSombraLigada[MAXIMO_QUE_RECEBEM_SOMBRA];
 static int locLuzVP[MAXIMO_QUE_RECEBEM_SOMBRA];
+static int locLuzVPPerto[MAXIMO_QUE_RECEBEM_SOMBRA];
+static float sombraMandada = -1.0f;   /* o "sombraLigada" que os shaders têm agora (-1: não se sabe) */
+static Matrix luzVPMandada, luzVPPertoMandada;   /* as duas matrizes do mapa de agora (para quem chega depois) */
 
 static Material material;   /* o mesmo material, trocando a textura a cada desenho */
 static Model mundoAberto;   /* o passeio livre: carregado na primeira vez (carregarMundoAberto) */
+static BoundingBox *caixasDoMundoAberto = NULL;   /* a caixa de cada malha dele, no mundo (o corte da sombra) */
 static int temMundoAberto = 0;
 static const Model *modelosNoMundoAberto[MODELOS_NO_MUNDO_ABERTO];   /* o Mack e as rodas (colocarNoMundoAberto) */
 static const Matrix *matrizesNoMundoAberto[MODELOS_NO_MUNDO_ABERTO];
@@ -413,6 +421,39 @@ static Texture2D texturaCeu;
  * horizonte para o alto, as nuvens, que são as partes sem cor da imagem, com a cor da hora), o lado
  * do sol brilha no fim da tarde, e de noite entram as estrelas e a lua. Ao meio-dia, a imagem como
  * ela é, mais o sol */
+/* As nuvens, nos dois céus (o das pistas de dia e o do passeio): uma camada a ALTURA_DAS_NUVENS, vista em
+ * perspectiva (grandes em cima, achatadas no horizonte, andando com o vento e com a câmera). A forma sai de um
+ * ruído que se repete sem emenda (gerarRuidoDasNuvens: o vermelho dá os montes, o verde gasta as bordas). O
+ * volume é de mentira, mas barato: duas leituras na direção da luz dizem quanta nuvem há entre o ponto e o sol
+ * (o lado de lá e o miolo ficam na sombra, o lado do sol fica claro), e a borda fina brilha contra ele.
+ * nuvemNoCeu devolve o céu com a nuvem por cima e, no alfa, o quanto ela cobre (o sol, a lua e as estrelas
+ * ficam atrás). RUIDO é o nome da textura do ruído no shader */
+#define ALTURA_DAS_NUVENS     "1800.0"  /* metros acima da câmera */
+#define LADO_DO_RUIDO         256       /* pixels da imagem do ruído */
+#define GLSL_DAS_NUVENS(RUIDO) \
+    "uniform vec2 olho; uniform vec2 vento; uniform float cobertura;\n" \
+    "float densidadeDaNuvem(vec2 p) {\n" \
+    "    float forma = texture(" RUIDO ", p / 22000.0 + vento).r;\n" \
+    "    float gasto = texture(" RUIDO ", p / 4300.0 + vento * 2.3).g;\n" \
+    "    return clamp((forma - (1.0 - cobertura) + (gasto - 0.5) * 0.42) * 6.0, 0.0, 1.0);\n" \
+    "}\n" \
+    "vec4 nuvemNoCeu(vec3 d, vec3 paraALuz, vec3 luz, vec3 sombra, vec3 ceu) {\n" \
+    "    if (d.y <= 0.012 || cobertura <= 0.0) return vec4(ceu, 0.0);\n" \
+    "    float t = " ALTURA_DAS_NUVENS " / d.y;\n" \
+    "    vec2 p = olho + d.xz * t;\n" \
+    "    float dens = densidadeDaNuvem(p);\n" \
+    "    if (dens <= 0.0) return vec4(ceu, 0.0);\n" \
+    "    vec2 rumo = normalize(paraALuz.xz + vec2(0.00001));\n" \
+    "    float antes = densidadeDaNuvem(p + rumo * 220.0) * 1.4 + densidadeDaNuvem(p + rumo * 600.0);\n" \
+    "    vec3 nuvem = sombra * (1.0 - 0.24 * dens) + luz * exp(-antes * 1.8) * 0.55;\n" \
+    "    float fina = (1.0 - dens) * (1.0 - dens);\n" \
+    "    nuvem += luz * pow(max(dot(d, paraALuz), 0.0), 8.0) * fina * 0.7;\n" \
+    "    float cobre = (1.0 - exp(-dens * 4.0)) * smoothstep(0.012, 0.10, d.y);\n" \
+    "    nuvem = mix(nuvem, ceu, smoothstep(3000.0, 22000.0, t) * 0.65);\n" \
+    "    return vec4(mix(ceu, nuvem, cobre), cobre);\n" \
+    "}\n"
+static Texture2D gerarRuidoDasNuvens(void);
+static Texture2D ruidoDasNuvens;
 static Shader shaderDoCeu;
 static Material materialDoCeu;
 static int locMisturaDoDia, locCorDoHorizonte, locCorDoAlto, locCorDasNuvens, locCorDoBrilho, locEstrelas,
@@ -427,32 +468,64 @@ static const char *VERTICES_DO_CEU =
 static const char *PIXELS_DO_CEU =
     "#version 330\n"
     "in vec2 fragTexCoord; in vec4 fragColor; in vec3 direcao;\n"
-    "uniform sampler2D texture0; uniform sampler2D texture1; uniform vec4 colDiffuse;\n"
+    "uniform sampler2D texture0; uniform sampler2D texture1; uniform sampler2D texture2; uniform vec4 colDiffuse;\n"
     "uniform float misturaDoDia; uniform vec3 corDoHorizonte; uniform vec3 corDoAlto; uniform vec3 corDasNuvens;\n"
     "uniform vec3 corDoBrilho; uniform float estrelas; uniform vec3 solNoCeu; uniform vec3 corDoSol;\n"
     "uniform vec3 luaNoCeu; uniform float brilhoDaLua;\n"
     "out vec4 finalColor;\n"
+    GLSL_DAS_NUVENS("texture2")
     "void main() {\n"
     "    vec3 d = normalize(direcao);\n"
-    "    vec3 imagem = (texture(texture0, fragTexCoord) * colDiffuse * fragColor).rgb;\n"
-    "    float maior = max(imagem.r, max(imagem.g, imagem.b)), menor = min(imagem.r, min(imagem.g, imagem.b));\n"
-    "    float nuvem = smoothstep(0.30, 0.10, (maior - menor) / max(maior, 0.001)) * smoothstep(0.55, 0.85, maior);\n"
     "    float alto = clamp(d.y, 0.0, 1.0);\n"
     "    vec2 h = normalize(d.xz + vec2(0.00001)), hs = normalize(solNoCeu.xz + vec2(0.00001));\n"
     "    float ladoDoSol = pow(max(dot(h, hs), 0.0), 3.0) * (1.0 - smoothstep(0.0, 0.45, alto));\n"
-    "    vec3 ceu = mix(corDoHorizonte, corDoAlto, pow(alto, 0.55)) + corDoBrilho * ladoDoSol;\n"
-    "    vec3 nuvens = corDasNuvens * (0.55 + 0.45 * maior) + corDoBrilho * ladoDoSol * 0.6;\n"
-    "    vec3 cor = mix(mix(ceu, nuvens, nuvem), imagem, misturaDoDia);\n"
+    "    vec3 cor = mix(corDoHorizonte, corDoAlto, pow(alto, 0.55)) + corDoBrilho * ladoDoSol;\n"
+    /* As nuvens: a sombra delas tem a cor das nuvens da hora (brancas de dia, rosadas no pôr do sol, escuras de
+     * noite), a luz é a do sol (de noite, um pouco da lua) */
+    "    float solAcima = smoothstep(-0.05, 0.02, solNoCeu.y);\n"
+    "    vec3 paraALuz = normalize(mix(luaNoCeu, solNoCeu, solAcima));\n"
+    "    vec3 luz = corDoSol * solAcima + vec3(0.30, 0.32, 0.42) * brilhoDaLua * (1.0 - solAcima);\n"
+    "    vec4 nuvem = nuvemNoCeu(d, paraALuz, luz, mix(corDoHorizonte, corDasNuvens * 0.68, 0.5) + corDoBrilho * ladoDoSol * 0.5, cor);\n"
+    "    cor = nuvem.rgb;\n"
+    "    float livre = 1.0 - nuvem.a;\n"
     "    vec2 uv = vec2(atan(d.x, d.z) * 0.15915, asin(clamp(d.y, -1.0, 1.0)) * 0.63662);\n"
     "    float estrela = texture(texture1, uv * vec2(2.0, 1.2)).r;\n"
-    "    cor += vec3(estrela) * estrelas * 0.85 * (1.0 - nuvem) * smoothstep(0.05, 0.25, d.y);\n"
+    "    cor += vec3(estrela) * estrelas * 0.85 * livre * smoothstep(0.05, 0.25, d.y);\n"
     "    float s = max(dot(d, solNoCeu), 0.0);\n"
-    "    float acima = smoothstep(-0.02, 0.01, d.y) * (1.0 - 0.85 * nuvem);\n"
+    "    float acima = smoothstep(-0.02, 0.01, d.y) * livre;\n"
     "    cor += corDoSol * acima * (smoothstep(0.99980, 0.99988, s) * 1.6 + pow(s, 400.0) * 0.5 + pow(s, 12.0) * 0.15);\n"
     "    float l = max(dot(d, luaNoCeu), 0.0);\n"
-    "    cor += vec3(0.92, 0.94, 1.0) * brilhoDaLua * (1.0 - 0.7 * nuvem)\n"
+    "    cor += vec3(0.92, 0.94, 1.0) * brilhoDaLua * livre\n"
     "           * (smoothstep(0.99990, 0.99995, l) * 0.95 + pow(l, 300.0) * 0.12);\n"
     "    finalColor = vec4(cor, 1.0);\n"
+    "}\n";
+/* O céu das pistas de dia, feito no shader: o degradê do horizonte ao alto, o sol (com o brilho em volta e o
+ * lado do céu dele mais quente) e as nuvens (GLSL_DAS_NUVENS), que tapam o sol */
+static const float COBERTURA_DAS_NUVENS[TOTAL_PISTAS] = { 0.43f, 0.0f, 0.38f, 0.41f };   /* Interlagos, Copa, Oval, Splat */
+#define COBERTURA_DO_PASSEIO  0.44f     /* o deserto: menos nuvens */
+static Shader shaderDoCeuDasPistas;
+static Material materialDoCeuDasPistas;
+static int locCeuHorizonte = -1, locCeuAlto = -1, locCeuSol = -1, locCeuCorDoSol = -1, locCeuOlho = -1, locCeuVento = -1,
+           locCeuCobertura = -1;
+static int locOlhoDoPasseio = -1, locVentoDoPasseio = -1, locCoberturaDoPasseio = -1;
+static const char *PIXELS_DO_CEU_DAS_PISTAS =
+    "#version 330\n"
+    "in vec2 fragTexCoord; in vec4 fragColor; in vec3 direcao;\n"
+    "uniform sampler2D texture0;\n"
+    "uniform vec3 corDoHorizonte, corDoAlto, solNoCeu, corDoSol;\n"
+    "out vec4 finalColor;\n"
+    GLSL_DAS_NUVENS("texture0")
+    "void main() {\n"
+    "    vec3 d = normalize(direcao);\n"
+    "    float alto = clamp(d.y, 0.0, 1.0);\n"
+    "    vec3 ceu = mix(corDoHorizonte, corDoAlto, pow(alto, 0.5));\n"
+    "    float s = max(dot(d, solNoCeu), 0.0);\n"
+    "    vec2 h = normalize(d.xz + vec2(0.00001)), hs = normalize(solNoCeu.xz + vec2(0.00001));\n"
+    "    ceu += corDoSol * (0.18 * pow(max(dot(h, hs), 0.0), 4.0) * (1.0 - smoothstep(0.0, 0.45, alto))\n"   /* o lado do sol, mais quente */
+    "                       + 0.16 * pow(s, 10.0) + 0.30 * pow(s, 120.0));\n"
+    "    vec3 sol = corDoSol * smoothstep(0.99986, 0.99992, s) * 2.6 * smoothstep(-0.02, 0.01, d.y);\n"   /* o disco: passa do branco */
+    "    vec4 nuvem = nuvemNoCeu(d, solNoCeu, corDoSol, mix(corDoHorizonte, vec3(0.68), 0.5), ceu);\n"
+    "    finalColor = vec4(nuvem.rgb + sol * (1.0 - nuvem.a), 1.0);\n"
     "}\n";
 static Texture2D texturaAsfalto[2], texturaGrama;
 static Texture2D texturaDoConcreto;   /* o concreto limpo dos muros de Interlagos (gerado) */
@@ -2277,6 +2350,7 @@ static void carregarCeuDoPasseio(void) {
     shaderDoPrepasse = LoadShaderFromMemory(VERTICES_DO_PREPASSE, PIXELS_DA_PROFUNDIDADE);
     shaderDoPrepasseComCor = LoadShaderFromMemory(VERTICES_DO_PREPASSE_COM_COR, PIXELS_DO_PREPASSE_COM_COR);
     shaderDoCeu = LoadShaderFromMemory(VERTICES_DO_CEU, PIXELS_DO_CEU);
+    ruidoDasNuvens = gerarRuidoDasNuvens();   /* as nuvens dos dois céus */
     materialDoCeu = LoadMaterialDefault();
     materialDoCeu.shader = shaderDoCeu;
     locMisturaDoDia = GetShaderLocation(shaderDoCeu, "misturaDoDia");
@@ -2289,6 +2363,25 @@ static void carregarCeuDoPasseio(void) {
     locCorDoSol = GetShaderLocation(shaderDoCeu, "corDoSol");
     locLuaNoCeu = GetShaderLocation(shaderDoCeu, "luaNoCeu");
     locBrilhoDaLua = GetShaderLocation(shaderDoCeu, "brilhoDaLua");
+    locOlhoDoPasseio = GetShaderLocation(shaderDoCeu, "olho");
+    locVentoDoPasseio = GetShaderLocation(shaderDoCeu, "vento");
+    locCoberturaDoPasseio = GetShaderLocation(shaderDoCeu, "cobertura");
+    shaderDoCeu.locs[SHADER_LOC_MAP_NORMAL] = GetShaderLocation(shaderDoCeu, "texture2");   /* o ruído das nuvens */
+}
+
+/* O céu das pistas de dia: o shader (com o mesmo jeito de achar a direção do céu do passeio) e o ruído */
+static void carregarCeuDasPistas(void) {
+    shaderDoCeuDasPistas = LoadShaderFromMemory(VERTICES_DO_CEU, PIXELS_DO_CEU_DAS_PISTAS);
+    materialDoCeuDasPistas = LoadMaterialDefault();
+    materialDoCeuDasPistas.shader = shaderDoCeuDasPistas;
+    materialDoCeuDasPistas.maps[MATERIAL_MAP_ALBEDO].texture = ruidoDasNuvens;
+    locCeuHorizonte = GetShaderLocation(shaderDoCeuDasPistas, "corDoHorizonte");
+    locCeuAlto = GetShaderLocation(shaderDoCeuDasPistas, "corDoAlto");
+    locCeuSol = GetShaderLocation(shaderDoCeuDasPistas, "solNoCeu");
+    locCeuCorDoSol = GetShaderLocation(shaderDoCeuDasPistas, "corDoSol");
+    locCeuOlho = GetShaderLocation(shaderDoCeuDasPistas, "olho");
+    locCeuVento = GetShaderLocation(shaderDoCeuDasPistas, "vento");
+    locCeuCobertura = GetShaderLocation(shaderDoCeuDasPistas, "cobertura");
 }
 
 /*
@@ -2308,8 +2401,16 @@ static void desenharCeuDoPasseio(Matrix naCamera) {
     SetShaderValue(shaderDoCeu, locCorDoSol, &luz->corDoSol, SHADER_UNIFORM_VEC3);
     SetShaderValue(shaderDoCeu, locLuaNoCeu, &luz->luaNoCeu, SHADER_UNIFORM_VEC3);
     SetShaderValue(shaderDoCeu, locBrilhoDaLua, &luz->lua, SHADER_UNIFORM_FLOAT);
+    Vector2 olho = { naCamera.m12, naCamera.m14 };
+    float minutos = (float) fmod(GetTime(), 36000.0) / 60.0f;
+    Vector2 vento = { minutos * 0.0016f, minutos * 0.0007f };   /* as nuvens andam devagar */
+    float cobertura = COBERTURA_DO_PASSEIO;
+    SetShaderValue(shaderDoCeu, locOlhoDoPasseio, &olho, SHADER_UNIFORM_VEC2);
+    SetShaderValue(shaderDoCeu, locVentoDoPasseio, &vento, SHADER_UNIFORM_VEC2);
+    SetShaderValue(shaderDoCeu, locCoberturaDoPasseio, &cobertura, SHADER_UNIFORM_FLOAT);
     Texture2D branca = { rlGetTextureIdDefault(), 1, 1, 1, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
     materialDoCeu.maps[MATERIAL_MAP_METALNESS].texture = texturaDoCeuNoturno();
+    materialDoCeu.maps[MATERIAL_MAP_NORMAL].texture = ruidoDasNuvens;
     materialDoCeu.maps[MATERIAL_MAP_ALBEDO].texture = texturaCeu;
     DrawMesh(ceuDeDia, materialDoCeu, naCamera);
     materialDoCeu.maps[MATERIAL_MAP_ALBEDO].texture = branca;
@@ -2348,6 +2449,7 @@ void carregarMundo(Pista *pistas[]) {
     /* Na vertical a imagem não se repete: a borda de cima não pode misturar com a de baixo */
     rlTextureParameters(texturaCeu.id, RL_TEXTURE_WRAP_T, RL_TEXTURE_WRAP_CLAMP);
     carregarCeuDoPasseio();
+    carregarCeuDasPistas();
 
     TraceLog(LOG_INFO, "CARGA-MUNDO: shaders/texturas/ceu %.2f s", GetTime() - tInicio); tInicio = GetTime();
     passoDaEspera("CARREGANDO CENARIOS", 0.02f);
@@ -2467,6 +2569,19 @@ int carregarMundoAberto(void) {
             SetTextureWrap(*textura, TEXTURE_WRAP_REPEAT);
         }
     }
+    /* A caixa de cada malha, já no mundo (os 8 cantos, pela matriz do modelo): o mapa de sombra corta por elas */
+    caixasDoMundoAberto = malloc(sizeof(BoundingBox) * (size_t) (mundoAberto.meshCount > 0 ? mundoAberto.meshCount : 1));
+    for (int m = 0; caixasDoMundoAberto != NULL && m < mundoAberto.meshCount; m++) {
+        BoundingBox b = GetMeshBoundingBox(mundoAberto.meshes[m]);
+        BoundingBox noMundo = { { 1e30f, 1e30f, 1e30f }, { -1e30f, -1e30f, -1e30f } };
+        for (int c = 0; c < 8; c++) {
+            Vector3 canto = { (c & 1) ? b.max.x : b.min.x, (c & 2) ? b.max.y : b.min.y, (c & 4) ? b.max.z : b.min.z };
+            canto = Vector3Transform(canto, mundoAberto.transform);
+            noMundo.min = Vector3Min(noMundo.min, canto);
+            noMundo.max = Vector3Max(noMundo.max, canto);
+        }
+        caixasDoMundoAberto[m] = noMundo;
+    }
     temMundoAberto = 1;
     return 1;
 }
@@ -2477,6 +2592,8 @@ void descarregarMundo(void) {
             mundoAberto.materials[i].shader.id = rlGetShaderIdDefault();   /* o shader é devolvido lá embaixo */
         }
         UnloadModel(mundoAberto);
+        free(caixasDoMundoAberto);
+        caixasDoMundoAberto = NULL;
         temMundoAberto = 0;
     }
     /* O shader é compartilhado: é devolvido uma vez só, aqui embaixo */
@@ -2543,6 +2660,8 @@ void descarregarMundo(void) {
     UnloadShader(shaderDoPrepasseComCor);
     UnloadShader(shader);
     UnloadShader(shaderDosMapasDeDia);
+    UnloadShader(shaderDoCeuDasPistas);
+    UnloadTexture(ruidoDasNuvens);
     for (int d = 0; d < TOTAL_DE_DESENHOS; d++) {
         if (PIXELS_DE_INTERLAGOS[d] != NULL) {
             UnloadShader(shadersDeInterlagos[d]);
@@ -2634,11 +2753,13 @@ static void carregarSombras(void) {
         ladoDoMapaDeSombraAtual = 1024;   /* sem sombras no começo: o mapa pequeno fica, caso elas sejam ligadas depois */
     }
     shaderDaProfundidade = LoadShaderFromMemory(VERTICES_DA_PROFUNDIDADE, PIXELS_DA_PROFUNDIDADE);
+    /* As duas metades lado a lado: a de perto à esquerda, a de longe à direita. A largura guardada na
+     * RenderTexture é a de uma metade: é ela que o BeginTextureMode usa para a área de desenho e o aspecto */
     mapaDeSombra.id = rlLoadFramebuffer();
     mapaDeSombra.texture.width = LADO_DO_MAPA_DE_SOMBRA;
     mapaDeSombra.texture.height = LADO_DO_MAPA_DE_SOMBRA;
-    mapaDeSombra.depth.id = rlLoadTextureDepth(LADO_DO_MAPA_DE_SOMBRA, LADO_DO_MAPA_DE_SOMBRA, false);
-    mapaDeSombra.depth.width = LADO_DO_MAPA_DE_SOMBRA;
+    mapaDeSombra.depth.id = rlLoadTextureDepth(2 * LADO_DO_MAPA_DE_SOMBRA, LADO_DO_MAPA_DE_SOMBRA, false);
+    mapaDeSombra.depth.width = 2 * LADO_DO_MAPA_DE_SOMBRA;
     mapaDeSombra.depth.height = LADO_DO_MAPA_DE_SOMBRA;
     rlFramebufferAttach(mapaDeSombra.id, mapaDeSombra.depth.id, RL_ATTACHMENT_DEPTH, RL_ATTACHMENT_TEXTURE2D, 0);
     temMapaDeSombra = rlFramebufferComplete(mapaDeSombra.id);
@@ -2650,7 +2771,56 @@ static void carregarSombras(void) {
         SetShaderValue(recebemSombra[i], GetShaderLocation(recebemSombra[i], "mapaDeSombra"), &slot, SHADER_UNIFORM_INT);
         locSombraLigada[i] = GetShaderLocation(recebemSombra[i], "sombraLigada");
         locLuzVP[i] = GetShaderLocation(recebemSombra[i], "luzVP");
+        locLuzVPPerto[i] = GetShaderLocation(recebemSombra[i], "luzVPPerto");
     }
+    luzVPMandada = luzVPPertoMandada = MatrixIdentity();
+}
+
+/*
+ * receberSombraDoSol
+ * Põe um shader de fora do cenário (os carros) entre os que recebem a sombra do sol. Ele tem de ter
+ * GLSL_DO_MAPA_DE_SOMBRA. Chamar depois de carregarMundo.
+ * Recebe: o shader.
+ * Devolve: nada.
+ */
+void receberSombraDoSol(Shader shader) {
+    if (totalQueRecebemSombra >= MAXIMO_QUE_RECEBEM_SOMBRA || shader.id == 0) {
+        TraceLog(LOG_WARNING, "MUNDO: shaders demais recebendo a sombra do sol");
+        return;
+    }
+    int i = totalQueRecebemSombra++;
+    recebemSombra[i] = shader;
+    int slot = SLOT_DA_SOMBRA;
+    SetShaderValue(shader, GetShaderLocation(shader, "mapaDeSombra"), &slot, SHADER_UNIFORM_INT);
+    locSombraLigada[i] = GetShaderLocation(shader, "sombraLigada");
+    locLuzVP[i] = GetShaderLocation(shader, "luzVP");
+    locLuzVPPerto[i] = GetShaderLocation(shader, "luzVPPerto");
+    float ligada = (sombraMandada > 0.5f) ? 1.0f : 0.0f;
+    SetShaderValue(shader, locSombraLigada[i], &ligada, SHADER_UNIFORM_FLOAT);
+    SetShaderValueMatrix(shader, locLuzVP[i], luzVPMandada);
+    SetShaderValueMatrix(shader, locLuzVPPerto[i], luzVPPertoMandada);
+}
+
+/* Manda "sombraLigada" a todos (só quando muda: o valor quase nunca muda) */
+static void mandarSombraLigada(float ligada) {
+    if (ligada == sombraMandada) {
+        return;
+    }
+    sombraMandada = ligada;
+    for (int i = 0; i < totalQueRecebemSombra; i++) {
+        SetShaderValue(recebemSombra[i], locSombraLigada[i], &ligada, SHADER_UNIFORM_FLOAT);
+    }
+}
+
+/*
+ * apagarSombraDoSol
+ * Desliga a sombra do sol até o próximo prepararSombras: para desenhar um carro fora do mundo (a vitrine
+ * da garagem), que senão pegaria a sombra do lugar em que o fundo do menu estava.
+ * Recebe: nada. Devolve: nada.
+ */
+void apagarSombraDoSol(void) {
+    sombraLigadaAgora = 0;
+    mandarSombraLigada(0.0f);
 }
 
 /*
@@ -2671,7 +2841,13 @@ static void desenharQuemFazSombra(IdPista id) {
                 originais[i] = mundoAberto.materials[i].shader;
                 mundoAberto.materials[i].shader = shaderDaProfundidade;
             }
-            DrawModel(mundoAberto, (Vector3){ 0.0f, 0.0f, 0.0f }, 1.0f, WHITE);
+            /* Malha por malha, só as que caem no quadrado da luz (o de perto pega poucas) */
+            for (int m = 0; m < mundoAberto.meshCount; m++) {
+                if (caixasDoMundoAberto != NULL && !caixaAVista(caixasDoMundoAberto[m])) {
+                    continue;
+                }
+                DrawMesh(mundoAberto.meshes[m], mundoAberto.materials[mundoAberto.meshMaterial[m]], mundoAberto.transform);
+            }
             for (int i = 0; i < total; i++) {
                 mundoAberto.materials[i].shader = originais[i];
             }
@@ -2709,53 +2885,58 @@ static void desenharQuemFazSombra(IdPista id) {
  * Recebe: a pista, a câmera e se as sombras estão ligadas nas configurações.
  * Devolve: nada.
  */
-void prepararSombras(IdPista id, Camera3D camera, int ligadas) {
-    const LuzDoDia *luzDoDia = luzAplicada();
-    sombraLigadaAgora = ligadas && temMapaDeSombra && id != PISTA_COPA_PISTAO && luzDoDia->sombra > 0.005f;
-    float ligada = sombraLigadaAgora ? 1.0f : 0.0f;
-    /* O valor quase nunca muda: mandá-lo de novo não faz nada */
-    static float ultimaLigada = -1.0f;
-    if (ligada != ultimaLigada) {
-        ultimaLigada = ligada;
-        for (int i = 0; i < totalQueRecebemSombra; i++) {
-            SetShaderValue(recebemSombra[i], locSombraLigada[i], &ligada, SHADER_UNIFORM_FLOAT);
-        }
-    }
-    if (!sombraLigadaAgora) {
-        return;
-    }
+/* Um dos dois quadrados do mapa: o tamanho, o quanto fica à frente da câmera, o quanto ela anda até ele ser
+ * refeito, a metade do mapa em que ele fica, e de quando ele foi feito */
+typedef struct {
+    float area, adiante, refazer;
+    int metade;
+    Vector3 meioAnterior, solAnterior;
+    int pistaAnterior;
+} QuadradoDaSombra;
 
+static QuadradoDaSombra quadradosDaSombra[2] = {
+    { AREA_DA_SOMBRA_DE_PERTO, ADIANTE_DA_SOMBRA_DE_PERTO, REFAZER_A_SOMBRA_DE_PERTO, 0, { 1e9f, 0.0f, 1e9f }, { 0.0f, 0.0f, 0.0f }, -1 },
+    { AREA_DA_SOMBRA, ADIANTE_DA_SOMBRA, REFAZER_A_SOMBRA, 1, { 1e9f, 0.0f, 1e9f }, { 0.0f, 0.0f, 0.0f }, -1 },
+};
+
+/*
+ * fazerQuadradoDaSombra
+ * Desenha o cenário visto do sol num dos quadrados (na metade dele do mapa), se a câmera andou o bastante
+ * desde a última vez, o sol andou ou a pista mudou.
+ * Recebe: o quadrado, a pista, a câmera e o sol.
+ * Devolve: 1 se refez (e preenche a matriz da luz), 0 se o de antes continua valendo.
+ */
+static int fazerQuadradoDaSombra(QuadradoDaSombra *q, IdPista id, Camera3D camera, Vector3 sol, Matrix *luzVP) {
     /* O meio do quadrado: à frente da câmera, preso à grade do mapa (senão a borda das sombras treme) */
     Vector3 frente = Vector3Subtract(camera.target, camera.position);
     frente.y = 0.0f;
     frente = Vector3Normalize(frente);
-    float passo = AREA_DA_SOMBRA / LADO_DO_MAPA_DE_SOMBRA * 4.0f;
-    Vector3 meio = { camera.position.x + frente.x * ADIANTE_DA_SOMBRA, camera.position.y, camera.position.z + frente.z * ADIANTE_DA_SOMBRA };
+    float passo = q->area / LADO_DO_MAPA_DE_SOMBRA * 4.0f;
+    Vector3 meio = { camera.position.x + frente.x * q->adiante, camera.position.y, camera.position.z + frente.z * q->adiante };
     meio.x = roundf(meio.x / passo) * passo;
     meio.z = roundf(meio.z / passo) * passo;
-
-    /* O cenário não se mexe: o mapa só é refeito quando a câmera anda bastante (ou muda a pista) */
-    static Vector3 meioAnterior = { 1e9f, 0.0f, 1e9f };
-    static Vector3 solAnterior = { 0.0f, 0.0f, 0.0f };
-    static int pistaAnterior = -1;
-    Vector3 sol = luzDoDia->sol;
-    if ((int) id == pistaAnterior && hypotf(meio.x - meioAnterior.x, meio.z - meioAnterior.z) < REFAZER_A_SOMBRA
-        && Vector3DotProduct(sol, solAnterior) > SOL_ANDOU) {
-        return;   /* luzVP e o mapa continuam valendo */
+    if ((int) id == q->pistaAnterior && hypotf(meio.x - q->meioAnterior.x, meio.z - q->meioAnterior.z) < q->refazer
+        && Vector3DotProduct(sol, q->solAnterior) > SOL_ANDOU) {
+        return 0;
     }
-    meioAnterior = meio;
-    solAnterior = sol;
-    pistaAnterior = id;
+    q->meioAnterior = meio;
+    q->solAnterior = sol;
+    q->pistaAnterior = id;
     Camera3D luz = { 0 };
     luz.position = Vector3Add(meio, Vector3Scale(sol, ALTURA_DO_SOL));
     luz.target = meio;
     luz.up = (Vector3){ 0.0f, 1.0f, 0.0f };
-    luz.fovy = AREA_DA_SOMBRA;
+    luz.fovy = q->area;
     luz.projection = CAMERA_ORTHOGRAPHIC;
 
     rlDrawRenderBatchActive();
-    BeginTextureMode(mapaDeSombra);
-    rlClearScreenBuffers();
+    BeginTextureMode(mapaDeSombra);   /* a área de desenho é a de uma metade: anda até a deste quadrado */
+    int x = q->metade * LADO_DO_MAPA_DE_SOMBRA;
+    rlViewport(x, 0, LADO_DO_MAPA_DE_SOMBRA, LADO_DO_MAPA_DE_SOMBRA);
+    rlEnableScissorTest();
+    rlScissor(x, 0, LADO_DO_MAPA_DE_SOMBRA, LADO_DO_MAPA_DE_SOMBRA);
+    rlClearScreenBuffers();   /* só a metade deste quadrado */
+    rlDisableScissorTest();
     rlSetClipPlanes(1.0, ALTURA_DO_SOL * 2.0);
     BeginMode3D(luz);
     Matrix vista = rlGetMatrixModelview();
@@ -2766,10 +2947,39 @@ void prepararSombras(IdPista id, Camera3D camera, int ligadas) {
     rlEnableBackfaceCulling();
     EndMode3D();
     EndTextureMode();
+    *luzVP = MatrixMultiply(vista, projecao);
+    return 1;
+}
 
-    Matrix luzVP = MatrixMultiply(vista, projecao);
-    for (int i = 0; i < totalQueRecebemSombra; i++) {
-        SetShaderValueMatrix(recebemSombra[i], locLuzVP[i], luzVP);
+/*
+ * prepararSombras
+ * Desenha o cenário visto do sol, em dois quadrados em volta da câmera (um pequeno e fino, outro grande),
+ * e passa o resultado aos shaders que recebem a sombra. Chamar antes de BeginMode3D. À noite, e com a
+ * opção desligada, não há sombra do sol. O sol é o da luz do dia aplicada (hora.c): no passeio ele anda
+ * com a hora, e o mapa é refeito quando ele anda um pouco.
+ * Recebe: a pista, a câmera e se as sombras estão ligadas nas configurações.
+ * Devolve: nada.
+ */
+void prepararSombras(IdPista id, Camera3D camera, int ligadas) {
+    const LuzDoDia *luzDoDia = luzAplicada();
+    sombraLigadaAgora = ligadas && temMapaDeSombra && id != PISTA_COPA_PISTAO && luzDoDia->sombra > 0.005f;
+    mandarSombraLigada(sombraLigadaAgora ? 1.0f : 0.0f);
+    if (!sombraLigadaAgora) {
+        return;
+    }
+    /* O cenário não se mexe: cada quadrado só é refeito quando a câmera anda bastante (ou muda a pista) */
+    Matrix vp;
+    if (fazerQuadradoDaSombra(&quadradosDaSombra[1], id, camera, luzDoDia->sol, &vp)) {
+        luzVPMandada = vp;
+        for (int i = 0; i < totalQueRecebemSombra; i++) {
+            SetShaderValueMatrix(recebemSombra[i], locLuzVP[i], vp);
+        }
+    }
+    if (fazerQuadradoDaSombra(&quadradosDaSombra[0], id, camera, luzDoDia->sol, &vp)) {
+        luzVPPertoMandada = vp;
+        for (int i = 0; i < totalQueRecebemSombra; i++) {
+            SetShaderValueMatrix(recebemSombra[i], locLuzVPPerto[i], vp);
+        }
     }
 }
 
@@ -2873,6 +3083,90 @@ static void prepasseDoMundoAberto(void) {
     }
 }
 
+/*
+ * desenharCeuDasPistas
+ * O céu de uma pista de dia, com o sol da luz aplicada e as nuvens dela.
+ * Recebe: a pista, a posição da câmera e a matriz que põe o céu em volta dela.
+ * Devolve: nada.
+ */
+static void desenharCeuDasPistas(IdPista id, Vector3 camera, Matrix naCamera) {
+    const LuzDoDia *luz = luzAplicada();
+    Vector3 sol = Vector3Normalize(luz->solNoCeu);
+    Vector2 olho = { camera.x, camera.z };
+    float minutos = (float) fmod(GetTime(), 36000.0) / 60.0f;
+    Vector2 vento = { minutos * 0.0016f, minutos * 0.0007f };   /* as nuvens andam devagar */
+    float cobertura = COBERTURA_DAS_NUVENS[((int) id >= 0 && (int) id < TOTAL_PISTAS) ? (int) id : 0];
+    SetShaderValue(shaderDoCeuDasPistas, locCeuHorizonte, &luz->horizonte, SHADER_UNIFORM_VEC3);
+    SetShaderValue(shaderDoCeuDasPistas, locCeuAlto, &luz->alto, SHADER_UNIFORM_VEC3);
+    SetShaderValue(shaderDoCeuDasPistas, locCeuSol, &sol, SHADER_UNIFORM_VEC3);
+    SetShaderValue(shaderDoCeuDasPistas, locCeuCorDoSol, &luz->corDoSol, SHADER_UNIFORM_VEC3);
+    SetShaderValue(shaderDoCeuDasPistas, locCeuOlho, &olho, SHADER_UNIFORM_VEC2);
+    SetShaderValue(shaderDoCeuDasPistas, locCeuVento, &vento, SHADER_UNIFORM_VEC2);
+    SetShaderValue(shaderDoCeuDasPistas, locCeuCobertura, &cobertura, SHADER_UNIFORM_FLOAT);
+    DrawMesh(ceuDeDia, materialDoCeuDasPistas, naCamera);
+    DrawMesh(tampaDoCeu, materialDoCeuDasPistas, naCamera);
+}
+
+/* O ruído das nuvens: um valor por canto de uma grade que dá a volta (a imagem se repete sem emenda), e a
+ * mistura suave entre os quatro cantos em volta */
+static float valorNaGrade(int x, int y, int periodo, unsigned int semente) {
+    x = ((x % periodo) + periodo) % periodo;
+    y = ((y % periodo) + periodo) % periodo;
+    unsigned int h = (unsigned int) x * 374761393u + (unsigned int) y * 668265263u + semente * 2246822519u;
+    h = (h ^ (h >> 13)) * 1274126177u;
+    h ^= h >> 16;
+    return (float) (h & 0xFFFFu) / 65535.0f;
+}
+
+static float ruidoQueDaAVolta(float u, float v, int periodo, unsigned int semente) {
+    float x = u * (float) periodo, y = v * (float) periodo;
+    int x0 = (int) floorf(x), y0 = (int) floorf(y);
+    float fx = x - (float) x0, fy = y - (float) y0;
+    fx = fx * fx * fx * (fx * (fx * 6.0f - 15.0f) + 10.0f);
+    fy = fy * fy * fy * (fy * (fy * 6.0f - 15.0f) + 10.0f);
+    float a = valorNaGrade(x0, y0, periodo, semente), b = valorNaGrade(x0 + 1, y0, periodo, semente);
+    float c = valorNaGrade(x0, y0 + 1, periodo, semente), d = valorNaGrade(x0 + 1, y0 + 1, periodo, semente);
+    return (a + (b - a) * fx) + ((c + (d - c) * fx) - (a + (b - a) * fx)) * fy;
+}
+
+/* Várias camadas do ruído, cada uma com o dobro dos detalhes e metade da força (de 0 a 1) */
+static float camadasDoRuido(float u, float v, int periodo, int camadas, unsigned int semente) {
+    float soma = 0.0f, forca = 1.0f, total = 0.0f;
+    for (int i = 0; i < camadas; i++) {
+        soma += ruidoQueDaAVolta(u, v, periodo, semente + (unsigned int) i * 17u) * forca;
+        total += forca;
+        forca *= 0.5f;
+        periodo *= 2;
+    }
+    return soma / total;
+}
+
+/*
+ * gerarRuidoDasNuvens
+ * A imagem do ruído das nuvens (gerada uma vez): no vermelho, os montes (de grandes a médios), no verde, os
+ * detalhes que gastam as bordas. Ela se repete sem emenda, e tem mipmaps (longe, no horizonte, não cintila).
+ * Recebe: nada. Devolve: a textura.
+ */
+static Texture2D gerarRuidoDasNuvens(void) {
+    Image imagem = GenImageColor(LADO_DO_RUIDO, LADO_DO_RUIDO, BLACK);
+    Color *pixels = (Color *) imagem.data;
+    for (int y = 0; y < LADO_DO_RUIDO; y++) {
+        for (int x = 0; x < LADO_DO_RUIDO; x++) {
+            float u = (float) x / LADO_DO_RUIDO, v = (float) y / LADO_DO_RUIDO;
+            float montes = camadasDoRuido(u, v, 4, 5, 11u);
+            float detalhe = camadasDoRuido(u, v, 8, 5, 97u);
+            pixels[y * LADO_DO_RUIDO + x] = (Color){ (unsigned char) (Clamp(montes, 0.0f, 1.0f) * 255.0f),
+                                                     (unsigned char) (Clamp(detalhe, 0.0f, 1.0f) * 255.0f), 0, 255 };
+        }
+    }
+    Texture2D textura = LoadTextureFromImage(imagem);
+    UnloadImage(imagem);
+    GenTextureMipmaps(&textura);
+    SetTextureFilter(textura, TEXTURE_FILTER_TRILINEAR);
+    SetTextureWrap(textura, TEXTURE_WRAP_REPEAT);
+    return textura;
+}
+
 void desenharCenario(IdPista id, Vector3 camera) {
     if (sombraLigadaAgora) {
         rlActiveTextureSlot(SLOT_DA_SOMBRA);
@@ -2907,8 +3201,7 @@ void desenharCenario(IdPista id, Vector3 camera) {
 
     if (mapasDeDia[id].existe) {
         MapaDeDia *mapa = &mapasDeDia[id];
-        desenharMalha(ceuDeDia, texturaCeu, naCamera);
-        desenharMalha(tampaDoCeu, semTextura, naCamera);
+        desenharCeuDasPistas(id, camera, naCamera);
         if (id == PISTA_INTERLAGOS) {
             desenharMalha(mapa->saia, texturaGrama, origem);
             desenharModeloDeInterlagos(mapa);

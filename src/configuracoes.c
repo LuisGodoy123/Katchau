@@ -102,6 +102,7 @@ void configuracoesPadrao(Configuracoes *config) {
     config->limiteDeQuadros = LIMITE_PADRAO_DE_QUADROS;
     config->mostrarFps = 0;
     config->tracadoDeCorrida = 1;
+    config->cameraViva = 1;
     aplicarPresetGrafico(config, PRESET_ALTO);   /* o padrão: tudo como o jogo sempre foi, mais a suavização e a nitidez leves */
     config->volumeVozes = config->volumeMusica = config->volumeEfeitos = config->volumeMenu = MAIOR_VOLUME;
     config->alcanceDinamico = 0;
@@ -143,7 +144,8 @@ float fatorDeVolume(int volume) {
  * Põe de uma vez todas as opções gráficas de um pacote:
  *   BAIXO: sem sombras nem efeitos, imagem a 70%, sem suavização, filtro trilinear: para PCs fracos;
  *   MÉDIO: sombras baixas, efeitos e brilho, imagem a 90%, suavização, filtro anisotrópico 4x;
- *   ALTO:  sombras médias, tudo ligado, imagem a 100%, suavização e nitidez leve, anisotrópico 8x.
+ *   ALTO:  sombras médias, tudo ligado, imagem a 100%, suavização e nitidez leve, anisotrópico 8x, as cores em
+ *          HDR, os raios de sol e a profundidade de campo nas cenas.
  * A resolução, o modo de tela e o limite de quadros não mudam: são da exibição.
  * Recebe: as configurações e o pacote.
  * Devolve: nada.
@@ -154,6 +156,8 @@ void aplicarPresetGrafico(Configuracoes *config, PresetGrafico preset) {
     config->oclusaoAmbiental = 0;
     config->profundidadeDeCampo = 0;
     config->distorcaoDaLente = 0;
+    config->coresHdr = 0;
+    config->raiosDeSol = 0;
     if (preset == PRESET_BAIXO) {
         config->sombras = 0; config->efeitos = 0; config->qualidadeDasSombras = 0;
         config->escalaDaImagem = 2; config->bloom = 0; config->lensFlare = 0;
@@ -166,6 +170,7 @@ void aplicarPresetGrafico(Configuracoes *config, PresetGrafico preset) {
         config->sombras = 1; config->efeitos = 1; config->qualidadeDasSombras = 2;
         config->escalaDaImagem = ESCALA_PADRAO_DA_IMAGEM; config->bloom = 1; config->lensFlare = 1;
         config->nitidez = 1; config->suavizacao = 1; config->filtroDeTexturas = 3;
+        config->coresHdr = 1; config->raiosDeSol = 1; config->profundidadeDeCampo = 1;   /* a profundidade: só nas cenas */
     }
 }
 
@@ -308,14 +313,14 @@ int salvarConfiguracoes(const Configuracoes *config, const char *arquivo) {
         fprintf(saida, "comando %s %d %d %d %d\n", CHAVES_DAS_ACOES[a], config->comandos[a][0], config->comandos[a][1],
                 config->comandos[a][2], config->comandos[a][3]);
     }
-    fprintf(saida, "vibracao %d\nforca %d\ngatilhos %d\nzona_morta %d\nvolante %d\nsombras %d\nefeitos %d\ncamera_x %d\ncamera_y %d\nresolucao %d\nmodo_de_tela %d\nsincronia_vertical %d\nlimite_de_quadros %d\nmostrar_fps %d\ntracado_de_corrida %d\npreset_grafico %d\nescala_da_imagem %d\nbloom %d\nlens_flare %d\ngranulado %d\nprofundidade_de_campo %d\ndistorcao_da_lente %d\nnitidez %d\nsuavizacao %d\nqualidade_das_sombras %d\nfiltro_de_texturas %d\nvolume_vozes %d\nvolume_musica %d\nvolume_efeitos %d\nvolume_menu %d\nalcance_dinamico %d\noclusao_ambiental %d\nsurround_virtual %d\n",
+    fprintf(saida, "vibracao %d\nforca %d\ngatilhos %d\nzona_morta %d\nvolante %d\nsombras %d\nefeitos %d\ncamera_x %d\ncamera_y %d\nresolucao %d\nmodo_de_tela %d\nsincronia_vertical %d\nlimite_de_quadros %d\nmostrar_fps %d\ntracado_de_corrida %d\npreset_grafico %d\nescala_da_imagem %d\nbloom %d\nlens_flare %d\ngranulado %d\nprofundidade_de_campo_real %d\ndistorcao_da_lente %d\nnitidez %d\nsuavizacao %d\nqualidade_das_sombras %d\nfiltro_de_texturas %d\nvolume_vozes %d\nvolume_musica %d\nvolume_efeitos %d\nvolume_menu %d\nalcance_dinamico %d\noclusao_ambiental %d\nsurround_virtual %d\ncores_hdr %d\nraios_de_sol %d\ncamera_viva %d\n",
             config->vibracaoLigada, config->forcaDaVibracao, config->gatilhosAdaptativos, config->zonaMorta,
             config->respostaDoVolante, config->sombras, config->efeitos, config->inverterCameraX, config->inverterCameraY,
             config->resolucao, config->modoDeTela, config->sincroniaVertical, config->limiteDeQuadros, config->mostrarFps,
             config->tracadoDeCorrida, config->presetGrafico, config->escalaDaImagem, config->bloom, config->lensFlare, config->granulado,
             config->profundidadeDeCampo, config->distorcaoDaLente, config->nitidez, config->suavizacao, config->qualidadeDasSombras,
             config->filtroDeTexturas, config->volumeVozes, config->volumeMusica, config->volumeEfeitos, config->volumeMenu, config->alcanceDinamico,
-            config->oclusaoAmbiental, config->surroundVirtual);
+            config->oclusaoAmbiental, config->surroundVirtual, config->coresHdr, config->raiosDeSol, config->cameraViva);
     fclose(saida);
     return 1;
 }
@@ -406,8 +411,10 @@ int carregarConfiguracoes(Configuracoes *config, const char *arquivo) {
                 valorValido(valor, 0, 1, &config->lensFlare);
             } else if (strcmp(chave, "granulado") == 0) {
                 valorValido(valor, 0, 1, &config->granulado);
-            } else if (strcmp(chave, "profundidade_de_campo") == 0) {
-                valorValido(valor, 0, 1, &config->profundidadeDeCampo);
+            } else if (strcmp(chave, "profundidade_de_campo_real") == 0) {
+                /* A opção antiga ("profundidade_de_campo") era um desfoque simulado na parte de cima da imagem:
+                 * a de agora é outra coisa (a profundidade de verdade, nas cenas), e começa no padrão do pacote */
+                valorValido(valor, 0, 2, &config->profundidadeDeCampo);
             } else if (strcmp(chave, "distorcao_da_lente") == 0) {
                 valorValido(valor, 0, 2, &config->distorcaoDaLente);
             } else if (strcmp(chave, "nitidez") == 0) {
@@ -432,6 +439,12 @@ int carregarConfiguracoes(Configuracoes *config, const char *arquivo) {
                 valorValido(valor, 0, 1, &config->oclusaoAmbiental);
             } else if (strcmp(chave, "surround_virtual") == 0) {
                 valorValido(valor, 0, 1, &config->surroundVirtual);
+            } else if (strcmp(chave, "cores_hdr") == 0) {
+                valorValido(valor, 0, 1, &config->coresHdr);
+            } else if (strcmp(chave, "raios_de_sol") == 0) {
+                valorValido(valor, 0, 1, &config->raiosDeSol);
+            } else if (strcmp(chave, "camera_viva") == 0) {
+                valorValido(valor, 0, 1, &config->cameraViva);
             }
         }
     }
