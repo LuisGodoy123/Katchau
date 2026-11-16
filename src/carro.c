@@ -21,6 +21,10 @@
  *     é mais empurrado; aliviando ou freando, ele segura melhor;
  *   - passando do limite, o pneu arrasta e o carro perde velocidade,
  *     o que acaba devolvendo o controle (caro, mas não é grama na hora);
+ *   - o freio de mão solta a traseira: o carro (sem a direção guiada) fica de
+ *     lado e vai para onde o volante manda, e o volante diz o ângulo; acelerando
+ *     e virando para dentro o drift continua, e ele acaba sozinho, aos poucos,
+ *     soltando o acelerador ou endireitando (veja derrapar);
  *   - o nitro empurra forte e passa da velocidade máxima, enquanto durar. Ele
  *     recarrega aos poucos o tempo todo, e bem mais rápido freando;
  *   - colado atrás de outro carro (vácuo), o ar segura menos e a
@@ -72,7 +76,6 @@
 #define RAIO_MINIMO_DA_DIRECAO    9.0f     /* metros: a curva mais fechada que o volante todo faz, devagar, sem a direção guiada */
 #define ACELERACAO_DE_CURVA_BASE  56.0f    /* m/s²: sem a guiada, o que o pneu segura na curva é isto... */
 #define ACELERACAO_DE_CURVA_NO_PNEU 18.0f  /* ...mais isto vezes a aderência */
-#define AGARRE_NO_DRIFT           0.6f     /* de lado, o bico gira mais depressa */
 #define PERDA_NO_LIMITE_DO_PNEU   250.0f   /* o que a velocidade cai por segundo, no limite do pneu: o pneu arrasta, não freia */
 #define INICIO_DA_DERRAPAGEM_LIVRE 0.85f   /* sem a guiada, o pneu só começa a arrastar perto do limite */
 /* A suspensão: uma mola com amortecedor em cada eixo do corpo, só no desenho */
@@ -119,6 +122,29 @@
 #define AMORTECE_O_GIRO           3.0f     /* por segundo */
 #define FRENTE_NO_DRIFT           1.00f    /* de lado, o volante vira menos o caminho: fração */
 #define CAMINHO_PELO_ANGULO       0.70f    /* o caminho vai para onde o bico aponta... */
+/* O drift sem a direção guiada (o jogo de verdade: a corrida e o passeio), de fliperama: o freio de mão, com o volante
+ * virado, joga a traseira para um lado; dali em diante o carro vai para onde o volante manda (de lado, um pouco mais
+ * fechado que de pé) e o ângulo do corpo vai, numa mola, até o que o volante pede. Acelerando e virando para dentro, o
+ * drift continua; soltando o acelerador, endireitando ou contraesterçando, ele acaba sozinho, aos poucos */
+#define CURVA_A_MAIS_NO_DRIFT     0.35f    /* de lado, o volante todo fecha a curva 35% mais que de pé */
+#define ANGULO_SOLTO              22.0f    /* graus: o ângulo do drift com o volante solto... */
+#define ANGULO_TODO               45.0f    /* ...com o volante todo para dentro da curva (contraesterçando, vai até reto) */
+#define MOLA_DO_ANGULO            60.0f    /* por segundo ao quadrado: o ângulo chega lá em ~0,3 s... */
+#define AMORTECE_O_ANGULO         11.0f    /* por segundo: ...passando um pouco e voltando, como uma traseira de verdade */
+#define CHUTE_DO_FREIO_DE_MAO     420.0f   /* graus por segundo ao quadrado: puxando o freio de mão, a traseira vem de uma vez */
+#define MAIOR_ANGULO_LIVRE        55.0f    /* graus: o corpo nunca passa disso */
+#define SOLTANDO_DE_VEZ           7.0f     /* por segundo: o freio de mão solta a traseira... */
+#define SEGUE_SOLTA               3.0f     /* ...acelerando e virando para dentro, ela continua solta... */
+#define VIRANDO_PARA_DENTRO       0.15f    /* (do volante, para o lado do drift) */
+#define ACABA_COM_VOLANTE_RETO    0.8f     /* ...acelerando com o volante reto, o drift acaba em ~1,2 s... */
+#define ACABA_SEM_ACELERAR        1.6f     /* ...sem acelerar, em ~0,6 s... */
+#define ACABA_NO_CONTRAESTERCO    2.5f     /* ...contraesterçando forte, em ~0,4 s... */
+#define CONTRAESTERCO_QUE_ACABA   0.5f
+#define ACABA_DEVAGAR             4.0f     /* ...e devagar demais, logo */
+#define ARRASTO_DO_DRIFT_LIVRE    0.5f     /* de lado, o carro perde metade do que perde na direção guiada... */
+#define FREIO_DE_MAO_NO_DRIFT     0.30f    /* puxando o freio de mão para o drift, ele freia só 30% (o toque custa ~5 km/h) */
+#define MOTOR_PERDIDO_NO_DRIFT    0.75f    /* ...e a roda patina: do motor chega ao chão só 25%. Segurando o drift, a velocidade
+                                            * fica quase onde estava (sobe um pouco devagar, cai um pouco rápido) */
 #define CAMINHO_DA_CAMERA_DE      2.0f     /* m/s: abaixo disso, a câmera segue o rumo; acima de... */
 #define CAMINHO_DA_CAMERA_ATE     8.0f     /* ...isto, segue para onde o carro está indo */
 #define ANGULO_DO_CAMINHO         28.0f    /* ...até este ângulo: mais de lado que isso é só estilo, e não joga o carro para fora da pista */
@@ -263,6 +289,7 @@ Carro criarCarro(const char *nome, int numero, Segmento *largada, float deslocam
     carro.raspandoNoMuro = 0;
     carro.anguloDeDrift = 0.0f;
     carro.giroDoDrift = 0.0f;
+    carro.ladoDoDrift = 0.0f;
     carro.gastaPneu = 0;
     carro.desgaste = 0.0f;
     carro.metrosDeUmJogoDePneus = METROS_DE_UM_JOGO_DE_PNEUS;
@@ -399,11 +426,16 @@ static void atualizarVelocidade(Carro *carro, Comandos comandos, float tempoQuad
     float maxima = velocidadeMaximaAgora(carro);
 
     if (comandos.freioDeMao) {
-        carro->velocidade -= (FREIO_DE_MAO + perdaSemAcelerar(carro)) * tempoQuadro;
+        /* Sem a guiada, com o volante virado, o freio de mão é para jogar a traseira: freia bem menos */
+        int paraODrift = carro->direcaoLivre && fabsf(carro->volante) > VOLANTE_PARA_O_DRIFT;
+        carro->velocidade -= (FREIO_DE_MAO * (paraODrift ? FREIO_DE_MAO_NO_DRIFT : 1.0f) + perdaSemAcelerar(carro)) * tempoQuadro;
     } else if (comandos.acelerar || carro->nitroLigado) {
-        carro->velocidade += forcaDoMotor(carro->velocidade, maxima, carro->aceleracao * carro->ritmoDoPelotao, &carro->motor) * tempoQuadro;
+        /* Sem a guiada, de lado, a roda de trás patina: do motor (e do nitro), chega ao chão só uma parte */
+        float chegaAoChao = carro->direcaoLivre ? 1.0f - MOTOR_PERDIDO_NO_DRIFT * carro->forcaDoDrift : 1.0f;
+        carro->velocidade += forcaDoMotor(carro->velocidade, maxima, carro->aceleracao * carro->ritmoDoPelotao, &carro->motor)
+                             * chegaAoChao * tempoQuadro;
         if (carro->nitroLigado) {
-            carro->velocidade += carro->aceleracao * FORCA_DO_NITRO * (1.0f + 0.25f * sinf(carro->fasePulso * 7.0f)) * tempoQuadro;   /* o nitro empurra em ondas */
+            carro->velocidade += carro->aceleracao * FORCA_DO_NITRO * (1.0f + 0.25f * sinf(carro->fasePulso * 7.0f)) * chegaAoChao * tempoQuadro;   /* o nitro empurra em ondas */
         }
     } else if (comandos.frear) {
         carro->velocidade -= FORCA_FREIO * tempoQuadro;
@@ -412,7 +444,8 @@ static void atualizarVelocidade(Carro *carro, Comandos comandos, float tempoQuad
     }
 
     float senoDoAngulo = sinf(carro->anguloDeDrift * 0.0174533f);
-    carro->velocidade -= (PERDA_NO_DRIFT * carro->forcaDoDrift + ARRASTO_DE_LADO * senoDoAngulo * senoDoAngulo) * tempoQuadro;
+    carro->velocidade -= (PERDA_NO_DRIFT * carro->forcaDoDrift + ARRASTO_DE_LADO * senoDoAngulo * senoDoAngulo)
+                         * (carro->direcaoLivre ? ARRASTO_DO_DRIFT_LIVRE : 1.0f) * tempoQuadro;
 
     /* Fora da pista o carro perde velocidade: muito na grama, menos na área de escape
      * asfaltada (senão cortar caminho por ela compensaria) */
@@ -548,7 +581,15 @@ static float semPneu(const Carro *carro) {
  * Recebe: o carro, os comandos e o tempo do quadro.
  * Devolve: nada.
  */
+static int puxouOFreioDeMao(const Carro *carro, Comandos comandos) {
+    return comandos.freioDeMao && carro->velocidade > VELOCIDADE_PARA_O_DRIFT
+           && (fabsf(carro->volante) > VOLANTE_PARA_O_DRIFT || fabsf(carro->anguloDeDrift) > ANGULO_DE_MANTER);
+}
+
 static void atualizarDrift(Carro *carro, Comandos comandos, float tempoQuadro) {
+    if (carro->direcaoLivre && (carro->forcaDoDrift > 0.0f || puxouOFreioDeMao(carro, comandos))) {
+        return;   /* sem a guiada, com a traseira solta, quem conta é derrapar (em girarNoMundo) */
+    }
     int rapidoOBastante = carro->velocidade > VELOCIDADE_PARA_O_DRIFT;
     int quebrouATraseira = comandos.freioDeMao && rapidoOBastante && fabsf(carro->volante) > VOLANTE_PARA_O_DRIFT;
     int aceleraDeLado = comandos.acelerar && !comandos.frear && rapidoOBastante
@@ -956,31 +997,92 @@ static float erroAoLongo(const Segmento *a, float t, float x, float z) {
  * Devolve: quantas vezes ele cruzou a linha de chegada.
  */
 /*
+ * derrapar
+ * Sem a direção guiada, com a traseira solta (o drift de fliperama): o caminho (rumoNoMundo) é o do volante, um pouco
+ * mais fechado; o corpo aponta para o caminho mais o anguloDeDrift, que vai numa mola até o que o volante pede para
+ * o lado do drift (solto, ANGULO_SOLTO; todo para dentro, ANGULO_TODO; contraesterçando, até reto). A traseira
+ * (forcaDoDrift) continua solta acelerando e virando para dentro, e prende de novo aos poucos; com ela, o ângulo
+ * some sem tranco.
+ * Recebe: o carro, o tempo do quadro e o giro do volante todo (rad/s, a curva de sempre).
+ * Devolve: nada (altera rumoNoMundo, anguloDeDrift, giroDoDrift, ladoDoDrift e forcaDoDrift).
+ */
+static void derrapar(Carro *carro, float tempoQuadro, float maximo) {
+    Comandos comandos = carro->ultimosComandos;
+    int puxou = puxouOFreioDeMao(carro, comandos);
+    if (carro->forcaDoDrift <= 0.0f) {
+        carro->ladoDoDrift = (carro->volante >= 0.0f) ? 1.0f : -1.0f;   /* começou agora: para o lado do volante */
+    }
+    float lado = carro->ladoDoDrift;
+    float paraDentro = carro->volante * lado;   /* +1: todo para dentro da curva do drift; -1: o contraesterço todo */
+    int acelerando = (comandos.acelerar || carro->nitroLigado) && !comandos.frear;
+
+    /* A traseira: o freio de mão solta; acelerando e virando para dentro, continua solta; senão, prende de novo */
+    float w = carro->forcaDoDrift;
+    if (puxou) {
+        w += SOLTANDO_DE_VEZ * tempoQuadro;
+    } else if (carro->velocidade <= VELOCIDADE_PARA_O_DRIFT) {
+        w -= ACABA_DEVAGAR * tempoQuadro;
+    } else if (acelerando && paraDentro > VIRANDO_PARA_DENTRO) {
+        w += SEGUE_SOLTA * tempoQuadro;
+    } else if (paraDentro < -CONTRAESTERCO_QUE_ACABA) {
+        w -= ACABA_NO_CONTRAESTERCO * tempoQuadro;
+    } else if (!acelerando) {
+        w -= ACABA_SEM_ACELERAR * tempoQuadro;
+    } else {
+        w -= ACABA_COM_VOLANTE_RETO * tempoQuadro;
+    }
+    w = limitar(w, 0.0f, 1.0f);
+    carro->forcaDoDrift = w;
+
+    /* O caminho: o do volante, mais fechado de lado */
+    carro->rumoNoMundo += carro->volante * maximo * (1.0f + CURVA_A_MAIS_NO_DRIFT * w) * 57.2958f * tempoQuadro;
+
+    /* O ângulo: uma mola até o que o volante pede */
+    float alvo = (paraDentro >= 0.0f) ? ANGULO_SOLTO + (ANGULO_TODO - ANGULO_SOLTO) * fminf(paraDentro, 1.0f)
+                                      : ANGULO_SOLTO * (1.0f + fmaxf(paraDentro, -1.0f));
+    alvo *= lado * w;
+    float aceleracao = MOLA_DO_ANGULO * (alvo - carro->anguloDeDrift) - AMORTECE_O_ANGULO * carro->giroDoDrift;
+    if (puxou) {
+        aceleracao += lado * CHUTE_DO_FREIO_DE_MAO;
+    }
+    carro->giroDoDrift += aceleracao * tempoQuadro;
+    carro->anguloDeDrift += carro->giroDoDrift * tempoQuadro;
+    if (fabsf(carro->anguloDeDrift) > MAIOR_ANGULO_LIVRE) {
+        carro->anguloDeDrift = limitar(carro->anguloDeDrift, -MAIOR_ANGULO_LIVRE, MAIOR_ANGULO_LIVRE);
+        carro->giroDoDrift = 0.0f;
+    }
+}
+
+/*
  * girarNoMundo
  * Sem a direção guiada, o volante muda o rumo do carro no mundo, até onde o pneu segura; no limite,
- * o pneu canta e o carro perde um pouco de velocidade. A corrida e o passeio livre usam esta mesma
- * conta, para o volante responder igual nos dois.
+ * o pneu canta e o carro perde um pouco de velocidade. Com a traseira solta (o freio de mão), quem
+ * conta é derrapar. A corrida e o passeio livre usam esta mesma conta, para o volante responder igual nos dois.
+ * O rumo é para onde o carro está indo; o corpo aponta para o rumo mais o ângulo do drift.
  * Recebe: o carro (velocidade negativa = de ré), o tempo do quadro e a aderência do chão (1 = asfalto).
- * Devolve: metros por segundo para a direita que o drift soma ao caminho.
+ * Devolve: metros por segundo para a direita que o drift soma ao caminho (agora, sempre 0: o rumo já é o caminho).
  */
 static float girarNoMundo(Carro *carro, float tempoQuadro, float aderenciaDoChao) {
     /* O volante muda o rumo, até onde o pneu segura */
     float metrosPorSegundo = carro->velocidade / UNIDADES_POR_METRO;
-    float agarra = aceleracaoDeCurva(carro) * aderenciaDoChao * (1.0f + AGARRE_NO_DRIFT * carro->forcaDoDrift);
+    float agarra = aceleracaoDeCurva(carro) * aderenciaDoChao;
     /* Volante todo é o máximo que dá nessa velocidade: devagar, o raio mínimo; rápido, o que o pneu segura */
     float maximo = fminf(metrosPorSegundo / RAIO_MINIMO_DA_DIRECAO, agarra / fmaxf(metrosPorSegundo, 1.0f));
-    carro->rumoNoMundo += carro->volante * maximo * 57.2958f * tempoQuadro;
+    float giroDoVolante = carro->volante * maximo;
 
     /* Levando o pneu ao limite, ele canta e o carro perde um pouco de velocidade */
     float uso = fabsf(carro->volante) * maximo * metrosPorSegundo / agarra;
     float noLimite = limitar((uso - INICIO_DA_DERRAPAGEM_LIVRE) / (1.0f - INICIO_DA_DERRAPAGEM_LIVRE), 0.0f, 1.0f);
-    carro->derrapagem = fmaxf(noLimite, carro->forcaDoDrift);
+
+    if (carro->velocidade > 0.0f && (carro->forcaDoDrift > 0.0f || puxouOFreioDeMao(carro, carro->ultimosComandos))) {
+        derrapar(carro, tempoQuadro, maximo);
+    } else {
+        carro->rumoNoMundo += giroDoVolante * 57.2958f * tempoQuadro;
+    }
+    carro->derrapagem = fmaxf(noLimite * (1.0f - carro->forcaDoDrift), carro->forcaDoDrift);
     float gastaNaCurva = PERDA_NO_LIMITE_DO_PNEU * noLimite;
     carro->velocidade = fmaxf(carro->velocidade - gastaNaCurva * (1.0f - carro->forcaDoDrift) * tempoQuadro, 0.0f);
-
-    /* De lado, o drift soma o seu pedaço ao caminho */
-    float anguloDoCaminho = limitar(carro->anguloDeDrift, -ANGULO_DO_CAMINHO, ANGULO_DO_CAMINHO);
-    return sinf(anguloDoCaminho * 0.0174533f) * metrosPorSegundo * CAMINHO_PELO_ANGULO * carro->forcaDoDrift;
+    return 0.0f;
 }
 
 static int andarNoMundo(Carro *carro, float tempoQuadro) {

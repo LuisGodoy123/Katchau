@@ -338,13 +338,17 @@ static float chaoNoRastro(const VisaoDoJogador *visao, Vector3 carro, float metr
 /* ---------- A câmera viva ----------
  * Com a opção ligada: em alta velocidade o campo de visão abre (o asfalto passa mais depressa nas bordas),
  * o nitro dá um chute a mais, as batidas e o muro raspando tremem a câmera, e nas curvas rápidas ela
- * inclina um pouco para dentro. Tudo chega e sai aos poucos: nada de tranco no quadro. */
+ * inclina um pouco para dentro. Tudo chega e sai aos poucos: nada de tranco no quadro.
+ * Andando rápido ela NÃO treme: um zumbido de velocidade (uns 6 vezes por segundo, crescendo com ela)
+ * balançava a mira e o carro pulava uns 3 px na tela no topo. Nos jogos de corrida a câmera de
+ * perseguição fica firme; a velocidade aparece no campo de visão, no desfoque e no asfalto passando. */
 #define GRAUS_NA_VELOCIDADE    6.0f     /* a mais, no topo da velocidade (cresce com o quadrado dela) */
 #define GRAUS_NO_NITRO         5.0f
 #define RESPOSTA_DOS_GRAUS     0.30f    /* segundos para chegar perto do alvo */
 #define TREMOR_PASSA           0.28f    /* segundos: o tremor cai a 1/e nesse tempo */
 #define TREMOR_MAXIMO          0.14f    /* metros, numa batida cheia */
-#define TREMOR_NA_VELOCIDADE   0.010f   /* metros: o zumbido no topo da velocidade */
+#define GIRO_DO_TREMOR         0.15f    /* radianos por metro de tremor: numa batida cheia a mira balança ~1,2 grau */
+#define ROLAGEM_DO_TREMOR      4.0f     /* graus por metro de tremor */
 #define ROLAGEM_NA_CURVA       1.8f     /* graus, com o volante todo virado no topo da velocidade */
 #define RESPOSTA_DA_ROLAGEM    0.25f
 
@@ -364,9 +368,12 @@ Camera3D tremerCamera(Camera3D camera, float metros, float relogio, float rolage
         float sobe = (sinf(relogio * 53.0f + 0.7f) + 0.6f * sinf(relogio * 91.0f + 2.1f)) / 1.6f;
         float olha = sinf(relogio * 37.0f + 2.4f);
         Vector3 mexe = Vector3Add(Vector3Scale(direita, lado * metros), Vector3Scale(cima, sobe * metros));
+        /* A mira balança um ângulo (a câmera olha a uma distância qualquer: somar metros à mira girava
+         * mais quanto mais perto ela estivesse) */
+        float distanciaDaMira = Vector3Length(Vector3Subtract(camera.target, camera.position));
         camera.position = Vector3Add(camera.position, mexe);
-        camera.target = Vector3Add(camera.target, Vector3Add(mexe, Vector3Scale(cima, olha * metros * 0.6f)));
-        rolagem += sinf(relogio * 61.0f + 0.4f) * metros * 8.0f;
+        camera.target = Vector3Add(camera.target, Vector3Add(mexe, Vector3Scale(cima, olha * metros * GIRO_DO_TREMOR * distanciaDaMira)));
+        rolagem += sinf(relogio * 61.0f + 0.4f) * metros * ROLAGEM_DO_TREMOR;
     }
     if (fabsf(rolagem) > 0.001f) {
         camera.up = Vector3RotateByAxisAngle(camera.up, frente, rolagem * DEG2RAD);
@@ -415,7 +422,9 @@ static float volanteDesenhado(const Carro *carro) {
         return 0.0f;   /* no pit lane o bico já vem pronto no anguloDeFuga */
     }
     float deRe = carro->rumoDeRe / GRAUS_DO_VOLANTE;   /* o quanto a ré girou o bico */
-    return (carro->re > 0.0f && !carro->direcaoLivre) ? deRe : carro->volante + deRe;
+    /* No drift o ângulo do corpo já é o de verdade: o bico pelo volante sai (senão ele pulava ao contraesterçar) */
+    float volante = carro->direcaoLivre ? carro->volante * (1.0f - carro->forcaDoDrift) : carro->volante;
+    return (carro->re > 0.0f && !carro->direcaoLivre) ? deRe : volante + deRe;
 }
 
 /*
@@ -1560,8 +1569,9 @@ void atualizarVisao(Corrida *corrida, VisaoDoJogador *visao) {
     int peloBico = andandoNoPit || (livre && !jogador->temRumoNoMundo && corrida->contagemRegressiva <= 0.0f);
     float rumoDoBico = peloBico ? pontoNoMundo(jogador->posicao, jogador->deslocamentoLateral).rumo + jogador->anguloDeFuga : 0.0f;
     int seguirORumo = comRumoReal || peloBico;
-    /* sem a guiada, a câmera vai atrás de para onde o carro está indo (no drift, ele aparece de lado) */
-    float rumoSeguido = comRumoReal ? jogador->rumoDaViagem : rumoDoBico;
+    /* Sem a guiada, a câmera vai atrás de para onde o carro está indo; no drift, atrás do corpo dele (o caminho mais
+     * o ângulo do drift): o carro fica de costas para a câmera e quem escorrega na tela é o mundo */
+    float rumoSeguido = comRumoReal ? jogador->rumoDaViagem + jogador->anguloDeDrift : rumoDoBico;
     if (!seguirORumo) {
         olhar.giro += jogador->anguloDeFuga * CAMERA_NA_FUGA;
     }
@@ -1610,7 +1620,7 @@ void atualizarVisao(Corrida *corrida, VisaoDoJogador *visao) {
                                    seguirORumo ? &visao->rumoDaCamera : NULL,
                                    chaoNoRastro(visao, carroNoChao, distanciaAtual.atras), visao->pesoDoRastro);
     if (viva || visao->tremor > 0.001f || fabsf(visao->rolagem) > 0.001f) {
-        float metros = TREMOR_MAXIMO * visao->tremor * visao->tremor + TREMOR_NA_VELOCIDADE * rapidez * rapidez * rapidez * (viva ? 1.0f : 0.0f);
+        float metros = TREMOR_MAXIMO * visao->tremor * visao->tremor;
         camera = tremerCamera(camera, metros, visao->relogioDoTremor, visao->rolagem);
     }
     if (jogador->estadoDoPit == PIT_TROCANDO) {

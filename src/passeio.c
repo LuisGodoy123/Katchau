@@ -73,8 +73,7 @@
 #define GRAUS_NO_NITRO        5.0f
 #define RESPOSTA_DOS_GRAUS    0.30f
 #define TREMOR_PASSA          0.28f
-#define TREMOR_MAXIMO         0.14f
-#define TREMOR_NA_VELOCIDADE  0.010f
+#define TREMOR_MAXIMO         0.14f    /* (andando rápido ela não treme: veja render.c) */
 #define ROLAGEM_NA_CURVA      1.8f
 #define RESPOSTA_DA_ROLAGEM   0.25f
 /* O cinema do passeio: a neblina (a cor é a do horizonte da hora), os raios e o reflexo do sol, e o foco */
@@ -1769,10 +1768,8 @@ Tela atualizarPasseio(EstadoMenu *menu, float tempoQuadro) {
 /*
  * rumoDaViagem
  * Para onde a câmera vai atrás: para onde o carro está indo (a velocidade, vista de cima), como nos
- * jogos de corrida. No drift, o bico aponta para dentro da curva e o caminho (o rumo da física) vira
- * para fora com o contraesterço; o carro vai entre os dois. Indo atrás do bico ou do rumo, a câmera
- * olhava para o lado errado e o carro escorregava pela tela; indo atrás da velocidade, ela olha o
- * caminho e o carro aparece de lado. Devagar (a velocidade dá pulos) ou de ré, ela vai atrás do rumo.
+ * jogos de corrida, e no drift atrás do corpo dele (o caminho mais o ângulo do drift), como na corrida:
+ * o carro fica de costas para a câmera. Devagar (a velocidade dá pulos) ou de ré, ela vai atrás do rumo.
  */
 static float rumoDaViagem(void) {
     float rapidez = hypotf(carro.vx, carro.vz);
@@ -1785,7 +1782,7 @@ static float rumoDaViagem(void) {
     if (fabsf(diferenca) > PI * 0.6f) {
         return carro.rumo;   /* a velocidade para trás do rumo: escorregando de ré, rodando */
     }
-    return carro.rumo + diferenca * peso;
+    return carro.rumo + diferenca * peso + carro.corrida.anguloDeDrift * DEG2RAD;
 }
 
 /* Um raio na malha de "de" até "ate" (Devolve: 1 se bateu em alguma coisa no caminho) */
@@ -1963,8 +1960,7 @@ static Camera3D montarCamera(void) {
         relogioDoTremor = fmodf(relogioDoTremor + dt, 1000.0f);
     }
     camera.fovy = GRAUS_DE_VISAO + grausAMais;
-    float metros = TREMOR_MAXIMO * tremorDaCamera * tremorDaCamera
-                   + ((viva && carro.noChao) ? TREMOR_NA_VELOCIDADE * rapidez * rapidez * rapidez : 0.0f);
+    float metros = TREMOR_MAXIMO * tremorDaCamera * tremorDaCamera;
     return tremerCamera(camera, metros, relogioDoTremor, rolagemDaCamera);
 }
 
@@ -2107,7 +2103,7 @@ static Matrix matrizDoCarro(void) {
     Vector3 frente = { carro.frente[0], carro.frente[1], carro.frente[2] };
     frente = Vector3Normalize(Vector3Subtract(frente, Vector3Scale(cimaDoDesenho, Vector3DotProduct(frente, cimaDoDesenho))));
     /* Como na corrida: o bico aponta para o caminho mais o ângulo do drift e um pouco do volante */
-    float bico = carro.corrida.anguloDeDrift + carro.volante * GRAUS_DO_VOLANTE;
+    float bico = carro.corrida.anguloDeDrift + carro.volante * (1.0f - carro.corrida.forcaDoDrift) * GRAUS_DO_VOLANTE;
     frente = Vector3RotateByAxisAngle(frente, cimaDoDesenho, -bico * DEG2RAD);
     Vector3 lado = Vector3Normalize(Vector3CrossProduct(cimaDoDesenho, frente));   /* a esquerda do carro é +x no modelo */
     Vector3 cima = Vector3CrossProduct(frente, lado);

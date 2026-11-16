@@ -64,6 +64,7 @@
 #define DESCIDA_DA_SAIA       0.02f     /* ela desce de leve, para ficar embaixo de qualquer outro terreno */
 #define LADRILHO_DA_SAIA      40.0f
 #define COR_DA_AGUA_DO_LAGO   (Color){ 70, 118, 122, 255 }   /* multiplica a imagem azul-clara do modelo */
+#define COR_DO_ESCAPE_VERDE   (Color){ 225, 150, 150, 255 }  /* multiplica o verde-menta da área de escape: dá ~(50, 115, 85) */
 #define COR_DA_SAIA           (Color){ 120, 128, 104, 255 }   /* a cor média da foto do terreno, sob a grama do jogo */
 #define LARGURA_DO_CONCRETO   256       /* pixels da imagem do concreto limpo */
 #define ALTURA_DO_CONCRETO    64
@@ -341,6 +342,23 @@ static const char *PIXELS_DOS_MAPAS_DE_DIA =
     "uniform float metrosDoLadrilho;\n" \
     "out vec4 finalColor;\n" \
     GLSL_DA_SOMBRA GLSL_DA_LUZ_DOS_MAPAS
+/* A grama de Interlagos. A imagem da grama do jogo é de um verde vivo de desenho, o dobro mais verde que a grama
+ * do mapa (a foto de satélite do terreno e a beira de grama do modelo são de um verde-oliva, seco em manchas):
+ * dela fica só o desenho (o claro e escuro das folhas), e a cor vem daqui. As manchas secas, em duas escalas
+ * (dezenas de metros e alguns metros), também desfazem a repetição do ladrilho de 9 m */
+#define GLSL_DA_GRAMA_DE_INTERLAGOS \
+    "float sorteioDaGrama(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33);\n" \
+    "                               return fract((q.x + q.y) * q.z); }\n" \
+    "float manchaDaGrama(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);\n" \
+    "    return mix(mix(sorteioDaGrama(i), sorteioDaGrama(i + vec2(1.0, 0.0)), f.x),\n" \
+    "               mix(sorteioDaGrama(i + vec2(0.0, 1.0)), sorteioDaGrama(i + vec2(1.0, 1.0)), f.x), f.y); }\n" \
+    "vec3 gramaDeInterlagos(vec3 imagem, vec2 xz) {\n" \
+    "    float folhas = dot(imagem, vec3(0.299, 0.587, 0.114)) / 0.424;\n" \
+    "    float seca = manchaDaGrama(xz / 41.0) * 0.65 + manchaDaGrama(xz / 7.0 + 19.0) * 0.35;\n" \
+    "    vec3 verde = vec3(0.30, 0.39, 0.19), secaCor = vec3(0.44, 0.41, 0.24);\n" \
+    "    vec3 base = mix(verde, secaCor, smoothstep(0.42, 0.80, seca));\n" \
+    "    return base * mix(1.0, folhas, 0.75); }\n"
+
 static const char *PIXELS_DE_INTERLAGOS[] = {
     [DESENHO_OPACO] = GLSL_DO_COMECO_DE_INTERLAGOS
         "void main() { vec4 cor = texture(texture0, fragTexCoord) * colDiffuse;\n"
@@ -373,15 +391,15 @@ static const char *PIXELS_DE_INTERLAGOS[] = {
         "void main() { vec4 cor = texture(texture0, fragTexCoord) * colDiffuse;\n"
         "              if (cor.a < 0.02) discard;\n"
         "              finalColor = vec4(iluminar(cor.rgb), cor.a); }\n",
-    [DESENHO_GRAMA] = GLSL_DO_COMECO_DE_INTERLAGOS
-        "void main() { vec4 cor = texture(texture0, fragPos.xz / metrosDoLadrilho) * colDiffuse;\n"
-        "              finalColor = vec4(iluminar(cor.rgb), 1.0); }\n",
+    [DESENHO_GRAMA] = GLSL_DO_COMECO_DE_INTERLAGOS GLSL_DA_GRAMA_DE_INTERLAGOS
+        "void main() { vec3 cor = gramaDeInterlagos(texture(texture0, fragPos.xz / metrosDoLadrilho).rgb, fragPos.xz) * colDiffuse.rgb;\n"
+        "              finalColor = vec4(iluminar(cor), 1.0); }\n",
     /* A foto de satélite do terreno é borrada de perto: dentro da área do autódromo (e numa faixa
      * em volta, misturando aos poucos) entra a grama do jogo, que vem na textura 1 */
-    [DESENHO_TERRENO] = GLSL_DO_COMECO_DE_INTERLAGOS
+    [DESENHO_TERRENO] = GLSL_DO_COMECO_DE_INTERLAGOS GLSL_DA_GRAMA_DE_INTERLAGOS
         "uniform vec4 areaDoAutodromo; uniform float transicaoDoAutodromo;\n"
         "void main() { vec3 foto = texture(texture0, fragTexCoord).rgb * colDiffuse.rgb;\n"
-        "              vec3 grama = texture(texture1, fragPos.xz / metrosDoLadrilho).rgb;\n"
+        "              vec3 grama = gramaDeInterlagos(texture(texture1, fragPos.xz / metrosDoLadrilho).rgb, fragPos.xz);\n"
         "              vec2 dentro = min(fragPos.xz - areaDoAutodromo.xy, areaDoAutodromo.zw - fragPos.xz);\n"
         "              float perto = smoothstep(-transicaoDoAutodromo, 0.0, min(dentro.x, dentro.y));\n"
         "              float claro = dot(foto, vec3(0.333));\n"
@@ -1160,6 +1178,7 @@ static void carregarMapaDeDia(Pista *pista, const char *arquivo, float escala, c
         texturaDoConcreto = gerarConcretoLimpo();
         trocarImagensGastas(&mapa->modelo);
         mapa->modelo.materials[MATERIAL_DO_LAGO].maps[MATERIAL_MAP_ALBEDO].color = COR_DA_AGUA_DO_LAGO;
+        mapa->modelo.materials[MATERIAL_DO_ESCAPE_VERDE].maps[MATERIAL_MAP_ALBEDO].color = COR_DO_ESCAPE_VERDE;
     }
     for (int i = 0; i < mapa->modelo.materialCount; i++) {
         mapa->modelo.materials[i].shader = shaderDosMapasDeDia;

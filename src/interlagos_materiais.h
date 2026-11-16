@@ -61,6 +61,10 @@ typedef struct {
  * um buraco no mapa. O jogo escurece para um verde-azulado de água */
 #define MATERIAL_DO_LAGO                7      /* lakes */
 
+/* A área de escape pintada de verde vem num verde-menta vivo (57, 196, 145), mais claro que a própria pista: ao lado
+ * da grama do mapa ela parecia um gramado de desenho. O jogo escurece para o verde de tinta das zebras e do autódromo */
+#define MATERIAL_DO_ESCAPE_VERDE        164    /* rdilgreen */
+
 static const MaterialDeInterlagos MATERIAIS_INTERLAGOS[TOTAL_MATERIAIS_INTERLAGOS] = {
     /*   0 (padrão da raylib)              */ { CHAO_NENHUM, DESENHO_OPACO },
     /*   1 redbuild_windows               */ { CHAO_NENHUM, DESENHO_OPACO },

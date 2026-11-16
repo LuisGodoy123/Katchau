@@ -113,13 +113,15 @@ typedef struct {
     float rumoAnterior, velocidadeAnterior;
     int temSuspensao;
     int temRumoNoMundo;            /* sem a direção guiada: 1 quando o campo abaixo já vale */
-    float rumoNoMundo;             /* graus: para onde o carro aponta no mundo; é o volante que muda */
-    float rumoDaViagem;            /* graus: para onde ele está indo de fato (o rumo mais o pedaço de lado do
-                                    * drift e das batidas): a câmera vai atrás dele, como nos jogos de corrida */
+    float rumoNoMundo;             /* graus: para onde o carro vai no mundo; é o volante que muda (no drift, os
+                                    * pneus: o corpo aponta para o rumo mais o anguloDeDrift) */
+    float rumoDaViagem;            /* graus: para onde ele está indo de fato (o rumo mais o pedaço de lado das
+                                    * batidas): a câmera vai atrás dele (no drift, mais o anguloDeDrift: atrás do corpo) */
     float anguloDeFuga;            /* graus: sem volante na curva, o carro segue reto, e o bico não acompanha a pista */
     float forcaDoDrift;            /* de 0 a 1: o quanto a traseira está solta */
-    float anguloDeDrift;           /* graus: o quanto o carro está de lado por causa do drift */
-    float giroDoDrift;             /* graus por segundo: a traseira tem inércia */
+    float anguloDeDrift;           /* graus: o quanto o carro está de lado por causa do drift (o corpo menos o caminho) */
+    float giroDoDrift;             /* graus por segundo: o quanto esse ângulo muda (a traseira tem inércia) */
+    float ladoDoDrift;             /* sem a guiada: +1 drift para a direita, -1 para a esquerda (o lado do volante ao puxar o freio de mão) */
 
     /* ---- Pneus (só no nível difícil) ---- */
     int gastaPneu;                 /* 1: os pneus gastam nesta corrida */

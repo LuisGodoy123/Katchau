@@ -304,8 +304,8 @@ ar-condicionado e os capachos de fibra (`recursos/modelos/cozy_cone_quartos.glb`
 a estante de cones, os cactos e o letreiro OFFICE em neon (`recursos/modelos/cozy_cone_recepcao.glb`, de
 `ferramentas/montar_recepcao_do_cozy_cone.py`); o carro entra pela porta de cada cone e pela entrada da recepção,
 e de fora se vê o lado de dentro pelas janelas. A câmera vem atrás de para onde o
-carro está indo (a velocidade), como nos jogos de corrida: no drift, ela olha o caminho e o carro aparece de lado
-(devagar ou de ré, ela vem atrás do bico). E ela nunca perde o carro de vista: com um morro atrás, sobe por cima
+carro está indo (a velocidade), como nos jogos de corrida, e no drift atrás do corpo dele: o carro fica de costas para
+ela e quem escorrega na tela é o mundo (devagar ou de ré, ela vem atrás do bico). E ela nunca perde o carro de vista: com um morro atrás, sobe por cima
 dele; debaixo de um teto (dentro da loja do Luigi ou do Cozy Cone, numa marquise, embaixo de uma ponte), chega mais perto e desce
 para baixo dele; com uma parede no caminho, vem para a frente dela, sempre com uma folga para não se ver através
 das paredes; livre do obstáculo, volta aos poucos (`cameraLivre`, em `passeio.c`). Na corrida sem a direção guiada é igual (`rumoDaViagem` em `carro.c`). No chão, o carro dirige com a mesma conta da corrida (a direção livre, sem assistência): o volante, a
@@ -611,7 +611,7 @@ Na escolha da corrida (no Mack) se escolhe a pista e o nível (`NIVEIS` em `corr
 
 - **Pneus:** o desgaste cresce com o caminho (um jogo dura cerca de 5 voltas) e 5 vezes mais rápido derrapando. Pneu gasto segura menos nas curvas e tira um pouco da velocidade máxima; a troca do Guido deixa os pneus novos. Os rivais também gastam.
 - **Pneu estourado** (no difícil, só o do jogador): com a vida do pneu em 5% estoura um pneu de trás, e aos poucos o outro de trás e os da frente, até os quatro no aro com a vida em 0%. Como no filme, a borracha some e o carro roda no aro (`separarAros` em `carros3d.c` acha onde o aro acaba em cada modelo: pela peça do pneu, quando ela é à parte, ou pela cor da borracha na tampa da roda, e o shader corta o que passa do aro), baixa daquele canto, solta uma chuva de faíscas do aro raspando no asfalto (`faiscas.c`) e destraciona: a traseira balança sozinha, mais acelerando, o carro quase não se alinha, a roda patina (o giro do motor sobe e ele acelera menos) e a velocidade máxima cai a cada pneu. Só a troca nos boxes resolve.
-- **Freio de mão** (Shift, ou Cruz no controle): tira velocidade. Um toque com o volante virado quebra a traseira (`atualizarDrift` em `carro.c`), e o carro fica de lado até 55°. Depois quem manda é o pé: acelerando de lado o drift continua, sem acelerar ele acaba, e o volante controla o ângulo, que tem inércia; virar para o outro lado é o contraesterço. De lado o carro vai para onde o bico aponta (até um limite, para não sair da pista), solta fumaça, gasta pneu e perde velocidade, mais quanto mais de lado.
+- **Freio de mão** (Shift, ou Cruz no controle): tira velocidade. Um toque com o volante virado quebra a traseira, e o carro fica de lado. Sem a direção guiada (o jogo de verdade, na corrida e no passeio) o drift é de fliperama (`derrapar` em `carro.c`): o carro vai para onde o volante manda, como de pé, e de lado a curva fecha um pouco mais (35%); o ângulo do corpo vai numa mola até o que o volante pede para o lado do drift (solto, ~22°; todo para dentro, ~45°; contraesterçando, até reto), passando um pouco e voltando, como uma traseira de verdade. Acelerando e virando para dentro o drift continua quanto você quiser; soltando o acelerador, endireitando ou contraesterçando, ele acaba sozinho, aos poucos, sem tranco. A câmera fica atrás do corpo, com um pequeno atraso: entrando no drift o carro gira um instante na tela e ela vem atrás dele. Com a traseira presa, a curva é exatamente a de sempre. De lado ele solta fumaça e gasta pneu, e a roda de trás patina: do motor (e do nitro) chega ao chão só um quarto, então segurando o drift a velocidade fica quase onde estava (a 100 km/h, uns 27° a mantêm, 36° perdem 2 a 3 km/h por segundo, 45° uns 5), em vez de o carro acelerar de lado como numa reta. O freio de mão puxado para o drift freia só 30%: o toque custa uns 6 a 8 km/h. (Na direção guiada, que só os testes usam, vale o drift antigo de `atualizarDrift`.)
 - **Câmbio** (`motor.c`): cada marcha é bem mais longa que a anterior, e a nova nasce entre 6.200 e 6.400 rpm, longe do corte de 8.000. A reduzida depende do pé: freando reduz cedo, com uma acelerada de punta-taco; aliviando, deixa a marcha longa; acelerando com o motor fraco, pula direto para a marcha que tem força.
 
 ## Onde a ordenação entra na lógica
@@ -851,7 +851,10 @@ mesmas nuvens, com as cores da hora. A pintura dos carros reflete o mundo em tr�
 (o chão escuro, uma linha clara no horizonte e o céu), mais forte nas bordas (`carros3d.c`), e as telas dos telões
 brilham sozinhas. Em Configurações, GRÁFICOS escolhe entre ALTO (tudo), MÉDIO (sombras baixas e efeitos) e BAIXO;
 EXIBIÇÃO tem o **movimento da câmera**: o campo de visão abre com a velocidade e o nitro, a câmera treme nas
-batidas e inclina um pouco nas curvas.
+batidas e inclina um pouco nas curvas. Andando rápido ela fica firme, como a câmera de perseguição dos jogos de
+corrida: havia um zumbido de velocidade (a mira balançando umas 6 vezes por segundo, mais forte quanto mais rápido)
+que, no topo, fazia o carro pular uns 3 px na tela; medido quadro a quadro numa volta de Interlagos, ele era o
+tremor, e saiu (na corrida e no passeio). Numa batida, a mira balança no máximo ~1,2 grau.
 
 ### Telões e placar
 
@@ -971,7 +974,11 @@ O traçado foi **medido no modelo** por `ferramentas/medir_interlagos.c` (`make 
 grama, pit, muro) e o jeito de desenhar. O modelo veio de outro jogo, onde o canal alfa das imagens tem vários usos: na
 maioria é o brilho (ignorado), nas folhas é o recorte, nos alambrados é transparência (de longe eles viram um véu, não uma
 parede cinza), nas linhas pintadas é a tinta sobre o asfalto e na borracha do traçado é o quanto escurece. O asfalto e a
-grama usam as imagens do jogo, presas ao chão do mundo. O terreno em volta é uma foto de satélite, borrada de perto:
+grama usam as imagens do jogo, presas ao chão do mundo. A imagem da grama é de um verde vivo, o dobro mais verde que a
+grama do mapa (a foto de satélite e a beira de grama do modelo são de um verde-oliva): em Interlagos fica só o desenho
+das folhas, e a cor é a do mapa, com manchas mais secas em duas escalas que também desfazem a repetição do ladrilho
+(`GLSL_DA_GRAMA_DE_INTERLAGOS` em `mundo.c`). A área de escape pintada de verde vinha num verde-menta mais claro que a
+pista e vira um verde de tinta (`COR_DO_ESCAPE_VERDE`). O terreno em volta é uma foto de satélite, borrada de perto:
 dentro da área do autódromo ele vira a grama do jogo, e a foto só aparece ao longe (`definirAreaDoAutodromo`). O muro de concreto também trazia as paredes invisíveis do jogo
 original (triângulos de 20 a 45 m de altura): elas são tiradas ao carregar. As imagens gastas do modelo (o concreto
 manchado e o enferrujado, o guard-rail enferrujado) davam um ar de abandonado: o concreto (inclusive o muro com musgo do
