@@ -29,7 +29,8 @@ typedef enum {
 } Tela;
 
 #define TOTAL_OPCOES 5   /* JOGAR, GARAGEM, COMO JOGAR, CONFIGURAÇÕES, SAIR */
-#define TOTAL_OPCOES_PAUSA 2   /* CONTINUAR e sair (MENU PRINCIPAL na cidade, VOLTAR À CIDADE na corrida) */
+#define MAIS_OPCOES_PAUSA 4    /* na cidade: CONTINUAR, GARAGEM, CONFIGURAÇÕES e MENU PRINCIPAL;
+                                  na corrida: CONTINUAR, CONFIGURAÇÕES e VOLTAR À CIDADE */
 
 /* O que o jogador escolheu na pausa neste quadro */
 typedef enum {
@@ -55,8 +56,10 @@ typedef struct {
     float giroDaVitrine;                        /* o carro da vitrine girando (radianos) */
     float destaqueOrdem;                        /* animação (0 a 1) do seletor de ordem */
     int opcaoPausa;                             /* item marcado na pausa */
-    const char *saidaDaPausa;                   /* o texto do segundo botão da pausa (abrirPausa põe MENU PRINCIPAL) */
-    float destaquePausa[TOTAL_OPCOES_PAUSA];    /* animação (0 a 1) de cada botão da pausa */
+    int opcoesDaPausa[MAIS_OPCOES_PAUSA];       /* os botões desta pausa (a da cidade ou a da corrida) */
+    int totalNaPausa;
+    int telaNaPausa;                            /* aberta por cima da pausa: TELA_GARAGEM, TELA_CONFIGURACOES ou 0 */
+    float destaquePausa[MAIS_OPCOES_PAUSA];     /* animação (0 a 1) de cada botão da pausa */
     int abaConfig;                              /* a aba das configurações: 0 = controles, 1 = exibição */
     float segundosParaAplicar;                  /* > 0: a resolução ou o modo de tela mudou e a janela muda quando chegar a zero */
     int linhaConfig;                            /* a linha marcada nas configurações */
@@ -68,15 +71,20 @@ typedef struct {
     int pistaEscolhida;                         /* em qual pista correr (IdPista) */
     NivelDaCorrida nivelEscolhido;              /* fácil, médio ou difícil */
     float destaqueNivel[TOTAL_NIVEIS];          /* animação (0 a 1) de cada botão de nível */
-    int focoDaCorrida;                          /* a linha marcada na tela da corrida: pista, nível ou CORRER */
-    float destaqueCorrer;                       /* animação (0 a 1) do botão CORRER */
+    int focoDaCorrida;                          /* a linha marcada na tela da corrida (pista, opções ou CORRER) */
+    int voltasEscolhidas;                       /* as regras da corrida, escolhidas na mesma tela */
+    int paradaEscolhida;                        /* 1: pit stop obrigatório */
+    int desgasteEscolhido;                      /* 1: os pneus gastam (só com a parada) */
+    int horaEscolhida;                          /* HoraDaCorrida */
+    float destaqueDaLinha[12];                  /* animação (0 a 1) de cada linha da tela da corrida */
+    float chaveAnimada[3];                      /* as chaves (parada, desgaste, 2 jogadores): 0 desligada, 1 ligada */
+    float nivelAnimado, horaAnimada;            /* onde está a marca das escolhas (desliza até a escolhida) */
+    float pulsoDasVoltas, pulsoDoCarro2;        /* o número que acabou de mudar cresce e volta (1 a 0) */
     float destaquePista[TOTAL_PISTAS];          /* animação (0 a 1) de cada cartão de pista */
 
     /* ---- A tela dividida, escolhida no Mack ---- */
     int telaDividida;                           /* 1: a próxima corrida é de dois no mesmo aparelho */
     int carroDoJogador2;                        /* o carro do jogador 2 (sempre != carroEscolhido) */
-    float destaqueDividida;                     /* animação (0 a 1) do botão da tela dividida */
-    float destaqueCarro2;                       /* animação (0 a 1) da linha do carro do jogador 2 */
 } EstadoMenu;
 
 void iniciarMenu(EstadoMenu *menu);
@@ -91,6 +99,7 @@ Tela atualizarGaragem(EstadoMenu *menu);
 void desenharGaragem(EstadoMenu *menu);
 
 Tela atualizarEscolhaDePista(EstadoMenu *menu);
+OpcoesDaCorrida opcoesEscolhidas(const EstadoMenu *menu);
 void desenharEscolhaDePista(EstadoMenu *menu, Pista *pistas[]);
 
 Tela atualizarConfiguracoes(EstadoMenu *menu);
@@ -99,8 +108,8 @@ void desenharConfiguracoes(EstadoMenu *menu);
 Tela atualizarComoJogar(void);
 void desenharComoJogar(void);
 
-void abrirPausa(EstadoMenu *menu);
-void abrirPausaDaCorrida(EstadoMenu *menu);   /* a saída é VOLTAR À CIDADE */
+void abrirPausa(EstadoMenu *menu);            /* a da cidade: com a garagem e as configurações */
+void abrirPausaDaCorrida(EstadoMenu *menu);   /* a da corrida: só as configurações; a saída é VOLTAR À CIDADE */
 EscolhaDaPausa atualizarPausa(EstadoMenu *menu);
 void desenharPausa(EstadoMenu *menu);
 

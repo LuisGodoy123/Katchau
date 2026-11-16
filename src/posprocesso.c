@@ -53,7 +53,7 @@ static const TomDaPista TONS[TOTAL_PISTAS] = {
     { { 1.04f, 1.00f, 0.94f }, 1.07f, 1.12f, 0.70f, 0.0f, 0.28f },   /* Interlagos: tarde quente */
     { { 0.95f, 0.99f, 1.07f }, 1.08f, 1.10f, 0.85f, 0.0f, 0.34f },   /* Copa Pistão: noite azulada, luzes fortes */
     { { 1.02f, 1.00f, 0.97f }, 1.05f, 1.16f, 0.70f, 0.0f, 0.26f },   /* Oval: dia de cartoon */
-    { { 1.00f, 1.02f, 0.95f }, 1.06f, 1.12f, 0.70f, 0.0f, 0.26f },   /* Splat */
+    { { 1.02f, 1.00f, 0.97f }, 1.06f, 1.12f, 0.70f, 0.0f, 0.27f },   /* Montreal: fim de tarde de primavera, mais fresco */
 };
 
 /* A neblina de cada pista: a cor (perto da do horizonte do céu de cada uma), a densidade no chão, por
@@ -67,7 +67,7 @@ static const NeblinaDaPista NEBLINAS[TOTAL_PISTAS] = {
     { { 0.76f, 0.80f, 0.86f }, 0.00026f, 0.55f },   /* Interlagos: a bruma da cidade */
     { { 0.05f, 0.06f, 0.12f }, 0.00030f, 0.60f },   /* Copa Pistão: a noite engole o longe */
     { { 0.74f, 0.83f, 0.95f }, 0.00020f, 0.50f },   /* Oval */
-    { { 0.78f, 0.82f, 0.82f }, 0.00024f, 0.50f },   /* Splat */
+    { { 0.74f, 0.80f, 0.88f }, 0.00022f, 0.50f },   /* Montreal: o ar do rio e a cidade do outro lado */
 };
 #define ALTURA_DA_NEBLINA_DAS_PISTAS 140.0f   /* metros acima do chão da câmera em que ela fica e vezes mais rala */
 

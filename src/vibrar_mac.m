@@ -19,7 +19,9 @@
 #include "vibrar.h"
 
 #define SEGUNDOS_ENTRE_ENVIOS   0.025f  /* no máximo 40 vezes por segundo */
-#define MUDANCA_MINIMA          0.015f  /* uma diferença menor nem é enviada */
+#define MUDANCA_MINIMA          0.015f  /* uma diferença menor nem é enviada... */
+#define ENVIA_MESMO_ASSIM       0.15f   /* ...a não ser depois de tanto tempo: o valor final sempre chega */
+#define FORCA_MINIMA            0.02f   /* abaixo disso, é zero: o motor desliga de vez */
 #define NITIDEZ_DO_GRAVE        0.15f   /* de 0 (surdo) a 1 (seco) */
 #define NITIDEZ_DO_AGUDO        0.85f
 #define DURACAO_DO_EVENTO       30.0f   /* segundos: o máximo de um evento contínuo */
@@ -35,6 +37,7 @@
 @property (nonatomic, assign) CFAbsoluteTime inicioDoEvento;
 @property (nonatomic, assign) float nitidez;
 @property (nonatomic, assign) float ultimaForca;
+@property (nonatomic, assign) CFAbsoluteTime ultimaMudanca;
 @end
 
 @implementation MotorDoControle
@@ -214,13 +217,24 @@ static void mudarForca(MotorDoControle *mao, float forca) {
     if (mao == nil || mao.tocador == nil) {
         return;
     }
-    if (CFAbsoluteTimeGetCurrent() - mao.inicioDoEvento > DURACAO_DO_EVENTO - FOLGA_PARA_REINICIAR) {
+    CFAbsoluteTime agora = CFAbsoluteTimeGetCurrent();
+    if (agora - mao.inicioDoEvento > DURACAO_DO_EVENTO - FOLGA_PARA_REINICIAR) {
         tocarEvento(mao);
     }
-    if (fabsf(forca - mao.ultimaForca) < MUDANCA_MINIMA && !(forca == 0.0f && mao.ultimaForca != 0.0f)) {
+    /* Uma força muito fraca é zero: um resto de vibração apagando não pode prender o motor ligado */
+    if (forca < FORCA_MINIMA) {
+        forca = 0.0f;
+    }
+    /* Só manda o que mudou bastante; mas o valor final (o zero, ou o fim de uma vibração que vai apagando aos
+     * poucos, em passos menores que MUDANCA_MINIMA) sempre chega, no máximo ENVIA_MESMO_ASSIM depois */
+    float diferenca = fabsf(forca - mao.ultimaForca);
+    int mudouBastante = diferenca >= MUDANCA_MINIMA || (forca == 0.0f && mao.ultimaForca != 0.0f);
+    int faltaChegar = diferenca > 0.0f && agora - mao.ultimaMudanca > ENVIA_MESMO_ASSIM;
+    if (!mudouBastante && !faltaChegar) {
         return;
     }
     mao.ultimaForca = forca;
+    mao.ultimaMudanca = agora;
     enviarForca(mao, forca);
 }
 

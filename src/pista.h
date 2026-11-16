@@ -39,7 +39,7 @@ typedef enum {
     PISTA_INTERLAGOS,
     PISTA_COPA_PISTAO,   /* o estádio do modelo 3D (copa_pistao.h) */
     PISTA_OVAL,          /* o oval de desenho animado (oval.h) */
-    PISTA_SPLAT,         /* o circuito sinuoso, montado em blocos (splat.h) */
+    PISTA_MONTREAL,      /* o Circuito Gilles-Villeneuve, do modelo 3D (montreal.h) */
     TOTAL_PISTAS
 } IdPista;
 
@@ -64,6 +64,9 @@ typedef enum {
 #define METROS_DO_PORTICO_A_LINHA_PINTADA (SEGMENTOS_ATE_A_LINHA_PINTADA * COMPRIMENTO_SEGMENTO / UNIDADES_POR_METRO)
 #define ESCALA_INTERLAGOS        1.4f    /* o traçado do modelo, 40% maior: na medida real a pista é estreita demais para 14 carros */
 
+/* Montreal também vem de um modelo em metros, com o asfalto de 10 a 13 m: o mesmo aumento de Interlagos */
+#define ESCALA_MONTREAL          1.4f
+
 /* A Copa Pistão tem o comprimento real de Daytona (2,5 milhas): a pista do filme
  * não tem medida oficial. A escala do modelo 3D sai disso: metros de uma volta
  * dividido pelo comprimento da linha de copa_pistao.h, em unidades do modelo. */
@@ -72,7 +75,6 @@ typedef enum {
 
 /* As outras pistas de modelo 3D: a escala deixa o asfalto com uma largura boa para correr */
 #define ESCALA_OVAL              2.0f
-#define ESCALA_SPLAT             24.0f
 
 /* Grid de largada, pintado no asfalto ANTES da linha de chegada, em
  * zigue-zague (pares à esquerda, ímpares à direita). O lugar 0 (pole) é
@@ -132,6 +134,10 @@ typedef struct Segmento {
     float escapeDireita, escapeEsquerda;   /* até onde o chão é asfaltado */
     float foraDireita[PONTOS_FORA_DA_PISTA], foraEsquerda[PONTOS_FORA_DA_PISTA];   /* altura do chão além da borda */
     float escalaDaBorda;            /* as distâncias além da borda estão nas medidas do modelo: vezes isto */
+    /* Para quem está no pit, onde a estrada dele passa longe demais da pista, por dentro de uma curva fechada (a de
+     * Montreal, ao lado da chicane): o que somar ao ponto do caminho para ele cair na estrada de verdade. A
+     * perpendicular da linha da pista, ali, não chega nela sem cruzar a de outro segmento. Zero no resto */
+    float correcaoDoPit[4];         /* x, altura e z, em metros, e o rumo, em graus */
     struct Obstaculo *obstaculos;   /* lista simples dos objetos da beira (obstaculos.c) */
     struct Segmento *proximo;       /* segmento seguinte (o último aponta para o primeiro) */
     struct Segmento *anterior;      /* segmento anterior (o primeiro aponta para o último) */
@@ -162,9 +168,14 @@ typedef struct {
     float vaga;              /* a vaga */
     float paraEntrar;        /* o jogador entra quando passa disto, na zona de entrada */
     int soEncostadoNaBorda;  /* 1: paraEntrar é a distância até a borda (só entra quem encosta na linha) */
+    int soEmCimaDaEstrada;   /* 1: e só quem está em cima da estrada do pit, perto do caminho (em Montreal, ao lado da
+                                chicane há asfalto de escape entre a pista e ela) */
     const float (*caminho)[2];  /* se a estrada dobra: { metros a partir da linha, metros até a linha da pista },
                                    começando na entrada */
     int pontosDoCaminho;
+    const float (*estrada)[3];  /* a faixa rápida no mundo, no modelo ({ x, altura, z }), onde ela passa longe da
+                                   pista (Montreal): veja correcaoDoPit */
+    int pontosDaEstrada;
 } DadosDoPit;
 
 /* O grid que a pista já traz pintado (o do modelo de Interlagos). Com "existe" em 0,
@@ -194,6 +205,7 @@ typedef struct {
     float metrosDaVolta;
     IdPista id;          /* qual pista é (define o cenário 3D em mundo.c) */
     const char *nome;    /* o nome que aparece no menu */
+    float *linhaDeCorrida;   /* a linha de corrida ideal, por segmento: { lateral, raio } (linha_de_corrida.c); NULL até alguém pedir */
 } Pista;
 
 /* Onde algo (a câmera, um carro) está na pista:
@@ -215,7 +227,7 @@ Pista *criarPistaVazia(void);
 Pista *criarPista(void);
 Pista *criarCopaPistao(void);
 Pista *criarOval(void);
-Pista *criarSplat(void);
+Pista *criarMontreal(void);
 Pista *criarPistaPorId(IdPista id);
 float metrosDesdeAEntrada(const Pista *pista, float metros);
 void adicionarTrecho(Pista *pista, const char *nome, int quantidade, float curvatura,
@@ -238,6 +250,8 @@ void liberarPista(Pista *pista);
 int moverNaPista(PosicaoNaPista *posicao, float distancia);
 float alturaNaPosicao(PosicaoNaPista posicao);
 PontoNoMundo pontoNoMundo(PosicaoNaPista posicao, float deslocamentoLateral);
+PontoNoMundo pontoNoMundoDoPit(PosicaoNaPista posicao, float deslocamentoLateral);
+int temCorrecaoDoPit(PosicaoNaPista posicao);
 float alturaDoChao(PosicaoNaPista posicao, float lateralEmMetros);
 float metrosNoMundoPorMetroDaPista(PosicaoNaPista posicao, float lateralEmMetros);
 float larguraDoLado(Segmento *segmento, float lateral);

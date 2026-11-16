@@ -140,6 +140,9 @@ static MalhaDeColisao *malha = NULL;
 static int tentouCarregar = 0;
 static int pronto = 0;
 static CarroLivre carro;
+static EstadoDaVibracao estadoDaVibracao;   /* o que o controle sente dirigindo pela cidade (vibracao.c) */
+static Vibracao vibracaoDoQuadro;
+static int temVibracao = 0;                 /* 1: o carro andou neste quadro, e vibracaoDoQuadro vale */
 static int numero = 0;
 static int pausado = 0, mapaAberto = 0, zoomDoMapa = 1;
 static const float ZOOMS_DO_MAPA[3] = { 1.0f, 2.5f, 6.0f };
@@ -917,6 +920,7 @@ static void acordarNoCone(void) {
 void iniciarPasseio(int numeroDoCarro) {
     prepararMapa();
     numero = numeroDoCarro;
+    iniciarEstadoDaVibracao(&estadoDaVibracao);
     iniciarCarroLivre(&carro, fichaDoCarro(numero), largada[0], largada[1], largada[2], largada[3]);
     acordarNoCone();   /* o jogo começa no quarto do cone 8, de frente para a porta */
     iniciarMoradores(malha, numero);   /* cada um em casa (menos quem tem o carro do jogador) */
@@ -951,6 +955,42 @@ void iniciarPasseio(int numeroDoCarro) {
     distanciaAtual = DISTANCIAS[distanciaEscolhida];
     limparFumaca();
     iniciarEfeitosDaCorrida();   /* para os sons que tenham sobrado */
+}
+
+/*
+ * trocarDeCarro
+ * Na garagem da pausa, o jogador escolheu outro carro: ele aparece no mesmo lugar, virado para o mesmo lado. O
+ * dono do carro novo sai da rua, e o do antigo volta (os moradores recomeçam em casa).
+ * Recebe: o número do carro novo.
+ * Devolve: nada.
+ */
+static void trocarDeCarro(int novo) {
+    if (novo == numero || !pronto) {
+        return;
+    }
+    float x = carro.x, y = carro.y, z = carro.z, rumo = carro.rumo;
+    numero = novo;
+    iniciarCarroLivre(&carro, fichaDoCarro(numero), x, y, z, rumo);
+    iniciarMoradores(malha, numero);
+    jeitoDoJogador = *jeitoDoModelo(numero);
+    jeitoDoJogador.tique = TIQUE_NENHUM;
+    jeitoDoJogador.sonolencia = 0.0f;
+    iniciarCorpo(&corpoDoJogador, &jeitoDoJogador, 101u);
+    memset(&poseDoJogador, 0, sizeof(poseDoJogador));
+}
+
+/*
+ * vibracaoDoPasseio
+ * A vibração do quadro em que o carro andou pela cidade. Nas cenas do Mack, na pausa, no mapa e dormindo o carro
+ * não anda, e o controle fica quieto.
+ * Recebe: nada.
+ * Devolve: a vibração (zerada se o carro não andou desde a última vez).
+ */
+Vibracao vibracaoDoPasseio(void) {
+    Vibracao nada = { 0.0f, 0.0f, 0.0f };
+    Vibracao v = temVibracao ? vibracaoDoQuadro : nada;
+    temVibracao = 0;
+    return v;
 }
 
 int passeioPausado(void) {
@@ -1655,6 +1695,9 @@ Tela atualizarPasseio(EstadoMenu *menu, float tempoQuadro) {
     }
     if (pausado) {
         EscolhaDaPausa escolha = atualizarPausa(menu);
+        if (menu->carroEscolhido != numero) {
+            trocarDeCarro(menu->carroEscolhido);   /* escolheu outro na garagem da pausa */
+        }
         if (escolha == PAUSA_CONTINUAR) {
             pausado = 0;
             pausarEfeitosDaCorrida(0);
@@ -1757,6 +1800,8 @@ Tela atualizarPasseio(EstadoMenu *menu, float tempoQuadro) {
     if (configuracoesAtuais()->cameraViva) {
         tremorDaCamera = fmaxf(tremorDaCamera, carro.pancada);   /* a câmera treme junto (antes de o som zerar a pancada) */
     }
+    vibracaoDoQuadro = calcularVibracaoDoPasseio(&estadoDaVibracao, &carro, carro.pancada, tempoQuadro);
+    temVibracao = 1;
     carro.pancada = 0.0f;
     return TELA_PASSEIO;
 }

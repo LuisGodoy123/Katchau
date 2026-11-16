@@ -8,39 +8,14 @@
  * na maioria é o brilho (aqui é ignorado), nas folhas e alambrados é o recorte,
  * nas linhas pintadas é a tinta sobre o asfalto e na borracha do traçado e nas
  * sombras pintadas é o quanto escurece. "chao" diz o que o carro sente em cima
- * dele, e é o que a ferramenta ferramentas/medir_interlagos.c procura.
+ * dele, e é o que a ferramenta ferramentas/medir_pista.c procura.
  * ------------------------------------------------------------------
  */
 
 #ifndef INTERLAGOS_MATERIAIS_H
 #define INTERLAGOS_MATERIAIS_H
 
-typedef enum {
-    CHAO_NENHUM,    /* prédios, árvores, postes: não é chão nem barreira */
-    CHAO_PISTA,     /* o asfalto da pista, com as linhas pintadas */
-    CHAO_ZEBRA,
-    CHAO_ESCAPE,    /* área de escape asfaltada ou pintada */
-    CHAO_GRAMA,
-    CHAO_PIT,       /* o piso do pit lane e dos boxes */
-    CHAO_MURO       /* muros, guard-rail, pneus e alambrados: param o carro */
-} ChaoDoMaterial;
-
-typedef enum {
-    DESENHO_OPACO,      /* a imagem como ela é, sem o alfa */
-    DESENHO_RECORTE,    /* furado onde o alfa é baixo (folhas, alambrados) */
-    DESENHO_ASFALTO,    /* o asfalto da pista, na mesma escala em toda a volta */
-    DESENHO_DECALQUE,   /* tinta sobre o asfalto: onde o alfa é baixo, aparece o asfalto */
-    DESENHO_SOMBRA,     /* escurece o que está embaixo, na medida do alfa (a borracha do traçado) */
-    DESENHO_TELA,       /* alambrados e grades: transparentes na medida do alfa (de longe, um véu) */
-    DESENHO_GRAMA,      /* a grama do jogo */
-    DESENHO_TERRENO,    /* o chão em volta (uma foto de satélite): perto do autódromo vira a grama do jogo */
-    DESENHO_ESCONDIDO
-} DesenhoDoMaterial;
-
-typedef struct {
-    ChaoDoMaterial chao;
-    DesenhoDoMaterial desenho;
-} MaterialDeInterlagos;
+#include "materiais_do_modelo.h"
 
 #define TOTAL_MATERIAIS_INTERLAGOS 178
 
@@ -65,7 +40,7 @@ typedef struct {
  * da grama do mapa ela parecia um gramado de desenho. O jogo escurece para o verde de tinta das zebras e do autódromo */
 #define MATERIAL_DO_ESCAPE_VERDE        164    /* rdilgreen */
 
-static const MaterialDeInterlagos MATERIAIS_INTERLAGOS[TOTAL_MATERIAIS_INTERLAGOS] = {
+static const MaterialDoModelo MATERIAIS_INTERLAGOS[TOTAL_MATERIAIS_INTERLAGOS] = {
     /*   0 (padrão da raylib)              */ { CHAO_NENHUM, DESENHO_OPACO },
     /*   1 redbuild_windows               */ { CHAO_NENHUM, DESENHO_OPACO },
     /*   2 portaopreto                    */ { CHAO_NENHUM, DESENHO_OPACO },

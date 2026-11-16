@@ -432,7 +432,7 @@ int main(int argc, char *argv[]) {
     }
 
     marcarEtapa("intro");
-    /* KATCHAU_CORRIDA=N: abre direto numa corrida na pista N (0 Interlagos, 1 Copa Pistão, 2 Oval, 3 Splat), para medir */
+    /* KATCHAU_CORRIDA=N: abre direto numa corrida na pista N (0 Interlagos, 1 Copa Pistão, 2 Oval, 3 Montreal), para medir */
     int corridaDeTeste = (getenv("KATCHAU_CORRIDA") != NULL) ? atoi(getenv("KATCHAU_CORRIDA")) : -1;
     if (corridaDeTeste >= 0 && corridaDeTeste < TOTAL_PISTAS) {
         menu.pistaEscolhida = corridaDeTeste;
@@ -532,12 +532,13 @@ int main(int argc, char *argv[]) {
         }
         /* Entrar na corrida (pelo Mack ou pelo "correr de novo") sempre começa uma nova */
         if (proxima == TELA_CORRIDA && tela != TELA_CORRIDA) {
+            OpcoesDaCorrida opcoes = opcoesEscolhidas(&menu);   /* como o jogador montou a corrida */
             if (menu.telaDividida) {
                 FormacaoLocal formacao = { MAXIMO_DE_JOGADORES_LOCAIS,
                                            { menu.carroEscolhido, menu.carroDoJogador2 } };
-                iniciarCorridaDividida(&corrida, pistas[menu.pistaEscolhida], menu.nivelEscolhido, &formacao);
+                iniciarCorridaDivididaComOpcoes(&corrida, pistas[menu.pistaEscolhida], &opcoes, &formacao);
             } else {
-                iniciarCorrida(&corrida, pistas[menu.pistaEscolhida], menu.carroEscolhido, menu.nivelEscolhido);
+                iniciarCorridaComOpcoes(&corrida, pistas[menu.pistaEscolhida], menu.carroEscolhido, &opcoes);
             }
             for (int v = 0; v < corrida.totalDeHumanos; v++) {
                 iniciarVisao(&visoes[v], v);
@@ -604,12 +605,15 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        /* O controle só vibra com a corrida andando: nos menus e na pausa, fica quieto */
+        /* O controle só vibra dirigindo (na corrida e pela cidade): nos menus e na pausa, fica quieto */
         if (tela == TELA_CORRIDA && !pausada) {
             Vibracao vibracao = calcularVibracao(&estadoDaVibracao, &corrida, tempoQuadro);
             vibracao = vibracaoAoGosto(vibracao, configuracoesAtuais());
             aplicarVibracao(&vibracao);
-        } else if (tela == TELA_CONFIGURACOES && menu.pulsoDeVibracao > 0.0f) {
+        } else if (tela == TELA_PASSEIO && menu.pulsoDeVibracao <= 0.0f) {
+            Vibracao vibracao = vibracaoAoGosto(vibracaoDoPasseio(), configuracoesAtuais());
+            aplicarVibracao(&vibracao);
+        } else if (menu.pulsoDeVibracao > 0.0f) {   /* nas configurações (do menu ou da pausa) */
             /* Mudou a vibração: um toque, para sentir como ficou */
             Vibracao toque = { FORCA_DO_TOQUE, FORCA_DO_TOQUE, 0.0f };
             toque = vibracaoAoGosto(toque, configuracoesAtuais());

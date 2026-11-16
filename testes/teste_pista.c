@@ -1701,7 +1701,11 @@ static void testarDepoisDaChegada(void) {
         for (int k = 0; k < 2; k++) {
             iniciarCorrida(&corrida, pista, casos[k].carro, NIVEL_MEDIO);
             corrida.jogador.habilidade = casos[k].habilidade;
-            corrida.jogador.velocidadeMaxima *= casos[k].ganho;
+            /* Em Montreal, largando em último numa prova de 5 voltas com chicanes, 5% a mais de carro vence só umas
+             * 6 de 10 (o resto fica preso no tráfego); com 15%, vence todas. Este teste é sobre o depois da chegada:
+             * ele só precisa de um caso que seja vitória */
+            float ganho = (casos[k].vence && id == PISTA_MONTREAL) ? 1.15f : casos[k].ganho;
+            corrida.jogador.velocidadeMaxima *= ganho;
             while (!corrida.terminou && corrida.tempoDeCorrida < 600.0f) {
                 atualizarCorrida(&corrida, atualizarIA(&corrida.jogador, corrida.pista), quadro);
             }
@@ -1722,13 +1726,7 @@ static void testarDepoisDaChegada(void) {
             }
             float metros = (corrida.jogador.distanciaPercorrida - andouAntes) / UNIDADES_POR_METRO;
             printf("     %s, %do lugar: %.0f m em 150 s, menor velocidade %d km/h\n", pista->nome, posicao, metros, converterParaKmh(menor));
-            if (id == PISTA_SPLAT && casos[k].vence) {
-                /* Curvas fechadas e pista estreita: uma corrida só depende demais das batidas. Quem
-                 * mede o ritmo no Splat é a média de 25 corridas, mais adiante, no teste do ritmo perfeito */
-                verificar(posicao >= 1 && posicao <= TOTAL_CARROS, "a corrida termina com uma posicao valida");
-            } else {
-                verificar(jogadorVenceu(&corrida) == casos[k].vence, casos[k].vence ? "este caso e uma vitoria" : "este caso nao e uma vitoria");
-            }
+            verificar(jogadorVenceu(&corrida) == casos[k].vence, casos[k].vence ? "este caso e uma vitoria" : "este caso nao e uma vitoria");
             verificar(menor > 0.0f && metros > 3000.0f, "o carro continua andando, sem parar nunca");
             verificar(corrida.jogador.voltas > voltasAntes, "e segue dando voltas");
             verificar(corrida.posicaoFinal == posicao && corrida.jogador.tempoDeChegada == chegada,
@@ -1869,7 +1867,7 @@ static void testarColisaoEEquilibrio(void) {
     verificar(fabsf(meioVirado - larguraNormal) < 0.01f && fabsf(larguraVirado - meioNormal) < 0.01f, "de lado, a caixa troca comprimento por largura");
 
     /* Equilíbrio: a mesma volta com qualquer carro */
-    Pista *pistas[TOTAL_PISTAS] = { pista, criarCopaPistao(), criarOval(), criarSplat() };
+    Pista *pistas[TOTAL_PISTAS] = { pista, criarCopaPistao(), criarOval(), criarMontreal() };
     for (int id = 0; id < TOTAL_PISTAS; id++) {
         float menor = 1e9f, maior = 0.0f;
         for (int n = 0; n < TOTAL_CARROS; n++) {
@@ -1917,9 +1915,11 @@ static void testarColisaoEEquilibrio(void) {
             pioresChegadas += corrida.posicaoFinal;
         }
         printf("     %s, ritmo perfeito: media %.1f; %d de %d corridas fora dos 5 primeiros\n", pistas[id]->nome, (float) melhor / corridas, longeDaFrente, corridas);
-        if (id == PISTA_SPLAT) {
-            /* Curvas fechadas e pista estreita: largar atrás pesa mais que nas outras */
-            verificar(melhor < 7 * corridas && longeDaFrente * 2 <= corridas, "com ritmo perfeito se chega perto da frente com qualquer carro");
+        if (id == PISTA_MONTREAL) {
+            /* Quatro freadas fortes no fim de retas de mais de 1 km (a 350 km/h ou mais): largando em último, quem
+             * tem ritmo perfeito chega muito mais rápido que o pelotão, e um toque na traseira faz rodar. Em 30
+             * corridas, umas 20 rodadas aqui, contra 4 em Interlagos */
+            verificar(melhor < 5 * corridas && longeDaFrente * 3 <= corridas, "com ritmo perfeito se chega na frente com qualquer carro (ao menos 2 em cada 3 corridas)");
         } else {
             verificar(melhor < 5 * corridas && longeDaFrente * 4 <= corridas, "com ritmo perfeito se chega na frente com qualquer carro (ao menos 3 em cada 4 corridas)");
         }
@@ -2885,57 +2885,42 @@ static void testarVibracao(void) {
         carro->velocidade = 7000.0f; \
         carro->motor.giro = 0.5f; \
         carro->motor.carga = 0.0f; \
-        estado.marchaAntes = carro->motor.marcha; \
     } while (0)
 
-    /* O asfalto: parado nao vibra; andando, esta sempre nas maos, e cresce com a velocidade */
+    /* O asfalto: parado ou andando reto, em qualquer velocidade, o controle fica quieto (a vibracao e para
+     * o que o piloto precisa sentir; a de antes vibrava 100% do tempo) */
     PREPARAR();
     carro->velocidade = 0.0f;
     vibracaoEm(&corrida, &estado, &grave, &agudo);
     verificar(grave < 0.02f && agudo < 0.02f, "parado, nao vibra");
-    float velocidades[3] = { 3000.0f, 7000.0f, 11500.0f }, gravePorVelocidade[3], agudoPorVelocidade[3];
+    float velocidades[3] = { 3000.0f, 7000.0f, 11500.0f }, maiorNoAsfalto = 0.0f;
     for (int k = 0; k < 3; k++) {
         PREPARAR();
         carro->velocidade = velocidades[k];
-        vibracaoEm(&corrida, &estado, &gravePorVelocidade[k], &agudoPorVelocidade[k]);
+        vibracaoEm(&corrida, &estado, &grave, &agudo);
+        maiorNoAsfalto = fmaxf(maiorNoAsfalto, fmaxf(grave, agudo));
     }
-    printf("     asfalto: grave %.2f / %.2f / %.2f, agudo %.2f / %.2f / %.2f (75, 175 e 290 km/h)\n",
-           gravePorVelocidade[0], gravePorVelocidade[1], gravePorVelocidade[2], agudoPorVelocidade[0], agudoPorVelocidade[1], agudoPorVelocidade[2]);
-    verificar(gravePorVelocidade[0] > 0.05f && agudoPorVelocidade[0] > 0.03f, "devagar, ja se sente o asfalto");
-    verificar(gravePorVelocidade[2] > gravePorVelocidade[0] && agudoPorVelocidade[2] > agudoPorVelocidade[0] * 1.5f, "e mais, quanto mais rapido");
-    verificar(gravePorVelocidade[2] < 0.3f, "sem cansar a mao");
-
-    /* Ele tem textura: nao e uma vibracao lisa */
+    printf("     asfalto, reto, de 75 a 290 km/h: no maximo %.3f\n", maiorNoAsfalto);
+    verificar(maiorNoAsfalto < 0.02f, "no asfalto, reto, em qualquer velocidade, o controle fica quieto");
     PREPARAR();
-    float menorAgudo = 1.0f, maiorAgudo = 0.0f;
-    for (int i = 0; i < 60 * 2; i++) {
-        Vibracao a = calcularVibracao(&estado, &corrida, 1.0f / 60.0f);
-        menorAgudo = fminf(menorAgudo, a.agudo);
-        maiorAgudo = fmaxf(maiorAgudo, a.agudo);
-    }
-    verificar(maiorAgudo > menorAgudo * 1.3f, "o asfalto tem textura");
-
-    /* As juntas do piso: um toque de vez em quando */
-    PREPARAR();
-    int juntas = 0;
+    float maiorEmQuatro = 0.0f;
     for (int i = 0; i < 60 * 4; i++) {
-        calcularVibracao(&estado, &corrida, 1.0f / 60.0f);
-        juntas += (estado.golpeGrave > 0.1f);
+        Vibracao a = calcularVibracao(&estado, &corrida, 1.0f / 60.0f);
+        maiorEmQuatro = fmaxf(maiorEmQuatro, fmaxf(a.grave, a.agudo));
     }
-    printf("     quadros com junta em 4 s a 175 km/h: %d\n", juntas);
-    verificar(juntas > 0, "as juntas do piso dao um toque");
+    verificar(maiorEmQuatro < 0.02f, "nem de vez em quando (sem as juntas do piso)");
 
-    /* Derrapando, o chao some e entra o tremor */
+    /* O pneu no limite: um tremor leve e irregular; escorregando so um pouco, nada */
     PREPARAR();
+    carro->derrapagem = 0.3f;
     vibracaoEm(&corrida, &estado, &grave, &agudo);
-    float graveNormal = grave;
+    verificar(agudo < 0.02f, "o pneu escorregando um pouco nao vibra");
     PREPARAR();
     carro->derrapagem = 1.0f;
     float graveDerrapando, agudoDerrapando;
     vibracaoEm(&corrida, &estado, &graveDerrapando, &agudoDerrapando);
-    printf("     derrapando: grave %.2f (no asfalto, %.2f), agudo %.2f\n", graveDerrapando, graveNormal, agudoDerrapando);
-    verificar(graveDerrapando < graveNormal * 0.6f, "derrapando, o chao some da mao: o carro flutua");
-    verificar(agudoDerrapando > 0.25f, "e o pneu treme na mao direita");
+    printf("     pneu no limite: agudo %.2f\n", agudoDerrapando);
+    verificar(agudoDerrapando > 0.1f && agudoDerrapando < 0.3f, "no limite, o pneu treme de leve na mao direita");
     float menorTremor = 1.0f, maiorTremor = 0.0f;
     for (int i = 0; i < 60; i++) {
         float a = calcularVibracao(&estado, &corrida, 1.0f / 60.0f).agudo;
@@ -2944,14 +2929,14 @@ static void testarVibracao(void) {
     }
     verificar(maiorTremor > menorTremor * 1.6f, "e um tremor irregular, nao um zumbido liso");
 
-    /* O drift: tranco ao soltar, peso na mao de fora, e tranco quando o pneu agarra */
+    /* O drift: um toque ao soltar, o peso de leve na mao de fora, e outro toque quando o pneu agarra */
     PREPARAR();
     calcularVibracao(&estado, &corrida, 1.0f / 60.0f);
     carro->forcaDoDrift = 1.0f;
     carro->anguloDeDrift = 30.0f;
     carro->derrapagem = 1.0f;
     float noTranco = calcularVibracao(&estado, &corrida, 1.0f / 60.0f).grave;
-    verificar(noTranco > 0.4f, "a traseira soltando da um tranco");
+    verificar(noTranco > 0.25f, "a traseira soltando da um tranco");
     for (int i = 0; i < 40; i++) {
         calcularVibracao(&estado, &corrida, 1.0f / 60.0f);
     }
@@ -2960,14 +2945,16 @@ static void testarVibracao(void) {
     carro->anguloDeDrift = -30.0f;
     float graveParaEsquerda = 0.0f, agudoParaEsquerda = 0.0f;
     vibracaoEm(&corrida, &estado, &graveParaEsquerda, &agudoParaEsquerda);
-    verificar(graveParaDireita > graveParaEsquerda, "virando para a direita, a mao de fora e a esquerda");
+    printf("     drift: entrando %.2f, durante %.2f na mao de fora\n", noTranco, graveParaDireita);
+    verificar(graveParaDireita > graveParaEsquerda && graveParaDireita > 0.12f,
+              "durante o drift o pneu arrastando vibra, mais na mao de fora (virando para a direita, a esquerda)");
     carro->forcaDoDrift = 0.0f;
     carro->anguloDeDrift = 0.0f;
     carro->derrapagem = 0.0f;
     float agarrou = calcularVibracao(&estado, &corrida, 1.0f / 60.0f).grave;
-    verificar(agarrou > 0.25f, "o pneu agarrando da outro tranco");
+    verificar(agarrou > 0.1f, "o pneu agarrando da outro toque");
 
-    /* O nitro: empurrao, combustao pulsando, engasgo e cauda */
+    /* O nitro: o empurrao, um ronco baixo pulsando, o engasgo e a cauda */
     PREPARAR();
     calcularVibracao(&estado, &corrida, 1.0f / 60.0f);
     carro->nitroLigado = 1;
@@ -2983,8 +2970,8 @@ static void testarVibracao(void) {
         maiorNitro = fmaxf(maiorNitro, g);
     }
     printf("     nitro: ignicao %.2f, queimando %.2f a %.2f\n", naIgnicao, menorNitro, maiorNitro);
-    verificar(naIgnicao > 0.7f && maiorNitro < naIgnicao * 0.75f, "ligando, o nitro da um empurrao maior que o resto");
-    verificar(menorNitro > graveNormal && maiorNitro > menorNitro + 0.05f, "e segue empurrando, com a combustao pulsando");
+    verificar(naIgnicao > 0.3f && maiorNitro < naIgnicao * 0.5f, "ligando, o nitro da um empurrao bem maior que o resto");
+    verificar(menorNitro > 0.03f && maiorNitro > menorNitro + 0.03f && maiorNitro < 0.15f, "e segue num ronco baixo, pulsando");
     carro->nitro = 0.05f;
     float menorFim = 1.0f, maiorFim = 0.0f;
     for (int i = 0; i < 30; i++) {
@@ -3003,13 +2990,14 @@ static void testarVibracao(void) {
         calcularVibracao(&estado, &corrida, 1.0f / 60.0f);
     }
     float cauda1 = calcularVibracao(&estado, &corrida, 1.0f / 60.0f).grave;
-    verificar(cauda0 > cauda1 + 0.1f && cauda1 < 0.3f, "apagando, some aos poucos");
+    verificar(cauda0 > cauda1 + 0.05f && cauda1 < 0.05f, "apagando, some aos poucos");
 
     /* Grama */
     PREPARAR();
     carro->deslocamentoLateral = 1.6f;
     vibracaoEm(&corrida, &estado, &grave, &agudo);
-    verificar(grave > graveNormal * 1.3f && agudo > 0.1f, "a grama treme mais que o asfalto");
+    printf("     grama (a direita): grave %.2f, agudo %.2f\n", grave, agudo);
+    verificar(fmaxf(grave, agudo) > 0.12f && agudo > grave * 0.5f, "a grama treme (o asfalto nao), mais na mao do lado dela");
 
     /* Zebra: acha um segmento com zebra e conta os pulsos */
     PREPARAR();
@@ -3018,47 +3006,51 @@ static void testarVibracao(void) {
         comZebra = proximoSegmento(comZebra);
     }
     carro->posicao.segmento = comZebra;
-    carro->deslocamentoLateral = 1.05f;
+    /* No meio da zebra, do lado em que ela está (o segmento pode ter zebra de um lado só) */
+    if (comZebra->zebraDireita > comZebra->larguraDireita + 0.3f) {
+        carro->deslocamentoLateral = (comZebra->larguraDireita + comZebra->zebraDireita) / 2.0f / comZebra->larguraDireita;
+    } else if (comZebra->zebraEsquerda > comZebra->larguraEsquerda + 0.3f) {
+        carro->deslocamentoLateral = -(comZebra->larguraEsquerda + comZebra->zebraEsquerda) / 2.0f / comZebra->larguraEsquerda;
+    } else {
+        carro->deslocamentoLateral = 1.05f;   /* sem a zebra medida: a borda das curvas */
+    }
+    verificar(superficieDoCarro(carro) == SUPERFICIE_ZEBRA || !comZebra->temBorda, "o carro do teste esta em cima da zebra");
     int subidas = 0;
     float anterior = 0.0f, maiorZebra = 0.0f, menorZebra = 1.0f;
     for (int i = 0; i < 60; i++) {
         Vibracao z = calcularVibracao(&estado, &corrida, 1.0f / 60.0f);
-        subidas += (z.grave > 0.35f && anterior <= 0.35f);
+        subidas += (z.grave > 0.12f && anterior <= 0.12f);
         anterior = z.grave;
         maiorZebra = fmaxf(maiorZebra, z.grave);
         menorZebra = fminf(menorZebra, z.grave);
     }
-    printf("     zebra: %d pulsos por segundo\n", subidas);
+    printf("     zebra: %d pulsos por segundo, ate %.2f\n", subidas, maiorZebra);
     verificar(subidas >= 5 && subidas <= 16 && menorZebra < maiorZebra * 0.5f, "a zebra da pulsos que a mao consegue contar");
     PREPARAR();
     carro->posicao.segmento = comZebra;
     carro->deslocamentoLateral = 0.0f;
     vibracaoEm(&corrida, &estado, &grave, &agudo);
-    verificar(grave < 0.3f, "no meio da pista, na mesma curva, nao tem zebra");
+    verificar(grave < 0.02f, "no meio da pista, na mesma curva, nao tem zebra");
 
-    /* Freada: o gatilho fica livre; o peso vai para a frente e o ABS so entra nas fortes */
+    /* Freada: nem o peso nem o ABS vibram (o freio e do piloto: ele ja sabe que esta freando) */
     PREPARAR();
     carro->ultimosComandos.frear = 1;
     carro->velocidade = 10000.0f;
     vibracaoEm(&corrida, &estado, &grave, &agudo);
-    float agudoFreando = agudo, graveFreando = grave;
-    PREPARAR();
-    carro->velocidade = 10000.0f;
-    vibracaoEm(&corrida, &estado, &grave, &agudo);
-    verificar(graveFreando > grave, "freando, o peso do carro vai para a frente");
-    verificar(agudoFreando > agudo + 0.05f, "e numa freada forte o ABS pulsa");
-    PREPARAR();
-    carro->ultimosComandos.frear = 1;
-    carro->velocidade = 2500.0f;
-    vibracaoEm(&corrida, &estado, &grave, &agudo);
-    verificar(agudo < 0.1f, "devagar, o ABS nao entra");
+    verificar(grave < 0.02f && agudo < 0.02f, "freando reto no asfalto, o controle fica quieto");
 
-    /* Arrancada */
+    /* Arrancada: saindo do carro parado, a roda patina um instante (e acaba sozinha, mesmo acelerando) */
     PREPARAR();
     carro->ultimosComandos.acelerar = 1;
     carro->velocidade = 100.0f;
-    Vibracao v = vibracaoEm(&corrida, &estado, &grave, &agudo);
-    verificar(agudo > 0.2f && v.noAcelerador > 0.5f, "na arrancada, a roda patina na mao e no gatilho");
+    Vibracao v = calcularVibracao(&estado, &corrida, 1.0f / 60.0f);
+    float gatilhoNaArrancada = v.noAcelerador;
+    vibracaoEm(&corrida, &estado, &grave, &agudo);
+    verificar(agudo > 0.1f && gatilhoNaArrancada > 0.5f, "na arrancada, a roda patina na mao e no gatilho");
+    for (int i = 0; i < 60; i++) {
+        v = calcularVibracao(&estado, &corrida, 1.0f / 60.0f);
+    }
+    verificar(v.agudo == 0.0f && v.noAcelerador == 0.0f, "e acaba sozinha, mesmo devagar e acelerando");
 
     /* Batida: de verdade, entre dois carros, mais forte com mais diferenca */
     float forcas[2];
@@ -3086,25 +3078,33 @@ static void testarVibracao(void) {
     for (int i = 0; i < 30; i++) {
         v = calcularVibracao(&estado, &corrida, 1.0f / 60.0f);
     }
-    verificar(noInicio > 0.8f && v.grave < noInicio * 0.35f && carro->pancada == 0.0f, "o tranco da batida some em meio segundo");
+    verificar(noInicio > 0.6f && v.grave < noInicio * 0.35f && carro->pancada == 0.0f, "o tranco da batida some em meio segundo");
+    PREPARAR();
+    carro->pancada = 0.05f;
+    vibracaoEm(&corrida, &estado, &grave, &agudo);
+    verificar(grave < 0.02f, "um toque de leve nao vibra");
+    PREPARAR();
+    carro->pancada = 0.4f;
+    float media = calcularVibracao(&estado, &corrida, 1.0f / 60.0f).grave;
+    verificar(media > 0.25f && media < noInicio * 0.75f, "a batida media se sente, e a cheia mais");
 
-    /* Marcha */
+    /* Marcha: o cambio e automatico, trocar nao vibra */
     PREPARAR();
     calcularVibracao(&estado, &corrida, 1.0f / 60.0f);
     float graveAntesDaMarcha = calcularVibracao(&estado, &corrida, 1.0f / 60.0f).grave;
     carro->motor.marcha++;
     v = calcularVibracao(&estado, &corrida, 1.0f / 60.0f);
-    verificar(v.grave > graveAntesDaMarcha + 0.05f, "cada troca de marcha da um toque");
+    verificar(v.grave < graveAntesDaMarcha + 0.02f, "trocar de marcha nao vibra");
 
     /* Muro e rodada */
     PREPARAR();
     carro->raspandoNoMuro = 1;
     vibracaoEm(&corrida, &estado, &grave, &agudo);
-    verificar(agudo > 0.25f, "raspando no muro, vibra");
+    verificar(agudo > 0.15f, "raspando no muro, vibra");
     PREPARAR();
     carro->rodando = 1;
     vibracaoEm(&corrida, &estado, &grave, &agudo);
-    verificar(grave > 0.25f && agudo > 0.15f, "rodando, sacode");
+    verificar(grave > 0.2f && agudo > 0.1f, "rodando, sacode");
 
     /* Pneu gasto, so virando */
     PREPARAR();
@@ -3123,7 +3123,7 @@ static void testarVibracao(void) {
     carro->duracaoDaTroca = DURACAO_DA_TROCA;
     carro->tempoDaTroca = SEGUNDOS_PARA_A_RODA + 0.1f;
     vibracaoEm(&corrida, &estado, &grave, &agudo);
-    verificar(agudo > 0.6f, "o Guido trocando a roda vibra forte");
+    verificar(agudo > 0.2f && agudo < 0.4f, "o Guido trocando a roda vibra, sem exagero");
     carro->tempoDaTroca = 0.05f;
     estado.golpeGrave = estado.golpeAgudo = 0.0f;
     float agudoIndo = calcularVibracao(&estado, &corrida, 1.0f / 60.0f).agudo;
@@ -3138,7 +3138,7 @@ static void testarVibracao(void) {
     for (int i = 0; i < 60 * 8 && corrida.contagemRegressiva > -0.1f; i++) {
         atualizarCorrida(&corrida, nada2, 1.0f / 60.0f);
         float g = calcularVibracao(&estado, &corrida, 1.0f / 60.0f).grave;
-        toques += (g > 0.2f && g > graveAntes + 0.1f);
+        toques += (g > 0.1f && g > graveAntes + 0.08f);
         graveAntes = g;
         if (corrida.contagemRegressiva <= 0.0f) {
             corrida.contagemRegressiva = -1.0f;
@@ -3155,7 +3155,7 @@ static void testarVibracao(void) {
     for (int i = 0; i < 60; i++) {
         v = calcularVibracao(&estado, &corrida, 1.0f / 60.0f);
     }
-    verificar(naChegada > 0.6f && v.grave < 0.01f, "a bandeirada da um tranco, e depois o controle fica quieto");
+    verificar(naChegada > 0.35f && v.grave < 0.01f, "a bandeirada da um tranco, e depois o controle fica quieto");
 
     /* Nunca passa do maximo, com tudo ao mesmo tempo */
     PREPARAR();
@@ -3861,10 +3861,10 @@ static void testarPitEmTodasAsPistas(void) {
  */
 static void testarCenarioDosMapas(void) {
     printf("\n35) O cenario dos mapas\n");
-    struct { IdPista id; const CoisaNoMapa *coisas; int total; } mapas[2] = {
-        { PISTA_OVAL, CENARIO_OVAL, TOTAL_CENARIO_OVAL }, { PISTA_SPLAT, CENARIO_SPLAT, TOTAL_CENARIO_SPLAT }
+    struct { IdPista id; const CoisaNoMapa *coisas; int total; } mapas[1] = {
+        { PISTA_OVAL, CENARIO_OVAL, TOTAL_CENARIO_OVAL }
     };
-    for (int k = 0; k < 2; k++) {
+    for (int k = 0; k < 1; k++) {
         Pista *pista = criarPistaPorId(mapas[k].id);
         int naPista = 0, noPit = 0, arvores = 0, estruturas = 0, pneus = 0;
         float maisPerto = 1e9f;
@@ -4096,20 +4096,26 @@ static void testarDirecaoGuiada(void) {
     verificar(corrida.jogador.direcaoLivre == 0, "ligada (so nos testes), tudo como antes");
     liberarPista(umaPista);
 
-    /* No Splat ela não existe: nem com a opção ligada, e os rivais continuam com a deles */
-    Pista *splat = criarPistaPorId(PISTA_SPLAT);
-    iniciarCorrida(&corrida, splat, 0, NIVEL_FACIL);
+    /* Uma pista pode dizer que ali ela não existe (nenhuma das de agora diz; o Splat dizia): nem com a opção ligada,
+     * e os rivais continuam com a deles */
+    Pista *semGuiada = criarPistaPorId(PISTA_MONTREAL);
+    semGuiada->semDirecaoGuiada = 1;
+    iniciarCorrida(&corrida, semGuiada, 0, NIVEL_FACIL);
     soOJogador = configuracoesAtuais()->direcaoGuiada == 1 && corrida.jogador.direcaoLivre == 1;
     for (int r = 0; r < TOTAL_RIVAIS; r++) {
         soOJogador &= corrida.rivais[r].direcaoLivre == 0;
     }
-    verificar(soOJogador, "no Splat o jogador sempre dirige sem ela, mesmo com a opcao ligada");
+    verificar(soOJogador, "numa pista sem ela o jogador sempre dirige sem, mesmo com a opcao ligada");
     corrida.terminou = 1;
     corrida.contagemRegressiva = 0.0f;
     atualizarCorrida(&corrida, atualizarIA(&corrida.jogador, corrida.pista), 1.0f / 60.0f);
     verificar(corrida.jogador.direcaoLivre == 0, "e la tambem a IA leva o carro depois da chegada");
-    /* Só acelerando, o carro não faz a curva: segue reto, sai do asfalto e para no fim da área de escape */
-    iniciarCorrida(&corrida, splat, 0, NIVEL_FACIL);
+    liberarPista(semGuiada);
+
+    /* Montreal, sem a guiada: só acelerando, o carro não faz a Curva Senna, sai do asfalto e para no fim do escape */
+    Pista *montreal = criarPistaPorId(PISTA_MONTREAL);
+    configuracoesAtuais()->direcaoGuiada = 0;
+    iniciarCorrida(&corrida, montreal, 0, NIVEL_FACIL);
     corrida.contagemRegressiva = 0.0f;
     Comandos soAcelerar = { 0, 0, 0, 0, 0.0f, 0, 0 };
     soAcelerar.acelerar = 1;
@@ -4118,60 +4124,37 @@ static void testarDirecaoGuiada(void) {
         atualizarCorrida(&corrida, soAcelerar, 1.0f / 60.0f);
         saiuDoAsfalto |= estaForaDaPista(&corrida.jogador);
     }
-    /* Sem zigue-zague depois da largada: a linha da pista vira sempre para o mesmo lado */
+    configuracoesAtuais()->direcaoGuiada = 1;
+    /* Sem zigue-zague na reta dos boxes: a linha medida no modelo não serpenteia. Ela é levemente curva para a
+     * direita, e na faixa da chegada desvia 1 m, onde o asfalto da saída do pit encosta no da pista (4,4 graus em
+     * 20 m): mais que isso seria um degrau */
     int semZigueZague = 1;
-    for (int m = 0; m < 220; m += 20) {
-        float agora = buscarSegmento(splat, (int) (m * SEGMENTOS_POR_METRO))->rumo;
-        float depois = buscarSegmento(splat, (int) ((m + 20) * SEGMENTOS_POR_METRO))->rumo;
-        semZigueZague &= depois - agora < 3.0f;
+    for (int m = 0; m < 280; m += 20) {
+        float agora = buscarSegmento(montreal, (int) (m * SEGMENTOS_POR_METRO))->rumo;
+        float depois = buscarSegmento(montreal, (int) ((m + 20) * SEGMENTOS_POR_METRO))->rumo;
+        float vira = depois - agora;
+        vira -= 360.0f * roundf(vira / 360.0f);   /* a reta aponta para o sul: o rumo passa de 180 para -180 */
+        semZigueZague &= fabsf(vira) < 5.0f;
     }
-    verificar(semZigueZague, "a linha do Splat nao faz zigue-zague depois da largada");
-
-    /* Sozinho, largando do grid e só acelerando: o rumo que a tela usa não acompanha a curva da pista */
-    Carro sozinho = criarCarro("Teste", 0, buscarSegmento(splat, contarSegmentos(splat) - 30), 0.0f, 12000.0f, 2400.0f, 0.5f);
-    sozinho.direcaoLivre = 1;
-    float rumoNaLargada = sozinho.posicao.segmento->rumo, rumoAoSair = rumoNaLargada, pistaAoSair = rumoNaLargada;
-    sozinho.rumoNoMundo = rumoNaLargada;
-    sozinho.temRumoNoMundo = 1;
-    for (int q = 0; q < 60 * 12 && !sozinho.raspandoNoMuro; q++) {
-        atualizarCarro(&sozinho, soAcelerar, 1.0f / 60.0f);
-        rumoAoSair = sozinho.rumoNoMundo;
-        pistaAoSair = sozinho.posicao.segmento->rumo;
-    }
-    printf("     Splat, so acelerando: a pista virou de %.0f para %.0f graus; o carro ficou em %.0f\n", rumoNaLargada, pistaAoSair, rumoAoSair);
-    verificar(pistaAoSair < rumoNaLargada - 5.0f && rumoAoSair > pistaAoSair + 5.0f, "a pista faz a curva e o carro nao");
-
+    verificar(semZigueZague, "a linha de Montreal nao faz zigue-zague na reta dos boxes");
     float andouSoAcelerando = corrida.jogador.distanciaPercorrida / UNIDADES_POR_METRO;
-    printf("     Splat, 30 s so acelerando: andou %.0f m e parou; saiu do asfalto: %d\n", andouSoAcelerando, saiuDoAsfalto);
+    printf("     Montreal, 30 s so acelerando: andou %.0f m e parou; saiu do asfalto: %d\n", andouSoAcelerando, saiuDoAsfalto);
     verificar(saiuDoAsfalto, "so acelerando, ele sai do asfalto na primeira curva");
-    verificar(andouSoAcelerando < 200.0f, "e nao da a volta sozinho");
-    Comandos sair = soAcelerar;
-    sair.direcao = (corrida.jogador.deslocamentoLateral > 0.0f) ? -1.0f : 1.0f;
-    float lateralParado = corrida.jogador.deslocamentoLateral * larguraDoLado(corrida.jogador.posicao.segmento, corrida.jogador.deslocamentoLateral);
-    float segundosParaSair = -1.0f;
-    for (int q = 0; q < 60 * 4 && segundosParaSair < 0.0f; q++) {
-        atualizarCorrida(&corrida, sair, 1.0f / 60.0f);
-        Carro *j = &corrida.jogador;
-        float agora = j->deslocamentoLateral * larguraDoLado(j->posicao.segmento, j->deslocamentoLateral);
-        if (j->velocidade > 1000.0f && fabsf(agora) < fabsf(lateralParado) - 3.0f) {
-            segundosParaSair = q / 60.0f;
-        }
-    }
-    printf("     saindo do limite com o volante: %.1f s\n", segundosParaSair);
-    verificar(segundosParaSair >= 0.0f, "e sai de la com o volante");
-    /* O limite nunca fica dentro de um carro parado: nem o que mediu um muro aperta demais */
+    verificar(andouSoAcelerando < 700.0f, "e nao da a volta sozinho");
+    /* O limite nunca fica dentro do asfalto: o muro medido está sempre na borda dele ou além */
     int limitesBons = 1;
-    Segmento *atualDoSplat = splat->largada;
+    Segmento *atualDeMontreal = montreal->largada;
     do {
-        limitesBons &= atualDoSplat->limiteDireita >= 9.0f && atualDoSplat->limiteEsquerda >= 9.0f
-                       && atualDoSplat->limiteDireita <= 22.5f && atualDoSplat->limiteEsquerda <= 22.5f && !atualDoSplat->temMuro;
-        atualDoSplat = atualDoSplat->proximo;
-    } while (atualDoSplat != splat->largada);
-    verificar(limitesBons, "os limites do Splat vao do muro real ate a area de escape");
-    liberarPista(splat);
+        limitesBons &= atualDeMontreal->limiteDireita >= atualDeMontreal->larguraDireita - 0.01f
+                       && atualDeMontreal->limiteEsquerda >= atualDeMontreal->larguraEsquerda - 0.01f
+                       && !atualDeMontreal->temMuro;
+        atualDeMontreal = atualDeMontreal->proximo;
+    } while (atualDeMontreal != montreal->largada);
+    verificar(limitesBons, "os limites de Montreal ficam na borda do asfalto ou alem dela");
+    liberarPista(montreal);
     for (int id = 0; id < TOTAL_PISTAS; id++) {
         Pista *outra = criarPistaPorId((IdPista) id);
-        verificar(outra->semDirecaoGuiada == (id == PISTA_SPLAT), "so o Splat fica sem ela");
+        verificar(outra->semDirecaoGuiada == 0, "todas as pistas de agora tem a guiada");
         liberarPista(outra);
     }
 

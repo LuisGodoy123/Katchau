@@ -12,6 +12,11 @@
 static float tempos[TOTAL_PISTAS];                                   /* 0 = ainda não há recorde */
 static char donos[TOTAL_PISTAS][TAMANHO_DO_NOME_DO_RECORDE];
 
+/* O número de cada pista no arquivo. O 3 era o Splat, que deu lugar a Montreal: um recorde dele que ainda esteja
+ * num arquivo antigo não vale para a pista nova (a volta de Montreal é bem mais longa) */
+static const int CODIGO_NO_ARQUIVO[TOTAL_PISTAS] = { [PISTA_INTERLAGOS] = 0, [PISTA_COPA_PISTAO] = 1, [PISTA_OVAL] = 2,
+                                                     [PISTA_MONTREAL] = 4 };
+
 /*
  * gravarRecordes
  * Escreve todos os recordes no arquivo. Se não der para abrir, os recordes valem só até fechar o jogo.
@@ -25,7 +30,7 @@ static void gravarRecordes(void) {
     }
     for (int i = 0; i < TOTAL_PISTAS; i++) {
         if (tempos[i] > 0.0f) {
-            fprintf(arquivo, "%d %.3f %s\n", i, tempos[i], donos[i]);
+            fprintf(arquivo, "%d %.3f %s\n", CODIGO_NO_ARQUIVO[i], tempos[i], donos[i]);
         }
     }
     fclose(arquivo);
@@ -44,11 +49,17 @@ void carregarRecordes(void) {
     if (arquivo == NULL) {
         return;
     }
-    int id;
+    int codigo;
     float tempo;
     char nome[TAMANHO_DO_NOME_DO_RECORDE];
-    while (fscanf(arquivo, "%d %f %31[^\n]", &id, &tempo, nome) == 3) {
-        if (id >= 0 && id < TOTAL_PISTAS && tempo > 0.0f) {
+    while (fscanf(arquivo, "%d %f %31[^\n]", &codigo, &tempo, nome) == 3) {
+        int id = -1;
+        for (int i = 0; i < TOTAL_PISTAS; i++) {
+            if (CODIGO_NO_ARQUIVO[i] == codigo) {
+                id = i;
+            }
+        }
+        if (id >= 0 && tempo > 0.0f) {
             tempos[id] = tempo;
             snprintf(donos[id], sizeof(donos[id]), "%s", nome);
         }

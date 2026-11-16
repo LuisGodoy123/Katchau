@@ -7,6 +7,7 @@
 
 #include <stdio.h>
 #include <math.h>
+#include <stdlib.h>
 #include "raylib.h"
 #include "config.h"
 #include "hud.h"
@@ -1019,6 +1020,134 @@ static int avisoDoBox(const Pista *pista, float metros) {
 }
 
 /*
+ * corDoPneu
+ * Recebe: quanto sobra do pneu (1: novo; 0: acabado).
+ * Devolve: a cor dele: verde novo, amarelo no meio, vermelho no fim (passando aos poucos de uma para a outra).
+ */
+#define COR_PNEU_NOVO     (Color){ 112, 226,  64, 255 }
+#define COR_PNEU_NO_MEIO  (Color){ 250, 204,  44, 255 }
+#define COR_PNEU_NO_FIM   (Color){ 240,  60,  48, 255 }
+static Color corDoPneu(float sobra) {
+    sobra = fminf(fmaxf(sobra, 0.0f), 1.0f);
+    Color de = (sobra > 0.5f) ? COR_PNEU_NO_MEIO : COR_PNEU_NO_FIM, para = (sobra > 0.5f) ? COR_PNEU_NOVO : COR_PNEU_NO_MEIO;
+    float t = (sobra > 0.5f) ? (sobra - 0.5f) / 0.5f : fmaxf(sobra - 0.2f, 0.0f) / 0.3f;   /* abaixo de 20%, vermelho */
+    return ColorLerp(de, para, fminf(t, 1.0f));
+}
+
+/*
+ * O diagrama dos pneus: o carro visto de cima (a frente para cima), escuro e só com o contorno claro, e os quatro
+ * pneus nos cantos, cada um com a borda na cor do quanto sobra dele e, por dentro, uma barra que esvazia de cima
+ * para baixo conforme ele gasta (a cor e o nível dizem a mesma coisa: dá para ler sem distinguir as cores).
+ * Medidas em pixels da interface.
+ */
+#define COMPRIMENTO_DO_CARRO_NO_HUD 80.0f
+#define LARGURA_DO_CARRO_NO_HUD     28.0f
+#define LARGURA_DO_PNEU_NO_HUD      11.0f
+#define ALTURA_DO_PNEU_NO_HUD       20.0f
+#define PNEU_PARA_FORA_DO_CARRO      4.0f   /* quanto o pneu sai da lateral do carro */
+#define EIXO_NO_HUD                 25.0f   /* do meio do carro até o meio de cada eixo */
+#define FOLGA_EM_VOLTA_DO_PNEU       2.0f   /* o vão escuro que separa o pneu do carro */
+#define PNEUS_ANTES_DO_MOSTRADOR    30.0f   /* do aro do velocímetro (e do nitro) até o diagrama */
+#define COR_DA_CARROCERIA           (Color){  30,  37,  47, 235 }
+#define COR_DO_CONTORNO_DO_CARRO    (Color){ 112, 128, 148, 255 }
+#define COR_DOS_VIDROS              (Color){  14,  18,  24, 235 }
+#define COR_DO_VAO                  (Color){  10,  12,  16, 220 }
+
+/*
+ * formaDoCarro
+ * A silhueta do carro: a frente arredondada, a traseira mais reta e o aerofólio. Desenhada duas vezes, uma maior
+ * na cor do contorno e outra por cima, na da carroceria: assim o contorno sai em volta da forma toda.
+ * Recebe: o meio, quanto crescer para fora (o contorno) e a cor.
+ * Devolve: nada.
+ */
+static void formaDoCarro(float meioX, float meioY, float crescer, Color cor) {
+    float largura = LARGURA_DO_CARRO_NO_HUD + 2.0f * crescer;
+    float frente = meioY - COMPRIMENTO_DO_CARRO_NO_HUD / 2.0f - crescer;
+    float tras = meioY + COMPRIMENTO_DO_CARRO_NO_HUD / 2.0f + crescer;
+    caixaArredondada((Rectangle){ meioX - largura / 2.0f, frente, largura, COMPRIMENTO_DO_CARRO_NO_HUD * 0.6f }, 11.0f + crescer, cor);
+    float meioDoCarro = meioY - COMPRIMENTO_DO_CARRO_NO_HUD * 0.05f;
+    caixaArredondada((Rectangle){ meioX - largura / 2.0f, meioDoCarro, largura, tras - meioDoCarro }, 4.0f + crescer, cor);
+    float aerofolio = largura + 6.0f;
+    caixaArredondada((Rectangle){ meioX - aerofolio / 2.0f, tras - 5.0f - 2.0f * crescer, aerofolio, 5.0f + 2.0f * crescer }, 2.0f + crescer, cor);
+}
+
+/*
+ * vidro
+ * Um vidro do carro: um trapézio, mais largo de um lado que do outro.
+ * Recebe: o meio, o y de cima e de baixo e a largura em cima e embaixo.
+ * Devolve: nada.
+ */
+static void vidro(float meioX, float cima, float baixo, float larguraEmCima, float larguraEmBaixo) {
+    Vector2 a = { meioX - larguraEmCima / 2.0f, cima }, b = { meioX + larguraEmCima / 2.0f, cima };
+    Vector2 c = { meioX + larguraEmBaixo / 2.0f, baixo }, d = { meioX - larguraEmBaixo / 2.0f, baixo };
+    DrawTriangle(a, d, c, COR_DOS_VIDROS);   /* a raylib quer os triângulos no sentido anti-horário */
+    DrawTriangle(a, c, b, COR_DOS_VIDROS);
+}
+
+/*
+ * desenharUmPneu
+ * Recebe: o retângulo do pneu, quanto sobra dele (0 a 1), se estourou e a piscada (0 a 1).
+ * Devolve: nada.
+ */
+static void desenharUmPneu(Rectangle pneu, float sobra, int estourou, float pisca) {
+    float f = FOLGA_EM_VOLTA_DO_PNEU;
+    caixaArredondada((Rectangle){ pneu.x - f, pneu.y - f, pneu.width + 2.0f * f, pneu.height + 2.0f * f }, 4.0f + f, COR_DO_VAO);
+    if (estourou) {
+        /* Estourado: vazio por dentro, a borda vermelha piscando */
+        caixaArredondada(pneu, 4.0f, (Color){ 46, 18, 20, 240 });
+        contornoArredondado(pneu, 4.0f, 2.0f, ColorLerp(Fade(COR_PNEU_NO_FIM, 0.35f), COR_PNEU_NO_FIM, pisca));
+        return;
+    }
+    Color cor = corDoPneu(sobra);
+    caixaArredondada(pneu, 4.0f, ColorLerp(cor, BLACK, 0.68f));   /* o fundo: a mesma cor, bem escura */
+    contornoArredondado(pneu, 4.0f, 1.8f, cor);
+    /* O que sobra: a barra de dentro, cheia no pneu novo, esvaziando de cima para baixo */
+    Rectangle dentro = { pneu.x + 3.0f, pneu.y + 3.0f, pneu.width - 6.0f, pneu.height - 6.0f };
+    float cheio = dentro.height * fminf(fmaxf(sobra, 0.0f), 1.0f);
+    if (cheio > 0.5f) {
+        caixaArredondada((Rectangle){ dentro.x, dentro.y + dentro.height - cheio, dentro.width, cheio }, 1.5f, cor);
+    }
+}
+
+/*
+ * desenharDiagramaDosPneus
+ * O carro de cima com os quatro pneus (veja as medidas acima).
+ * Recebe: o meio do diagrama, quanto sobra dos pneus (0 a 1) e quais estouraram (bits: 0 frente esquerda,
+ * 1 frente direita, 2 trás esquerda, 3 trás direita, como pneuEstourado).
+ * Devolve: nada.
+ */
+static void desenharDiagramaDosPneus(float meioX, float meioY, float sobra, int estourados) {
+    float pisca = 0.5f + 0.5f * sinf((float) GetTime() * 9.0f);
+    desenharBrilho(meioX, meioY, COMPRIMENTO_DO_CARRO_NO_HUD * 0.75f, Fade(BLACK, 0.45f));   /* para ler em cima do céu claro */
+    formaDoCarro(meioX, meioY, 1.5f, COR_DO_CONTORNO_DO_CARRO);
+    formaDoCarro(meioX, meioY, 0.0f, COR_DA_CARROCERIA);
+    /* O para-brisa, o teto (entre os dois vidros, na cor do carro) e o vidro de trás */
+    float l = LARGURA_DO_CARRO_NO_HUD;
+    vidro(meioX, meioY - 15.0f, meioY - 5.0f, l - 12.0f, l - 7.0f);
+    vidro(meioX, meioY + 12.0f, meioY + 18.0f, l - 8.0f, l - 12.0f);
+    for (int roda = 0; roda < 4; roda++) {
+        float lado = (roda % 2 == 0) ? -1.0f : 1.0f, frente = (roda < 2) ? -1.0f : 1.0f;
+        float x = meioX + lado * (l / 2.0f + PNEU_PARA_FORA_DO_CARRO - LARGURA_DO_PNEU_NO_HUD / 2.0f);
+        float y = meioY + frente * EIXO_NO_HUD;
+        Rectangle pneu = { x - LARGURA_DO_PNEU_NO_HUD / 2.0f, y - ALTURA_DO_PNEU_NO_HUD / 2.0f, LARGURA_DO_PNEU_NO_HUD, ALTURA_DO_PNEU_NO_HUD };
+        desenharUmPneu(pneu, sobra, (estourados >> roda) & 1, pisca);
+    }
+}
+
+/*
+ * desenharPneus
+ * O diagrama dos pneus do jogador, à esquerda do velocímetro.
+ * Recebe: o carro do jogador.
+ * Devolve: nada.
+ */
+static void desenharPneus(const Carro *jogador) {
+    Vector2 mostrador = centroDoMostrador();
+    float largura = LARGURA_DO_CARRO_NO_HUD + 2.0f * PNEU_PARA_FORA_DO_CARRO + 2.0f * FOLGA_EM_VOLTA_DO_PNEU;
+    float meioX = mostrador.x - RAIO_VELOCIMETRO - DISTANCIA_DO_ARCO_NITRO - PNEUS_ANTES_DO_MOSTRADOR - largura / 2.0f;
+    desenharDiagramaDosPneus(meioX, mostrador.y + 4.0f, 1.0f - jogador->desgaste, jogador->pneuEstourado);
+}
+
+/*
  * desenharAvisosDoPit
  * O que falta da parada obrigatória, o caminho até os boxes, o limite do pit lane e
  * o cronômetro da troca de pneus.
@@ -1037,24 +1166,11 @@ static void desenharAvisosDoPit(Corrida *corrida, Carro *jogador) {
      * estado da parada sobe para debaixo do painel da volta. Na tela cheia, os Y são os de sempre. */
     int estreita = naFaixaEstreita();
     float yEstado = estreita ? 92.0f : 134.0f;
-    float yPneus = estreita ? 128.0f : 158.0f;
-    float yRodas = estreita ? 124.0f : 154.0f;
-    float yBarra = estreita ? 148.0f : 178.0f;
 
-    /* Os pneus, só quando eles gastam: a barra esvazia, e o verde vira vermelho */
+    /* Os pneus, só quando eles gastam: os quatro, à esquerda do velocímetro (desenharPneus) */
     if (jogador->gastaPneu) {
         float sobra = 1.0f - jogador->desgaste;
-        Color cor = (sobra > 0.5f) ? COR_VERDE_HUD : (sobra > 0.25f) ? COR_AMARELO : COR_VERMELHO;
-        float larguraDaBarra = 150.0f;
-        float xDaBarra = estreita ? MARGEM_HUD + 30.0f : direita - larguraDaBarra;
-        escrever(FONTE_FORTE, TextFormat("PNEUS %d%%", (int) (sobra * 100.0f + 0.5f)), xDaBarra, yPneus, 15.0f, cor);
-        /* As quatro rodas, vistas de cima: a que estourou fica vermelha */
-        for (int roda = 0; roda < 4; roda++) {
-            Rectangle quadro = { xDaBarra - 30.0f + (float) (roda % 2) * 13.0f, yRodas + (float) (roda / 2) * 17.0f, 9.0f, 14.0f };
-            caixaArredondada(quadro, 3.0f, (jogador->pneuEstourado & (1 << roda)) ? COR_VERMELHO : Fade(COR_TEXTO_CLARO, 0.55f));
-        }
-        caixaArredondada((Rectangle){ xDaBarra, yBarra, larguraDaBarra, 8.0f }, 4.0f, Fade(COR_GRAFITE, 0.85f));
-        caixaArredondada((Rectangle){ xDaBarra, yBarra, larguraDaBarra * sobra, 8.0f }, 4.0f, cor);
+        desenharPneus(jogador);
         if (jogador->pneuEstourado && !carroNoPit(jogador)) {   /* o aviso pisca */
             float pisca = 0.55f + 0.45f * sinf((float) GetTime() * 9.0f);
             int estourados = quantosPneusEstourados(jogador);

@@ -42,6 +42,7 @@ float metrosNaVolta(const Carro *carro);
 float metroDaVagaDoCarro(const Pista *pista, int numero);
 int dentroDoLimiteDoPit(const Pista *pista, float metros);
 float linhaNoPit(const Pista *pista, const Carro *carro, int saindo, float metrosPorSegundoAgora);
+float ladoDoPitEm(const Pista *pista, float noPit);
 void lugarDaVaga(Pista *pista, const Carro *carro, PosicaoNaPista *lugar, float *lateral);
 int querEntrarNoPit(const Pista *pista, const Carro *carro);
 void entrarNoPit(Carro *carro);

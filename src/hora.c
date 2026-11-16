@@ -58,14 +58,15 @@ typedef struct {
 } HoraChave;
 
 static const HoraChave CHAVES[] = {
-    /* noite: azulada, com a lua; dá para ver a rua */
+    /* noite: azulada, com a lua; dá para ver a rua. O céu é azul-marinho, quase preto no alto (o roxo é só o do
+     * crepúsculo) */
     { 0.0f, { 0.34f, 0.35f, 0.53f }, { 0.23f, 0.25f, 0.45f }, { 0.24f, 0.28f, 0.46f }, 0.0f,
-      { 0.04f, 0.04f, 0.09f }, { 0.16f, 0.15f, 0.32f },
-      { 0.16f, 0.13f, 0.32f }, { 0.06f, 0.05f, 0.16f }, { 0.10f, 0.09f, 0.18f }, { 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f },
+      { 0.04f, 0.04f, 0.09f }, { 0.11f, 0.13f, 0.25f },
+      { 0.07f, 0.10f, 0.20f }, { 0.015f, 0.025f, 0.07f }, { 0.07f, 0.08f, 0.13f }, { 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f },
       0.0f, 1.0f, 1.0f, { 0.62f, 0.56f, 0.50f }, 1.0f },
     { 4.8f, { 0.34f, 0.35f, 0.53f }, { 0.23f, 0.25f, 0.45f }, { 0.24f, 0.28f, 0.46f }, 0.0f,
-      { 0.04f, 0.04f, 0.09f }, { 0.16f, 0.15f, 0.32f },
-      { 0.16f, 0.13f, 0.32f }, { 0.06f, 0.05f, 0.16f }, { 0.10f, 0.09f, 0.18f }, { 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f },
+      { 0.04f, 0.04f, 0.09f }, { 0.11f, 0.13f, 0.25f },
+      { 0.07f, 0.10f, 0.20f }, { 0.015f, 0.025f, 0.07f }, { 0.07f, 0.08f, 0.13f }, { 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f },
       0.0f, 1.0f, 1.0f, { 0.62f, 0.56f, 0.50f }, 1.0f },
     /* antes do sol: o horizonte começa a clarear, rosado */
     { 5.6f, { 0.42f, 0.42f, 0.58f }, { 0.36f, 0.38f, 0.58f }, { 0.18f, 0.18f, 0.28f }, 0.0f,
@@ -112,8 +113,8 @@ static const HoraChave CHAVES[] = {
       { 0.30f, 0.20f, 0.40f }, { 0.09f, 0.08f, 0.24f }, { 0.20f, 0.15f, 0.28f }, { 0.10f, 0.04f, 0.06f }, { 0.0f, 0.0f, 0.0f },
       0.0f, 0.7f, 0.8f, { 0.64f, 0.58f, 0.52f }, 1.0f },
     { 21.0f, { 0.34f, 0.35f, 0.53f }, { 0.23f, 0.25f, 0.45f }, { 0.24f, 0.28f, 0.46f }, 0.0f,
-      { 0.04f, 0.04f, 0.09f }, { 0.16f, 0.15f, 0.32f },
-      { 0.16f, 0.13f, 0.32f }, { 0.06f, 0.05f, 0.16f }, { 0.10f, 0.09f, 0.18f }, { 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f },
+      { 0.04f, 0.04f, 0.09f }, { 0.11f, 0.13f, 0.25f },
+      { 0.07f, 0.10f, 0.20f }, { 0.015f, 0.025f, 0.07f }, { 0.07f, 0.08f, 0.13f }, { 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f },
       0.0f, 1.0f, 1.0f, { 0.62f, 0.56f, 0.50f }, 1.0f },
 };
 #define TOTAL_DE_CHAVES (int) (sizeof(CHAVES) / sizeof(CHAVES[0]))
@@ -398,6 +399,17 @@ const LuzDoDia *luzDaHora(void) {
         montarLuz(hora, &luzAgora);
     }
     return &luzAgora;
+}
+
+/*
+ * luzDeUmaHora
+ * A luz de uma hora qualquer, sem mexer no relógio do passeio (as corridas escolhem a hora delas).
+ * Recebe: a hora (0 a 24) e onde guardar a luz.
+ * Devolve: nada.
+ */
+void luzDeUmaHora(float horaPedida, LuzDoDia *luz) {
+    prepararMeioDia();
+    montarLuz(fmodf(fmodf(horaPedida, 24.0f) + 24.0f, 24.0f), luz);
 }
 
 const LuzDoDia *luzDoMeioDia(void) {

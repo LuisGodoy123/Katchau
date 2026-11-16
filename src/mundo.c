@@ -18,16 +18,18 @@
 #include "telao.h"
 #include "tracado.h"
 #include "oval.h"
-#include "splat.h"
 #include "cenario_mapas.h"
 #include "construcao.h"
 #include "interlagos.h"
 #include "interlagos_materiais.h"
+#include "montreal.h"
+#include "montreal_materiais.h"
 #include "pitstop.h"
 #include "raymath.h"
 #include "rlgl.h"
 #include "obstaculos.h"
 #include "noite.h"
+#include "holofotes.h"
 #include "hora.h"
 #include "corte.h"
 #include "espera.h"
@@ -53,10 +55,11 @@
 #define PASTA_DOS_OBJETOS     "recursos/modelos/objetos/"
 #define MAXIMO_DE_LOTES       800
 #define ARQUIVO_DO_OVAL       "recursos/modelos/oval.glb"
-#define ARQUIVO_DO_SPLAT      "recursos/modelos/splat.glb"
 #define ARQUIVO_DE_INTERLAGOS "recursos/modelos/interlagos.glb"
+#define ARQUIVO_DE_MONTREAL   "recursos/modelos/montreal.glb"
 #define ARQUIVO_DO_MUNDO_ABERTO "recursos/modelos/radiator_springs.glb"
 #define FIGURA_DE_INTERLAGOS  1.2f      /* os assentos do modelo têm o tamanho de verdade */
+#define FIGURA_DE_MONTREAL    1.2f
 #define LADRILHO_DO_ASFALTO   6.0f      /* metros: a imagem do asfalto se repete a cada tanto */
 #define LADRILHO_DA_GRAMA     9.0f
 #define MARGEM_DA_SAIA        150.0f    /* metros do modelo além da pista: a borda do terreno mais perto é furo de dentro */
@@ -64,6 +67,9 @@
 #define DESCIDA_DA_SAIA       0.02f     /* ela desce de leve, para ficar embaixo de qualquer outro terreno */
 #define LADRILHO_DA_SAIA      40.0f
 #define COR_DA_AGUA_DO_LAGO   (Color){ 70, 118, 122, 255 }   /* multiplica a imagem azul-clara do modelo */
+#define COR_DA_AGUA_DE_MONTREAL (Color){ 150, 175, 185, 255 } /* a bacia de remo e o rio: um pouco mais escuros que a imagem */
+#define CELULA_DA_ARQUIBANCADA 30.0f    /* metros do modelo: assentos em células vizinhas são da mesma arquibancada */
+#define MENOR_ARQUIBANCADA    120       /* lugares: menos que isso não ganha telão */
 #define COR_DO_ESCAPE_VERDE   (Color){ 225, 150, 150, 255 }  /* multiplica o verde-menta da área de escape: dá ~(50, 115, 85) */
 #define COR_DA_SAIA           (Color){ 120, 128, 104, 255 }   /* a cor média da foto do terreno, sob a grama do jogo */
 #define LARGURA_DO_CONCRETO   256       /* pixels da imagem do concreto limpo */
@@ -72,7 +78,6 @@
 #define TRANSICAO_DO_AUTODROMO 120.0f     /* metros do modelo em que a grama vira a foto do terreno */
 #define FORCA_DA_BORRACHA     "0.85"
 #define FIGURA_DO_OVAL        1.5f      /* metros de largura de uma figura da torcida */
-#define FIGURA_DO_SPLAT       1.1f
 #define FIGURA_EM_PE          254       /* marca, no alfa, as figuras em pé da torcida (somem onde há torcida 3D) */
 #define CARRINHO_POR_FIGURA   0.36f     /* o carrinho 3D, do tamanho da figura: o modelo tem 3 m */
 #define ALTURA_DA_FIGURA      0.85f     /* em larguras */
@@ -325,17 +330,21 @@ static const char *PIXELS_DOS_MAPAS_DE_DIA =
     "                         + 0.38 * max(dot(n, solDoDia), 0.0) * luzDoSol + luzDasLampadas(fragPos, n);\n"
     "              finalColor = vec4(cor.rgb * luz * 0.92, 1.0); }\n";
 
-/* Interlagos: o modelo veio de outro jogo, e cada material pede um jeito de desenhar
- * (veja interlagos_materiais.h). Todos têm a mesma luz e a mesma sombra dos mapas de dia */
+/* Interlagos e Montreal: os modelos vieram de outros jogos, e cada material pede um jeito de desenhar
+ * (veja materiais_do_modelo.h). Todos têm a mesma luz e a mesma sombra dos mapas de dia, e as lâmpadas (de
+ * noite, as dos holofotes: holofotes.c; de dia nenhuma, e o laço não roda) */
 #define GLSL_DA_LUZ_DOS_MAPAS \
-    GLSL_DA_LUZ_DO_DIA \
+    GLSL_DA_LUZ_DO_DIA GLSL_DAS_LAMPADAS \
     "vec3 iluminar(vec3 cor) {\n" \
     "    cor *= 1.0 - " FORCA_DA_SOMBRA " * forcaDaSombra * naSombra(fragPos);\n" \
     "    vec3 n = normalize(cross(dFdx(fragPos), dFdy(fragPos)));\n" \
-    "    vec3 luz = 0.58 * luzDeBase + 0.30 * (n.y * 0.5 + 0.5) * luzDoCeu + 0.38 * max(dot(n, solDoDia), 0.0) * luzDoSol;\n" \
+    "    vec3 lampadas = luzDasLampadas(fragPos, n);\n" \
+    "    lampadas /= 1.0 + 0.5 * lampadas;   /* perto da torre a luz não estoura: a pista fica por igual */\n" \
+    "    vec3 luz = 0.58 * luzDeBase + 0.30 * (n.y * 0.5 + 0.5) * luzDoCeu + 0.38 * max(dot(n, solDoDia), 0.0) * luzDoSol\n" \
+    "               + lampadas;\n" \
     "    return cor * luz * 0.92;\n" \
     "}\n"
-#define GLSL_DO_COMECO_DE_INTERLAGOS \
+#define GLSL_DO_COMECO_DOS_MODELOS \
     "#version 330\n" \
     "in vec2 fragTexCoord; in vec3 fragPos;\n" \
     "uniform sampler2D texture0; uniform sampler2D texture1; uniform vec4 colDiffuse;\n" \
@@ -359,13 +368,13 @@ static const char *PIXELS_DOS_MAPAS_DE_DIA =
     "    vec3 base = mix(verde, secaCor, smoothstep(0.42, 0.80, seca));\n" \
     "    return base * mix(1.0, folhas, 0.75); }\n"
 
-static const char *PIXELS_DE_INTERLAGOS[] = {
-    [DESENHO_OPACO] = GLSL_DO_COMECO_DE_INTERLAGOS
+static const char *PIXELS_DOS_MODELOS[] = {
+    [DESENHO_OPACO] = GLSL_DO_COMECO_DOS_MODELOS
         "void main() { vec4 cor = texture(texture0, fragTexCoord) * colDiffuse;\n"
         "              finalColor = vec4(iluminar(cor.rgb), 1.0); }\n",
     /* O furo vem de uma versão detalhada da imagem: nas reduzidas, a média dos fios de um
      * alambrado passa de meio e ele viraria uma parede cinza ao longe */
-    [DESENHO_RECORTE] = GLSL_DO_COMECO_DE_INTERLAGOS
+    [DESENHO_RECORTE] = GLSL_DO_COMECO_DOS_MODELOS
         "void main() { vec4 cor = texture(texture0, fragTexCoord) * colDiffuse;\n"
         "              vec2 tamanho = vec2(textureSize(texture0, 0));\n"
         "              vec2 dx = dFdx(fragTexCoord * tamanho), dy = dFdy(fragTexCoord * tamanho);\n"
@@ -374,29 +383,29 @@ static const char *PIXELS_DE_INTERLAGOS[] = {
         "              if (alfa < 0.5) discard;\n"
         "              finalColor = vec4(iluminar(cor.rgb), 1.0); }\n",
     /* O asfalto e a grama do jogo, presos ao chão do mundo: a imagem tem sempre o mesmo tamanho */
-    [DESENHO_ASFALTO] = GLSL_DO_COMECO_DE_INTERLAGOS
+    [DESENHO_ASFALTO] = GLSL_DO_COMECO_DOS_MODELOS
         "void main() { vec4 cor = texture(texture0, fragPos.xz / metrosDoLadrilho) * colDiffuse;\n"
         "              finalColor = vec4(iluminar(cor.rgb), 1.0); }\n",
     /* A tinta (o alfa da imagem) sobre o asfalto do jogo, que vem na textura 1 */
-    [DESENHO_DECALQUE] = GLSL_DO_COMECO_DE_INTERLAGOS
+    [DESENHO_DECALQUE] = GLSL_DO_COMECO_DOS_MODELOS
         "void main() { vec4 tinta = texture(texture0, fragTexCoord);\n"
         "              vec3 asfalto = texture(texture1, fragPos.xz / metrosDoLadrilho).rgb;\n"
         "              vec3 cor = mix(asfalto, tinta.rgb, smoothstep(0.35, 0.65, tinta.a)) * colDiffuse.rgb;\n"
         "              finalColor = vec4(iluminar(cor), 1.0); }\n",
     /* A borracha do traçado e as sombras pintadas: só escurecem o que está embaixo */
-    [DESENHO_SOMBRA] = GLSL_DO_COMECO_DE_INTERLAGOS
+    [DESENHO_SOMBRA] = GLSL_DO_COMECO_DOS_MODELOS
         "void main() { float a = texture(texture0, fragTexCoord).a * colDiffuse.a;\n"
         "              finalColor = vec4(0.0, 0.0, 0.0, a * " FORCA_DA_BORRACHA "); }\n",
-    [DESENHO_TELA] = GLSL_DO_COMECO_DE_INTERLAGOS
+    [DESENHO_TELA] = GLSL_DO_COMECO_DOS_MODELOS
         "void main() { vec4 cor = texture(texture0, fragTexCoord) * colDiffuse;\n"
         "              if (cor.a < 0.02) discard;\n"
         "              finalColor = vec4(iluminar(cor.rgb), cor.a); }\n",
-    [DESENHO_GRAMA] = GLSL_DO_COMECO_DE_INTERLAGOS GLSL_DA_GRAMA_DE_INTERLAGOS
+    [DESENHO_GRAMA] = GLSL_DO_COMECO_DOS_MODELOS GLSL_DA_GRAMA_DE_INTERLAGOS
         "void main() { vec3 cor = gramaDeInterlagos(texture(texture0, fragPos.xz / metrosDoLadrilho).rgb, fragPos.xz) * colDiffuse.rgb;\n"
         "              finalColor = vec4(iluminar(cor), 1.0); }\n",
     /* A foto de satélite do terreno é borrada de perto: dentro da área do autódromo (e numa faixa
      * em volta, misturando aos poucos) entra a grama do jogo, que vem na textura 1 */
-    [DESENHO_TERRENO] = GLSL_DO_COMECO_DE_INTERLAGOS GLSL_DA_GRAMA_DE_INTERLAGOS
+    [DESENHO_TERRENO] = GLSL_DO_COMECO_DOS_MODELOS GLSL_DA_GRAMA_DE_INTERLAGOS
         "uniform vec4 areaDoAutodromo; uniform float transicaoDoAutodromo;\n"
         "void main() { vec3 foto = texture(texture0, fragTexCoord).rgb * colDiffuse.rgb;\n"
         "              vec3 grama = gramaDeInterlagos(texture(texture1, fragPos.xz / metrosDoLadrilho).rgb, fragPos.xz);\n"
@@ -408,7 +417,7 @@ static const char *PIXELS_DE_INTERLAGOS[] = {
     [DESENHO_ESCONDIDO] = NULL,
 };
 #define TOTAL_DE_DESENHOS (DESENHO_ESCONDIDO + 1)
-static Shader shadersDeInterlagos[TOTAL_DE_DESENHOS];
+static Shader shadersDosModelos[TOTAL_DE_DESENHOS];
 
 /* Os shaders que recebem a sombra do sol */
 #define MAXIMO_QUE_RECEBEM_SOMBRA 16
@@ -520,7 +529,7 @@ static const char *PIXELS_DO_CEU =
     "}\n";
 /* O céu das pistas de dia, feito no shader: o degradê do horizonte ao alto, o sol (com o brilho em volta e o
  * lado do céu dele mais quente) e as nuvens (GLSL_DAS_NUVENS), que tapam o sol */
-static const float COBERTURA_DAS_NUVENS[TOTAL_PISTAS] = { 0.43f, 0.0f, 0.38f, 0.41f };   /* Interlagos, Copa, Oval, Splat */
+static const float COBERTURA_DAS_NUVENS[TOTAL_PISTAS] = { 0.43f, 0.0f, 0.38f, 0.40f };   /* Interlagos, Copa, Oval, Montreal */
 #define COBERTURA_DO_PASSEIO  0.44f     /* o deserto: menos nuvens */
 static Shader shaderDoCeuDasPistas;
 static Material materialDoCeuDasPistas;
@@ -601,13 +610,52 @@ typedef struct {
     int *deTela, totalDeTela;
 } MapaDeDia;
 static MapaDeDia mapasDeDia[TOTAL_PISTAS];
-static void prepararMaterialDeInterlagos(Material *material, DesenhoDoMaterial desenho);
+
+/*
+ * tabelaDoModelo
+ * Os modelos que vieram de outros jogos (Interlagos e Montreal) têm uma tabela que diz o que é cada material.
+ * Recebe: o modelo e onde guardar quantos materiais a tabela tem.
+ * Devolve: a tabela, ou NULL se o modelo não tem (o Oval: tudo é desenhado do mesmo jeito).
+ */
+static const MaterialDoModelo *tabelaDoModelo(const Model *modelo, int *total) {
+    if (modelo == &mapasDeDia[PISTA_INTERLAGOS].modelo) {
+        *total = TOTAL_MATERIAIS_INTERLAGOS;
+        return MATERIAIS_INTERLAGOS;
+    }
+    if (modelo == &mapasDeDia[PISTA_MONTREAL].modelo) {
+        *total = TOTAL_MATERIAIS_MONTREAL;
+        return MATERIAIS_MONTREAL;
+    }
+    *total = 0;
+    return NULL;
+}
+
+/*
+ * materialDoModelo
+ * Recebe: o modelo e o número de um material dele.
+ * Devolve: o que é esse material (fora da tabela: nada de chão, desenhado como ele é).
+ */
+static MaterialDoModelo materialDoModelo(const Model *modelo, int qual) {
+    int total = 0;
+    const MaterialDoModelo *tabela = tabelaDoModelo(modelo, &total);
+    if (tabela == NULL || qual < 0 || qual >= total) {
+        return (MaterialDoModelo){ CHAO_NENHUM, DESENHO_OPACO };
+    }
+    return tabela[qual];
+}
+
+static int temTabela(const MapaDeDia *mapa) {
+    int total = 0;
+    return tabelaDoModelo(&mapa->modelo, &total) != NULL;
+}
+static void prepararMaterialDoModelo(Material *material, DesenhoDoMaterial desenho);
 static void tirarParedesInvisiveis(Model *modelo);
 static Texture2D gerarConcretoLimpo(void);
 static void trocarImagensGastas(Model *modelo);
 static void prepararCaixasDoMapa(MapaDeDia *mapa, IdPista id);
 static void colocarTeloesDeInterlagos(Pista *pista, const Model *modelo);
 static void colocarTeloesDasArquibancadas(Pista *pista, const Model *modelo);
+static void colocarTeloesDeMontreal(Pista *pista, const Model *modelo, const LugarNaTorcida *lugares, int totalDeLugares);
 static void definirAreaDoAutodromo(Pista *pista);
 static int construirArquibancadasQueFaltam(Pista *pista, MapaDeDia *mapa, const LugarNaTorcida *lugares, int totalDeLugares,
                                            LugarNaTorcida **todosOsLugares);
@@ -1180,10 +1228,13 @@ static void carregarMapaDeDia(Pista *pista, const char *arquivo, float escala, c
         mapa->modelo.materials[MATERIAL_DO_LAGO].maps[MATERIAL_MAP_ALBEDO].color = COR_DA_AGUA_DO_LAGO;
         mapa->modelo.materials[MATERIAL_DO_ESCAPE_VERDE].maps[MATERIAL_MAP_ALBEDO].color = COR_DO_ESCAPE_VERDE;
     }
+    if (pista->id == PISTA_MONTREAL && mapa->modelo.materialCount == TOTAL_MATERIAIS_MONTREAL) {
+        mapa->modelo.materials[MATERIAL_DA_AGUA_DE_MONTREAL].maps[MATERIAL_MAP_ALBEDO].color = COR_DA_AGUA_DE_MONTREAL;
+    }
     for (int i = 0; i < mapa->modelo.materialCount; i++) {
         mapa->modelo.materials[i].shader = shaderDosMapasDeDia;
-        if (pista->id == PISTA_INTERLAGOS && i < TOTAL_MATERIAIS_INTERLAGOS) {
-            prepararMaterialDeInterlagos(&mapa->modelo.materials[i], MATERIAIS_INTERLAGOS[i].desenho);
+        if (temTabela(mapa)) {
+            prepararMaterialDoModelo(&mapa->modelo.materials[i], materialDoModelo(&mapa->modelo, i).desenho);
         }
         Texture2D *textura = &mapa->modelo.materials[i].maps[MATERIAL_MAP_ALBEDO].texture;
         if (textura->id != 0 && textura->id != rlGetTextureIdDefault()) {
@@ -1216,6 +1267,8 @@ static void carregarMapaDeDia(Pista *pista, const char *arquivo, float escala, c
     if (pista->id == PISTA_INTERLAGOS) {
         colocarTeloesDeInterlagos(pista, &mapa->modelo);
         mapa->saia = construirSaiaDoTerreno(&mapa->modelo, escala, pista);
+    } else if (pista->id == PISTA_MONTREAL) {
+        colocarTeloesDeMontreal(pista, &mapa->modelo, lugares, totalDeLugares);
     }
     fecharTodosOsLotes();
     mapa->fimDosLotes = totalDeLotes;
@@ -1228,18 +1281,18 @@ static void carregarMapaDeDia(Pista *pista, const char *arquivo, float escala, c
  * ================================================================== */
 
 /*
- * prepararMaterialDeInterlagos
+ * prepararMaterialDoModelo
  * Põe em cada material do modelo o shader do jeito dele ser desenhado. O asfalto e a
  * grama trocam a imagem do modelo pela do jogo; a tinta sobre o asfalto leva o asfalto
  * do jogo na textura 1.
  * Recebe: o material e como ele é desenhado.
  * Devolve: nada.
  */
-static void prepararMaterialDeInterlagos(Material *material, DesenhoDoMaterial desenho) {
+static void prepararMaterialDoModelo(Material *material, DesenhoDoMaterial desenho) {
     if (desenho == DESENHO_ESCONDIDO) {
         return;
     }
-    material->shader = shadersDeInterlagos[desenho];
+    material->shader = shadersDosModelos[desenho];
     if (desenho == DESENHO_ASFALTO) {
         material->maps[MATERIAL_MAP_ALBEDO].texture = texturaAsfalto[0];
     } else if (desenho == DESENHO_GRAMA) {
@@ -1341,21 +1394,21 @@ static void trocarImagensGastas(Model *modelo) {
 }
 
 /*
- * carregarShadersDeInterlagos
+ * carregarShadersDosModelos
  * Recebe: nada.
- * Devolve: nada (preenche shadersDeInterlagos e os põe entre os que recebem sombra).
+ * Devolve: nada (preenche shadersDosModelos e os põe entre os que recebem sombra).
  */
-static void carregarShadersDeInterlagos(void) {
+static void carregarShadersDosModelos(void) {
     for (int d = 0; d < TOTAL_DE_DESENHOS; d++) {
-        if (PIXELS_DE_INTERLAGOS[d] == NULL) {
+        if (PIXELS_DOS_MODELOS[d] == NULL) {
             continue;
         }
-        shadersDeInterlagos[d] = LoadShaderFromMemory(VERTICES_DOS_MAPAS_DE_DIA, PIXELS_DE_INTERLAGOS[d]);
+        shadersDosModelos[d] = LoadShaderFromMemory(VERTICES_DOS_MAPAS_DE_DIA, PIXELS_DOS_MODELOS[d]);
         float ladrilho = (d == DESENHO_GRAMA || d == DESENHO_TERRENO) ? LADRILHO_DA_GRAMA : LADRILHO_DO_ASFALTO;
-        SetShaderValue(shadersDeInterlagos[d], GetShaderLocation(shadersDeInterlagos[d], "metrosDoLadrilho"), &ladrilho,
+        SetShaderValue(shadersDosModelos[d], GetShaderLocation(shadersDosModelos[d], "metrosDoLadrilho"), &ladrilho,
                        SHADER_UNIFORM_FLOAT);
-        recebemSombra[totalQueRecebemSombra++] = shadersDeInterlagos[d];
-        registrarShaderDoDia(shadersDeInterlagos[d]);
+        recebemSombra[totalQueRecebemSombra++] = shadersDosModelos[d];
+        registrarShaderDoDia(shadersDosModelos[d]);
     }
 }
 
@@ -1365,8 +1418,7 @@ static void carregarShadersDeInterlagos(void) {
  * Devolve: como ela é desenhada.
  */
 static DesenhoDoMaterial desenhoDaMalha(const Model *modelo, int malha) {
-    int qual = modelo->meshMaterial[malha];
-    return (qual < TOTAL_MATERIAIS_INTERLAGOS) ? MATERIAIS_INTERLAGOS[qual].desenho : DESENHO_OPACO;
+    return materialDoModelo(modelo, modelo->meshMaterial[malha]).desenho;
 }
 
 /*
@@ -1392,7 +1444,8 @@ static void prepararCaixasDoMapa(MapaDeDia *mapa, IdPista id) {
     for (int i = 0; i < total; i++) {
         mapa->caixas[i] = caixaDaMalha(mapa->modelo.meshes[i], noMundo);
     }
-    if (id != PISTA_INTERLAGOS) {
+    (void) id;
+    if (!temTabela(mapa)) {
         return;   /* as outras pistas são desenhadas num laço só, sem separar por tipo */
     }
     mapa->opacas = malloc(total * sizeof(int));
@@ -1415,8 +1468,8 @@ static void prepararCaixasDoMapa(MapaDeDia *mapa, IdPista id) {
             mapa->opacas[mapa->totalOpacas++] = i;
         }
     }
-    TraceLog(LOG_INFO, "CORTE: Interlagos tem %d malhas (%d opacas, %d de sombra, %d de tela)",
-             total, mapa->totalOpacas, mapa->totalDeSombra, mapa->totalDeTela);
+    TraceLog(LOG_INFO, "CORTE: a pista %d tem %d malhas (%d opacas, %d de sombra, %d de tela)",
+             id, total, mapa->totalOpacas, mapa->totalDeSombra, mapa->totalDeTela);
 }
 
 /*
@@ -1442,7 +1495,7 @@ static void desenharModeloCortado(MapaDeDia *mapa) {
 }
 
 /*
- * desenharModeloDeInterlagos
+ * desenharModeloComMateriais
  * Primeiro tudo o que é sólido; depois, sem escrever na profundidade, o que só escurece
  * (a borracha do traçado em cima do asfalto) e os alambrados, transparentes. As faces valem dos dois lados, como no
  * jogo de onde o modelo veio.
@@ -1459,7 +1512,7 @@ static void desenharMalhasDoMapa(MapaDeDia *mapa, const int *quais, int quantas,
     }
 }
 
-static void desenharModeloDeInterlagos(MapaDeDia *mapa) {
+static void desenharModeloComMateriais(MapaDeDia *mapa) {
     Matrix noMundo = MatrixMultiply(mapa->modelo.transform, MatrixScale(mapa->escala, mapa->escala, mapa->escala));
     rlDisableBackfaceCulling();
     if (mapa->opacas == NULL) {   /* sem as listas prontas: o modelo inteiro, como antes */
@@ -1492,13 +1545,13 @@ static void desenharModeloDeInterlagos(MapaDeDia *mapa) {
 }
 
 /*
- * desenharSombraDeInterlagos
+ * desenharSombraComMateriais
  * O que faz sombra: só o que fica de pé (o chão não faz sombra em si mesmo). Onde o alfa
  * da imagem não é recorte, a peça é inteira: vai com a imagem branca do padrão.
  * Recebe: o mapa.
  * Devolve: nada.
  */
-static void desenharSombraDeInterlagos(MapaDeDia *mapa) {
+static void desenharSombraComMateriais(MapaDeDia *mapa) {
     Matrix noMundo = MatrixMultiply(mapa->modelo.transform, MatrixScale(mapa->escala, mapa->escala, mapa->escala));
     Texture2D branca = { rlGetTextureIdDefault(), 1, 1, 1, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
     for (int i = 0; i < mapa->modelo.meshCount; i++) {
@@ -1510,8 +1563,8 @@ static void desenharSombraDeInterlagos(MapaDeDia *mapa) {
             continue;   /* fora do quadrado da luz: não escreve no mapa de sombra */
         }
         int qual = mapa->modelo.meshMaterial[i];
-        if (qual < TOTAL_MATERIAIS_INTERLAGOS && MATERIAIS_INTERLAGOS[qual].chao != CHAO_NENHUM
-            && MATERIAIS_INTERLAGOS[qual].chao != CHAO_MURO) {
+        ChaoDoMaterial chao = materialDoModelo(&mapa->modelo, qual).chao;
+        if (chao != CHAO_NENHUM && chao != CHAO_MURO) {
             continue;
         }
         /* As imagens do material ficam num vetor apontado por ele: a troca é feita e desfeita no original */
@@ -1638,7 +1691,7 @@ static void definirAreaDoAutodromo(Pista *pista) {
     area[1] -= folga;
     area[2] += folga;
     area[3] += folga;
-    Shader terreno = shadersDeInterlagos[DESENHO_TERRENO];
+    Shader terreno = shadersDosModelos[DESENHO_TERRENO];
     SetShaderValue(terreno, GetShaderLocation(terreno, "areaDoAutodromo"), area, SHADER_UNIFORM_VEC4);
     SetShaderValue(terreno, GetShaderLocation(terreno, "transicaoDoAutodromo"), &transicao, SHADER_UNIFORM_FLOAT);
 }
@@ -1735,8 +1788,9 @@ static int recortarModuloDaArquibancada(const Model *modelo, PecaDoModulo *pecas
     int malhasDoModelo = modelo->meshCount;
     for (int m = 0; m < malhasDoModelo; m++) {
         int qual = modelo->meshMaterial[m];
-        if (qual >= TOTAL_MATERIAIS_INTERLAGOS || MATERIAIS_INTERLAGOS[qual].desenho == DESENHO_ESCONDIDO
-            || (MATERIAIS_INTERLAGOS[qual].chao != CHAO_NENHUM && MATERIAIS_INTERLAGOS[qual].chao != CHAO_MURO)) {
+        MaterialDoModelo oQueE = materialDoModelo(modelo, qual);
+        if (qual >= TOTAL_MATERIAIS_INTERLAGOS || oQueE.desenho == DESENHO_ESCONDIDO
+            || (oQueE.chao != CHAO_NENHUM && oQueE.chao != CHAO_MURO)) {
             continue;
         }
         const Mesh *malha = &modelo->meshes[m];
@@ -2060,8 +2114,8 @@ static float chaoNoModelo(const Model *modelo, float escala, float x, float z) {
     z /= escala;
     for (int m = 0; m < modelo->meshCount; m++) {
         int qual = modelo->meshMaterial[m];
-        if (qual >= TOTAL_MATERIAIS_INTERLAGOS || MATERIAIS_INTERLAGOS[qual].chao == CHAO_NENHUM
-            || MATERIAIS_INTERLAGOS[qual].chao == CHAO_MURO) {
+        ChaoDoMaterial chao = materialDoModelo(modelo, qual).chao;
+        if (chao == CHAO_NENHUM || chao == CHAO_MURO) {
             continue;
         }
         const Mesh *malha = &modelo->meshes[m];
@@ -2141,7 +2195,7 @@ static Mesh construirSaiaDoTerreno(const Model *modelo, float escala, Pista *pis
     int totalDeArestas = 0;
     for (int m = 0; m < modelo->meshCount; m++) {
         int qual = modelo->meshMaterial[m];
-        if (qual < TOTAL_MATERIAIS_INTERLAGOS && MATERIAIS_INTERLAGOS[qual].desenho == DESENHO_TERRENO && modelo->meshes[m].indices) {
+        if (materialDoModelo(modelo, qual).desenho == DESENHO_TERRENO && modelo->meshes[m].indices) {
             terrenos[totalDeTerrenos++] = m;
             totalDeArestas += modelo->meshes[m].triangleCount * 3;
         }
@@ -2291,10 +2345,49 @@ static int longeDoPitLane(Pista *pista, float x, float z, float folga) {
 }
 
 /*
+ * colocarTeloesDeFrenteParaArquibancada
+ * Um telão de frente para uma arquibancada (dois nas compridas), do outro lado da pista, além do
+ * muro: de qualquer lugar dela dá para ver um. Se o lugar cai perto de outro trecho da pista ou do
+ * pit lane, ele vai mais para longe; se não houver lugar, fica sem.
+ * Recebe: a pista, o modelo, a escala dele, de onde a onde a arquibancada vai (metros do jogo desde
+ *         a linha), de que lado ela fica (+1: à direita) e se o pé vai no que estiver ali (telhado
+ *         incluído) ou só no chão.
+ * Devolve: nada.
+ */
+static void colocarTeloesDeFrenteParaArquibancada(Pista *pista, const Model *modelo, float escala, float inicio, float fim,
+                                                  int lado, int noTelhado) {
+    float comprimento = fim - inicio;
+    int teloes = (comprimento > ARQUIBANCADA_DE_DOIS_TELOES) ? 2 : 1;
+    int segmentos = contarSegmentos(pista);
+    for (int t = 0; t < teloes; t++) {
+        float metros = inicio + comprimento * (t + 0.5f) / teloes;
+        metros = fmodf(metros + pista->metrosDaVolta, pista->metrosDaVolta);
+        int primeiro = (int) ((metros - PERTO_DO_TELAO) * SEGMENTOS_POR_METRO), ultimo = (int) ((metros + PERTO_DO_TELAO) * SEGMENTOS_POR_METRO);
+        float muro = 0.0f, frente = 0.0f;
+        for (int k = primeiro; k <= ultimo; k++) {
+            Segmento *s = buscarSegmento(pista, ((k % segmentos) + segmentos) % segmentos);
+            muro = fmaxf(muro, (lado > 0) ? s->limiteEsquerda : s->limiteDireita);
+            frente = fmaxf(frente, (lado > 0) ? s->limiteDireita : s->limiteEsquerda);
+        }
+        for (float alem = TELAO_ALEM_DO_MURO; alem <= TELAO_ALEM_DO_MURO + 3.0f * TELAO_MAIS_LONGE; alem += TELAO_MAIS_LONGE) {
+            PontoNoMundo pe = pontoDaPistaEmMetros(pista, metros, -lado * (muro + alem));
+            if (!longeDeOutraPista(pista, pe.x, pe.z, (int) (metros * SEGMENTOS_POR_METRO), TELAO_LONGE_DE_OUTRA_PISTA)
+                || !longeDoPitLane(pista, pe.x, pe.z, TELAO_LONGE_DE_OUTRA_PISTA)) {
+                continue;
+            }
+            PontoNoMundo alvo = pontoDaPistaEmMetros(pista, metros, lado * (frente + ALEM_DO_MURO_DA_ARQUIBANCADA + 10.0f));
+            float chao = noTelhado ? alturaNoModelo(modelo, pe.x / escala, pe.z / escala) * escala
+                                   : chaoNoModelo(modelo, escala, pe.x, pe.z);
+            Vector3 lugar = { pe.x, (chao > -1e8f) ? chao : pe.y, pe.z };
+            colocarNoCenario(CENARIO_TELAO, lugar, atan2f(alvo.x - pe.x, alvo.z - pe.z), escala);
+            break;
+        }
+    }
+}
+
+/*
  * colocarTeloesDasArquibancadas
- * Um telão de frente para cada arquibancada que o jogo levanta (dois nas compridas), do outro
- * lado da pista, além do muro: de qualquer lugar dela dá para ver um. Se o lugar cai perto de
- * outro trecho da pista, ele vai mais para longe; se não houver lugar, fica sem.
+ * Um telão de frente para cada arquibancada que o jogo levanta em Interlagos (todas à direita da pista).
  * Recebe: a pista e o modelo (o pé vai no chão).
  * Devolve: nada.
  */
@@ -2303,31 +2396,124 @@ static void colocarTeloesDasArquibancadas(Pista *pista, const Model *modelo) {
     int quantas = (int) (sizeof(ARQUIBANCADAS_QUE_FALTAM) / sizeof(ARQUIBANCADAS_QUE_FALTAM[0]));
     for (int i = 0; i < quantas; i++) {
         const ArquibancadaQueFalta *a = &ARQUIBANCADAS_QUE_FALTAM[i];
-        float comprimento = (a->fim - a->inicio) * e;
-        int teloes = (comprimento > ARQUIBANCADA_DE_DOIS_TELOES) ? 2 : 1;
-        for (int t = 0; t < teloes; t++) {
-            float metros = (a->inicio * e) + comprimento * (t + 0.5f) / teloes;
-            int primeiro = (int) ((metros - PERTO_DO_TELAO) * SEGMENTOS_POR_METRO), ultimo = (int) ((metros + PERTO_DO_TELAO) * SEGMENTOS_POR_METRO);
-            float muro = 0.0f, frente = 0.0f;
-            for (int k = primeiro; k <= ultimo; k++) {
-                Segmento *s = buscarSegmento(pista, k);
-                muro = fmaxf(muro, s->limiteEsquerda);
-                frente = fmaxf(frente, s->limiteDireita);
-            }
-            for (float alem = TELAO_ALEM_DO_MURO; alem <= TELAO_ALEM_DO_MURO + 3.0f * TELAO_MAIS_LONGE; alem += TELAO_MAIS_LONGE) {
-                PontoNoMundo pe = pontoDaPistaEmMetros(pista, metros, -(muro + alem));
-                if (!longeDeOutraPista(pista, pe.x, pe.z, (int) (metros * SEGMENTOS_POR_METRO), TELAO_LONGE_DE_OUTRA_PISTA)
-                    || !longeDoPitLane(pista, pe.x, pe.z, TELAO_LONGE_DE_OUTRA_PISTA)) {
-                    continue;
+        colocarTeloesDeFrenteParaArquibancada(pista, modelo, e, a->inicio * e, a->fim * e, 1, 0);
+    }
+}
+
+/*
+ * colocarTeloesDeMontreal
+ * As arquibancadas de Montreal vêm no modelo: os lugares da torcida medidos nelas são juntados em arquibancadas
+ * (lugares em células vizinhas de CELULA_DA_ARQUIBANCADA são da mesma), e cada uma ganha um telão de frente para
+ * ela, do outro lado da pista, como as que o jogo levanta em Interlagos. O pé vai no que estiver ali: no chão, ou
+ * no telhado (do outro lado da arquibancada da reta ficam as garagens).
+ * Recebe: a pista, o modelo e os lugares da torcida (nas medidas do modelo).
+ * Devolve: nada.
+ */
+static void colocarTeloesDeMontreal(Pista *pista, const Model *modelo, const LugarNaTorcida *lugares, int totalDeLugares) {
+    const float e = ESCALA_MONTREAL;
+    if (totalDeLugares <= 0) {
+        return;
+    }
+    float x0 = 1e9f, z0 = 1e9f, x1 = -1e9f, z1 = -1e9f;
+    for (int i = 0; i < totalDeLugares; i++) {
+        x0 = fminf(x0, lugares[i].x); x1 = fmaxf(x1, lugares[i].x);
+        z0 = fminf(z0, lugares[i].z); z1 = fmaxf(z1, lugares[i].z);
+    }
+    int colunas = (int) ((x1 - x0) / CELULA_DA_ARQUIBANCADA) + 1, linhas = (int) ((z1 - z0) / CELULA_DA_ARQUIBANCADA) + 1;
+    int *celula = calloc((size_t) (colunas * linhas), sizeof(int));     /* 0: vazia; -1: tem lugar; n > 0: da arquibancada n */
+    int *pilha = malloc(sizeof(int) * (size_t) (colunas * linhas));
+    int *daCelula = malloc(sizeof(int) * (size_t) totalDeLugares);
+    if (celula == NULL || pilha == NULL || daCelula == NULL) {
+        free(celula); free(pilha); free(daCelula);
+        return;
+    }
+    for (int i = 0; i < totalDeLugares; i++) {
+        int c = (int) ((lugares[i].x - x0) / CELULA_DA_ARQUIBANCADA), l = (int) ((lugares[i].z - z0) / CELULA_DA_ARQUIBANCADA);
+        daCelula[i] = l * colunas + c;
+        celula[daCelula[i]] = -1;
+    }
+    int arquibancadas = 0;
+    for (int k = 0; k < colunas * linhas; k++) {
+        if (celula[k] != -1) {
+            continue;
+        }
+        arquibancadas++;
+        int topo = 0;
+        pilha[topo++] = k;
+        celula[k] = arquibancadas;
+        while (topo > 0) {
+            int aqui = pilha[--topo], c = aqui % colunas, l = aqui / colunas;
+            for (int dl = -1; dl <= 1; dl++) {
+                for (int dc = -1; dc <= 1; dc++) {
+                    int cc = c + dc, ll = l + dl;
+                    if (cc >= 0 && ll >= 0 && cc < colunas && ll < linhas && celula[ll * colunas + cc] == -1) {
+                        celula[ll * colunas + cc] = arquibancadas;
+                        pilha[topo++] = ll * colunas + cc;
+                    }
                 }
-                PontoNoMundo alvo = pontoDaPistaEmMetros(pista, metros, frente + ALEM_DO_MURO_DA_ARQUIBANCADA + 10.0f);
-                float chao = chaoNoModelo(modelo, e, pe.x, pe.z);
-                Vector3 lugar = { pe.x, (chao > -1e8f) ? chao : pe.y, pe.z };
-                colocarNoCenario(CENARIO_TELAO, lugar, atan2f(alvo.x - pe.x, alvo.z - pe.z), e);
-                break;
             }
         }
     }
+    int segmentos = contarSegmentos(pista);
+    for (int a = 1; a <= arquibancadas; a++) {
+        /* O meio dela, o segmento mais perto do meio, e daí até onde ela vai ao longo da pista e de que lado fica */
+        float mx = 0.0f, mz = 0.0f;
+        int quantos = 0;
+        for (int i = 0; i < totalDeLugares; i++) {
+            if (celula[daCelula[i]] == a) {
+                mx += lugares[i].x * e;
+                mz += lugares[i].z * e;
+                quantos++;
+            }
+        }
+        if (quantos < MENOR_ARQUIBANCADA) {
+            continue;
+        }
+        mx /= quantos;
+        mz /= quantos;
+        Segmento *meio = pista->largada, *atual = pista->largada;
+        float menor = 1e18f;
+        do {
+            float d = (atual->xMundo - mx) * (atual->xMundo - mx) + (atual->zMundo - mz) * (atual->zMundo - mz);
+            if (d < menor) {
+                menor = d;
+                meio = atual;
+            }
+            atual = atual->proximo;
+        } while (atual != pista->largada);
+        int deMenos = 0, deMais = 0;
+        float ladoSomado = 0.0f;
+        for (int i = 0; i < totalDeLugares; i++) {
+            if (celula[daCelula[i]] != a) {
+                continue;
+            }
+            float x = lugares[i].x * e, z = lugares[i].z * e, perto = 1e18f;
+            Segmento *dele = meio;
+            int passo = 0, passoDele = 0;
+            for (Segmento *s = meio; passo < segmentos / 4; s = s->proximo, passo++) {
+                float d = (s->xMundo - x) * (s->xMundo - x) + (s->zMundo - z) * (s->zMundo - z);
+                if (d < perto) { perto = d; dele = s; passoDele = passo; }
+            }
+            passo = 0;
+            for (Segmento *s = meio; passo < segmentos / 4; s = s->anterior, passo++) {
+                float d = (s->xMundo - x) * (s->xMundo - x) + (s->zMundo - z) * (s->zMundo - z);
+                if (d < perto) { perto = d; dele = s; passoDele = -passo; }
+            }
+            deMenos = (passoDele < deMenos) ? passoDele : deMenos;
+            deMais = (passoDele > deMais) ? passoDele : deMais;
+            float rumo = dele->rumo * DEG2RAD;   /* 0 = -z, 90 = +x: a direita é (cos, sin) */
+            ladoSomado += ((x - dele->xMundo) * cosf(rumo) + (z - dele->zMundo) * sinf(rumo) > 0.0f) ? 1.0f : -1.0f;
+        }
+        float metrosDoMeio = meio->indice * COMPRIMENTO_SEGMENTO / UNIDADES_POR_METRO;
+        float inicio = metrosDoMeio + deMenos * COMPRIMENTO_SEGMENTO / UNIDADES_POR_METRO;
+        float fim = metrosDoMeio + deMais * COMPRIMENTO_SEGMENTO / UNIDADES_POR_METRO;
+        int lado = (ladoSomado >= 0.0f) ? 1 : -1;
+        TraceLog(LOG_INFO, "MUNDO: arquibancada de Montreal com %d lugares, de %.0f a %.0f m, do lado %+d", quantos, inicio, fim, lado);
+        colocarTeloesDeFrenteParaArquibancada(pista, modelo, e, inicio, fim, lado, 1);
+    }
+    free(celula);
+    free(pilha);
+    free(daCelula);
 }
 
 /*
@@ -2452,7 +2638,7 @@ void carregarMundo(Pista *pistas[]) {
     recebemSombra[totalQueRecebemSombra++] = shaderDosMapasDeDia;
     registrarShaderDoDia(shader);
     registrarShaderDoDia(shaderDosMapasDeDia);
-    carregarShadersDeInterlagos();
+    carregarShadersDosModelos();
     carregarSombras();
     material = LoadMaterialDefault();
     material.shader = shader;
@@ -2486,10 +2672,10 @@ void carregarMundo(Pista *pistas[]) {
     carregarMapaDeDia(pistas[PISTA_OVAL], ARQUIVO_DO_OVAL, ESCALA_OVAL, TORCIDA_OVAL, TOTAL_TORCIDA_OVAL, FIGURA_DO_OVAL,
                       CENARIO_OVAL, TOTAL_CENARIO_OVAL);
     TraceLog(LOG_INFO, "CARGA-MUNDO: oval %.2f s", GetTime() - tInicio); tInicio = GetTime();
-    passoDaEspera("CARREGANDO SPLAT", 0.92f);
-    carregarMapaDeDia(pistas[PISTA_SPLAT], ARQUIVO_DO_SPLAT, ESCALA_SPLAT, TORCIDA_SPLAT, TOTAL_TORCIDA_SPLAT, FIGURA_DO_SPLAT,
-                      CENARIO_SPLAT, TOTAL_CENARIO_SPLAT);
-    TraceLog(LOG_INFO, "CARGA-MUNDO: splat %.2f s", GetTime() - tInicio); tInicio = GetTime();
+    passoDaEspera("CARREGANDO MONTREAL", 0.86f);
+    carregarMapaDeDia(pistas[PISTA_MONTREAL], ARQUIVO_DE_MONTREAL, ESCALA_MONTREAL, TORCIDA_MONTREAL, TOTAL_TORCIDA_MONTREAL,
+                      FIGURA_DE_MONTREAL * ESCALA_MONTREAL, NULL, 0);
+    TraceLog(LOG_INFO, "CARGA-MUNDO: montreal %.2f s", GetTime() - tInicio); tInicio = GetTime();
     iniciarTorcida3D();
     ligarTeloesDoCenario();
     TraceLog(LOG_INFO, "CARGA-MUNDO: torcida/telões %.2f s", GetTime() - tInicio); tInicio = GetTime();
@@ -2683,8 +2869,8 @@ void descarregarMundo(void) {
     UnloadShader(shaderDoCeuDasPistas);
     UnloadTexture(ruidoDasNuvens);
     for (int d = 0; d < TOTAL_DE_DESENHOS; d++) {
-        if (PIXELS_DE_INTERLAGOS[d] != NULL) {
-            UnloadShader(shadersDeInterlagos[d]);
+        if (PIXELS_DOS_MODELOS[d] != NULL) {
+            UnloadShader(shadersDosModelos[d]);
         }
     }
     UnloadShader(shaderDaProfundidade);
@@ -2693,6 +2879,7 @@ void descarregarMundo(void) {
         rlUnloadFramebuffer(mapaDeSombra.id);
     }
     descarregarNoite();
+    descarregarHolofotes();
 }
 
 /* ==================================================================
@@ -2875,8 +3062,8 @@ static void desenharQuemFazSombra(IdPista id) {
         desenharModelosColocados(&material);   /* o Mack também faz sombra */
     } else if (mapasDeDia[id].existe) {
         MapaDeDia *mapa = &mapasDeDia[id];
-        if (id == PISTA_INTERLAGOS) {
-            desenharSombraDeInterlagos(mapa);
+        if (temTabela(mapa)) {
+            desenharSombraComMateriais(mapa);
         } else {
             Shader originais[256];
             int total = mapa->modelo.materialCount < 256 ? mapa->modelo.materialCount : 256;
@@ -3228,10 +3415,16 @@ void desenharCenario(IdPista id, Vector3 camera) {
 
     if (mapasDeDia[id].existe) {
         MapaDeDia *mapa = &mapasDeDia[id];
-        desenharCeuDasPistas(id, camera, naCamera);
-        if (id == PISTA_INTERLAGOS) {
-            desenharMalha(mapa->saia, texturaGrama, origem);
-            desenharModeloDeInterlagos(mapa);
+        if (luzAplicada()->estrelas > 0.05f) {
+            desenharCeuDoPasseio(naCamera);   /* a noite, com a lua e as estrelas (o céu das pistas é de dia) */
+        } else {
+            desenharCeuDasPistas(id, camera, naCamera);
+        }
+        if (temTabela(mapa)) {
+            if (mapa->saia.vertexCount > 0) {
+                desenharMalha(mapa->saia, texturaGrama, origem);
+            }
+            desenharModeloComMateriais(mapa);
         } else {
             desenharModeloCortado(mapa);
         }
@@ -3243,6 +3436,47 @@ void desenharCenario(IdPista id, Vector3 camera) {
         desenharMalha(mapa->torcida, semTextura, origem);
         material.shader = shader;
     }
+}
+
+/*
+ * visaoLivreNoCenario
+ * Se nada do cenário fica entre dois pontos: o chão, os prédios, as arquibancadas e as árvores do modelo da pista
+ * (os alambrados e as grades, que são transparentes, não contam). Os últimos metros antes do ponto de chegada
+ * também não (o capim e as zebras em volta do carro não tapam a vista dele). As câmeras de TV usam isto para não
+ * ficar atrás de uma árvore ou de um prédio. Custa: um raio contra as malhas por onde ele passa.
+ * Recebe: a pista e os dois pontos.
+ * Devolve: 1 se a vista está livre (ou se a pista não tem modelo para testar).
+ */
+#define VISTA_PERTO_DO_ALVO 4.0f
+int visaoLivreNoCenario(IdPista id, Vector3 de, Vector3 ate) {
+    if ((int) id < 0 || (int) id >= TOTAL_PISTAS || !mapasDeDia[id].existe || mapasDeDia[id].caixas == NULL) {
+        return 1;
+    }
+    MapaDeDia *mapa = &mapasDeDia[id];
+    Vector3 caminho = Vector3Subtract(ate, de);
+    float comprimento = Vector3Length(caminho) - VISTA_PERTO_DO_ALVO;
+    if (comprimento <= 0.0f) {
+        return 1;
+    }
+    Ray raio = { de, Vector3Normalize(caminho) };
+    Matrix noMundo = MatrixMultiply(mapa->modelo.transform, MatrixScale(mapa->escala, mapa->escala, mapa->escala));
+    for (int i = 0; i < mapa->modelo.meshCount; i++) {
+        DesenhoDoMaterial desenho = desenhoDaMalha(&mapa->modelo, i);
+        if (desenho == DESENHO_TELA || desenho == DESENHO_SOMBRA || desenho == DESENHO_ESCONDIDO) {
+            continue;
+        }
+        RayCollision naCaixa = GetRayCollisionBox(raio, mapa->caixas[i]);
+        int dentro = de.x >= mapa->caixas[i].min.x && de.x <= mapa->caixas[i].max.x && de.y >= mapa->caixas[i].min.y
+                     && de.y <= mapa->caixas[i].max.y && de.z >= mapa->caixas[i].min.z && de.z <= mapa->caixas[i].max.z;
+        if (!dentro && (!naCaixa.hit || naCaixa.distance > comprimento)) {
+            continue;
+        }
+        RayCollision batida = GetRayCollisionMesh(raio, mapa->modelo.meshes[i], noMundo);
+        if (batida.hit && batida.distance < comprimento) {
+            return 0;
+        }
+    }
+    return 1;
 }
 
 /*

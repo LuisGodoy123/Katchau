@@ -4,7 +4,7 @@
  * O cenário 3D de cada pista, desenhado com a raylib em 3D de verdade:
  *
  *   - Copa Pistão: o modelo do estádio (recursos/modelos/copa_pistao.glb);
- *   - Interlagos, Oval e Splat: o modelo 3D de cada uma, de dia, com o que o
+ *   - Interlagos, Oval e Montreal: o modelo 3D de cada uma, de dia, com o que o
  *     jogo põe em cima (telões, torcida, vagas do pit e objetos dos mapas);
  *   - o mundo aberto do passeio livre (recursos/modelos/radiator_springs.glb),
  *     carregado só na primeira vez que o jogador entra nele.
@@ -37,6 +37,7 @@ void descarregarMundo(void);
 void desenharCenario(IdPista id, Vector3 camera);
 void prepararPlanosDaCamera(void);
 int teloesAVista(IdPista id);
+int visaoLivreNoCenario(IdPista id, Vector3 de, Vector3 ate);
 void desenharTelasQueBrilham(IdPista id);
 void prepararSombras(IdPista id, Camera3D camera, int ligadas);
 /* Um shader de fora do cenário (os carros) que recebe a sombra do sol: ele tem GLSL_DO_MAPA_DE_SOMBRA (hora.h).

@@ -47,9 +47,31 @@ typedef struct {
     float variacao;             /* o quanto o ritmo dos rivais muda de uma volta para a outra */
 } FichaDoNivel;
 
+/* A hora da corrida: a luz das pistas de dia (a Copa Pistão é sempre à noite, no estádio) */
+typedef enum {
+    HORA_MANHA,
+    HORA_MEIO_DIA,
+    HORA_TARDE,      /* a de sempre: em Interlagos e em Montreal, a hora da largada do GP */
+    HORA_NOITE,
+    TOTAL_HORAS_DA_CORRIDA
+} HoraDaCorrida;
+
+/* Como a corrida é montada na tela da escolha: a dificuldade é a dos rivais; o resto, as regras e a hora */
+#define MENOS_VOLTAS              1
+#define MAIS_VOLTAS              20
+#define MENOS_VOLTAS_COM_PARADA   3    /* com a parada obrigatória: os rivais param da 2ª volta em diante */
+typedef struct {
+    NivelDaCorrida nivel;
+    int voltas;
+    int paradaObrigatoria;   /* 1: todo mundo para nos boxes uma vez (onde a pista tem pit lane) */
+    int desgaste;            /* 1: os pneus gastam (só com a parada: sem ela não haveria como trocar) */
+    HoraDaCorrida hora;
+} OpcoesDaCorrida;
+
 typedef struct {
     Pista *pista;
     NivelDaCorrida nivel;
+    HoraDaCorrida hora;
     int totalVoltas;
     int temParada;              /* 1: esta corrida tem pitstop */
     Carro jogador;
@@ -104,6 +126,11 @@ typedef enum {
 const FichaTecnica *fichaDoCarro(int numero);
 const FichaDoNivel *fichaDoNivel(NivelDaCorrida nivel);
 void iniciarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador, NivelDaCorrida nivel);
+OpcoesDaCorrida opcoesDoNivel(NivelDaCorrida nivel);
+const char *nomeDaHora(HoraDaCorrida hora);
+void iniciarCorridaComOpcoes(Corrida *corrida, Pista *pista, int carroDoJogador, const OpcoesDaCorrida *opcoes);
+void iniciarCorridaDivididaComOpcoes(Corrida *corrida, Pista *pista, const OpcoesDaCorrida *opcoes,
+                                     const FormacaoLocal *formacao);
 void iniciarCorridaDividida(Corrida *corrida, Pista *pista, NivelDaCorrida nivel, const FormacaoLocal *formacao);
 int carroEDeHumano(const Corrida *corrida, const Carro *carro);
 Carro *carroDoHumano(Corrida *corrida, int humano);

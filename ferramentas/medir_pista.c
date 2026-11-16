@@ -1,10 +1,12 @@
 /*
- * medir_interlagos.c
+ * medir_pista.c
  * ------------------------------------------------------------------
- * Mede a pista no modelo recursos/modelos/interlagos.glb e escreve as tabelas
- * de src/interlagos.h: a linha da pista, a largura do asfalto, o perfil do chão,
- * as zebras, a área de escape, o que para o carro de cada lado, o caminho do
- * pit lane e os lugares da torcida.
+ * Mede uma pista no modelo 3D dela (recursos/modelos/interlagos.glb ou
+ * montreal.glb) e escreve as tabelas de src/interlagos.h ou src/montreal.h: a
+ * linha da pista, a largura do asfalto, o perfil do chão, as zebras, a área de
+ * escape, o que para o carro de cada lado, o caminho do pit lane e os lugares da
+ * torcida. O que muda de uma pista para a outra (os materiais, onde começa a
+ * linha, onde fica o pit lane) está em PISTAS, logo abaixo.
  *
  * Usa a raylib só para carregar o modelo (assim os eixos são os mesmos do jogo).
  * O resto é geometria: os triângulos do chão e das barreiras ficam numa grade
@@ -12,9 +14,9 @@
  * de lado atravessa um muro?") olha só as células por onde passa.
  *
  * Uso:
- *   make medir-interlagos
- *   ./build/medir_interlagos recursos/modelos/interlagos.glb src/interlagos.h
- *   ./build/medir_interlagos recursos/modelos/interlagos.glb --sonda x0 z0 x1 z1 n
+ *   make medir-interlagos            (ou make medir-montreal)
+ *   ./build/medir_pista interlagos recursos/modelos/interlagos.glb src/interlagos.h
+ *   ./build/medir_pista montreal recursos/modelos/montreal.glb --sonda x0 z0 x1 z1 n
  * ------------------------------------------------------------------
  */
 
@@ -24,6 +26,7 @@
 #include <math.h>
 #include "raylib.h"
 #include "../src/interlagos_materiais.h"
+#include "../src/montreal_materiais.h"
 
 #define LADO_DA_CELULA     4.0f    /* metros */
 #define PASSO_DA_LINHA     2.0f    /* metros entre dois pontos da tabela */
@@ -33,7 +36,7 @@
 #define MAIOR_MEIA_LARGURA 30.0f
 #define PROCURA_DO_MURO    90.0f   /* metros: além disso, não há o que pare o carro */
 #define PASSO_DO_MURO      0.25f
-#define JANELA_DA_BORDA    20      /* pontos para cada lado: 40 m */
+#define MAIOR_JANELA_DA_BORDA 40   /* pontos para cada lado (cada pista diz a sua: janelaDaBorda) */
 #define FOLGA_DA_BORDA     0.8f    /* metros além da mediana que a borda pode ir */
 #define GRAMA_SEM_MURO     12.0f   /* metros de grama depois do escape, onde não há barreira */
 #define MENOR_LIMITE_SEM_MURO 25.0f
@@ -44,19 +47,103 @@
 /* As distâncias além da borda do asfalto onde a altura do chão é medida */
 static const float DISTANCIAS_DE_FORA[PONTOS_DE_FORA] = { 1.0f, 2.0f, 3.0f, 5.0f, 7.0f, 10.0f, 14.0f, 20.0f, 28.0f, 40.0f, 55.0f, 70.0f, 90.0f };
 
-/* A linha de chegada, no meio do pórtico da largada, e o rumo da reta (para +z) */
-#define LARGADA_X   (-480.0f)
-#define LARGADA_Z   88.0f
-
-/* Um ponto no meio do pit lane, na frente dos boxes */
 #define LARGURA_MINIMA_DO_PIT 2.5f
-#define PIT_X       (-458.0f)
-#define PIT_Z       200.0f
+#define LONGE_DA_LINHA     9.0f    /* metros: assento mais perto da linha da pista que isso está na beira dela */
+#define MAXIMO_NA_LISTA 8
 
 typedef struct {
     Vector3 a, b, c;
     int material;
+    float u, v;        /* o meio do triângulo na imagem (já dentro de 0..1) */
 } Triangulo;
+
+/* O que muda de uma pista para a outra */
+typedef struct {
+    const char *nome;               /* o do arquivo e do "make medir-..." */
+    const char *maiusculo;          /* o das tabelas: TRACADO_<MAIUSCULO>... */
+    const char *titulo;             /* o do comentário do arquivo escrito */
+    const char *arquivoDoModelo;
+    const char *sentido;            /* da corrida, visto de cima */
+    const MaterialDoModelo *materiais;
+    int totalDeMateriais;
+    int paredesInvisiveis;          /* o material que traz as paredes invisíveis do jogo original (0: nenhum) */
+    float alturaDaParedeInvisivel;
+    int borracha;                   /* a borracha do traçado (0: não tem)... */
+    int soComBorracha;              /* ...1: a pista de corrida é só o asfalto embaixo dela; 0: ela só guia a caminhada
+                                       (não deixa a linha seguir reto por uma rota de fuga) */
+    int linhasDaBorda[MAXIMO_NA_LISTA];   /* as linhas brancas da borda, que ficam fora da borracha (0 fecha a lista) */
+    int terrenos[MAXIMO_NA_LISTA];        /* a grama de longe: só vale onde não há outra coisa */
+    int assentos[MAXIMO_NA_LISTA];        /* os materiais dos assentos das arquibancadas */
+    int assentoNaImagem;            /* um material que só é assento numa região da imagem (0: nenhum)... */
+    float assentoU0, assentoU1, assentoV0, assentoV1;   /* ...esta */
+    float torcidaAte;               /* metros da linha da pista: assentos mais longe que isso não contam (0: todos) */
+    float assentoAcimaDoChao;       /* metros: um "assento" mais baixo que isso acima do chão não é de arquibancada (0: todos) */
+    int pisoNaImagem;               /* um material que, nas faces de cima e nesta faixa da imagem, é piso do pit (0: nenhum) */
+    float pisoV0, pisoV1;
+    float largadaX, largadaZ;       /* onde a linha começa (na linha de chegada, ou no meio do pórtico)... */
+    float rumoX, rumoZ;             /* ...e para onde a pista vai dali */
+    float pitX, pitZ, alturaDoPit;  /* um ponto no meio do pit lane, na frente dos boxes, e a altura do chão ali */
+    float pitRumoX, pitRumoZ;       /* para onde o pit lane vai dali, no sentido da corrida */
+    int pitComEscape;               /* 1: o asfalto de escape também é piso do pit (a entrada de Montreal tem remendos dele) */
+    int pitAteEncostar;             /* 1: o pit lane acaba onde, depois de encostar na pista, volta a se afastar (Interlagos);
+                                       0: onde ele entra na pista (em Montreal a saída corre ao lado dela, separada pela tinta) */
+    int janelaDaBorda;              /* pontos para cada lado na mediana das bordas: o asfalto de escape colado na pista
+                                       some se for mais curto que a janela */
+    int pitNaPerpendicular;         /* 1: a tabela do pit é medida em cada ponto da linha da pista, na perpendicular dela
+                                       até as bordas da estrada do pit (em Montreal ela passa reto por fora da chicane,
+                                       e o ponto da pista mais perto da estrada pula de uma ponta da chicane para a outra) */
+    int cortarPelaGrama;            /* 1: onde não há barreira, o carro vai até onde quiser (até PROCURA_DO_MURO): dá para
+                                       sair da pista, voltar por qualquer lugar e cortar caminho pela grama até outro trecho
+                                       (o jogo acha o trecho mais perto: andarNoMundo em carro.c); 0: um pouco além do escape */
+} PistaMedida;
+
+static const PistaMedida PISTAS[] = {
+    {
+        "interlagos", "INTERLAGOS", "Interlagos", "recursos/modelos/interlagos.glb", "anti-horário",
+        MATERIAIS_INTERLAGOS, TOTAL_MATERIAIS_INTERLAGOS, MATERIAL_COM_PAREDES_INVISIVEIS, ALTURA_DA_PAREDE_INVISIVEL,
+        19, 1,                     /* groove: cobre toda a pista de corrida, e só ela */
+        { 166, 177 },              /* roada, roada */
+        { 169, 45 },               /* as fotos de satélite do terreno */
+        { 29, 175, 61, 118 },      /* gstands_seats... */
+        0, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+        0, 0.0f, 0.0f,
+        -480.0f, 88.0f, 0.0f, 1.0f,    /* no meio do pórtico da largada; a reta vai para +z */
+        -458.0f, 200.0f, 16.0f, 0.0f, 1.0f,
+        0, 1,
+        20,                        /* 40 m */
+        0,
+        1,                         /* sem paredes invisíveis na grama */
+    },
+    {
+        "montreal", "MONTREAL", "Montreal", "recursos/modelos/montreal.glb", "horário",
+        MATERIAIS_MONTREAL, TOTAL_MATERIAIS_MONTREAL, 0, 0.0f,
+        MATERIAL_DA_BORRACHA_DE_MONTREAL, 0,   /* a borracha só cobre o meio: a pista é o asfalto com as linhas */
+        { 0 },
+        { 0 },
+        { 0 },
+        MATERIAL_DOS_PREDIOS_DE_MONTREAL, MONTREAL_ASSENTO_U0, MONTREAL_ASSENTO_U1, MONTREAL_ASSENTO_V0, MONTREAL_ASSENTO_V1,
+        150.0f,
+        1.5f,                      /* a mesma região da imagem pinta umas peças rentes ao chão, na beira da pista */
+        MATERIAL_DOS_PREDIOS_DE_MONTREAL, MONTREAL_PISO_V0, MONTREAL_PISO_V1,   /* o pit lane e a frente das garagens */
+        225.28f, 613.44f, 0.208f, 0.978f,    /* na faixa branca da chegada, pintada no asfalto */
+        215.0f, 490.0f, 2.7f, 0.208f, 0.978f,
+        1, 0,
+        40,                        /* 80 m: o escape da curva 1 e o do grampo são compridos */
+        1,
+        0,                         /* a ilha: além do que não tem muro há a água */
+    },
+};
+
+static const PistaMedida *pista;   /* a que está sendo medida */
+
+static int naLista(const int *lista, int material) {
+    for (int i = 0; i < MAXIMO_NA_LISTA && lista[i] != 0; i++) {
+        if (lista[i] == material) {
+            return 1;
+        }
+    }
+    return 0;
+}
 
 typedef struct {
     float x0, z0;
@@ -93,7 +180,7 @@ static void celulasDoTriangulo(const Grade *g, const Triangulo *t, int *c0, int 
 }
 
 /* Junta os triângulos dos materiais que "servem" e espalha cada um pelas células que ele cobre */
-static void montarGrade(Grade *g, Model *modelo, int (*serve)(int material)) {
+static void montarGrade(Grade *g, Model *modelo, int (*serve)(int material), int (*fica)(const Triangulo *t)) {
     g->total = 0;
     int capacidade = 0;
     for (int m = 0; m < modelo->meshCount; m++) {
@@ -122,14 +209,27 @@ static void montarGrade(Grade *g, Model *modelo, int (*serve)(int material)) {
                 ymin = fminf(ymin, v[k]->y);
                 ymax = fmaxf(ymax, v[k]->y);
             }
-            if (material == MATERIAL_COM_PAREDES_INVISIVEIS && ymax - ymin > ALTURA_DA_PAREDE_INVISIVEL) {
+            if (pista->paredesInvisiveis != 0 && material == pista->paredesInvisiveis
+                && ymax - ymin > pista->alturaDaParedeInvisivel) {
                 continue;   /* parede invisível do jogo original */
+            }
+            novo->u = novo->v = 0.0f;
+            if (malha->texcoords != NULL) {
+                for (int k = 0; k < 3; k++) {
+                    novo->u += malha->texcoords[i[k] * 2] / 3.0f;
+                    novo->v += malha->texcoords[i[k] * 2 + 1] / 3.0f;
+                }
+                novo->u -= floorf(novo->u);
+                novo->v -= floorf(novo->v);
+            }
+            novo->material = material;
+            if (fica != NULL && !fica(novo)) {
+                continue;
             }
             for (int k = 0; k < 3; k++) {
                 xmin = fminf(xmin, v[k]->x); xmax = fmaxf(xmax, v[k]->x);
                 zmin = fminf(zmin, v[k]->z); zmax = fmaxf(zmax, v[k]->z);
             }
-            novo->material = material;
             g->total++;
         }
     }
@@ -167,32 +267,64 @@ static void montarGrade(Grade *g, Model *modelo, int (*serve)(int material)) {
     free(conta);
 }
 
-static int ehChao(int material) {
-    if (material <= 0 || material >= TOTAL_MATERIAIS_INTERLAGOS) {
-        return 0;
+static ChaoDoMaterial chaoDoMaterial(int material) {
+    if (material <= 0 || material >= pista->totalDeMateriais) {
+        return CHAO_NENHUM;
     }
-    ChaoDoMaterial c = MATERIAIS_INTERLAGOS[material].chao;
+    if (pista->pisoNaImagem != 0 && material == pista->pisoNaImagem) {
+        return CHAO_PIT;   /* só as faces que ficaNoPiso deixou entrar na grade */
+    }
+    return pista->materiais[material].chao;
+}
+
+/* O material de pisoNaImagem só é chão nas faces de cima, na faixa dele na imagem */
+static int ficaNoPiso(const Triangulo *t) {
+    if (pista->pisoNaImagem == 0 || t->material != pista->pisoNaImagem) {
+        return 1;
+    }
+    Vector3 e1 = { t->b.x - t->a.x, t->b.y - t->a.y, t->b.z - t->a.z };
+    Vector3 e2 = { t->c.x - t->a.x, t->c.y - t->a.y, t->c.z - t->a.z };
+    Vector3 n = { e1.y * e2.z - e1.z * e2.y, e1.z * e2.x - e1.x * e2.z, e1.x * e2.y - e1.y * e2.x };
+    float comprimento = sqrtf(n.x * n.x + n.y * n.y + n.z * n.z);
+    return comprimento > 1e-6f && fabsf(n.y) / comprimento > 0.9f && t->v >= pista->pisoV0 && t->v < pista->pisoV1;
+}
+
+static int ehChao(int material) {
+    ChaoDoMaterial c = chaoDoMaterial(material);
     return c != CHAO_NENHUM && c != CHAO_MURO;
 }
 
 static int ehBarreira(int material) {
-    return material > 0 && material < TOTAL_MATERIAIS_INTERLAGOS && MATERIAIS_INTERLAGOS[material].chao == CHAO_MURO;
+    return chaoDoMaterial(material) == CHAO_MURO;
 }
 
-/* A borracha do traçado cobre toda a pista de corrida, e só ela (o pit lane não tem) */
-#define MATERIAL_DA_BORRACHA 19
+
+
+/* A borracha do traçado (em Interlagos) cobre toda a pista de corrida, e só ela (o pit lane não tem) */
 static int ehBorracha(int material) {
-    return material == MATERIAL_DA_BORRACHA;
+    return pista->borracha != 0 && material == pista->borracha;
 }
 
 /* As linhas brancas da borda da pista ficam fora da borracha */
 static int ehLinhaDaBorda(int material) {
-    return material == 166 || material == 177;
+    return naLista(pista->linhasDaBorda, material);
 }
 
-/* Os lugares da torcida: os assentos das arquibancadas */
+/* A grama de longe (a foto do terreno) */
+static int ehTerreno(int material) {
+    return naLista(pista->terrenos, material);
+}
+
+/* Os lugares da torcida: os assentos das arquibancadas (ou a parte da imagem dos prédios que é assento) */
 static int ehAssento(int material) {
-    return material == 29 || material == 175 || material == 61 || material == 118;
+    return naLista(pista->assentos, material) || (pista->assentoNaImagem != 0 && material == pista->assentoNaImagem);
+}
+
+static int ficaNoAssento(const Triangulo *t) {
+    if (pista->assentoNaImagem == 0 || t->material != pista->assentoNaImagem) {
+        return 1;
+    }
+    return t->u >= pista->assentoU0 && t->u < pista->assentoU1 && t->v >= pista->assentoV0 && t->v < pista->assentoV1;
 }
 
 /* ==================================================================
@@ -231,15 +363,15 @@ static Embaixo chaoEm(float x, float z, float teto) {
             continue;
         }
         /* A grama de longe (a foto do terreno) só vale onde não há outra coisa */
-        int ehTerreno = (t->material == 169 || t->material == 45);
-        if (e.achou && ehTerreno && fabsf(y - e.y) < 3.0f) {
+        int terreno = ehTerreno(t->material);
+        if (e.achou && terreno && fabsf(y - e.y) < 3.0f) {
             continue;
         }
-        if (!e.achou || y > e.y || (fabsf(y - e.y) < 3.0f && (e.material == 169 || e.material == 45))) {
+        if (!e.achou || y > e.y || (fabsf(y - e.y) < 3.0f && ehTerreno(e.material))) {
             e.achou = 1;
             e.y = y;
             e.material = t->material;
-            e.chao = MATERIAIS_INTERLAGOS[t->material].chao;
+            e.chao = chaoDoMaterial(t->material);
         }
     }
     return e;
@@ -247,6 +379,9 @@ static Embaixo chaoEm(float x, float z, float teto) {
 
 /* Tem borracha do traçado em cima deste ponto, perto da altura dada? */
 static int temBorracha(float x, float z, float altura) {
+    if (pista->borracha == 0) {
+        return 0;
+    }
     int c, l;
     if (!naGrade(&borracha, x, z, &c, &l)) {
         return 0;
@@ -329,10 +464,11 @@ typedef struct {
 static Ponto2 linha[MAXIMO_DE_PONTOS];
 static int totalDaLinha = 0;
 
-/* A pista de corrida: asfalto com a borracha do traçado por cima */
+/* A pista de corrida: asfalto (em Interlagos, com a borracha do traçado por cima) */
 static int ehAsfalto(float x, float z, float alturaPerto) {
     Embaixo e = chaoEm(x, z, alturaPerto + 4.0f);
-    return e.achou && e.chao == CHAO_PISTA && fabsf(e.y - alturaPerto) < 4.0f && temBorracha(x, z, e.y);
+    return e.achou && e.chao == CHAO_PISTA && fabsf(e.y - alturaPerto) < 4.0f
+           && (!pista->soComBorracha || temBorracha(x, z, e.y));
 }
 
 /* Quanto o asfalto vai para um lado, a partir de (x, z), na direção (dx, dz): até onde vai a
@@ -361,13 +497,13 @@ static float ateABorda(float x, float z, float dx, float dz, float altura) {
 
 /*
  * andarPelaPista
- * Começa na linha de chegada, olhando para +z, e anda de 2 em 2 metros: a cada
+ * Começa na linha de chegada, olhando para a reta, e anda de 2 em 2 metros: a cada
  * passo acha as duas bordas do asfalto, corrige o ponto para o meio delas e
  * aponta para onde a pista vai. Para quando volta à largada.
  */
 static void andarPelaPista(void) {
-    float x = LARGADA_X, z = LARGADA_Z;
-    float fx = 0.0f, fz = 1.0f;
+    float x = pista->largadaX, z = pista->largadaZ;
+    float fx = pista->rumoX / hypotf(pista->rumoX, pista->rumoZ), fz = pista->rumoZ / hypotf(pista->rumoX, pista->rumoZ);
     float altura = chaoEm(x, z, 1000.0f).y;
     float andou = 0.0f;
     float larguraDireita = 8.0f, larguraEsquerda = 8.0f;
@@ -392,6 +528,19 @@ static void andarPelaPista(void) {
         }
         float meio = (direita - esquerda) * 0.5f;
         meio = fmaxf(fminf(meio, CORRECAO_MAXIMA), -CORRECAO_MAXIMA);
+        if (pista->borracha != 0 && !pista->soComBorracha && !temBorracha(x + rx * meio, z + rz * meio, altura)) {
+            /* Saiu da borracha (seguindo reto por uma rota de fuga, onde a pista vira): volta para ela, de lado */
+            for (float lado = PASSO_DE_LADO; lado < MAIOR_MEIA_LARGURA; lado += PASSO_DE_LADO) {
+                if (temBorracha(x + rx * lado, z + rz * lado, altura)) {
+                    meio = lado;
+                    break;
+                }
+                if (temBorracha(x - rx * lado, z - rz * lado, altura)) {
+                    meio = -lado;
+                    break;
+                }
+            }
+        }
         larguraDireita = 0.8f * larguraDireita + 0.2f * (direita - meio);
         larguraEsquerda = 0.8f * larguraEsquerda + 0.2f * (esquerda + meio);
         x += rx * meio;
@@ -567,12 +716,13 @@ static float mediana(float *valores, int n) {
  */
 static void filtrarBordas(float *borda, int n) {
     static float copia[MAXIMO_DE_PONTOS];
-    float janela[2 * JANELA_DA_BORDA + 1];
+    float janela[2 * MAIOR_JANELA_DA_BORDA + 1];
+    int metade = pista->janelaDaBorda;
     for (int i = 0; i < n; i++) {
-        for (int k = -JANELA_DA_BORDA; k <= JANELA_DA_BORDA; k++) {
-            janela[k + JANELA_DA_BORDA] = borda[(i + k + n) % n];
+        for (int k = -metade; k <= metade; k++) {
+            janela[k + metade] = borda[(i + k + n) % n];
         }
-        float m = mediana(janela, 2 * JANELA_DA_BORDA + 1);
+        float m = mediana(janela, 2 * metade + 1);
         copia[i] = (borda[i] > m + FOLGA_DA_BORDA) ? m : borda[i];
     }
     memcpy(borda, copia, sizeof(float) * n);
@@ -620,9 +770,11 @@ static void medirPontos(void) {
         m->escapeDireita = ateOFimDoEscape(m->x, m->z, rx, rz, m->direita, altura, m->muroDireita);
         m->escapeEsquerda = ateOFimDoEscape(m->x, m->z, -rx, -rz, m->esquerda, altura, m->muroEsquerda);
         /* Onde não há barreira, o carro vai até um pouco além do escape, e não atravessa o
-         * gramado até outro trecho da pista */
-        m->muroDireita = fminf(m->muroDireita, fmaxf(m->escapeDireita + GRAMA_SEM_MURO, MENOR_LIMITE_SEM_MURO));
-        m->muroEsquerda = fminf(m->muroEsquerda, fmaxf(m->escapeEsquerda + GRAMA_SEM_MURO, MENOR_LIMITE_SEM_MURO));
+         * gramado até outro trecho da pista (menos onde a pista deixa cortar pela grama) */
+        if (!pista->cortarPelaGrama) {
+            m->muroDireita = fminf(m->muroDireita, fmaxf(m->escapeDireita + GRAMA_SEM_MURO, MENOR_LIMITE_SEM_MURO));
+            m->muroEsquerda = fminf(m->muroEsquerda, fmaxf(m->escapeEsquerda + GRAMA_SEM_MURO, MENOR_LIMITE_SEM_MURO));
+        }
         float ultimoD = m->perfil[PONTOS_DO_PERFIL - 1] + altura, ultimoE = m->perfil[0] + altura;
         for (int k = 0; k < PONTOS_DE_FORA; k++) {
             float sd = m->direita + DISTANCIAS_DE_FORA[k], se = m->esquerda + DISTANCIAS_DE_FORA[k];
@@ -647,10 +799,18 @@ typedef struct {
 static PontoDoPit pit[MAXIMO_DE_PONTOS];
 static int totalDoPit = 0;
 
+/* As bordas da estrada do pit no mundo, na mesma ordem de "pit": a do lado da pista e a de fora */
+typedef struct {
+    Ponto2 dentro, fora;
+} BordasDoPit;
+static BordasDoPit bordasDoPit[MAXIMO_DE_PONTOS];
+static float alturaDoPit[MAXIMO_DE_PONTOS];
+static int totalDaEstrada = 0;   /* os pontos de bordasDoPit (a caminhada), que pitNaPerpendicular não muda */
+
 static int ehPisoDoPit(float x, float z, float alturaPerto) {
     Embaixo e = chaoEm(x, z, alturaPerto + 3.0f);
-    return e.achou && (e.chao == CHAO_PISTA || e.chao == CHAO_PIT) && fabsf(e.y - alturaPerto) < 3.0f
-           && !temBorracha(x, z, e.y);
+    return e.achou && (e.chao == CHAO_PISTA || e.chao == CHAO_PIT || (pista->pitComEscape && e.chao == CHAO_ESCAPE))
+           && fabsf(e.y - alturaPerto) < 3.0f && !temBorracha(x, z, e.y);
 }
 
 static float ateABordaDoPit(float x, float z, float dx, float dz, float altura) {
@@ -703,12 +863,16 @@ static void naPista(float x, float z, int *indice, float *metros, float *lateral
  */
 static void andarPeloPit(void) {
     static PontoDoPit ida[MAXIMO_DE_PONTOS], volta[MAXIMO_DE_PONTOS];
+    static BordasDoPit bordasDaIda[MAXIMO_DE_PONTOS], bordasDaVolta[MAXIMO_DE_PONTOS];
+    BordasDoPit *bordasDaSaida[2] = { bordasDaVolta, bordasDaIda };
+    static float alturasDaIda[MAXIMO_DE_PONTOS], alturasDaVolta[MAXIMO_DE_PONTOS];
     int totais[2] = { 0, 0 };
     PontoDoPit *saida[2] = { volta, ida };
     float n = (float) totalDaLinha;
     for (int sentido = 0; sentido < 2; sentido++) {
-        float x = PIT_X, z = PIT_Z, fz = sentido ? 1.0f : -1.0f, fx = 0.0f;
-        float altura = alturaEm(x, z, 16.0f);
+        float rumo = hypotf(pista->pitRumoX, pista->pitRumoZ), sinal = sentido ? 1.0f : -1.0f;
+        float x = pista->pitX, z = pista->pitZ, fx = sinal * pista->pitRumoX / rumo, fz = sinal * pista->pitRumoZ / rumo;
+        float altura = alturaEm(x, z, pista->alturaDoPit);
         float largD = 6.0f, largE = 6.0f;
         int indice = -1;
         int encostou = 0;
@@ -753,7 +917,7 @@ static void andarPeloPit(void) {
             float metros, lateral;
             naPista(x, z, &indice, &metros, &lateral);
             /* O pit lane fica à esquerda da pista: as bordas, em distância para a esquerda */
-            /* Andando para +z, a pista fica à direita; para -z, à esquerda */
+            /* Andando no sentido da corrida, a pista fica à direita; no contrário, à esquerda */
             float paraAPista = sentido ? largD : largE, paraFora = sentido ? largE : largD;
             float bordaDentro = -lateral - paraAPista;
             float bordaFora = -lateral + paraFora;
@@ -763,11 +927,21 @@ static void andarPeloPit(void) {
             /* Encostado na pista (só a linha pintada entre os dois), o pit lane está na ponta:
              * se dali ele volta a se afastar, a caminhada entrou em outra rua */
             float bordaDaPista = medidas[indice].esquerda;
-            if (bordaDentro < bordaDaPista + 1.5f) {
+            if (!pista->pitAteEncostar) {
+                if (bordaDentro < bordaDaPista - 0.5f) {
+                    break;   /* o pit lane já entrou na pista */
+                }
+            } else if (bordaDentro < bordaDaPista + 1.5f) {
                 encostou = 1;
             } else if (encostou && bordaDentro > bordaDaPista + 3.0f) {
                 break;
             }
+            /* A borda do lado da pista fica à direita de quem anda no sentido da corrida */
+            BordasDoPit *bordas = &bordasDaSaida[sentido][totais[sentido]];
+            Ponto2 aDireita = { x + rx * largD, z + rz * largD }, aEsquerda = { x - rx * largE, z - rz * largE };
+            bordas->dentro = sentido ? aDireita : aEsquerda;
+            bordas->fora = sentido ? aEsquerda : aDireita;
+            (sentido ? alturasDaIda : alturasDaVolta)[totais[sentido]] = altura;
             PontoDoPit *novo = &saida[sentido][totais[sentido]++];
             novo->metros = metros;
             novo->dentro = bordaDentro;
@@ -792,12 +966,70 @@ static void andarPeloPit(void) {
     /* Junta: a volta (de trás para a frente) e depois a ida */
     totalDoPit = 0;
     for (int i = totais[0] - 1; i >= 1; i--) {
+        bordasDoPit[totalDoPit] = bordasDaVolta[i];
+        alturaDoPit[totalDoPit] = alturasDaVolta[i];
         pit[totalDoPit++] = volta[i];
     }
     for (int i = 0; i < totais[1]; i++) {
+        bordasDoPit[totalDoPit] = bordasDaIda[i];
+        alturaDoPit[totalDoPit] = alturasDaIda[i];
         pit[totalDoPit++] = ida[i];
     }
+    totalDaEstrada = totalDoPit;
     fprintf(stderr, "pit lane: %d pontos, de %.0f m a %.0f m\n", totalDoPit, pit[0].metros, pit[totalDoPit - 1].metros);
+}
+
+/* Onde o raio de (ox, oz) na direção (dx, dz) corta a linha "borda" (dentro ou fora): a distância, ou -1 */
+static float raioNaBorda(float ox, float oz, float dx, float dz, int fora) {
+    float melhor = -1.0f;
+    for (int i = 0; i + 1 < totalDoPit; i++) {
+        Ponto2 a = fora ? bordasDoPit[i].fora : bordasDoPit[i].dentro;
+        Ponto2 b = fora ? bordasDoPit[i + 1].fora : bordasDoPit[i + 1].dentro;
+        float ex = b.x - a.x, ez = b.z - a.z;
+        float det = dx * (-ez) - dz * (-ex);
+        if (fabsf(det) < 1e-6f) {
+            continue;
+        }
+        float qx = a.x - ox, qz = a.z - oz;
+        float t = (qx * (-ez) - qz * (-ex)) / det;   /* ao longo do raio */
+        float u = (dx * qz - dz * qx) / det;         /* ao longo do trecho da borda */
+        if (t > 0.0f && u >= 0.0f && u <= 1.0f && (melhor < 0.0f || t < melhor)) {
+            melhor = t;
+        }
+    }
+    return melhor;
+}
+
+/*
+ * pitNaPerpendicular
+ * Refaz a tabela do pit a partir da pista: em cada ponto da linha entre a entrada e a saída que a
+ * caminhada achou, um raio para a esquerda, na perpendicular, até as duas bordas da estrada do pit.
+ */
+static void pitNaPerpendicular(void) {
+    int n = totalDaLinha;
+    float volta = n * PASSO_DA_LINHA;
+    int primeiro = (int) floorf(pit[0].metros / PASSO_DA_LINHA), ultimo = (int) ceilf(pit[totalDoPit - 1].metros / PASSO_DA_LINHA);
+    static PontoDoPit refeito[MAXIMO_DE_PONTOS];
+    int total = 0;
+    for (int k = primeiro; k <= ultimo && total < MAXIMO_DE_PONTOS; k++) {
+        int i = ((k % n) + n) % n;
+        Medida *a = &medidas[(i - 1 + n) % n], *b = &medidas[(i + 1) % n];
+        float fx = b->x - a->x, fz = b->z - a->z, f = hypotf(fx, fz);
+        float ex = fz / f, ez = -fx / f;   /* a esquerda de quem olha para a frente */
+        float dentro = raioNaBorda(medidas[i].x, medidas[i].z, ex, ez, 0);
+        float fora = raioNaBorda(medidas[i].x, medidas[i].z, ex, ez, 1);
+        if (dentro < 0.0f || fora < 0.0f || fora <= dentro) {
+            continue;
+        }
+        float metros = k * PASSO_DA_LINHA;
+        if (metros > volta * 0.5f) {
+            metros -= volta;
+        }
+        refeito[total++] = (PontoDoPit){ metros, dentro, fora };
+    }
+    memcpy(pit, refeito, sizeof(PontoDoPit) * total);
+    totalDoPit = total;
+    fprintf(stderr, "pit lane na perpendicular: %d pontos, de %.0f m a %.0f m\n", totalDoPit, pit[0].metros, pit[totalDoPit - 1].metros);
 }
 
 /* ==================================================================
@@ -810,6 +1042,40 @@ typedef struct {
 
 static Lugar *lugares = NULL;
 static int totalDeLugares = 0;
+
+/* O assento está a menos de torcidaAte metros da linha da pista? (os prédios longe também têm degraus) */
+static int pertoDaPista(float x, float z) {
+    if (pista->torcidaAte <= 0.0f) {
+        return 1;
+    }
+    float limite = pista->torcidaAte * pista->torcidaAte;
+    for (int i = 0; i < totalDaLinha; i++) {
+        float dx = medidas[i].x - x, dz = medidas[i].z - z;
+        if (dx * dx + dz * dz < limite) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* O assento está alto o bastante acima do chão para ser de uma arquibancada? */
+static int altoDoChao(float x, float y, float z) {
+    if (pista->assentoAcimaDoChao <= 0.0f) {
+        return 1;
+    }
+    Embaixo e = chaoEm(x, z, y + 0.5f);   /* o chão mais alto ali, até um pouco acima do "assento" */
+    if (e.achou && y - e.y < pista->assentoAcimaDoChao) {
+        return 0;
+    }
+    /* E longe do asfalto: nenhuma arquibancada fica a menos de LONGE_DA_LINHA da linha da pista */
+    for (int i = 0; i < totalDaLinha; i++) {
+        float dx = medidas[i].x - x, dz = medidas[i].z - z;
+        if (dx * dx + dz * dz < LONGE_DA_LINHA * LONGE_DA_LINHA) {
+            return 0;
+        }
+    }
+    return 1;
+}
 
 /* Um lugar a cada ~1,6 m dos assentos: o mais alto de cada quadradinho visto de cima */
 static void acharLugaresDaTorcida(void) {
@@ -842,7 +1108,7 @@ static void acharLugaresDaTorcida(void) {
                         float y = u * t->a.y + v * t->b.y + (1 - u - v) * t->c.y;
                         if (y > melhor) melhor = y;
                     }
-                    if (melhor > -1e8f && totalDeLugares < capacidade) {
+                    if (melhor > -1e8f && totalDeLugares < capacidade && pertoDaPista(x, z) && altoDoChao(x, melhor, z)) {
                         lugares[totalDeLugares++] = (Lugar){ x, melhor, z };
                     }
                 }
@@ -863,16 +1129,17 @@ static void escrever(const char *arquivo) {
         exit(1);
     }
     int n = totalDaLinha;
-    fprintf(f, "/*\n * interlagos.h\n * ------------------------------------------------------------------\n");
-    fprintf(f, " * Interlagos medido no modelo recursos/modelos/interlagos.glb, em metros e nos\n");
-    fprintf(f, " * eixos do próprio modelo. GERADO por ferramentas/medir_interlagos.c: não edite\n");
-    fprintf(f, " * à mão; rode \"make medir-interlagos\".\n *\n");
+    const char *N = pista->maiusculo;
+    fprintf(f, "/*\n * %s.h\n * ------------------------------------------------------------------\n", pista->nome);
+    fprintf(f, " * %s medido no modelo %s, em metros e nos\n", pista->titulo, pista->arquivoDoModelo);
+    fprintf(f, " * eixos do próprio modelo. GERADO por ferramentas/medir_pista.c: não edite\n");
+    fprintf(f, " * à mão; rode \"make medir-%s\".\n *\n", pista->nome);
     fprintf(f, " * A linha passa no meio do asfalto, a cada ~%.0f m, a partir da linha de chegada\n", PASSO_DA_LINHA);
-    fprintf(f, " * e no sentido da corrida (anti-horário).\n");
+    fprintf(f, " * e no sentido da corrida (%s).\n", pista->sentido);
     fprintf(f, " * ------------------------------------------------------------------\n */\n\n");
-    fprintf(f, "#ifndef INTERLAGOS_H\n#define INTERLAGOS_H\n\n#include \"tracado.h\"\n\n");
+    fprintf(f, "#ifndef %s_H\n#define %s_H\n\n#include \"tracado.h\"\n\n", N, N);
 
-    fprintf(f, "static const PontoDoTracado TRACADO_INTERLAGOS[] = {\n");
+    fprintf(f, "static const PontoDoTracado TRACADO_%s[] = {\n", N);
     for (int i = 0; i < n; i++) {
         Medida *m = &medidas[i];
         fprintf(f, "    { %9.3ff, %9.3ff, %6.3ff, %6.3ff, %8.3ff, {", m->x, m->z, m->direita, m->esquerda, m->altura);
@@ -881,17 +1148,17 @@ static void escrever(const char *arquivo) {
         }
         fprintf(f, " } },\n");
     }
-    fprintf(f, "};\n#define TOTAL_PONTOS_INTERLAGOS (int) (sizeof(TRACADO_INTERLAGOS) / sizeof(TRACADO_INTERLAGOS[0]))\n\n");
+    fprintf(f, "};\n#define TOTAL_PONTOS_%s (int) (sizeof(TRACADO_%s) / sizeof(TRACADO_%s[0]))\n\n", N, N, N);
 
     fprintf(f, "/* Até o que para o carro (muro, guard-rail, pneus), em metros da linha: { direita, esquerda } */\n");
-    fprintf(f, "static const float LIMITES_INTERLAGOS[][2] = {\n");
+    fprintf(f, "static const float LIMITES_%s[][2] = {\n", N);
     for (int i = 0; i < n; i++) {
         fprintf(f, "    { %6.2ff, %6.2ff },\n", medidas[i].muroDireita, medidas[i].muroEsquerda);
     }
     fprintf(f, "};\n\n");
 
     fprintf(f, "/* O que fica além da borda do asfalto, em metros da linha */\n");
-    fprintf(f, "static const BordaDoTracado BORDAS_INTERLAGOS[] = {\n");
+    fprintf(f, "static const BordaDoTracado BORDAS_%s[] = {\n", N);
     for (int i = 0; i < n; i++) {
         Medida *m = &medidas[i];
         fprintf(f, "    { %6.2ff, %6.2ff, %6.2ff, %6.2ff, {", m->zebraDireita, m->zebraEsquerda, m->escapeDireita, m->escapeEsquerda);
@@ -904,18 +1171,31 @@ static void escrever(const char *arquivo) {
 
     fprintf(f, "/* O pit lane, da entrada à saída: { metros desde a linha (antes dela, negativo),\n");
     fprintf(f, " * metros da linha da pista até a borda do pit lane do lado da pista, até a outra borda } */\n");
-    fprintf(f, "static const float PIT_INTERLAGOS[][3] = {\n");
+    fprintf(f, "static const float PIT_%s[][3] = {\n", N);
     for (int i = 0; i < totalDoPit; i++) {
         fprintf(f, "    { %8.2ff, %6.2ff, %6.2ff },\n", pit[i].metros, pit[i].dentro, pit[i].fora);
     }
-    fprintf(f, "};\n#define TOTAL_PONTOS_PIT_INTERLAGOS (int) (sizeof(PIT_INTERLAGOS) / sizeof(PIT_INTERLAGOS[0]))\n\n");
+    fprintf(f, "};\n#define TOTAL_PONTOS_PIT_%s (int) (sizeof(PIT_%s) / sizeof(PIT_%s[0]))\n\n", N, N, N);
+
+    if (pista->pitNaPerpendicular) {
+        /* A faixa rápida da estrada do pit no mundo, da entrada à saída (onde ela passa longe da pista, por dentro
+         * de uma curva fechada, a perpendicular da linha não chega nela: o jogo desenha o carro por aqui) */
+        fprintf(f, "/* A faixa rápida da estrada do pit, no mundo, da entrada à saída: { x, altura, z } */\n");
+        fprintf(f, "static const float ESTRADA_DO_PIT_%s[][3] = {\n", N);
+        for (int i = 0; i < totalDaEstrada; i++) {
+            Ponto2 d = bordasDoPit[i].dentro, o = bordasDoPit[i].fora;
+            float largura = hypotf(o.x - d.x, o.z - d.z), t = (largura > 0.01f) ? fminf(2.5f / largura, 0.5f) : 0.5f;
+            fprintf(f, "    { %8.2ff, %6.2ff, %8.2ff },\n", d.x + (o.x - d.x) * t, alturaDoPit[i], d.z + (o.z - d.z) * t);
+        }
+        fprintf(f, "};\n#define TOTAL_PONTOS_DA_ESTRADA_DO_PIT_%s (int) (sizeof(ESTRADA_DO_PIT_%s) / sizeof(ESTRADA_DO_PIT_%s[0]))\n\n", N, N, N);
+    }
 
     fprintf(f, "/* Os assentos das arquibancadas do modelo */\n");
-    fprintf(f, "static const LugarNaTorcida TORCIDA_INTERLAGOS[] = {\n");
+    fprintf(f, "static const LugarNaTorcida TORCIDA_%s[] = {\n", N);
     for (int i = 0; i < totalDeLugares; i++) {
         fprintf(f, "    { %8.2ff, %7.2ff, %8.2ff },\n", lugares[i].x, lugares[i].y, lugares[i].z);
     }
-    fprintf(f, "};\n#define TOTAL_TORCIDA_INTERLAGOS (int) (sizeof(TORCIDA_INTERLAGOS) / sizeof(TORCIDA_INTERLAGOS[0]))\n\n");
+    fprintf(f, "};\n#define TOTAL_TORCIDA_%s (int) (sizeof(TORCIDA_%s) / sizeof(TORCIDA_%s[0]))\n\n", N, N, N);
     fprintf(f, "#endif\n");
     fclose(f);
 }
@@ -934,35 +1214,47 @@ static void sondar(float x0, float z0, float x1, float z1, int n) {
 }
 
 int main(int argc, char **argv) {
-    if (argc < 3) {
-        fprintf(stderr, "uso: %s modelo.glb saida.h | --sonda x0 z0 x1 z1 n\n", argv[0]);
+    if (argc < 4) {
+        fprintf(stderr, "uso: %s pista modelo.glb saida.h | --sonda x0 z0 x1 z1 n\n", argv[0]);
+        return 1;
+    }
+    for (int i = 0; i < (int) (sizeof(PISTAS) / sizeof(PISTAS[0])); i++) {
+        if (strcmp(argv[1], PISTAS[i].nome) == 0) {
+            pista = &PISTAS[i];
+        }
+    }
+    if (pista == NULL) {
+        fprintf(stderr, "não conheço a pista \"%s\"\n", argv[1]);
         return 1;
     }
     SetTraceLogLevel(LOG_WARNING);
     SetConfigFlags(FLAG_WINDOW_HIDDEN);
-    InitWindow(64, 64, "medir_interlagos");
-    Model modelo = LoadModel(argv[1]);
-    if (modelo.materialCount != TOTAL_MATERIAIS_INTERLAGOS) {
-        fprintf(stderr, "o modelo tem %d materiais; interlagos_materiais.h espera %d\n", modelo.materialCount,
-                TOTAL_MATERIAIS_INTERLAGOS);
+    InitWindow(64, 64, "medir_pista");
+    Model modelo = LoadModel(argv[2]);
+    if (modelo.materialCount != pista->totalDeMateriais) {
+        fprintf(stderr, "o modelo tem %d materiais; a tabela de %s espera %d\n", modelo.materialCount, pista->nome,
+                pista->totalDeMateriais);
         return 1;
     }
-    montarGrade(&chao, &modelo, ehChao);
-    montarGrade(&barreiras, &modelo, ehBarreira);
-    montarGrade(&assentos, &modelo, ehAssento);
-    montarGrade(&borracha, &modelo, ehBorracha);
+    montarGrade(&chao, &modelo, ehChao, ficaNoPiso);
+    montarGrade(&barreiras, &modelo, ehBarreira, NULL);
+    montarGrade(&assentos, &modelo, ehAssento, ficaNoAssento);
+    montarGrade(&borracha, &modelo, ehBorracha, NULL);
     fprintf(stderr, "chao: %d triangulos, barreiras: %d, assentos: %d\n", chao.total, barreiras.total, assentos.total);
 
-    if (strcmp(argv[2], "--sonda") == 0 && argc >= 8) {
-        sondar(atof(argv[3]), atof(argv[4]), atof(argv[5]), atof(argv[6]), atoi(argv[7]));
+    if (strcmp(argv[3], "--sonda") == 0 && argc >= 9) {
+        sondar(atof(argv[4]), atof(argv[5]), atof(argv[6]), atof(argv[7]), atoi(argv[8]));
         return 0;
     }
     andarPelaPista();
     suavizarEReamostrar();
     medirPontos();
     andarPeloPit();
+    if (pista->pitNaPerpendicular) {
+        pitNaPerpendicular();
+    }
     acharLugaresDaTorcida();
-    escrever(argv[2]);
-    fprintf(stderr, "escrito: %s\n", argv[2]);
+    escrever(argv[3]);
+    fprintf(stderr, "escrito: %s\n", argv[3]);
     return 0;
 }

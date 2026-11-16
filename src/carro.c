@@ -34,6 +34,7 @@
 
 #include <string.h>
 #include <math.h>
+#include <stdlib.h>
 #include "carro.h"
 
 #define FORCA_FREIO             6000.0f  /* quanto a velocidade cai por segundo freando (~5 g, como um F1) */
@@ -98,6 +99,9 @@
 #define MAIOR_RUMO_DE_RE          80.0f    /* graus: dá para virar o carro quase de lado */
 #define ALINHANDO_DEPOIS_DA_RE    0.5f     /* segundos: andando para a frente, o bico volta a seguir a pista */
 #define PASSOS_PROCURANDO_NA_LINHA 200     /* segmentos: procurando onde o carro está */
+#define LONGE_DA_PISTA_PARA_PROCURAR 10.0f /* metros além da borda: daqui em diante, procura o trecho mais perto */
+#define MAIS_PERTO_PARA_TROCAR     0.8f    /* o outro trecho tem que estar bem mais perto (não troca de um para o outro) */
+#define MESMO_TRECHO_EM_SEGMENTOS  40      /* segmentos (~67 m): mais perto que isso na linha, é o mesmo trecho */
 #define FOLGA_DA_CONTA_NO_LIMITE  0.01f    /* metros */
 #define VOLANTE_PARA_SAIR_DO_LIMITE 0.1f
 #define GIRO_SAINDO_DO_LIMITE     120.0f   /* graus por segundo: manobrando para sair do limite */
@@ -969,6 +973,16 @@ void meiasMedidasDoCarro(const Carro *carro, float *meioComprimento, float *meia
  * Recebe: o carro.
  * Devolve: o quanto o pneu segura na curva, sem a direção guiada, em metros por segundo ao quadrado.
  */
+/*
+ * aceleracaoDoMotor
+ * Recebe: o carro e uma velocidade (unidades por segundo).
+ * Devolve: quanto o motor acelera nela, de pé embaixo e sem trocar de marcha (unidades por segundo ao quadrado).
+ */
+float aceleracaoDoMotor(const Carro *carro, float velocidade) {
+    float proporcao = velocidade / carro->velocidadeMaxima;
+    return carro->aceleracao * FORCA_DA_ARRANCADA * (1.0f - PERDA_NA_MAXIMA * proporcao * proporcao);
+}
+
 float aceleracaoDeCurva(const Carro *carro) {
     return ACELERACAO_DE_CURVA_BASE + ACELERACAO_DE_CURVA_NO_PNEU * aderenciaAtual(carro);
 }
@@ -985,6 +999,75 @@ static float erroAoLongo(const Segmento *a, float t, float x, float z) {
     float rumo = (a->rumo + mudou * t) * 0.0174533f;
     float cx = a->xMundo + (b->xMundo - a->xMundo) * t, cz = a->zMundo + (b->zMundo - a->zMundo) * t;
     return (x - cx) * sinf(rumo) - (z - cz) * cosf(rumo);
+}
+
+/*
+ * acharNaLinha
+ * O lugar da linha da pista na perpendicular de um ponto, andando pela lista a partir de um segmento (o carro
+ * anda pouco de um quadro para o outro: o lugar fica perto do anterior).
+ * Recebe: o segmento de onde procurar, o ponto e onde guardar o andamento dentro do segmento achado (0 a 1).
+ * Devolve: o segmento.
+ */
+static Segmento *acharNaLinha(Segmento *de, float x, float z, float *t) {
+    Segmento *novo = de;
+    for (int i = 0; i < PASSOS_PROCURANDO_NA_LINHA; i++) {
+        if (erroAoLongo(novo, 0.0f, x, z) < 0.0f) {
+            novo = novo->anterior;
+        } else if (erroAoLongo(novo, 1.0f, x, z) >= 0.0f) {
+            novo = novo->proximo;
+        } else {
+            break;
+        }
+    }
+    float t0 = 0.0f, t1 = 1.0f;
+    for (int i = 0; i < 10; i++) {
+        float meio = (t0 + t1) / 2.0f;
+        if (erroAoLongo(novo, meio, x, z) >= 0.0f) {
+            t0 = meio;
+        } else {
+            t1 = meio;
+        }
+    }
+    *t = (t0 + t1) / 2.0f;
+    return novo;
+}
+
+/*
+ * trechoMaisPerto
+ * Cortando pela grama, o carro pode chegar mais perto de outro trecho da pista que do trecho por onde saiu (o
+ * outro lado de um grampo, a reta do lado). Longe do asfalto, procura na volta toda o ponto da linha mais perto.
+ * Recebe: o segmento achado por perto (acharNaLinha), o andamento nele e o ponto.
+ * Devolve: o segmento de outro trecho bem mais perto do ponto, ou NULL se o carro continua no mesmo.
+ */
+static Segmento *trechoMaisPerto(Segmento *perto, float t, float x, float z) {
+    const Segmento *b = perto->proximo;
+    float cx = perto->xMundo + (b->xMundo - perto->xMundo) * t, cz = perto->zMundo + (b->zMundo - perto->zMundo) * t;
+    float distancia = hypotf(x - cx, z - cz);
+    if (distancia < fmaxf(perto->larguraDireita, perto->larguraEsquerda) + LONGE_DA_PISTA_PARA_PROCURAR) {
+        return NULL;
+    }
+    float melhor = distancia * MAIS_PERTO_PARA_TROCAR;
+    melhor *= melhor;
+    Segmento *achado = NULL;
+    Segmento *s = perto;
+    int total = 0;
+    do {
+        total++;
+        s = s->proximo;
+    } while (s != perto);
+    for (int k = 0; k < total; k++, s = s->proximo) {
+        int longe = abs(s->indice - perto->indice);
+        longe = (longe < total - longe) ? longe : total - longe;
+        if (longe <= MESMO_TRECHO_EM_SEGMENTOS) {
+            continue;
+        }
+        float dx = s->xMundo - x, dz = s->zMundo - z;
+        if (dx * dx + dz * dz < melhor) {
+            melhor = dx * dx + dz * dz;
+            achado = s;
+        }
+    }
+    return achado;
 }
 
 /*
@@ -1112,42 +1195,64 @@ static int andarNoMundo(Carro *carro, float tempoQuadro) {
 
     /* Agora a pista diz onde ele está */
     Segmento *antes = carro->posicao.segmento;
-    Segmento *novo = antes;
-    for (int i = 0; i < PASSOS_PROCURANDO_NA_LINHA; i++) {
-        if (erroAoLongo(novo, 0.0f, x, z) < 0.0f) {
-            novo = novo->anterior;
-        } else if (erroAoLongo(novo, 1.0f, x, z) >= 0.0f) {
-            novo = novo->proximo;
-        } else {
-            break;
-        }
-    }
-    float t0 = 0.0f, t1 = 1.0f;
-    for (int i = 0; i < 10; i++) {
-        float meio = (t0 + t1) / 2.0f;
-        if (erroAoLongo(novo, meio, x, z) >= 0.0f) {
-            t0 = meio;
-        } else {
-            t1 = meio;
-        }
-    }
-    float t = (t0 + t1) / 2.0f;
-
-    /* Da linha de chegada para trás ele não passa, para a volta não contar duas vezes */
-    int total = antes->indice - novo->indice;
-    int voltou = antes->indice < novo->indice && novo->indice - antes->indice > PASSOS_PROCURANDO_NA_LINHA * 2;
-    if (voltou) {
-        novo = antes;
-        t = 0.0f;
-    }
-    int cruzou = total > PASSOS_PROCURANDO_NA_LINHA * 2;
-
-    /* O quanto andou conta na linha, como para todo mundo */
+    float t;
+    Segmento *novo = acharNaLinha(antes, x, z, &t);
     float antesNaLinha = antes->indice * COMPRIMENTO_SEGMENTO + carro->posicao.distanciaNoSegmento;
-    float agoraNaLinha = novo->indice * COMPRIMENTO_SEGMENTO + t * COMPRIMENTO_SEGMENTO;
-    float andou = agoraNaLinha - antesNaLinha;
-    if (cruzou) {
-        andou += (antes->indice + 1) * COMPRIMENTO_SEGMENTO;
+    int cruzou;
+    float andou;
+
+    /* Cortando pela grama até outro trecho, ele passa a contar nesse trecho: não há parede invisível na grama */
+    Segmento *outro = trechoMaisPerto(novo, t, x, z);
+    float tNoOutro = 0.0f;
+    int trocou = 0;
+    if (outro != NULL) {
+        outro = acharNaLinha(outro, x, z, &tNoOutro);
+        int segmentos = 0;
+        const Segmento *s = antes;
+        do {
+            segmentos++;
+            s = s->proximo;
+        } while (s != antes);
+        int paraFrente = (outro->indice - antes->indice + segmentos) % segmentos;
+        int cruzouCortando = outro->indice < antes->indice;
+        /* Para a frente (o corte), contando a volta se ele passou pela linha de chegada; para trás, só sem passar
+         * dela de ré (como andando pela pista) */
+        int adiante = (paraFrente <= segmentos / 2);
+        /* Só do lado de dentro dos muros do outro trecho: um guard-rail dele no caminho continua segurando o carro */
+        const Segmento *depois = outro->proximo;
+        float mudou = depois->rumo - outro->rumo;
+        mudou -= 360.0f * roundf(mudou / 360.0f);
+        float r = (outro->rumo + mudou * tNoOutro) * 0.0174533f;
+        float ox = outro->xMundo + (depois->xMundo - outro->xMundo) * tNoOutro;
+        float oz = outro->zMundo + (depois->zMundo - outro->zMundo) * tNoOutro;
+        float lateralNoOutro = (x - ox) * cosf(r) + (z - oz) * sinf(r);
+        float muroDoOutro = (lateralNoOutro > 0.0f) ? outro->limiteDireita : outro->limiteEsquerda;
+        int dentroDosMuros = muroDoOutro <= 0.0f || fabsf(lateralNoOutro) <= muroDoOutro - FOLGA_DO_MURO;
+        if (dentroDosMuros && (adiante || outro->indice < antes->indice)) {
+            novo = outro;
+            t = tNoOutro;
+            cruzou = adiante && cruzouCortando;
+            float agoraNaLinha = novo->indice * COMPRIMENTO_SEGMENTO + t * COMPRIMENTO_SEGMENTO;
+            andou = agoraNaLinha - antesNaLinha + (cruzou ? (float) segmentos * COMPRIMENTO_SEGMENTO : 0.0f);
+            trocou = 1;
+        }
+    }
+    if (!trocou) {
+        /* Da linha de chegada para trás ele não passa, para a volta não contar duas vezes */
+        int total = antes->indice - novo->indice;
+        int voltou = antes->indice < novo->indice && novo->indice - antes->indice > PASSOS_PROCURANDO_NA_LINHA * 2;
+        if (voltou) {
+            novo = antes;
+            t = 0.0f;
+        }
+        cruzou = total > PASSOS_PROCURANDO_NA_LINHA * 2;
+
+        /* O quanto andou conta na linha, como para todo mundo */
+        float agoraNaLinha = novo->indice * COMPRIMENTO_SEGMENTO + t * COMPRIMENTO_SEGMENTO;
+        andou = agoraNaLinha - antesNaLinha;
+        if (cruzou) {
+            andou += (antes->indice + 1) * COMPRIMENTO_SEGMENTO;
+        }
     }
     carro->distanciaPercorrida += andou;
     atualizarDesgaste(carro, fabsf(andou));
@@ -1587,4 +1692,16 @@ float tempoAteVelocidade(const FichaTecnica *ficha, float velocidade) {
         tempo += passo;
     }
     return tempo;
+}
+
+/*
+ * pontoDoCarro
+ * Onde o carro está no mundo. No pit, onde a estrada dele passa longe da pista (Montreal), é na estrada medida
+ * (pontoNoMundoDoPit); a física continua a mesma, na linha da pista.
+ * Recebe: o carro.
+ * Devolve: o ponto.
+ */
+PontoNoMundo pontoDoCarro(const Carro *carro) {
+    return (carro->estadoDoPit != PIT_FORA) ? pontoNoMundoDoPit(carro->posicao, carro->deslocamentoLateral)
+                                            : pontoNoMundo(carro->posicao, carro->deslocamentoLateral);
 }

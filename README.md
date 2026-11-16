@@ -379,7 +379,7 @@ MENU ──> GARAGEM ──> MENU
   │──> COMO JOGAR ──> MENU
   └──(JOGAR)──> CIDADE (passeio.c) ──(pausa: MENU PRINCIPAL)──> MENU
                   │  └──(ENTER na vaga do Mack: o carro sobe a rampa)──> PISTA ──(VOLTAR: desce a rampa)──> CIDADE
-                  │                         └──(IR COM O MACK)──> CIDADE: o Mack parte ──> CORRIDA
+                  │                         └──(CORRER)──────────> CIDADE: o Mack parte ──> CORRIDA
                   └──(o carro desce da carreta)<──┐
 CORRIDA ──(chegada + ENTER)──> RESULTADO ──(ENTER)──┤
    │                              └──(R)──> CORRIDA │
@@ -404,16 +404,21 @@ src/
   main.c           laço do jogo: ler teclado, atualizar, desenhar
   config.h         constantes compartilhadas (TOTAL_VOLTAS, tamanho da tela...)
   pista.c/.h       lista circular duplamente encadeada de segmentos   (fase 1)
+  linha_de_corrida.c/.h  a linha de corrida ideal de cada pista, para o traçado no asfalto
   render.c/.h      câmera, carros e sprites na corrida em 3D
   corte.c/.h       o corte pelo campo de visão: não manda desenhar o que está fora da tela
   mundo.c/.h       cenário 3D: os modelos das pistas e o que o jogo põe em cima deles
   carros3d.c/.h    modelos 3D dos carros, sombras e fotos para os menus
   fumaca.c/.h      fumaça dos pneus e poeira da grama
   noite.c/.h       noite da Copa Pistão: refletores, torcida e flashes
+  holofotes.c/.h   as torres de holofotes das pistas de dia, de noite
   copa_pistao.h    traçado da Copa Pistão, medido no modelo 3D
-  oval.h, splat.h  traçado e lugares da torcida dos outros dois modelos 3D
+  oval.h           traçado e lugares da torcida do Oval
   interlagos.h     traçado, bordas, muros, pit lane e torcida de Interlagos (gerado: veja ferramentas/)
+  montreal.h       o mesmo de Montreal (gerado: veja ferramentas/)
+  materiais_do_modelo.h   os tipos de chão e de desenho dos materiais dos modelos de Interlagos e Montreal
   interlagos_materiais.h  o que é cada material do modelo de Interlagos (chão e jeito de desenhar)
+  montreal_materiais.h    o que é cada material do modelo de Montreal
   tracado.h        o formato dessas tabelas
   carro.c/.h       struct Carro, Comandos e movimento                  (fase 3)
   corrida.c/.h     grid, voltas, colisão, classificação e fim          (fases 3 e 4)
@@ -443,7 +448,9 @@ src/
 testes/
   teste_pista.c    testa pista, carro, corrida, IA e ordenação no terminal
 ferramentas/
-  medir_interlagos.c     mede o modelo de Interlagos e escreve src/interlagos.h (make medir-interlagos)
+  medir_pista.c          mede o modelo de Interlagos ou de Montreal e escreve src/interlagos.h ou src/montreal.h
+                         (make medir-interlagos, make medir-montreal)
+  preparar_montreal.py   prepara o modelo de Montreal baixado: recursos/modelos/montreal.glb (Python com numpy)
   preparar_carros.py     prepara os modelos do Luigi, do Wingo, do Jackson Storm, do Boost e do DJ (Blender)
   preparar_figurantes.py prepara os da Flo, do Ruivo, do Xerife e da Lizzie (Blender)
   montar_mundo_aberto.py monta o mapa do passeio, radiator_springs.glb e .col (Blender)
@@ -560,7 +567,7 @@ uma `habilidade`, de 93% do limite do carro (a pole) a 86% (o último do grid, a
 
 ## Pitstop
 
-Em Interlagos, nos níveis médio e difícil, a parada nos boxes é obrigatória: quem cruza a última bandeirada sem parar é desclassificado. As garagens ficam logo depois da linha de chegada: quem entra no pit na última volta cruza a linha antes de parar, então pare antes dela.
+Com o pit stop obrigatório (o padrão do médio e do difícil), a parada nos boxes é obrigatória: quem cruza a última bandeirada sem parar é desclassificado. As garagens ficam logo depois da linha de chegada: quem entra no pit na última volta cruza a linha antes de parar, então pare antes dela.
 
 - **Entrar:** no fim da Subida dos Boxes, onde acaba o guard-rail da esquerda e começam as faixas brancas que separam o pit lane, com as rodas da esquerda em cima da linha branca (`querEntrarNoPit`). Ali o piloto automático assume, no limite de 100 km/h perto das garagens. A linha de corrida da Subida passa pela esquerda, então só entra quem encosta de propósito na linha (`soEncostadoNaBorda`).
 - **O caminho:** é o pit lane do modelo, medido (`PIT_INTERLAGOS` em `interlagos.h`): passa na frente das garagens, logo depois da linha de chegada, corre por dentro do S do Senna e da Curva do Sol e volta à pista na Reta Oposta. A tabela medida é alisada (média dos vizinhos) e, longe da vaga, o carro anda exatamente por ela, sem atraso; o passo na pista é corrigido para ele andar no mundo o que a velocidade manda (por dentro de uma curva, um metro da linha da pista vale menos), o bico aponta para onde ele andou de verdade (com um giro máximo) e a câmera vem atrás do bico. Chegando ao caminho, o que ainda falta até ele some em um quarto de segundo, em vez de um passo de lado num quadro. Nas curvas do caminho ele anda no máximo na velocidade que as faz com 25 m/s² de lado, freando com calma antes delas, e antes da manobra até a vaga já chega devagar: nada de balanço, câmera de lado ou trancos na saída.
@@ -568,7 +575,18 @@ Em Interlagos, nos níveis médio e difícil, a parada nos boxes é obrigatória
 - **A troca:** cada carro tem uma vaga (as 17 cabem na frente das garagens). Na do jogador, o Guido passa por todas as rodas em 3,2 s (`faseDaTroca` e `lugarDoGuido` em `pitstop.c`, desenho em `render.c`), e a imagem corta para uma câmera ao lado do carro.
 - **Rivais:** cada um para numa volta (`voltaDoPit`) e leva mais tempo na troca que o Guido. No pit lane há fila: quem vem atrás reduz, quem sai da vaga espera passar quem já vem na faixa, e a colisão só separa os carros, sem tranco nem rodada; o carro parado na troca nunca é empurrado.
 
-A Copa Pistão ainda não tem pit lane: lá não há parada.
+Todas as pistas têm pit lane.
+
+**O traçado no asfalto** (a linha que guia o jogador, `render.c`) segue a linha de corrida ideal de cada pista
+(`linha_de_corrida.c`): a de menor curvatura que cabe no asfalto, com 1,4 m de folga das bordas, calculada uma vez por
+pista. Cada ponto dela é puxado muitas vezes para onde a curva em volta fica mais suave (a média dos vizinhos
+(-1, 4, 4, -1)/6), primeiro com vizinhos longe (a forma da curva toda) e depois com os de perto (o detalhe): sai aberta
+na entrada, por dentro no meio da curva e aberta de novo na saída. Do raio dela sai a velocidade de cada ponto (a raiz
+de o que o pneu segura vezes o raio), e a linha olha para a frente com o freio e o motor de verdade do carro: verde
+onde dá para acelerar, amarela onde é para aliviar e vermelha onde é para frear. Quando o jogador precisa dos boxes (ainda
+deve a parada, tem um pneu estourado ou os pneus passaram de 75% de desgaste), a linha fica **azul** do aviso do box
+até o fim da zona de entrada (`querIrParaOBox`), mudando de cor aos poucos em 160 m, e leva até a estrada do pit,
+como nos jogos de F1.
 
 ## Configurações
 
@@ -585,31 +603,85 @@ A posição do carro é medida em relação à pista, então, sem cuidado, ele a
 
 A raylib não tem vibração no macOS, então o jogo fala direto com o sistema de controles da Apple (`src/vibrar_mac.m`). A lógica fica separada e testada em `src/vibracao.c`. Com `make testar-vibracao` dá para sentir cada efeito no controle, sem abrir o jogo. Fora do macOS o jogo não vibra.
 
+A regra é o **silêncio**: no asfalto em linha reta o controle fica quieto, e ele vibra quando há algo a dizer. A
+vibração de antes (a textura do asfalto o tempo todo, as juntas do piso, um toque a cada marcha, o peso da freada)
+ficava ligada 100% do tempo numa corrida, medida com o carro do jogador guiado pela IA; agora, 16 a 17% do tempo,
+e forte (acima de 35%) em menos de 1% dele. Três cuidados:
+
+- **o lado:** a zebra, a grama, o muro, as batidas e o pneu estourado vibram 30% mais na mão do lado em que
+  acontecem (a mão esquerda é o motor grave, a direita o agudo);
+- **a mão se acostuma:** o que dura (a grama, a terra, o ronco do nitro) começa marcado e assenta em ~1,5 s até
+  pouco mais da metade: o começo é o que informa, e o resto não cansa. O drift assenta só um pouco: é para sentir
+  do começo ao fim;
+- **a força é a do que aconteceu:** a batida leve se sente (um raspão de nada, não), a forte bem mais.
+
 | O que acontece | O que se sente |
 |---|---|
-| Asfalto | sempre presente quando o carro anda: textura que cresce com a velocidade, com as juntas do piso de vez em quando |
-| Pneu escorregando | o asfalto some das mãos, o carro flutua, e entra um tremor irregular na mão direita |
-| Drift | tranco quando a traseira solta, o peso na mão de fora da curva, e outro tranco quando o pneu agarra |
-| Nitro | empurrão ao ligar, combustão pulsando enquanto queima, engasgos com o tanque no fim e uma cauda ao apagar |
-| Freada | o peso indo para a frente e, nas freadas fortes, o ABS na mão direita |
+| Asfalto, reto, freando ou trocando de marcha | nada, de propósito: o piloto já sabe |
+| Zebra | os relevos, no ritmo da velocidade (até 13 por segundo), do lado dela |
+| Grama (na corrida); terra, areia e rocha (no mundo aberto) | um chão irregular, do lado dele, que vai assentando |
+| Pneu no limite | um tremor leve e irregular na mão direita (escorregando só um pouco, nada) |
+| Drift | um tranco quando a traseira solta; durante todo o drift, o pneu arrastando de lado (o peso na mão de fora da curva e o tremor da borracha, mais forte quanto mais de lado e mais rápido); e outro toque quando o pneu agarra |
+| Nitro | o empurrão ao ligar, um ronco baixo pulsando que assenta, engasgos com o tanque no fim e uma cauda ao apagar |
 | Arrancada | a roda patinando, na mão direita e no gatilho do acelerador |
-| Zebra e grama | pulsos no ritmo do carro; tremor irregular |
-| Batida, muro, rodada | tranco proporcional à diferença de velocidade; raspar; sacudir |
-| Marchas | um toque a cada troca, maior na reduzida |
-| Boxes | o macaco subindo e descendo, e a pistola do Guido em cada roda |
-| Largada e chegada | um toque a cada número, e um tranco no GO e na bandeirada |
+| Batida, muro, rodada | noutro carro ou no muro, um tranco quando o contato começa, do lado dele, que sempre se sente e cresce com a força; encostado noutro carro, a lataria raspando; o muro raspando; a rodada sacudindo |
+| Pneu estourado | um tranco do lado do pneu, e o aro raspando no asfalto enquanto não troca |
+| Boxes | um toque leve quando o piloto automático assume, o macaco subindo e descendo, e a pistola do Guido em cada roda |
+| Largada e chegada | um toque a cada número, um tranco no GO e na bandeirada e, vencendo, mais dois pulsos de comemoração |
 
-## Níveis, pneus e drift
+No **mundo aberto** o carro é sentido do mesmo jeito (`calcularVibracaoDoPasseio`): o chão vem da malha da cidade
+(o asfalto quieto; a terra, a areia e a rocha ásperas), e as batidas nas paredes, nos postes, nos moradores e no chão
+depois de um pulo vibram na força delas. Nas cenas do Mack, na pausa, no mapa e dormindo, o controle fica quieto.
+`make testar-vibracao` toca cada sensação no controle, uma de cada vez.
 
-Na escolha da corrida (no Mack) se escolhe a pista e o nível (`NIVEIS` em `corrida.c`). O vermelho marca o que está escolhido, e o contorno amarelo, onde o cursor está; confirmar passa para a linha seguinte, e só o IR COM O MACK larga:
+## Montar a corrida, níveis, pneus e drift
+
+No Mack, a tela **ESCOLHA A CORRIDA** (`atualizarEscolhaDePista` e `desenharEscolhaDePista` em `menu.c`) vai de cima
+para baixo na ordem em que se decide: a **pista** (os quatro cartões da fileira de cima; embaixo, à esquerda, o cartão
+da marcada, com o traçado, o comprimento, as curvas, o sentido e o recorde) e, à direita, as opções em seções:
+
+- **CORRIDA:** a dificuldade dos rivais (fácil, médio, difícil) e as voltas (de 1 a 20);
+- **REGRAS:** pit stop obrigatório e desgaste dos pneus, em chaves de liga e desliga. O desgaste só existe com o pit
+  (sem os boxes não haveria como trocar) e, com o pit, a corrida tem pelo menos 3 voltas;
+- **AMBIENTE:** a hora do dia (manhã, meio-dia, tarde ou noite). A Copa Pistão é sempre à noite, no estádio;
+- **JOGADORES:** 2 jogadores (a tela dividida) e, com ela, o carro do jogador 2.
+
+Embaixo, o botão vermelho **CORRER**.
+A pista escolhida fica mais clara, com o contorno claro; as chaves deslizam a bolinha e mudam de cor; a marca vermelha
+das escolhas desliza até a escolhida; e o número que muda (as voltas, o carro do jogador 2) cresce e volta.
+Cima e baixo trocam de linha, esquerda e direita mudam o valor, confirmar liga e desliga as chaves (no resto, passa
+para a linha seguinte) e só o CORRER larga; com o mouse, passar por cima marca a linha e clicar mexe no que foi
+clicado. A linha que não dá para mexer fica apagada, com o motivo no lugar do controle. A tela abre com as regras de
+antes do médio: 5 voltas, pit obrigatório, sem desgaste, à tarde. `OpcoesDaCorrida` (`corrida.h`) leva a escolha
+para `iniciarCorridaComOpcoes`; `iniciarCorrida(nivel)`, que os testes usam, monta as regras de sempre de cada nível
+(`opcoesDoNivel`):
 
 | Nível | Voltas | Rivais (habilidade) | Pitstop | Pneus gastam |
 |---|---|---|---|---|
 | Fácil | 3 | 0,87 a 0,80 | não | não |
-| Médio | 5 | 0,93 a 0,86 | sim (em Interlagos) | não |
-| Difícil | 8 | 0,97 a 0,91 | sim (em Interlagos) | sim (em Interlagos) |
+| Médio | 5 | 0,93 a 0,86 | sim | não |
+| Difícil | 8 | 0,97 a 0,91 | sim | sim |
 
-- **Pneus:** o desgaste cresce com o caminho (um jogo dura cerca de 5 voltas) e 5 vezes mais rápido derrapando. Pneu gasto segura menos nas curvas e tira um pouco da velocidade máxima; a troca do Guido deixa os pneus novos. Os rivais também gastam.
+A **hora** muda a luz das pistas de dia (`luzDaPista` em `render.c`). A tarde é a de sempre: em Interlagos e em
+Montreal, o sol da largada do GP (veja o sol das pistas). A manhã (8h30), o meio-dia (12h45) e a noite (22h) saem do
+relógio do passeio (`luzDeUmaHora` em `hora.c`): a luz, o céu, a cor da tela e a neblina daquela hora, com o sol
+girado para o leste de verdade da pista (em Interlagos, no hemisfério sul, o sol do meio-dia fica ao norte). À noite
+o céu é o do passeio, azul-marinho, quase preto no alto, com a lua e as estrelas (o roxo é só o do crepúsculo).
+
+De noite as pistas de dia ganham **holofotes** (`holofotes.c`): torres de treliça de 45 m, poucas (uma a cada ~240 m,
+alternando os lados: 25 em Interlagos e em Montreal, 11 no Oval), atrás do muro, com um painel de 18 lâmpadas
+inclinado para o asfalto. A torre é uma malha montada no código (a base de concreto, as quatro pernas que afinam, os
+anéis e as diagonais, os braços, o painel, a passarela e a escada), com as faces sombreadas pela direção delas.
+Onde ela atravessaria o cenário (uma arquibancada, um prédio, uma árvore: `visaoLivreNoCenario`), ela procura um
+lugar livre perto (mais para trás, do outro lado ou um pouco para a frente ou para trás). A luz de cada torre é uma
+lâmpada pontual branca, de 220 m de alcance; as 6 mais à vista vão ao shader do cenário e dos carros (cada uma custa
+~0,35 ms), e a soma tem um teto suave no shader da pista (perto da torre a luz não estoura e as faixas brancas não
+brilham). A luz da noite em volta é neutra (um quarto da azul do passeio, mais um pouco de luz branca), a tela não
+puxa para o azul, e o halo de cada lâmpada só aparece de frente para ela. Com os holofotes, Montreal fica em ~200 FPS
+de noite (~320 de dia) e Interlagos em ~145 (~157).
+
+- **Pneus:** o desgaste cresce com o caminho (um jogo dura cerca de 5 voltas) e 5 vezes mais rápido derrapando. Pneu gasto segura menos nas curvas e tira um pouco da velocidade máxima; a troca do Guido deixa os pneus novos. Os rivais também gastam. A duração foi acertada para as 8 voltas do difícil; numa corrida mais longa ela cresce na mesma proporção (`escalaDoDesgaste`), para uma parada continuar bastando.
+- **O desenho dos pneus** (`desenharPneus` em `hud.c`), à esquerda do velocímetro: o carro visto de cima, escuro, e os quatro pneus nos cantos. Cada pneu tem a borda na cor do quanto sobra dele (verde, amarelo e, abaixo de 20%, vermelho) e, por dentro, uma barra que esvazia conforme ele gasta: a cor e o nível dizem a mesma coisa, então dá para ler sem distinguir as cores. O pneu estourado fica vazio, com a borda vermelha piscando. Não há números: o desgaste é um só para o carro, e o estouro é de cada pneu.
 - **Pneu estourado** (no difícil, só o do jogador): com a vida do pneu em 5% estoura um pneu de trás, e aos poucos o outro de trás e os da frente, até os quatro no aro com a vida em 0%. Como no filme, a borracha some e o carro roda no aro (`separarAros` em `carros3d.c` acha onde o aro acaba em cada modelo: pela peça do pneu, quando ela é à parte, ou pela cor da borracha na tampa da roda, e o shader corta o que passa do aro), baixa daquele canto, solta uma chuva de faíscas do aro raspando no asfalto (`faiscas.c`) e destraciona: a traseira balança sozinha, mais acelerando, o carro quase não se alinha, a roda patina (o giro do motor sobe e ele acelera menos) e a velocidade máxima cai a cada pneu. Só a troca nos boxes resolve.
 - **Freio de mão** (Shift, ou Cruz no controle): tira velocidade. Um toque com o volante virado quebra a traseira, e o carro fica de lado. Sem a direção guiada (o jogo de verdade, na corrida e no passeio) o drift é de fliperama (`derrapar` em `carro.c`): o carro vai para onde o volante manda, como de pé, e de lado a curva fecha um pouco mais (35%); o ângulo do corpo vai numa mola até o que o volante pede para o lado do drift (solto, ~22°; todo para dentro, ~45°; contraesterçando, até reto), passando um pouco e voltando, como uma traseira de verdade. Acelerando e virando para dentro o drift continua quanto você quiser; soltando o acelerador, endireitando ou contraesterçando, ele acaba sozinho, aos poucos, sem tranco. A câmera fica atrás do corpo, com um pequeno atraso: entrando no drift o carro gira um instante na tela e ela vem atrás dele. Com a traseira presa, a curva é exatamente a de sempre. De lado ele solta fumaça e gasta pneu, e a roda de trás patina: do motor (e do nitro) chega ao chão só um quarto, então segurando o drift a velocidade fica quase onde estava (a 100 km/h, uns 27° a mantêm, 36° perdem 2 a 3 km/h por segundo, 45° uns 5), em vez de o carro acelerar de lado como numa reta. O freio de mão puxado para o drift freia só 30%: o toque custa uns 6 a 8 km/h. (Na direção guiada, que só os testes usam, vale o drift antigo de `atualizarDrift`.)
 - **Câmbio** (`motor.c`): cada marcha é bem mais longa que a anterior, e a nova nasce entre 6.200 e 6.400 rpm, longe do corte de 8.000. A reduzida depende do pé: freando reduz cedo, com uma acelerada de punta-taco; aliviando, deixa a marcha longa; acelerando com o motor fraco, pula direto para a marcha que tem força.
@@ -770,9 +842,8 @@ fora, que cresce com o quadrado da velocidade. Devagar, ele quase contorna a cur
 guiada, e vem ligada. Desligada nas configurações, vale só para o jogador: o carro guarda para onde o bico aponta
 (`desvioDoRumo`), a curva da pista aumenta a diferença e só o volante a tira, então sem volante ele segue reto
 em qualquer velocidade. A IA sempre dirige com ela ligada, inclusive com o carro do jogador depois da chegada.
-No Splat ela não existe (`semDirecaoGuiada`): lá o jogador sempre dirige sem ela, seja qual for a opção. E a
-pista não tem muro invisível: cada lado para no que existe de verdade (`LIMITES_SPLAT`, medido no modelo): muro,
-barranco, buraco, outro trecho da corrida, os pneus das ruas fechadas ou, no máximo, 22 m de área de escape na grama.
+Uma pista pode dizer que ali ela não existe (`semDirecaoGuiada`): o jogador sempre dirige sem ela, seja qual for a
+opção. Nenhuma das pistas de agora diz (o Splat, que deu lugar a Montreal, dizia).
 
 Sem a direção guiada, o carro anda no mundo (`andarNoMundo`): tem lugar e rumo próprios, e só o volante muda o rumo,
 até o que o pneu segura naquela velocidade. Sem volante, o caminho é uma reta. A pista só é consultada depois, para
@@ -843,8 +914,11 @@ As pistas de dia têm o **sol delas** (`SOIS_DAS_PISTAS` em `render.c`). Interla
 GP de São Paulo: domingo, 8 de novembro de 2026, 14h de Brasília, com o sol 58,9° acima do horizonte, no azimute
 276,9° (quase oeste, do lado das arquibancadas da reta). Como o modelo não vem com o norte para -z, o norte de
 verdade fica no rumo 14,2° do mapa do jogo: é o giro que encaixa o traçado do modelo no do OpenStreetMap (5,8 m de
-diferença média na volta, mesma escala). O Oval e o Splat têm um sol baixo o bastante para aparecer no céu (na reta
-da largada, um pouco para o lado da frente). Todas têm um **céu feito no shader** (`mundo.c`), com **nuvens** a 1,8 km de
+diferença média na volta, mesma escala). Montreal tem o sol da largada do GP do Canadá de 2026: domingo, 24 de maio,
+16h de Montreal (a largada foi atrasada duas horas para não bater com as 500 Milhas de Indianápolis), com o sol 44,3°
+acima do horizonte, no azimute 253,6° (oés-sudoeste). Lá o modelo já vem com o norte para -z (o giro que encaixa o
+traçado no do OpenStreetMap é de 0,1°, com 3,3 m de diferença média). O Oval tem um sol baixo o bastante para aparecer
+no céu (na reta da largada, um pouco para o lado da frente). Todas têm um **céu feito no shader** (`mundo.c`), com **nuvens** a 1,8 km de
 altura: a forma sai de um ruído que se repete sem emenda, gerado ao abrir o jogo, e o volume, de duas leituras na
 direção do sol (o lado de lá e o miolo ficam na sombra, a borda fina brilha contra ele). O céu do passeio tem as
 mesmas nuvens, com as cores da hora. A pintura dos carros reflete o mundo em três faixas, como num estúdio de foto
@@ -859,9 +933,14 @@ tremor, e saiu (na corrida e no passeio). Numa batida, a mira balança no máxim
 ### Telões e placar
 
 Na Copa Pistão, os telões (o cubo pendurado no meio e o telão do alto da arquibancada) passam a transmissão da
-corrida, umas 20 vezes por segundo: a cada 6 s a câmera troca de carro (o jogador, o líder, quem está logo à frente
-dele, alguém do pelotão) e de ângulo (perseguição, on-board no teto, lateral, helicóptero, frontal), com as legendas
-de TV. O placar da torre e do telão do alto mostra a volta do líder e os quinze primeiros. As imagens do modelo são
+corrida, umas 20 vezes por segundo, com as legendas de TV. A transmissão é dirigida como a de F1 e NASCAR
+(`cameraDaTransmissao` em `render.c`): câmeras **fixas na beira da pista**, a cada 180 m, do lado de fora da próxima
+curva, 8 m acima do chão (15 m onde o muro ou as árvores tapam a vista), que seguem o carro com a lente longa
+(o carro fica do mesmo tamanho na tela, perto ou longe) e cortam para a próxima quando ele passa; e as **aéreas**, o
+helicóptero (75 m acima, ao lado e atrás do carro) e o dirigível (240 m acima, devagar, sobre a parte da pista onde o
+carro está). Cada câmera é conferida antes de ir ao ar: um raio dela até o carro não pode bater no cenário
+(`visaoLivreNoCenario` em `mundo.c`). A cada 3 tomadas troca o carro filmado (o jogador, o líder, quem está logo à
+frente dele, alguém do pelotão). O placar da torre e do telão do alto mostra a volta do líder e os quinze primeiros. As imagens do modelo são
 trocadas por RenderTextures (`telao.c`); a câmera de TV fica em `render.c`.
 
 Nas outras pistas, o telão é uma estrutura 3D (`objetos/telao.glb` e `telao_katchau.glb`, gerados por
@@ -883,7 +962,7 @@ completo (76 triângulos, `objetos/carro_torcida.glb`) até 200 m e um simples (
 virado para a pista, com cor sorteada e pulando, e cada grupo vai para a placa de vídeo numa chamada só
 (os lugares ficam na placa de vídeo desde a carga; por quadro, o processador só escolhe os trechos da grade perto
 da câmera, e o shader gira, posiciona e escala cada carrinho). Os lugares vêm dos degraus do estádio (Copa Pistão) e
-dos lugares medidos nos modelos (Interlagos, Oval e Splat); uma grade de células acha os lugares perto sem
+dos lugares medidos nos modelos (Interlagos, Oval e Montreal); uma grade de células acha os lugares perto sem
 olhar todos. Mais longe continua a torcida pintada, que some onde os carrinhos aparecem. Na onda da Copa Pistão,
 os faróis deles acendem. `KATCHAU_SEM_TORCIDA3D=1 ./katchau` desliga, para comparar o desempenho.
 
@@ -914,36 +993,27 @@ Na Copa Pistão, quando o líder chega à metade da corrida, a torcida de carrin
 até dar a volta inteira no estádio (7 s). Os faróis são fileiras de pares de luzes amareladas sobre os assentos
 (`acenderFarol` em `noite.c`); o clarão de leve do setor fica no shader da torcida.
 
-### Oval e Splat
+### Oval
 
-O Splat tem muito mais ruas do que a corrida usa. A rota escolhida (2,1 km) sai da reta dos boxes, passa por cima
-da ponte, vira no cruzamento para o laço de cima, volta por baixo da ponte, desce pelos esses e fecha pela reta;
-ficaram de fora o grampo do lado oeste e as esquinas mais fechadas. A curva mais fechada tem 30 m de raio.
+Uma pista de dia que vem pronta num modelo 3D (`recursos/modelos/oval.glb`). O traçado e os lugares da torcida
+(`oval.h`) foram medidos no modelo, e a arquibancada recebe uma figura em cada lugar, com o mesmo shader de torcida
+da Copa Pistão. O pit lane é o que o modelo mostra: entre o muro dos boxes e as garagens. Na Copa Pistão não há
+garagens: a equipe arma as tendas no pátio por dentro da Reta Oposta.
 
-Duas pistas de dia que vêm prontas em um modelo 3D (`recursos/modelos/oval.glb` e `splat.glb`). O traçado e
-os lugares da torcida (`oval.h`, `splat.h`) foram medidos nos modelos, e a arquibancada recebe uma figura em
-cada lugar, com o mesmo shader de torcida da Copa Pistão. O pit lane de cada uma é o que o modelo mostra: no
-oval, entre o muro dos boxes e as garagens; no Splat, a estrada paralela à reta, na frente do prédio das
-garagens. Na Copa Pistão não há garagens: a equipe arma as tendas no pátio por dentro da Reta Oposta.
-
-As árvores e estruturas dos dois mapas (`cenario_mapas.h`) usam os modelos de `recursos/modelos/objetos/`, mais pinheiros
+As árvores e estruturas do mapa (`cenario_mapas.h`) usam os modelos de `recursos/modelos/objetos/`, mais pinheiros
 e um telão próprio. Cada lugar foi conferido contra a malha do modelo: arquibancadas e camarotes nas retas,
 olhando para a pista; caminhões no paddock; carros no estacionamento; postos de fiscal e torres de TV em
 volta do circuito; e a mata em uma cortina acompanhando a pista e em manchas mais longe.
 
-Os modelos têm mais ruas do que a corrida usa. Onde a estrada continua além do limite da pista, uma fileira de
-pneus fecha a passagem, deixando só as aberturas do pit lane. No Splat, os três pórticos de checkpoint saíram.
+O modelo tem mais ruas do que a corrida usa. Onde a estrada continua além do limite da pista, uma fileira de
+pneus fecha a passagem, deixando só as aberturas do pit lane.
 
-Modelos:
+Modelo:
 - [Cartoon Race Track - Oval](https://sketchfab.com/3d-models/cartoon-race-track-oval-f88b33a3a65c4965b03578dc7f4f6eb4),
   de [RCC Design](https://sketchfab.com/retrovalorem), publicado como CC-BY-4.0. Alterado para o jogo: árvores,
   pneus e arquibancadas com menos polígonos, imagens em 1024 pixels, malhas juntadas por material e sem os
   cones, as barreiras e o muro que ficavam em cima do asfalto do oval. As árvores do modelo foram trocadas
   pelas do jogo, nos mesmos lugares.
-- [Splat Track](https://sketchfab.com/3d-models/splat-track-9878cad018a9440c8cfa2ab2c9d1eda7),
-  de [Geedtopia](https://sketchfab.com/Geedtopia), publicado como **CC-BY-NC-4.0: só para uso não comercial**.
-  Alterado para o jogo: sem os pórticos de checkpoint, malhas juntadas por material, e o magenta que marcava os pixels transparentes das
-  imagens trocado pela cor média de cada uma, senão ele vazava para as folhas.
 
 ### Interlagos
 
@@ -959,7 +1029,7 @@ material, de shader e de buffers. As malhas são separadas por tipo de desenho n
 (`prepararCaixasDoMapa` em `mundo.c`), com a caixa de cada uma já em coordenadas do mundo. O mesmo corte vale para o
 mapa de sombra (que enxerga um quadrado de 330 m) e para a transmissão dos telões.
 
-O traçado foi **medido no modelo** por `ferramentas/medir_interlagos.c` (`make medir-interlagos`), que escreve
+O traçado foi **medido no modelo** por `ferramentas/medir_pista.c` (`make medir-interlagos`), que escreve
 `src/interlagos.h`. A ferramenta carrega o modelo com a raylib e:
 
 - anda pela pista a partir da linha de chegada, de 2 em 2 m, achando as duas bordas do asfalto e corrigindo o ponto para o
@@ -969,6 +1039,14 @@ O traçado foi **medido no modelo** por `ferramentas/medir_interlagos.c` (`make 
   além da borda (de 1 a 90 m, em 13 distâncias) e a distância até o muro de cada lado (um raio de lado, a 35 cm e a 90 cm do chão);
 - anda pelo pit lane, da entrada à saída, e guarda onde ele fica em relação à pista;
 - acha os assentos das arquibancadas, para a torcida.
+
+**Cortar caminho pela grama.** Em Interlagos não há parede invisível: onde não há barreira (muro, guard-rail,
+alambrado), o carro vai até onde quiser, sai da pista, volta por qualquer lugar e pode cortar pela grama até outro
+trecho (`cortarPelaGrama` em `ferramentas/medir_pista.c`; antes, onde não havia barreira, um limite parava o carro
+logo depois do escape). Longe do asfalto e bem mais perto de outro trecho da pista, o jogo passa a contá-lo nesse
+trecho (`trechoMaisPerto` em `andarNoMundo`, `carro.c`), contando a volta se o corte passar pela linha de chegada.
+Ele só passa para o outro trecho do lado de dentro dos muros dele: um guard-rail no caminho continua segurando o
+carro. Em Montreal o limite continua, porque além do que não tem muro há a água.
 
 `interlagos_materiais.h` diz o que é cada um dos 177 materiais do modelo: o chão que o carro sente (pista, zebra, escape,
 grama, pit, muro) e o jeito de desenhar. O modelo veio de outro jogo, onde o canal alfa das imagens tem vários usos: na
@@ -1012,3 +1090,69 @@ site). Ele traz a marca e texturas de um jogo comercial (Automobilista, da Reiza
 confira a licença.
 
 A lista completa, segmento a segmento, sai com `./build/teste_pista -v`.
+
+### Montreal
+
+O Circuito Gilles-Villeneuve, na Ilha Notre-Dame, com o traçado de 2019, num modelo 3D (`recursos/modelos/montreal.glb`),
+no lugar do Splat. Como Interlagos, o modelo está em metros e o jogo usa ele 40% maior (`ESCALA_MONTREAL`): na medida
+real o asfalto tem de 10 a 13 m. A volta é no sentido horário: 4.355 m no modelo (4.361 m de verdade), 6.097 m no jogo.
+
+O modelo baixado tem uma malha só, com uma parte por material, e algumas passam de 65 mil vértices (o alambrado tem
+230 mil, os prédios 388 mil), o que a raylib não aponta (ela usa índices de 16 bits). `ferramentas/preparar_montreal.py`
+põe a rotação do nó nos vértices (o modelo vinha deitado), corta cada material grande em ladrilhos de 300 m vistos de
+cima (os que se espalham por quilômetros, como a água e a cidade ao longe, em ladrilhos de 1,5 km), cada ladrilho em
+pedaços de até 60 mil vértices, e reduz as imagens de 4096 pixels para 2048 (a borracha do traçado, para 1024): 281
+malhas, que o corte pelo campo de visão (`corte.c`) já trata como as de Interlagos. A ordem dos materiais é a do
+modelo; `montreal_materiais.h` diz o que é cada um. Os prédios, as arquibancadas e as placas dividem uma imagem só: os
+degraus das arquibancadas e o piso do pit lane são regiões dela, nas faces de cima.
+
+O desenho é o de Interlagos (`PIXELS_DOS_MODELOS` em `mundo.c`, um shader por jeito de desenhar), com as imagens do
+próprio modelo: o asfalto já traz as linhas brancas da borda, a borracha do traçado escurece o que está embaixo, os
+alambrados são telas transparentes e as árvores e os tufos de capim são recortes. A água da bacia de remo e do rio
+fica um pouco mais escura que a imagem (`COR_DA_AGUA_DE_MONTREAL`).
+
+A mesma ferramenta de Interlagos mede Montreal (`make medir-montreal` escreve `src/montreal.h`), com o que muda de uma
+pista para a outra numa tabela (`PISTAS` em `ferramentas/medir_pista.c`):
+
+- a pista é o asfalto com as linhas brancas da borda (em Montreal a borracha só cobre o meio dela), e a borracha só
+  guia a caminhada: ela segue a volta da corrida, e não as rotas de fuga em linha reta (a da curva 3 enganava a linha);
+- o escape colado na pista some numa janela de 80 m (o da curva 1 e o do grampo são compridos);
+- a tabela do pit é medida em cada ponto da linha da pista, na perpendicular dela, até as duas bordas da estrada do
+  pit: a estrada passa reto por fora da chicane do fim da volta, e o ponto da pista mais perto dela pularia de uma
+  ponta da chicane para a outra;
+- os lugares da torcida são os degraus das arquibancadas a até 150 m da pista, pelo menos 0,5 m acima do chão e a
+  mais de 9 m da linha: 13.915 (a mesma região da imagem também pinta umas faixas no chão, perto das Curvas 8 e 9, que
+  viravam carrinhos em cima da zebra).
+
+Cada arquibancada (os lugares juntados por vizinhança) ganha um telão de frente para ela, do outro lado da pista
+(`colocarTeloesDeMontreal`): o da reta dos boxes fica em cima das garagens.
+
+O **grid** e a **linha de chegada** vêm pintados no modelo: a pole fica à esquerda, 16,2 m antes da linha, e cada fila
+a 16 m da outra (`GridDaPista` em `criarMontreal`). O **pit lane** é o de verdade: até a chicane do fim da volta ele é
+a metade esquerda da pista, separada por uma linha tracejada; no começo da chicane a estrada do pit segue reto enquanto
+a pista vira, passa na frente das garagens (as 17 vagas ficam antes da linha de chegada, com o limite de 100 km/h),
+depois da linha corre ao lado da pista, separada pela tinta vermelha, e volta a ela por fora do grampo da Curva Senna.
+O jogador entra quando, em vez de virar na chicane, segue reto e sai do asfalto da pista para a estrada do pit
+(`soEmCimaDaEstrada`: ao lado da chicane há escape asfaltado antes dela, e quem só passa por ele não entra). A IA dos
+rivais só entra quando decidiu parar (`moverCarro` em `corrida.c`): antes, quem passava pela metade esquerda da pista
+para fazer a chicane era puxado para o box.
+
+Na saída, a estrada do pit fica a até 63 m da linha da pista, por dentro de uma curva de 30 a 50 m de raio: ali o
+ponto "linha da pista mais o lado" dobraria sobre si mesmo, e os carros do pit pulavam de lugar. Por isso, a cada
+segmento, o jogo guarda quanto o ponto calculado está longe do ponto mais perto da estrada medida
+(`ESTRADA_DO_PIT_MONTREAL`, `corrigirOPitPelaEstrada` em `pista.c`) e soma essa correção a quem está no pit
+(`pontoNoMundoDoPit`; o carro, a sombra e a câmera usam `pontoDoCarro`). A correção some aos poucos nos 14 m em que a
+estrada encontra a pista.
+
+O **sol** é o da largada do GP do Canadá de 2026 (veja o sol das pistas). As curvas têm os nomes de verdade: Curva
+Senna (a 1 e o grampo da 2), Curvas 3 e 4, Curva 5, Curvas 6 e 7, Curvas 8 e 9, Grampo, Reta do Cassino e Muro dos
+Campeões (a chicane do fim da volta). O recorde de volta dela fica no `recordes.txt` com o número 4: um recorde do
+Splat (o 3) que esteja num arquivo antigo é ignorado (`CODIGO_NO_ARQUIVO` em `recordes.c`).
+
+Com 17 carros, quem larga em último com ritmo perfeito chega entre os 5 primeiros em 2 de cada 3 corridas (em
+Interlagos, 3 de cada 4): são quatro freadas fortes no fim de retas de mais de 1 km, a 350 km/h ou mais, e um toque
+na traseira faz rodar.
+
+O modelo é o "Circuit Gilles Villeneuve Montreal 2019 layout", baixado como Interlagos. Ele traz a marca e as
+texturas de um jogo comercial (Assetto Corsa, da Kunos Simulazioni) e as placas de patrocinadores de verdade: antes
+de publicar o jogo, confira a licença.

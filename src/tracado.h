@@ -2,7 +2,7 @@
  * tracado.h
  * ------------------------------------------------------------------
  * O formato das tabelas medidas nos modelos 3D das pistas (copa_pistao.h,
- * oval.h, splat.h e interlagos.h), nas unidades e nos eixos do próprio modelo.
+ * oval.h, interlagos.h e montreal.h), nas unidades e nos eixos do próprio modelo.
  * ------------------------------------------------------------------
  */
 
@@ -19,7 +19,7 @@ typedef struct {
 } PontoDoTracado;
 
 /* O que fica além da borda do asfalto, num ponto da linha (só onde o modelo foi medido
- * com isso: interlagos.h). Tudo em metros a partir da linha da pista */
+ * com isso: interlagos.h e montreal.h). Tudo em metros a partir da linha da pista */
 #define PONTOS_ALEM_DA_BORDA 13
 typedef struct {
     float zebraDireita, zebraEsquerda;     /* até onde vai a zebra; 0: não tem zebra ali */

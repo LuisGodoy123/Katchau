@@ -19,11 +19,13 @@
 #define PASSEIO_H
 
 #include "menu.h"
+#include "vibracao.h"
 
 void iniciarPasseio(int numeroDoCarro);
 Tela atualizarPasseio(EstadoMenu *menu, float tempoQuadro);
 void desenharPasseio(EstadoMenu *menu);
 int passeioPausado(void);
+Vibracao vibracaoDoPasseio(void);   /* a do quadro em que o carro andou (e só nele: depois, nada) */
 void descarregarPasseio(void);
 
 /* As corridas, pelo Mack */

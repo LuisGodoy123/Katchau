@@ -163,13 +163,17 @@ static Carro criarCarroDaFicha(FichaTecnica ficha, int numero, Pista *pista) {
 
 /*
  * escalaDoDesgaste
- * Os pneus duram cerca de 5 voltas de Interlagos. Como lá o modelo é usado maior que o de verdade
- * (ESCALA_INTERLAGOS), a volta é mais longa e os pneus andam mais na mesma proporção.
- * Recebe: a pista.
+ * Os pneus duram cerca de 5 voltas de Interlagos. Como lá (e em Montreal) o modelo é usado maior que o de
+ * verdade (ESCALA_INTERLAGOS, ESCALA_MONTREAL), a volta é mais longa e os pneus andam mais na mesma proporção.
+ * Recebe: a pista e as voltas da corrida.
  * Devolve: por quanto multiplicar a distância que um jogo de pneus anda.
  */
-static float escalaDoDesgaste(const Pista *pista) {
-    return (pista->id == PISTA_INTERLAGOS) ? ESCALA_INTERLAGOS : 1.0f;
+static float escalaDoDesgaste(const Pista *pista, int voltas) {
+    float escala = (pista->id == PISTA_INTERLAGOS) ? ESCALA_INTERLAGOS : (pista->id == PISTA_MONTREAL) ? ESCALA_MONTREAL : 1.0f;
+    /* Os pneus foram acertados para as voltas do difícil, com uma parada só. Numa corrida mais longa (as voltas são
+     * escolhidas na tela da corrida), eles duram na mesma proporção: a parada continua sendo uma */
+    int voltasDoAcerto = NIVEIS[NIVEL_DIFICIL].voltas;
+    return escala * ((voltas > voltasDoAcerto) ? (float) voltas / (float) voltasDoAcerto : 1.0f);
 }
 
 /*
@@ -189,17 +193,20 @@ static float escalaDoDesgaste(const Pista *pista) {
  *         que já diz o carro de cada um), o nível e a formação.
  * Devolve: nada.
  */
-static void montarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador, NivelDaCorrida nivel,
+static void montarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador, const OpcoesDaCorrida *opcoes,
                           const FormacaoLocal *formacao) {
     static unsigned int corridasIniciadas = 0;   /* cada corrida sorteia ritmos diferentes */
     corridasIniciadas++;
+    NivelDaCorrida nivel = opcoes->nivel;
     const FichaDoNivel *ficha = fichaDoNivel(nivel);
-    int temParada = ficha->temParada && pista->temPit;
-    int gastaPneu = ficha->gastaPneu && temParada;   /* sem boxes, não haveria como trocar */
+    int voltas = opcoes->voltas < MENOS_VOLTAS ? MENOS_VOLTAS : (opcoes->voltas > MAIS_VOLTAS ? MAIS_VOLTAS : opcoes->voltas);
+    int temParada = opcoes->paradaObrigatoria && pista->temPit && voltas >= MENOS_VOLTAS_COM_PARADA;
+    int gastaPneu = opcoes->desgaste && temParada;   /* sem boxes, não haveria como trocar */
     corrida->temParada = temParada;
     corrida->pista = pista;
     corrida->nivel = nivel;
-    corrida->totalVoltas = ficha->voltas;
+    corrida->hora = (pista->id == PISTA_COPA_PISTAO) ? HORA_NOITE : opcoes->hora;
+    corrida->totalVoltas = voltas;
     corrida->tempoDeCorrida = 0.0f;
     corrida->contagemRegressiva = SEGUNDOS_DE_CONTAGEM;
     corrida->terminou = 0;
@@ -242,10 +249,10 @@ static void montarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador, Ni
     corrida->jogador.controladoPeloJogador = 1;
     colocarNoGrid(&corrida->jogador, pista, LUGAR_DO_JOGADOR);
     corrida->jogador.duracaoDaTroca = DURACAO_DA_TROCA;
-    corrida->jogador.voltaDoPit = temParada ? (ficha->voltas + 1) / 2 : 0;   /* se a IA dirigir */
-    corrida->jogador.voltasDaProva = ficha->voltas;
+    corrida->jogador.voltaDoPit = temParada ? (voltas + 1) / 2 : 0;   /* se a IA dirigir */
+    corrida->jogador.voltasDaProva = voltas;
     corrida->jogador.gastaPneu = gastaPneu;
-    corrida->jogador.metrosDeUmJogoDePneus *= escalaDoDesgaste(pista);
+    corrida->jogador.metrosDeUmJogoDePneus *= escalaDoDesgaste(pista, voltas);
     corrida->jogador.pitFeito = !temParada;
     corrida->jogador.direcaoLivre = semGuiada;
     corrida->classificacao[0] = &corrida->jogador;
@@ -262,9 +269,9 @@ static void montarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador, Ni
         *dele = criarCarroDaFicha(FICHAS[numero], numero, pista);
         colocarNoGrid(dele, pista, LUGAR_DO_JOGADOR - h);
         dele->controladoPeloJogador = 1;
-        dele->voltasDaProva = ficha->voltas;
+        dele->voltasDaProva = voltas;
         dele->gastaPneu = gastaPneu;
-        dele->metrosDeUmJogoDePneus *= escalaDoDesgaste(pista);
+        dele->metrosDeUmJogoDePneus *= escalaDoDesgaste(pista, voltas);
         dele->pitFeito = !temParada;
         dele->duracaoDaTroca = DURACAO_DA_TROCA;   /* a troca de um humano é a do jogador, não a dos rivais */
         dele->voltaDoPit = 0;                      /* humano decide sozinho quando entrar no box */
@@ -297,18 +304,18 @@ static void montarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador, Ni
         colocarNoGrid(oRival, pista, lugarDaIA++);
         oRival->habilidade = ficha->habilidadeDaPole
             - (ficha->habilidadeDaPole - ficha->habilidadeDoUltimo) * ordemDaIA / ultimoDaIA;
-        oRival->voltasDaProva = ficha->voltas;
+        oRival->voltasDaProva = voltas;
         oRival->defesa = ficha->defesa;
         oRival->vontadeDeRevide = ficha->revide;
         oRival->variacao = ficha->variacao;
         oRival->sorteio = 2654435761u * (unsigned int) (ordemDaIA + 1) + 40503u * corridasIniciadas;
         oRival->gastaPneu = gastaPneu;
-        oRival->metrosDeUmJogoDePneus *= escalaDoDesgaste(pista);
+        oRival->metrosDeUmJogoDePneus *= escalaDoDesgaste(pista, voltas);
         /* De propósito SEM mexer em direcaoLivre: criarCarro deixa em 0, e a IA sempre dirigiu
          * com a direção guiada — é o modelo para o qual ela foi acertada. Pôr a IA no rumo livre
          * a faria sair da pista nas curvas. */
         /* Cada um para numa volta, para os boxes não lotarem; na troca, eles são mais lentos que o Guido */
-        oRival->voltaDoPit = temParada ? 2 + ordemDaIA * 5 % (ficha->voltas - 2) : 0;
+        oRival->voltaDoPit = temParada ? 2 + ordemDaIA * 5 % (voltas - 2) : 0;
         oRival->pitFeito = !temParada;
         oRival->duracaoDaTroca = TROCA_MAIS_RAPIDA_DOS_RIVAIS + (ordemDaIA % 6) * PASSO_DA_TROCA_DOS_RIVAIS;
         corrida->classificacao[rival + 1] = oRival;
@@ -336,7 +343,41 @@ static void montarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador, Ni
  * Devolve: nada.
  */
 void iniciarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador, NivelDaCorrida nivel) {
-    montarCorrida(corrida, pista, carroDoJogador, nivel, NULL);
+    OpcoesDaCorrida opcoes = opcoesDoNivel(nivel);
+    montarCorrida(corrida, pista, carroDoJogador, &opcoes, NULL);
+}
+
+/*
+ * opcoesDoNivel
+ * As regras que cada nível tinha antes da escolha livre (e que os testes usam): as voltas, a parada e o desgaste
+ * da ficha dele, à tarde.
+ * Recebe: o nível.
+ * Devolve: as opções.
+ */
+OpcoesDaCorrida opcoesDoNivel(NivelDaCorrida nivel) {
+    const FichaDoNivel *ficha = fichaDoNivel(nivel);
+    OpcoesDaCorrida opcoes = { nivel, ficha->voltas, ficha->temParada, ficha->gastaPneu, HORA_TARDE };
+    return opcoes;
+}
+
+/*
+ * nomeDaHora
+ * Recebe: a hora da corrida.
+ * Devolve: o nome dela, em maiúsculas.
+ */
+const char *nomeDaHora(HoraDaCorrida hora) {
+    static const char *NOMES[TOTAL_HORAS_DA_CORRIDA] = { "MANHÃ", "MEIO-DIA", "TARDE", "NOITE" };
+    return ((int) hora >= 0 && hora < TOTAL_HORAS_DA_CORRIDA) ? NOMES[hora] : NOMES[HORA_TARDE];
+}
+
+/*
+ * iniciarCorridaComOpcoes
+ * A corrida de um jogador, montada como ele quis na tela da escolha.
+ * Recebe: a corrida a preparar, a pista, o número do carro do jogador e as opções.
+ * Devolve: nada.
+ */
+void iniciarCorridaComOpcoes(Corrida *corrida, Pista *pista, int carroDoJogador, const OpcoesDaCorrida *opcoes) {
+    montarCorrida(corrida, pista, carroDoJogador, opcoes, NULL);
 }
 
 /*
@@ -348,6 +389,18 @@ void iniciarCorrida(Corrida *corrida, Pista *pista, int carroDoJogador, NivelDaC
  * Devolve: nada.
  */
 void iniciarCorridaDividida(Corrida *corrida, Pista *pista, NivelDaCorrida nivel, const FormacaoLocal *formacao) {
+    OpcoesDaCorrida opcoes = opcoesDoNivel(nivel);
+    iniciarCorridaDivididaComOpcoes(corrida, pista, &opcoes, formacao);
+}
+
+/*
+ * iniciarCorridaDivididaComOpcoes
+ * A de tela dividida, com as opções da tela da escolha (veja iniciarCorridaDividida).
+ * Recebe: a corrida a preparar, a pista, as opções e a formação.
+ * Devolve: nada.
+ */
+void iniciarCorridaDivididaComOpcoes(Corrida *corrida, Pista *pista, const OpcoesDaCorrida *opcoes,
+                                     const FormacaoLocal *formacao) {
     FormacaoLocal minha = *formacao;
     for (int h = 1; h < minha.totalDeJogadores; h++) {
         for (int antes = 0; antes < h; antes++) {
@@ -357,7 +410,7 @@ void iniciarCorridaDividida(Corrida *corrida, Pista *pista, NivelDaCorrida nivel
             }
         }
     }
-    montarCorrida(corrida, pista, minha.numeroDoCarro[0], nivel, &minha);
+    montarCorrida(corrida, pista, minha.numeroDoCarro[0], opcoes, &minha);
 }
 
 /*
@@ -1014,7 +1067,10 @@ static int moverCarro(Corrida *corrida, Carro *carro, Comandos comandos, float t
         cruzou = atualizarCarroNoPit(carro, corrida->pista, tempoQuadro) > 0;
     } else {
         cruzou = atualizarCarro(carro, comandos, tempoQuadro) > 0;
-        if (corrida->temParada && querEntrarNoPit(corrida->pista, carro)) {
+        /* A IA só entra quando decidiu parar: se passar por cima do asfalto do pit lane sem querer (em Montreal ele
+         * é a metade esquerda da pista antes da chicane, por onde passa a linha de corrida), segue na pista */
+        int podeEntrar = carroEDeHumano(corrida, carro) || carro->querParar;
+        if (corrida->temParada && podeEntrar && querEntrarNoPit(corrida->pista, carro)) {
             entrarNoPit(carro);
         }
     }

@@ -103,7 +103,7 @@ static const char *PIXELS_DA_TORCIDA =
     "    float perto = 1.0 - smoothstep(0.15, 0.7, pixel);\n"
     "    if (escondida.w > 0.0) {\n"   /* onde há carrinhos 3D, sobra só o assento vazio */
     "        float some = 1.0 - smoothstep(escondida.w - 30.0, escondida.w - 8.0, distance(fragPos, escondida.xyz));\n"
-    "        if (fragColor.a < 0.999 && some > 0.5) discard;\n"   /* as figuras em pé do Oval e do Splat */
+    "        if (fragColor.a < 0.999 && some > 0.5) discard;\n"   /* as figuras em pé do Oval, de Interlagos e de Montreal */
     "        if (some > 0.99) { vec3 nn = normalize(cross(dFdx(fragPos), dFdy(fragPos)));\n"
     "            finalColor = vec4(vec3(0.16, 0.17, 0.20) * (luzDaNoite(fragPos, nn) * 0.72 + vec3(0.08, 0.09, 0.12)), 1.0); return; }\n"
     "        cor = mix(cor, vec3(0.16, 0.17, 0.20), some); perto *= 1.0 - some;\n"

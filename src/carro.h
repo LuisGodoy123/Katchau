@@ -201,6 +201,7 @@ int atualizarCarro(Carro *carro, Comandos comandos, float tempoQuadro);
 int estaForaDaPista(Carro *carro);
 Superficie superficieDoCarro(Carro *carro);
 float aceleracaoDeCurva(const Carro *carro);
+float aceleracaoDoMotor(const Carro *carro, float velocidade);
 void atualizarSuspensao(Carro *carro, float tempoQuadro);
 int velocidadeEmKmh(Carro *carro);
 float dirigirSemPista(Carro *carro, Comandos comandos, float tempoQuadro, float aderenciaDoChao, float *deLado, int *deRe);
@@ -218,5 +219,6 @@ float volanteDaFolgaDaCurva(const Carro *carro);
 void fazerRodar(Carro *carro, float impulso);
 void meiasMedidasDoCarro(const Carro *carro, float *meioComprimento, float *meiaLargura);
 float tempoAteVelocidade(const FichaTecnica *ficha, float velocidade);
+PontoNoMundo pontoDoCarro(const Carro *carro);
 
 #endif

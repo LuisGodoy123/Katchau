@@ -33,7 +33,7 @@
 static const char *CARACTERES =
     " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`"
     "abcdefghijklmnopqrstuvwxyz{|}~"
-    "áàâãéêíóôõúüçÁÀÂÃÉÊÍÓÔÕÚÜÇºª";
+    "áàâãéêíóôõúüçÁÀÂÃÉÊÍÓÔÕÚÜÇºª·—";
 
 static const char *ARQUIVOS_FONTE[TOTAL_FONTES] = {
     [FONTE_TITULO] = "racing_sans_one.ttf",

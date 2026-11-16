@@ -204,6 +204,7 @@ void escreverHora(char *texto, int tamanho, float hora);   /* "19:42" */
 
 const LuzDoDia *luzDaHora(void);           /* a luz da hora de agora */
 const LuzDoDia *luzDoMeioDia(void);        /* a de sempre (corridas, menus) */
+void luzDeUmaHora(float hora, LuzDoDia *luz);   /* a de uma hora qualquer, sem mexer no relógio (o sol nasce em +x) */
 const LuzDoDia *luzAplicada(void);         /* a última mandada aos shaders */
 
 /* Os shaders que recebem a luz do dia. Ao serem registrados, ganham a do meio-dia */
