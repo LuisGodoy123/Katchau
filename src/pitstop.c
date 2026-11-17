@@ -227,7 +227,10 @@ static void ancorarNaEstrada(Carro *carro, const Pista *pista, PontoNoMundo alvo
     PosicaoNaPista melhorLugar = carro->posicao;
     float melhorLado = 0.0f, melhorAndar = 0.0f, melhor = 1e9f;
     PontoNoMundo melhorPonto = alvo;
-    for (float andar = -ANCORA_PROCURA; andar <= ANCORA_PROCURA; andar += ANCORA_PASSO) {
+    /* Nunca antes da entrada do pit lane: lá o ponto é o da pista, sem o caminho alisado, e às vezes fica mais perto
+     * do carro; ancorado ali, ele estava "depois da vaga" para o pit (o noPit dá a volta), saía na hora e entrava de
+     * novo */
+    for (float andar = fmaxf(-ANCORA_PROCURA, -noPit); andar <= ANCORA_PROCURA; andar += ANCORA_PASSO) {
         PosicaoNaPista lugar = carro->posicao;
         moverNaPista(&lugar, andar * UNIDADES_POR_METRO);
         float lado = pista->pit.lado * ladoNoCaminho(pista, noPit + andar);
@@ -391,6 +394,8 @@ float ladoDoPitEm(const Pista *pista, float noPit) {
 #define JANELA_DO_ALISAMENTO  5.0f    /* metros do caminho no mundo, para cada lado */
 #define PASSO_DO_ALISAMENTO   0.25f   /* metros do pit lane entre as amostras */
 #define SOME_O_ALISAMENTO     15.0f   /* metros em que ele some, nas pontas */
+#define PERTO_PARA_A_ALTURA   2.0f    /* metros do caminho até a estrada medida: até aqui, o chão é o dela... */
+#define LONGE_PARA_A_ALTURA   6.0f    /* ...e daqui em diante, o de antes */
 #define RUMO_DO_ALISAMENTO    2.0f    /* metros do caminho para cada lado, medindo para onde ele aponta */
 
 /*
@@ -415,9 +420,12 @@ static void pontoDaEstradaMedida(const float *ex, const float *ez, const float *
  * Recebe: o pit, quantas amostras, o caminho de cada uma (x, z) e a base (começa igual ao caminho; muda aqui).
  * Devolve: nada.
  */
-#define EM_CIMA_DA_MEDIDA     3.0f    /* metros: o caminho está em cima da estrada medida */
+#define EM_CIMA_DA_MEDIDA     6.0f    /* metros: o caminho (a tabela do pit lane) está em cima da estrada medida */
 #define MISTURA_NA_MEDIDA     15.0f   /* metros do pit lane em que a mistura com a média vai e volta */
 #define FOLGA_DA_VOLTA        10.0f   /* metros do pit lane antes e depois de onde o caminho volta, refeitos em reta */
+#define PARADO_NA_MEDIDA      0.002f  /* metros da estrada: andando menos que isto de uma amostra para a outra, está parado */
+#define AINDA_NA_MEDIDA       20.0f   /* metros: depois de chegar nela, o caminho pode se afastar até isto da estrada... */
+#define ANTES_DO_FIM_DA_MEDIDA 1.0f   /* ...enquanto ela não acaba */
 static void usarAEstradaMedida(const DadosDoPit *pit, int total, const float *x, const float *z, float *mx, float *mz) {
     int pontos = pit->pontosDaEstrada;
     float escala = (pit->escalaDaEstrada > 0.0f) ? pit->escalaDaEstrada : 1.0f;
@@ -451,29 +459,35 @@ static void usarAEstradaMedida(const DadosDoPit *pit, int total, const float *x,
             de++;
             continue;
         }
+        /* Já em cima dela, segue a estrada medida até o fim, mesmo onde a tabela do pit lane se afasta (na saída de
+         * Montreal, ela passa pela grama ao lado da faixa) */
         int ate = de;
-        while (ate + 1 < total && longe[ate + 1] < EM_CIMA_DA_MEDIDA) {
+        while (ate + 1 < total && (longe[ate + 1] < EM_CIMA_DA_MEDIDA ||
+                                   (longe[ate + 1] < AINDA_NA_MEDIDA && u[ate + 1] < eu[pontos - 1] - ANTES_DO_FIM_DA_MEDIDA))) {
             ate++;
         }
-        /* Sempre para a frente: onde o ponto da estrada volta (ou para), refaz em reta, com uma folga para cada lado */
-        float maior = u[de];
-        for (int i = de; i <= ate; i++) {
-            if (u[i] < maior) {
-                int a = i - 1, b = i;
-                while (b <= ate && u[b] <= maior) {
-                    b++;
-                }
-                a = (a - folga > de) ? a - folga : de;
-                b = (b + folga < ate) ? b + folga : ate;
-                float ua = u[a], ub = fmaxf(u[b], ua);
-                for (int j = a; j <= b; j++) {
-                    u[j] = ua + (ub - ua) * (float) (j - a) / (float) ((b > a) ? b - a : 1);
-                }
-                maior = u[b];
-                i = b;
+        /* Sempre para a frente: o ponto da estrada nunca volta (fica no maior até ali), e cada trecho em que ele ficou
+         * parado (o caminho voltava ou parava, como no grampo da saída) vira uma reta do antes até o primeiro que passa
+         * dele, com uma folga para cada lado: nenhum trecho fica parado, e o carro não dá ré nem para */
+        for (int i = de + 1; i <= ate; i++) {
+            u[i] = fmaxf(u[i], u[i - 1]);
+        }
+        for (int i = de + 1; i <= ate; ) {
+            if (u[i] > u[i - 1] + PARADO_NA_MEDIDA) {
+                i++;
                 continue;
             }
-            maior = u[i];
+            int a = i - 1, b = i;
+            while (b < ate && u[b] <= u[a] + PARADO_NA_MEDIDA) {
+                b++;
+            }
+            a = (a - folga > de) ? a - folga : de;
+            b = (b + folga < ate) ? b + folga : ate;
+            float ua = u[a], ub = u[b];
+            for (int j = a; j <= b; j++) {
+                u[j] = ua + (ub - ua) * (float) (j - a) / (float) ((b > a) ? b - a : 1);
+            }
+            i = b + 1;
         }
         for (int i = de; i <= ate; i++) {
             float ex1, ez1;
@@ -485,6 +499,28 @@ static void usarAEstradaMedida(const DadosDoPit *pit, int total, const float *x,
         de = ate + 1;
     }
     free(dados);
+}
+
+/*
+ * alturaDaEstradaMedida
+ * Recebe: o pit (com a estrada medida), um ponto do mundo (x, z) e onde guardar a distância dele até a estrada.
+ * Devolve: a altura da estrada no ponto dela mais perto, em metros do jogo.
+ */
+static float alturaDaEstradaMedida(const DadosDoPit *pit, float x, float z, float *distancia) {
+    float escala = (pit->escalaDaEstrada > 0.0f) ? pit->escalaDaEstrada : 1.0f;
+    float menor = 1e18f, altura = 0.0f;
+    for (int k = 0; k + 1 < pit->pontosDaEstrada; k++) {
+        float ax = pit->estrada[k][0] * escala, az = pit->estrada[k][2] * escala;
+        float dx = pit->estrada[k + 1][0] * escala - ax, dz = pit->estrada[k + 1][2] * escala - az, l2 = dx * dx + dz * dz;
+        float t = (l2 > 1e-6f) ? fminf(fmaxf(((x - ax) * dx + (z - az) * dz) / l2, 0.0f), 1.0f) : 0.0f;
+        float d = hypotf(ax + dx * t - x, az + dz * t - z);
+        if (d < menor) {
+            menor = d;
+            altura = (pit->estrada[k][1] + (pit->estrada[k + 1][1] - pit->estrada[k][1]) * t) * escala;
+        }
+    }
+    *distancia = menor;
+    return altura;
 }
 
 /*
@@ -572,6 +608,8 @@ static void alisarEstradaDoPit(Pista *pista) {
     int segmentos = (int) (fim * UNIDADES_POR_METRO / COMPRIMENTO_SEGMENTO) + 2;
     for (int k = 0; k < segmentos; k++, seg = seg->proximo) {
         seg->temTrajetoDoPit = 0;
+        seg->chaoDoPitMedido = 0.0f;
+        seg->temChaoDoPitMedido = 0;
     }
     seg = entrada.segmento;
     for (int k = 0; k < segmentos; k++, seg = seg->proximo) {
@@ -605,11 +643,21 @@ static void alisarEstradaDoPit(Pista *pista) {
         seg->trajetoDoPit[1] = p.z + (alvoZ - p.z) * peso;
         seg->trajetoDoPit[2] = p.rumo + dentroDeMeiaVolta(rumo - p.rumo) * peso;
         seg->temTrajetoDoPit = 2;   /* medido: liga embaixo */
+        if (pit->pontosDaEstrada >= 2) {
+            /* O chão: perto da estrada medida, a altura dela; longe, a de antes (a do ponto pela pista) */
+            float distancia, medida = alturaDaEstradaMedida(pit, seg->trajetoDoPit[0], seg->trajetoDoPit[1], &distancia);
+            float perto = fminf(fmaxf((LONGE_PARA_A_ALTURA - distancia) / (LONGE_PARA_A_ALTURA - PERTO_PARA_A_ALTURA), 0.0f), 1.0f);
+            seg->chaoDoPitMedido = p.y + (medida - p.y) * perto;
+        }
     }
     seg = entrada.segmento;
     for (int k = 0; k < segmentos; k++, seg = seg->proximo) {
         float noPit = metrosDesdeAEntrada(pista, seg->indice * COMPRIMENTO_SEGMENTO / UNIDADES_POR_METRO);
         seg->temTrajetoDoPit = seg->temTrajetoDoPit == 2 && noPit > 0.0f && noPit < volta;
+        seg->temChaoDoPitMedido = seg->temTrajetoDoPit && pit->pontosDaEstrada >= 2;
+        if (!seg->temChaoDoPitMedido) {
+            seg->chaoDoPitMedido = 0.0f;
+        }
     }
     free(dados);
 }
@@ -965,8 +1013,10 @@ int atualizarCarroNoPit(Carro *carro, Pista *pista, float tempoQuadro) {
 
     /* Chegou ao fim do pit lane: de volta à pista, e o piloto volta a mandar */
     /* Ou antes, assim que o pit lane já devolveu o carro à pista (o fim do muro de pit) */
-    int devolvido = noPit > vaga + pit->encostar + LONGE_DA_VAGA && fabsf(carro->deslocamentoLateral) <= 1.0f
-                    && fabsf(linhaNoPit(pista, carro, 1, 0.0f)) <= larguraDaPista;
+    /* Onde a estrada do pit foi medida até se juntar à pista (Montreal), só no fim dela: a faixa de saída corre ao lado
+     * da pista, dentro da largura dela, e o carro devolvido no meio da Curva Senna abria para a grama */
+    int devolvido = pit->pontosDaEstrada < 2 && noPit > vaga + pit->encostar + LONGE_DA_VAGA
+                    && fabsf(carro->deslocamentoLateral) <= 1.0f && fabsf(linhaNoPit(pista, carro, 1, 0.0f)) <= larguraDaPista;
     /* E só com o bico na direção da pista: a estrada do pit encontra a pista na diagonal (em Montreal, uns 16 graus), e
      * o carro devolvido assim, sem a direção guiada, seguia para onde apontava e atravessava a pista até a grama do
      * outro lado. Depois do fim do caminho o lado fica parado: o carro anda junto da pista e o bico alinha logo */

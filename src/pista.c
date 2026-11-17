@@ -85,6 +85,8 @@ static Segmento *criarSegmento(float curvatura) {
     novo->estradaDoPit = 0.0f;
     novo->trajetoDoPit[0] = novo->trajetoDoPit[1] = novo->trajetoDoPit[2] = 0.0f;
     novo->temTrajetoDoPit = 0;
+    novo->chaoDoPitMedido = 0.0f;
+    novo->temChaoDoPitMedido = 0;
     novo->obstaculos = NULL;
     novo->proximo = novo;    /* sozinho, ele é o próprio vizinho */
     novo->anterior = novo;
@@ -655,9 +657,9 @@ static const TrechoComNome TRECHOS_MONTREAL[] = {
 #define ALEM_DA_BORDA_PARA_ENTRAR    1.0f        /* metros: o jogador entra quando segue reto e sai da pista pela esquerda */
 #define FIM_DA_ESTRADA_CORRIGIDA     (-385.0f)   /* depois da curva 14, a perpendicular da pista volta a chegar na estrada */
 #define FAIXA_RAPIDA_DE_MONTREAL     2.5f        /* metros da borda do pit lane até o meio da faixa rápida */
-#define VOLTA_A_PISTA_EM_MONTREAL    350.0f      /* já dentro da Curva Senna... */
-#define DENTRO_DA_PISTA_EM_MONTREAL  3.0f        /* ...a tanto da linha da pista */
-static float caminhoDoPitDeMontreal[TOTAL_PONTOS_PIT_MONTREAL + 2][2];
+#define VOLTA_A_PISTA_EM_MONTREAL    400.0f      /* depois da Curva Senna, onde a faixa de saída já se juntou à pista... */
+#define DENTRO_DA_PISTA_EM_MONTREAL  3.3f        /* ...a tanto da linha da pista (onde a faixa termina) */
+static float caminhoDoPitDeMontreal[TOTAL_PONTOS_PIT_MONTREAL + TOTAL_PONTOS_SAIDA_DO_PIT_MONTREAL + 2][2];
 
 /*
  * criarMontreal
@@ -680,7 +682,8 @@ Pista *criarMontreal(void) {
     pista->largadaPintadaNoModelo = 1;
 
     /* O caminho: da linha tracejada, pela esquerda dela, até a estrada do pit, e daí o pit lane medido (na
-     * perpendicular de cada ponto da pista), com a faixa rápida 2,5 m para dentro da borda do lado da pista */
+     * perpendicular de cada ponto da pista), com a faixa rápida 2,5 m para dentro da borda do lado da pista; depois,
+     * a faixa de saída medida, por fora da Curva Senna, até ela se juntar à pista */
     caminhoDoPitDeMontreal[0][0] = ENTRADA_DO_PIT_DE_MONTREAL * e;
     caminhoDoPitDeMontreal[0][1] = LADO_NA_ENTRADA_DE_MONTREAL * e;
     int pontos = 1;
@@ -690,8 +693,13 @@ Pista *criarMontreal(void) {
         caminhoDoPitDeMontreal[pontos][1] = (dentro + fminf(FAIXA_RAPIDA_DE_MONTREAL, (fora - dentro) / 2.0f)) * e;
         pontos++;
     }
+    for (int i = 0; i < TOTAL_PONTOS_SAIDA_DO_PIT_MONTREAL; i++) {
+        caminhoDoPitDeMontreal[pontos][0] = SAIDA_DO_PIT_MONTREAL[i][0] * e;
+        caminhoDoPitDeMontreal[pontos][1] = SAIDA_DO_PIT_MONTREAL[i][1] * e;
+        pontos++;
+    }
     for (int vez = 0; vez < VEZES_ALISANDO_O_PIT; vez++) {
-        float alisado[TOTAL_PONTOS_PIT_MONTREAL + 2];
+        float alisado[TOTAL_PONTOS_PIT_MONTREAL + TOTAL_PONTOS_SAIDA_DO_PIT_MONTREAL + 2];
         for (int i = 0; i < pontos; i++) {
             float soma = 0.0f;
             int quantos = 0;
@@ -1292,10 +1300,13 @@ float alturaDoChao(PosicaoNaPista posicao, float lateralEmMetros) {
 #define PAREDE_NO_PIT         0.2f    /* metros de altura por metro de lado: mais que isto é parede, não chão */
 float alturaDoChaoNoPit(PosicaoNaPista posicao, float lateralEmMetros) {
     Segmento *a = posicao.segmento, *b = a->proximo;
+    float t = posicao.distanciaNoSegmento / COMPRIMENTO_SEGMENTO;
+    if (a->temChaoDoPitMedido && b->temChaoDoPitMedido) {
+        return a->chaoDoPitMedido + (b->chaoDoPitMedido - a->chaoDoPitMedido) * t;   /* a altura medida da estrada */
+    }
     if (a->estradaDoPit == 0.0f || b->estradaDoPit == 0.0f) {
         return alturaDoChao(posicao, lateralEmMetros);
     }
-    float t = posicao.distanciaNoSegmento / COMPRIMENTO_SEGMENTO;
     float estrada = a->estradaDoPit + (b->estradaDoPit - a->estradaDoPit) * t;
     float falta = lateralEmMetros - estrada;
     int passos = (int) ceilf(fabsf(falta) / PASSO_NO_PIT);
@@ -1368,7 +1379,11 @@ PontoNoMundo pontoNoMundoDoPit(PosicaoNaPista posicao, float deslocamentoLateral
         float angulo = ponto.rumo * GRAUS_PARA_RADIANOS;
         ponto.x = a->trajetoDoPit[0] + (b->trajetoDoPit[0] - a->trajetoDoPit[0]) * t + cosf(angulo) * foraDoCaminho;
         ponto.z = a->trajetoDoPit[1] + (b->trajetoDoPit[1] - a->trajetoDoPit[1]) * t + sinf(angulo) * foraDoCaminho;
-        ponto.y += a->correcaoDoPit[1] + (b->correcaoDoPit[1] - a->correcaoDoPit[1]) * t;
+        if (a->temChaoDoPitMedido && b->temChaoDoPitMedido) {
+            ponto.y = alturaDoChaoNoPit(posicao, deslocamentoLateral * largura);   /* a altura medida da estrada */
+        } else {
+            ponto.y += a->correcaoDoPit[1] + (b->correcaoDoPit[1] - a->correcaoDoPit[1]) * t;
+        }
         if (temCorrecaoDoPit(posicao)) {
             ponto.inclinacao = 0.0f;   /* a estrada do pit é plana de lado */
         }

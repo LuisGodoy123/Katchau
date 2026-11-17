@@ -147,6 +147,12 @@ typedef struct Segmento {
      * posto nele (pontoNoMundoDoPit). temTrajetoDoPit: 1 onde ele vale */
     float trajetoDoPit[3];
     int temTrajetoDoPit;
+    /* Onde a estrada do pit foi medida no mundo (Montreal): a altura dela onde o caminho alisado passa, em metros. O
+     * chão do pit ali (alturaDoChaoNoPit) é ela, plano de lado (as vagas ficam na altura da faixa): longe da linha, a
+     * pista não sabe a altura de verdade, e na curva da entrada o carro e a sombra ficavam até 40 cm abaixo do asfalto.
+     * temChaoDoPitMedido: 1 onde vale (aí o ponto de quem está no pit também fica nessa altura) */
+    float chaoDoPitMedido;
+    int temChaoDoPitMedido;
     struct Obstaculo *obstaculos;   /* lista simples dos objetos da beira (obstaculos.c) */
     struct Segmento *proximo;       /* segmento seguinte (o último aponta para o primeiro) */
     struct Segmento *anterior;      /* segmento anterior (o primeiro aponta para o último) */
