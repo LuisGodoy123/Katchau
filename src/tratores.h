@@ -11,7 +11,7 @@
  *
  * O modelo (recursos/modelos/trator/: corpo, olhos, rodas de trás e da
  * frente, e trator.json com as medidas) e os lugares (recursos/modelos/
- * tratores.json) saem de ferramentas/preparar_trator.py.
+ * tratores.json) saem da ferramenta preparar_trator.
  * ------------------------------------------------------------------
  */
 

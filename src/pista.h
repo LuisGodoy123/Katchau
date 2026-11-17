@@ -138,6 +138,15 @@ typedef struct Segmento {
      * Montreal, ao lado da chicane): o que somar ao ponto do caminho para ele cair na estrada de verdade. A
      * perpendicular da linha da pista, ali, não chega nela sem cruzar a de outro segmento. Zero no resto */
     float correcaoDoPit[4];         /* x, altura e z, em metros, e o rumo, em graus */
+    /* Onde passa o meio da estrada do pit, no começo do segmento: metros da linha da pista, com o sinal do lado
+     * (medirEstradaDoPit, em pitstop.c). 0 fora do pit lane. O chão do pit lane é medido a partir dele */
+    float estradaDoPit;
+    /* O caminho do pit alisado no mundo, no começo do segmento (alisarEstradaDoPit, em pitstop.c): x e z, em metros, e
+     * para onde ele aponta, em graus. Onde a estrada passa longe da pista, o caminho na conta da pista faz zigue-zague e
+     * dobra sobre si mesmo (a chicane e o grampo de Montreal), e o carro seguia essas quinas: ali, quem está no pit é
+     * posto nele (pontoNoMundoDoPit). temTrajetoDoPit: 1 onde ele vale */
+    float trajetoDoPit[3];
+    int temTrajetoDoPit;
     struct Obstaculo *obstaculos;   /* lista simples dos objetos da beira (obstaculos.c) */
     struct Segmento *proximo;       /* segmento seguinte (o último aponta para o primeiro) */
     struct Segmento *anterior;      /* segmento anterior (o primeiro aponta para o último) */
@@ -176,6 +185,9 @@ typedef struct {
     const float (*estrada)[3];  /* a faixa rápida no mundo, no modelo ({ x, altura, z }), onde ela passa longe da
                                    pista (Montreal): veja correcaoDoPit */
     int pontosDaEstrada;
+    float escalaDaEstrada;      /* do modelo para o jogo (a estrada está nas medidas do modelo) */
+    float (*caminhoProprio)[2]; /* o caminho de novo, com um ponto no começo de cada segmento (medirEstradaDoPit):
+                                   caminho aponta para ele, e liberarPista o devolve */
 } DadosDoPit;
 
 /* O grid que a pista já traz pintado (o do modelo de Interlagos). Com "existe" em 0,
@@ -253,6 +265,7 @@ PontoNoMundo pontoNoMundo(PosicaoNaPista posicao, float deslocamentoLateral);
 PontoNoMundo pontoNoMundoDoPit(PosicaoNaPista posicao, float deslocamentoLateral);
 int temCorrecaoDoPit(PosicaoNaPista posicao);
 float alturaDoChao(PosicaoNaPista posicao, float lateralEmMetros);
+float alturaDoChaoNoPit(PosicaoNaPista posicao, float lateralEmMetros);
 float metrosNoMundoPorMetroDaPista(PosicaoNaPista posicao, float lateralEmMetros);
 float larguraDoLado(Segmento *segmento, float lateral);
 float larguraNaPosicao(PosicaoNaPista posicao, float lateral);

@@ -8,7 +8,7 @@
  * na maioria é o brilho (aqui é ignorado), nas folhas e alambrados é o recorte,
  * nas linhas pintadas é a tinta sobre o asfalto e na borracha do traçado e nas
  * sombras pintadas é o quanto escurece. "chao" diz o que o carro sente em cima
- * dele, e é o que a ferramenta ferramentas/medir_pista.c procura.
+ * dele, e é o que a ferramenta medir_pista procurava.
  * ------------------------------------------------------------------
  */
 

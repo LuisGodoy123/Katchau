@@ -2,7 +2,7 @@
  * postes.h
  * ------------------------------------------------------------------
  * Os postes de luz da rua principal e o semáforo do cruzamento
- * (recursos/modelos/postes.glb, de ferramentas/luzes/montar_postes.py): o
+ * (recursos/modelos/postes.glb, da ferramenta montar_postes): o
  * desenho deles, com a luz da hora e a sombra do sol como o resto do mapa, e
  * os troncos, que o carro não atravessa (recursos/modelos/postes.json). As
  * luminárias acesas e as lentes do semáforo são luzes da cidade (luzes.c:

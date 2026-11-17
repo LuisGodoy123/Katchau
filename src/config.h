@@ -10,7 +10,9 @@
 #define TITULO_JANELA    "KATCHAU"
 
 /* Corrida */
-#define MAXIMO_DE_VOLTAS 8   /* a corrida mais longa: cada nível tem o seu número de voltas (corrida.c) */
+#define MAXIMO_DE_VOLTAS 20  /* a corrida mais longa que a escolha da corrida deixa montar (MAIS_VOLTAS, corrida.h):
+                             * é o tamanho de Carro.temposDeVolta. Com 8, uma corrida de 9 ou mais voltas gravava os
+                             * tempos fora do vetor, por cima dos campos seguintes (a chegada, a melhor volta) */
 #define MAXIMO_DE_JOGADORES_LOCAIS 2  /* na tela dividida: 2 humanos + 15 da IA = os 17 carros de sempre */
 #define ESPERA_ANTES_DA_CONTAGEM 1.2f  /* segundos só com o som do motor, antes do 3 aparecer */
 #define NUMEROS_DA_CONTAGEM   3      /* 3, 2, 1... */

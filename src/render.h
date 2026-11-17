@@ -18,6 +18,7 @@
 
 #include "corrida.h"
 #include "olhar.h"
+#include "palco.h"
 
 #define TOTAL_DISTANCIAS_DA_CAMERA 3   /* perto, médio e longe */
 #define MAXIMO_DE_VISOES  MAXIMO_DE_JOGADORES_LOCAIS   /* uma visão por jogador do sofá */
@@ -77,6 +78,7 @@ void congelarCena(int pausada);
 void desenharPistaDeFundo(Pista *pista);
 void desenharFundoAlternado(Pista *pistas[]);
 void desenharCarroParado(int numero, float centroX, float baseY, float escala);
-Texture2D fotografarVitrine(int numero, float giro, Vector2 *chao);
+/* O palco da garagem (palco.c), na tela inteira: a imagem tem o tamanho pedido (o da janela) */
+Texture2D fotografarPalco(const Palco *palco, int largura, int altura);
 
 #endif

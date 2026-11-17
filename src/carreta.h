@@ -7,8 +7,8 @@
  * troféus da Copa Pistão, pôsteres, teto com spots, e no fundo o telão,
  * as vitrines e o letreiro; nas laterais, as caixas das rodas.
  *
- * É o modelo recursos/modelos/mack_interior.glb, feito no Blender por
- * ferramentas/montar_carreta_do_mack.py, com a luz assada nas cores dos
+ * É o modelo recursos/modelos/mack_interior.glb, feito no Blender pela
+ * ferramenta montar_carreta_do_mack, com a luz assada nas cores dos
  * vértices: desenhado com o shader padrão da raylib (textura × cor do
  * vértice). Módulo de desenho: usa a raylib.
  * ------------------------------------------------------------------

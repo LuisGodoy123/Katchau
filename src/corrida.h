@@ -58,7 +58,7 @@ typedef enum {
 
 /* Como a corrida é montada na tela da escolha: a dificuldade é a dos rivais; o resto, as regras e a hora */
 #define MENOS_VOLTAS              1
-#define MAIS_VOLTAS              20
+#define MAIS_VOLTAS              MAXIMO_DE_VOLTAS   /* (config.h) o vetor dos tempos de volta tem esse tamanho */
 #define MENOS_VOLTAS_COM_PARADA   3    /* com a parada obrigatória: os rivais param da 2ª volta em diante */
 typedef struct {
     NivelDaCorrida nivel;

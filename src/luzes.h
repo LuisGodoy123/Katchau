@@ -3,7 +3,7 @@
  * ------------------------------------------------------------------
  * As luzes da cidade à noite: os neons, as lâmpadas, as janelas acesas e o
  * semáforo de cada lugar de Radiator Springs (recursos/modelos/luzes/
- * <lugar>.glb, feitos pelas ferramentas de ferramentas/luzes/), e as luzes pontuais que
+ * <lugar>.glb, feitos pelas ferramentas das luzes), e as luzes pontuais que
  * eles jogam em volta (<lugar>.json). No pôr do sol a cidade acende: cada
  * lugar na sua vez, cada letra e cada lâmpada na ordem dela (o alfa da cor
  * do vértice), piscando um pouco ao ligar; no amanhecer, apagam. De dia os

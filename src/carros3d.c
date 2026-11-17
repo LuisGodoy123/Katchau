@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "carros3d.h"
+#include "olhos.h"
 #include "espera.h"
 #include "raymath.h"
 #include "rlgl.h"
@@ -131,13 +132,16 @@ static float larguraDaFicha(int numero) {
 
 /* Os vértices. A boca: os da mandíbula (o peso de cada um vem no x de vertexTexCoord2, posto por
  * prepararBoca; nos outros é 0) giram em volta da dobradiça, na horizontal de lado a lado do carro, o
- * quanto a boca abre vezes o peso: a frente desce. A normal gira junto. O fragNaPeca (o corte do aro do
- * pneu estourado) continua sendo o ponto parado */
+ * quanto a boca abre vezes o peso: a frente desce. A normal gira junto. Os garfos do Guido cruzados: o
+ * lado de cada vértice deles vem no y de vertexTexCoord2 (+ de um garfo, - do outro, vezes o quanto ele
+ * gira; posto por prepararGarfosCruzados), e cada garfo gira em volta do mastro dele, para dentro. O
+ * fragNaPeca (o corte do aro do pneu estourado) continua sendo o ponto parado */
 static const char *VERTICES_DO_SHADER =
     "#version 330\n"
     "in vec3 vertexPosition; in vec2 vertexTexCoord; in vec3 vertexNormal; in vec4 vertexColor; in vec2 vertexTexCoord2;\n"
     "uniform mat4 mvp; uniform mat4 matModel;\n"
     "uniform vec3 mandibula;\n" /* a dobradiça (y, z) e o ângulo da boca aberta (radianos) */
+    "uniform vec4 garfosCruzados;\n" /* o meio dos mastros (o x de cada lado e o z), o giro (radianos) e o quanto um sobe */
     "out vec2 fragTexCoord; out vec4 fragColor; out vec3 fragNormal; out vec3 fragPos; out vec3 fragNaPeca;\n"
     "void main() { fragTexCoord = vertexTexCoord; fragColor = vertexColor; fragNaPeca = vertexPosition;\n"
     "              vec3 p = vertexPosition, n = vertexNormal;\n"
@@ -147,6 +151,15 @@ static const char *VERTICES_DO_SHADER =
     "                  vec2 d = p.yz - mandibula.xy;\n"
     "                  p.yz = mandibula.xy + vec2(d.x * c - d.y * s, d.x * s + d.y * c);\n"
     "                  n.yz = vec2(n.y * c - n.z * s, n.y * s + n.z * c);\n"
+    "              }\n"
+    "              float lado = vertexTexCoord2.y;\n"
+    "              if (lado != 0.0 && garfosCruzados.z != 0.0) {\n"
+    "                  vec2 eixo = vec2(sign(lado) * garfosCruzados.x, garfosCruzados.y);\n"
+    "                  float g = -lado * garfosCruzados.z, c = cos(g), s = sin(g);\n"
+    "                  vec2 d = p.xz - eixo;\n"
+    "                  p.xz = eixo + vec2(d.x * c + d.y * s, d.y * c - d.x * s);\n"
+    "                  n.xz = vec2(n.x * c + n.z * s, n.z * c - n.x * s);\n"
+    "                  p.y += 0.5 * lado * garfosCruzados.w;\n"
     "              }\n"
     "              fragNormal = mat3(matModel) * n;\n"
     "              fragPos = vec3(matModel * vec4(p, 1.0));\n"
@@ -210,58 +223,10 @@ static const char *VERTICES_DO_SHADER =
  * O shader desliza as íris pelo "desvio" e só as mostra onde é branco: assim elas olham
  * para o lado da curva e somem por baixo da pálpebra. Na sombra, a íris escurece junto. */
 #define PASTA_DOS_OLHOS       PASTA_DOS_MODELOS "olhos/"
-#define CURVA_DO_OLHAR        0.55f     /* < 1: um pouco de volante já vira bem os olhos */
-#define SOBE_O_OLHAR          0.45f     /* quanto a íris sobe ou desce, em raios dela */
-/* A cara em cada estado: o fechamento da pálpebra (0 normal, 1 fechada, < 0 arregalada),
- * a inclinação (> 0 o canto de dentro desce: determinado; < 0 sobe: preocupado), o arco
- * (> 0 o meio abre mais que os cantos) e o tamanho da íris */
-#define CACA_FECHA            0.35f     /* "modo caça", em alta velocidade */
-#define CACA_INCLINA          0.35f
-#define CACA_IRIS             1.04f
-#define SUSTO_FECHA          -0.40f     /* rodando, ou depois de uma batida forte */
-#define SUSTO_INCLINA        -0.30f
-#define SUSTO_ARCO            0.35f
-#define SUSTO_IRIS            0.78f
-#define SUSTO_OLHA_PARA_CIMA  0.35f
-#define SUSTO_TREME           0.10f     /* a íris treme de lado (em frações do quanto ela anda) */
-#define SUSTO_PASSA           0.80f     /* segundos para o susto passar */
-/* As emoções dos moradores (gestos.h), cada uma inteira: a pálpebra faz de sobrancelha */
-#define ALEGRIA_FECHA         0.16f     /* contente: os olhos sorriem, um pouco apertados... */
-#define ALEGRIA_INCLINA      -0.18f     /* ...com o canto de dentro erguido (a cara amiga) */
-#define ALEGRIA_ARCO          0.12f
-#define ALEGRIA_IRIS          1.06f
-#define RAIVA_FECHA           0.28f     /* bravo: a pálpebra desce sobre o canto de dentro */
-#define RAIVA_INCLINA         0.60f
-#define RAIVA_ARCO           -0.10f
-#define RAIVA_IRIS            0.90f
-#define TRISTEZA_FECHA        0.28f     /* triste ou tímido: o canto de dentro sobe e o de fora cai */
-#define TRISTEZA_INCLINA     -0.50f
-#define TRISTEZA_IRIS         1.08f
-#define ESPANTO_FECHA        -0.28f     /* curioso, perguntando: arregalado, a sobrancelha em arco */
-#define ESPANTO_ARCO          0.30f
-#define ESPANTO_IRIS          0.94f
-#define SONO_FECHA            0.80f     /* calmo, pensativo, cochilando: as pálpebras caem */
-#define MAIS_FECHADO          0.95f     /* somando tudo, a pálpebra para aqui... */
-#define MAIS_ABERTO          -0.45f     /* ...e aqui */
-/* As molas: cada parte da cara vai até o alvo como uma mola (frequência em Hz e
- * amortecimento: abaixo de 1, passa um pouco do ponto e volta). É isso que dá vida: o olho
- * chega no canto, passa um tico e assenta, em vez de deslizar em linha reta. */
-#define MOLA_DO_OLHAR         3.2f, 0.55f
-#define MOLA_DA_PALPEBRA      2.2f, 0.75f
-#define MOLA_DA_INCLINACAO    2.0f, 0.80f
-#define MOLA_DO_ARCO          2.0f, 0.60f
-#define MOLA_DA_IRIS          4.0f, 0.50f
+/* As formas das expressões, as molas, as piscadas, as olhadelas e o alcance do olhar ficam no painel dos olhos
+ * (olhos.h e olhos.c). Cada parte da cara vai até o alvo como uma mola (frequência e amortecimento: abaixo de 1,
+ * passa um pouco do ponto e volta): o olho chega no canto, passa um tico e assenta. */
 #define PASSO_DAS_MOLAS       (1.0f / 240.0f)
-/* As piscadas: de tempos em tempos (às vezes duas seguidas), e uma no começo do susto */
-#define PISCA_DE_TEMPOS       2.2f      /* segundos, no mínimo... */
-#define PISCA_ATE             5.5f      /* ...e no máximo */
-#define DURACAO_DA_PISCADA    0.17f
-#define PISCADA_DUPLA         0.20f     /* a chance de piscar duas vezes */
-/* Olhadelas: com o volante parado, o olhar não fica congelado; muda um pouco de vez em quando */
-#define OLHADELA_DE_TEMPOS    0.5f
-#define OLHADELA_ATE          1.8f
-#define OLHADELA_DE_LADO      0.22f
-#define OLHADELA_DE_ALTURA    0.15f
 
 /* O shader dos olhos.
  * A íris: desliza pelo "desvio", escala em volta do meio dela e só aparece onde é branco
@@ -274,10 +239,11 @@ static const char *VERTICES_DO_SHADER =
  *   original, senão o mipmap pisca na emenda. */
 #define OLHOS_DO_SHADER \
     "uniform sampler2D texture1; uniform sampler2D texture2; uniform sampler2D texture3;\n" \
-    "uniform vec2 desvio; uniform vec4 meiosDasIris; uniform float tamanhoDaIris; uniform vec4 formaDaPalpebra;\n" \
-    "float fechamentoDoOlho(float u, float meio, float outro) {\n" \
+    "uniform vec2 desvio; uniform vec4 meiosDasIris; uniform float tamanhoDaIris;\n" \
+    "uniform vec4 formaDaPalpebra; uniform vec4 formaDoOutroOlho;\n" /* a do olho da primeira íris e a do outro */ \
+    "float fechamentoDoOlho(float u, float meio, float outro, vec4 forma) {\n" \
     "    float x = clamp((u - meio) / max(abs(outro - meio) * 0.5, 0.02) * sign(outro - meio), -1.3, 1.3);\n" \
-    "    return formaDaPalpebra.x + 0.5 * formaDaPalpebra.y * x - 0.45 * formaDaPalpebra.z * (1.0 - x * x);\n" \
+    "    return forma.x + 0.5 * forma.y * x - 0.45 * forma.z * (1.0 - x * x);\n" \
     "}\n" \
     "vec2 comPalpebra(vec2 uv) {\n" \
     "    vec3 borda = texture(texture3, vec2(uv.x, 0.5)).rgb;\n" \
@@ -285,7 +251,7 @@ static const char *VERTICES_DO_SHADER =
     "    if (borda.z < 0.5 || abs(d) < 0.002) return uv;\n" \
     "    float c1 = meiosDasIris.x, c2 = meiosDasIris.z;\n" \
     "    float t = smoothstep(-0.15, 0.15, (uv.x - 0.5 * (c1 + c2)) / max(abs(c2 - c1), 0.02) * sign(c2 - c1));\n" \
-    "    float f = mix(fechamentoDoOlho(uv.x, c1, c2), fechamentoDoOlho(uv.x, c2, c1), t);\n" \
+    "    float f = mix(fechamentoDoOlho(uv.x, c1, c2, formaDaPalpebra), fechamentoDoOlho(uv.x, c2, c1, formaDoOutroOlho), t);\n" \
     "    float s = (uv.y - borda.y) / d;\n" \
     "    float e = 1.0 - f;\n" \
     "    float v = uv.y;\n" \
@@ -326,6 +292,7 @@ typedef struct {
     float linha;            /* a altura do meio do olho, na textura */
     float raio;             /* o raio da íris na altura, na textura */
     Vector4 meios;          /* o meio de cada íris (u, v, u, v) */
+    float desceAIris;       /* o descanso da íris do personagem (olhos.c), em raios dela */
 } OlhosDoCarro;
 
 /* Uma mola: a posição e a velocidade */
@@ -345,6 +312,19 @@ typedef struct {
     float olhadelaX, olhadelaY;
     float olharPedido;             /* para onde olhar no próximo desenho, no lugar do volante... */
     int temOlharPedido;            /* ...se pediram (olharNoProximoDesenho) */
+    /* Os pedidos do painel dos olhos (olhos.h), para o próximo desenho */
+    float pesos[TOTAL_EXPRESSOES];  /* mostrarExpressao */
+    int temAlvo;                    /* olharParaNoProximoDesenho: o olhar já no alcance, sem a curva do volante */
+    float alvoX, alvoY;
+    float foco;                     /* focarOlhar: 0 a 1, sem as olhadelas */
+    int pedePiscada;                /* piscarAgora */
+    float piscadela;                /* segundos desde o começo da piscadela (< 0: nenhuma) */
+    float ladoDaPiscadela;          /* +1 o olho direito do carro, -1 o esquerdo */
+    float fechaUmOlho;              /* fecharUmOlhoNoProximoDesenho: + o direito, - o esquerdo */
+    float desvioX, desvioY;         /* desviarOlharNoProximoDesenho: somado a para onde ele olha */
+    Mola assimetria;                /* > 0: o olho direito mais fechado */
+    float semPiscar;                /* segundos desde o começo da última piscada */
+    int saltando;                   /* 1 enquanto o olho está longe de para onde vai (um salto do olhar) */
     unsigned int sorteio;          /* para os sorteios do carro (não mexe no rand() do jogo) */
     double hora;                   /* do último desenho (para saber quanto tempo passou) */
 } CaraDoCarro;
@@ -355,13 +335,13 @@ static OlhosDoCarro olhos[TOTAL_DE_MODELOS + 1];
 static CaraDoCarro caras[TOTAL_DE_MODELOS + 1];
 static float reflexos[TOTAL_DE_MODELOS];    /* quanto o céu se reflete na pintura de cada carro */
 static Shader shaderDosOlhos;
-static int locDoDesvio, locDosMeios, locDoTamanho, locDaForma;
+static int locDoDesvio, locDosMeios, locDoTamanho, locDaForma, locDaFormaDoOutro;
 static int locsDoReflexo[3];   /* reflexoDaPintura no opaco, no translúcido e no dos olhos */
 static int locsDoCorte[2];     /* corteDoAro no opaco e no translúcido */
 static int locsDoOlho[3];      /* "olho" nos mesmos três: procurar pelo nome a cada quadro é caro */
 static int locsDaMandibula[2]; /* "mandibula" no opaco e no translúcido */
 
-/* A boca de cada modelo (recursos/modelos/carros/bocas.txt, de ferramentas/medir_bocas.py) */
+/* A boca de cada modelo (recursos/modelos/carros/bocas.txt, da ferramenta medir_bocas) */
 #define ARQUIVO_DAS_BOCAS     PASTA_DOS_MODELOS "bocas.txt"
 #define MESMO_PONTO           2e-5f     /* unidades do modelo: o vértice da tabela e o da malha são o mesmo */
 typedef struct {
@@ -391,6 +371,16 @@ static int temGarfos = 0;
 static Matrix poseDosGarfos;             /* no carro normalizado; vale só para o próximo desenho */
 static int temPoseDosGarfos = 0;
 static Vector3 pontaDosGarfosNormal;     /* o meio das pás, em cima, no carro normalizado */
+/* Os garfos cruzados como braços (a pose de "e daí?"): cada garfo gira em volta do mastro dele, para dentro, e um
+ * fica um pouco mais alto que o outro, para as pás passarem uma por cima da outra */
+#define GARFOS_CRUZADOS_GIRAM 1.20f      /* radianos, cruzados de todo */
+#define GARFOS_CRUZADOS_SOBEM 0.10f      /* da altura dos garfos: a diferença entre um e outro */
+#define GARFO_DOBRA_DE        0.20f      /* do comprimento dos garfos, atrás do mastro: até aqui é suporte, parado... */
+#define GARFO_DOBRA_ATE       0.06f      /* ...e daqui para a frente gira inteiro (o braço entre os dois dobra) */
+static Vector4 garfosCruzados;           /* o meio dos mastros (x de cada lado, z), no modelo como veio, e o resto 0 */
+static float cruzamentoDosGarfos = 0.0f; /* 0 a 1, no próximo desenho */
+static int locsDosGarfos[2];             /* garfosCruzados no opaco e no translúcido */
+
 static int rodaEscondida = -1;           /* a roda que não está no carro no próximo desenho */
 static int estouradosNoProximo = 0;      /* os pneus estourados no próximo desenho (bits, como Carro.pneuEstourado) */
 static Matrix corpoInclinado;            /* a suspensão: só o corpo inclina, as rodas não */
@@ -862,6 +852,38 @@ void desenharRodaSolta(int numero, int roda, Matrix noMundo) {
 }
 
 /*
+ * desenharPecaCromada
+ * Uma peça que não é do modelo (a suspensão hidráulica do Ramone, na garagem), desenhada com o material cromado
+ * do próprio carro e o shader dele: ganha a mesma luz e os mesmos reflexos da lataria. O cromado é o material
+ * liso (sem imagem) mais claro do modelo.
+ * Recebe: o carro, a malha e onde ela fica no mundo.
+ * Devolve: nada.
+ */
+void desenharPecaCromada(int numero, Mesh malha, Matrix noMundo) {
+    static int cromo[TOTAL_DE_MODELOS];
+    static int procurado[TOTAL_DE_MODELOS];
+    Model modelo = modelos[numero];
+    if (!procurado[numero]) {
+        procurado[numero] = 1;
+        cromo[numero] = (modelo.materialCount > 1) ? 1 : 0;
+        int maisClaro = -1;
+        for (int i = 0; i < modelo.materialCount; i++) {
+            Material *m = &modelo.materials[i];
+            Color c = m->maps[MATERIAL_MAP_DIFFUSE].color;
+            int claro = (c.r + c.g + c.b) / 3;
+            int semImagem = (m->maps[MATERIAL_MAP_DIFFUSE].texture.id == rlGetTextureIdDefault());
+            if (semImagem && claro > 110 && claro > maisClaro) {
+                maisClaro = claro;
+                cromo[numero] = i;
+            }
+        }
+    }
+    Material material = modelo.materials[cromo[numero]];
+    material.shader = shaderOpaco;
+    DrawMesh(malha, material, noMundo);
+}
+
+/*
  * expressaoNoProximoDesenho
  * A cara do carro no próximo desenho: o quanto ele aperta os olhos (o "modo caça", em alta
  * velocidade) e o quanto está assustado (rodando, batendo). A cara vai até lá com as molas.
@@ -884,6 +906,16 @@ void expressaoNoProximoDesenho(int numero, float aperto, float susto) {
  */
 void emocaoNoProximoDesenho(int numero, const Emocao *emocao) {
     caras[numero].emocao = *emocao;
+}
+
+/*
+ * cruzarGarfosNoProximoDesenho
+ * Os garfos do Guido cruzados como braços, no próximo desenho.
+ * Recebe: o quanto (0 soltos, 1 cruzados).
+ * Devolve: nada.
+ */
+void cruzarGarfosNoProximoDesenho(float cruzado) {
+    cruzamentoDosGarfos = fmaxf(0.0f, fminf(1.0f, cruzado));
 }
 
 /*
@@ -918,6 +950,62 @@ void bocaNoProximoDesenho(int numero, float abertura) {
 void olharNoProximoDesenho(int numero, float olhar) {
     caras[numero].olharPedido = fmaxf(-1.0f, fminf(1.0f, olhar));
     caras[numero].temOlharPedido = 1;
+}
+
+/* ---------- O painel dos olhos (olhos.h): os pedidos para o próximo desenho ---------- */
+
+/*
+ * olharParaNoProximoDesenho
+ * Os olhos do carro olham para um ponto do mundo (a câmera, para o contato visual; outro carro; o jogador), pela
+ * pose dele: a conta é feita no carro, a partir de onde ficam os olhos.
+ * Recebe: o carro, a matriz com que ele vai ser desenhado e o ponto.
+ * Devolve: nada.
+ */
+void olharParaNoProximoDesenho(int numero, Matrix noMundo, Vector3 ponto) {
+    if (numero < 0 || numero >= TOTAL_DE_MODELOS) {
+        return;
+    }
+    Vector3 noCarro = Vector3Transform(ponto, MatrixInvert(noMundo));
+    float x = noCarro.x, y = noCarro.y - alturaDoCarro3D(numero) * OLHOS_NA_ALTURA;
+    float z = noCarro.z - comprimentoDoCarro3D(numero) * OLHOS_NA_FRENTE;
+    olharParaOPonto(x, y, z, &caras[numero].alvoX, &caras[numero].alvoY);
+    caras[numero].temAlvo = 1;
+}
+
+/* Uma expressão da tabela (olhos.c) no próximo desenho, com uma força (0 a 1; dá para somar várias) */
+void mostrarExpressao(int numero, Expressao expressao, float forca) {
+    if ((int) expressao >= 0 && expressao < TOTAL_EXPRESSOES && forca > 0.0f) {
+        caras[numero].pesos[expressao] += forca;
+    }
+}
+
+/* Somado a para onde ele olha (o ponto, o volante ou o pedido), no próximo desenho: a olhadela para o lado de quem
+ * está encarando alguém, o conferir de um lado e do outro (de lado: + para a direita do carro; para cima: + sobe) */
+void desviarOlharNoProximoDesenho(int numero, float deLado, float paraCima) {
+    caras[numero].desvioX += deLado;
+    caras[numero].desvioY += paraCima;
+}
+
+/* Um olho fechado no próximo desenho, por quanto ele fecha (+ o direito do carro, - o esquerdo, até 1): a piscadela
+ * com o tempo de quem pede */
+void fecharUmOlhoNoProximoDesenho(int numero, float quanto) {
+    caras[numero].fechaUmOlho = fmaxf(-1.0f, fminf(1.0f, quanto));
+}
+
+/* O olhar fica onde foi pedido, sem as olhadelas (0 a 1), no próximo desenho */
+void focarOlhar(int numero, float foco) {
+    caras[numero].foco = fmaxf(caras[numero].foco, foco);
+}
+
+/* Uma piscada agora (se já não está piscando) */
+void piscarAgora(int numero) {
+    caras[numero].pedePiscada = 1;
+}
+
+/* A piscadela: um olho só (1 o direito do carro, 0 o esquerdo) */
+void piscarUmOlho(int numero, int direito) {
+    caras[numero].piscadela = 0.0f;
+    caras[numero].ladoDaPiscadela = direito ? 1.0f : -1.0f;
 }
 
 /*
@@ -979,16 +1067,39 @@ static void animarOlhos(int numero, float volante, float tempo) {
     c->alvoSusto = 0.0f;
     memset(&c->emocao, 0, sizeof(c->emocao));
 
-    /* As piscadas: de tempos em tempos, menos no "modo caça" (concentrado), e no susto */
+    /* Os pedidos do painel (olhos.h) */
+    float pedidos[TOTAL_EXPRESSOES];
+    memcpy(pedidos, c->pesos, sizeof(pedidos));
+    memset(c->pesos, 0, sizeof(c->pesos));
+    int temAlvo = c->temAlvo;
+    float alvoX = c->alvoX, alvoY = c->alvoY, foco = c->foco, desvioX = c->desvioX, desvioY = c->desvioY;
+    c->temAlvo = 0;
+    c->foco = 0.0f;
+    c->desvioX = 0.0f;
+    c->desvioY = 0.0f;
+
+    /* As piscadas: de tempos em tempos, menos no "modo caça" (concentrado), no susto e quando pedem */
     c->proximaPiscada -= tempo;
+    c->semPiscar += tempo;
     if (c->piscada >= 0.0f) {
         c->piscada += tempo;
         if (c->piscada > DURACAO_DA_PISCADA) {
             c->piscada = -1.0f;
         }
     }
+    if (c->pedePiscada && c->piscada < 0.0f) {
+        c->proximaPiscada = 0.0f;
+    }
+    c->pedePiscada = 0;
+    if (c->piscadela >= 0.0f) {
+        c->piscadela += tempo;
+        if (c->piscadela > DURACAO_DA_PISCADELA) {
+            c->piscadela = -1.0f;
+        }
+    }
     if (comecouSusto || (c->proximaPiscada <= 0.0f && c->piscada < 0.0f)) {
         c->piscada = 0.0f;
+        c->semPiscar = 0.0f;
         int dupla = sortear(c, 0.0f, 1.0f) < PISCADA_DUPLA;
         c->proximaPiscada = dupla ? DURACAO_DA_PISCADA + 0.08f
                                   : sortear(c, PISCA_DE_TEMPOS, PISCA_ATE) * (1.0f + 0.8f * a);
@@ -1001,27 +1112,50 @@ static void animarOlhos(int numero, float volante, float tempo) {
         c->olhadelaY = sortear(c, -OLHADELA_DE_ALTURA, OLHADELA_DE_ALTURA);
         c->proximaOlhadela = sortear(c, OLHADELA_DE_TEMPOS, OLHADELA_ATE);
     }
-    float v = fmaxf(-1.0f, fminf(1.0f, volante));
-    float olhar = copysignf(powf(fabsf(v), CURVA_DO_OLHAR), v);
-    float solto = (1.0f - fabsf(olhar)) * (1.0f - a * 0.7f);   /* concentrado, olha menos em volta */
+    /* Para onde olha: o ponto pedido (já no alcance) ou o volante, pela curva dele */
+    float olhar;
+    if (temAlvo) {
+        olhar = alvoX;
+    } else {
+        float v = fmaxf(-1.0f, fminf(1.0f, volante));
+        olhar = copysignf(powf(fabsf(v), CURVA_DO_OLHAR), v);
+    }
+    olhar = fmaxf(-1.0f, fminf(1.0f, olhar + desvioX));
+    float solto = (1.0f - fabsf(olhar)) * (1.0f - a * 0.7f) * (1.0f - fminf(fmaxf(foco, 0.0f), 1.0f));   /* concentrado ou focado, olha menos em volta */
     float tremor = s * SUSTO_TREME * sinf((float) c->hora * 47.0f + (float) numero * 1.7f);
 
-    /* As emoções somam por cima do aperto (a cara de quem não está assustado) */
-    float fechar = CACA_FECHA * a + SUSTO_FECHA * s
-                   + semSusto * (ALEGRIA_FECHA * e.alegria + RAIVA_FECHA * e.raiva + TRISTEZA_FECHA * e.tristeza
-                                 + ESPANTO_FECHA * e.espanto + SONO_FECHA * e.sono);
-    float inclinar = CACA_INCLINA * a + SUSTO_INCLINA * s
-                     + semSusto * (ALEGRIA_INCLINA * e.alegria + RAIVA_INCLINA * e.raiva + TRISTEZA_INCLINA * e.tristeza);
-    float arco = SUSTO_ARCO * s + semSusto * (ALEGRIA_ARCO * e.alegria + RAIVA_ARCO * e.raiva + ESPANTO_ARCO * e.espanto);
-    float iris = 1.0f + (CACA_IRIS - 1.0f) * a + (SUSTO_IRIS - 1.0f) * s
-                 + semSusto * ((ALEGRIA_IRIS - 1.0f) * e.alegria + (RAIVA_IRIS - 1.0f) * e.raiva
-                               + (TRISTEZA_IRIS - 1.0f) * e.tristeza + (ESPANTO_IRIS - 1.0f) * e.espanto);
-    molar(&c->olharX, olhar * (1.0f - 0.3f * s) + c->olhadelaX * solto + tremor, MOLA_DO_OLHAR, tempo);
-    molar(&c->olharY, SUSTO_OLHA_PARA_CIMA * s + semSusto * e.olharParaCima + c->olhadelaY * solto, MOLA_DO_OLHAR, tempo);
-    molar(&c->fechar, fmaxf(MAIS_ABERTO, fminf(MAIS_FECHADO, fechar)), MOLA_DA_PALPEBRA, tempo);
-    molar(&c->inclinar, fmaxf(-0.7f, fminf(0.7f, inclinar)), MOLA_DA_INCLINACAO, tempo);
-    molar(&c->arco, fmaxf(-0.3f, fminf(0.5f, arco)), MOLA_DO_ARCO, tempo);
-    molar(&c->iris, iris, MOLA_DA_IRIS, tempo);
+    /* A cara: as expressões da tabela (olhos.c), pelos pesos. O aperto é a concentrada e o susto, a assustada; as
+     * emoções do corpo e as pedidas somam por cima, menos no susto (ele passa por cima de tudo) */
+    float pesos[TOTAL_EXPRESSOES] = { 0 };
+    somarEmocao(&e, pesos);
+    for (int i = 0; i < TOTAL_EXPRESSOES; i++) {
+        pesos[i] = (pesos[i] + pedidos[i]) * semSusto;
+    }
+    pesos[EXPRESSAO_CONCENTRADA] += a;
+    pesos[EXPRESSAO_ASSUSTADA] += s;
+    FormaDosOlhos forma = misturarExpressoes(pesos);
+    float paraCima = forma.sobe + semSusto * e.olharParaCima + (temAlvo ? alvoY : 0.0f) + desvioY;
+    float paraOndeVai = olhar * (1.0f - 0.3f * s) + c->olhadelaX * solto + tremor;
+    /* O salto do olhar: quando o olho tem de ir longe de uma vez, às vezes ele pisca no caminho, como as pessoas
+     * (uma vez por salto, e não logo depois de outra piscada) */
+    float falta = fabsf(paraOndeVai - c->olharX.x);
+    if (falta > SALTO_DO_OLHAR && !c->saltando) {
+        c->saltando = 1;
+        if (c->piscada < 0.0f && c->semPiscar > PISCA_NO_SALTO_A_CADA && sortear(c, 0.0f, 1.0f) < PISCA_NO_SALTO) {
+            c->piscada = 0.0f;
+            c->semPiscar = 0.0f;
+            c->proximaPiscada = fmaxf(c->proximaPiscada, PISCA_DE_TEMPOS);
+        }
+    } else if (falta < SALTO_DO_OLHAR * 0.5f) {
+        c->saltando = 0;
+    }
+    molar(&c->olharX, paraOndeVai, MOLA_DO_OLHAR, tempo);
+    molar(&c->olharY, fmaxf(-1.0f, fminf(1.0f, paraCima)) + c->olhadelaY * solto, MOLA_DO_OLHAR, tempo);
+    molar(&c->fechar, forma.fechar, MOLA_DA_PALPEBRA, tempo);
+    molar(&c->inclinar, forma.inclinar, MOLA_DA_INCLINACAO, tempo);
+    molar(&c->arco, forma.arco, MOLA_DO_ARCO, tempo);
+    molar(&c->iris, 1.0f + forma.iris, MOLA_DA_IRIS, tempo);
+    molar(&c->assimetria, forma.assimetria, MOLA_DA_ASSIMETRIA, tempo);
 }
 
 /*
@@ -1039,6 +1173,7 @@ static void prepararOlhos(int numero, float volante) {
         c->sorteio = 2654435761u * (unsigned int) (numero + 1);
         c->iris.x = 1.0f;
         c->piscada = -1.0f;
+        c->piscadela = -1.0f;
         c->proximaPiscada = sortear(c, 0.5f, PISCA_ATE);
     }
     float tempo = (c->hora > 0.0) ? (float) fmin(0.1, agora - c->hora) : 0.0f;
@@ -1046,15 +1181,35 @@ static void prepararOlhos(int numero, float volante) {
     animarOlhos(numero, c->temOlharPedido ? c->olharPedido : volante, tempo);
     c->temOlharPedido = 0;
 
+    /* Cada olho com a sua pálpebra: a assimetria fecha mais um que o outro, e a piscadela fecha um só. A primeira
+     * íris da imagem (meios.xy) é o olho direito do carro quando ela fica do lado da direita (o "lado" da imagem) */
     float piscada = fechamentoDaPiscada(c->piscada);
-    Vector4 forma = { c->fechar.x + (1.08f - c->fechar.x) * piscada, c->inclinar.x * (1.0f - piscada),
-                      c->arco.x * (1.0f - piscada), 0.0f };
-    Vector2 desvio = { o->lado * o->anda * c->olharX.x, o->ladoDeCima * o->raio * SOBE_O_OLHAR * c->olharY.x };
+    float piscadela = 0.0f;
+    if (c->piscadela >= 0.0f) {
+        float t = c->piscadela / DURACAO_DA_PISCADELA;
+        piscadela = (t < 0.3f) ? t / 0.3f : (t < 0.6f) ? 1.0f : 1.0f - (t - 0.6f) / 0.4f;
+        piscadela = piscadela * piscadela * (3.0f - 2.0f * piscadela);
+    }
+    float umOlho = c->fechaUmOlho;
+    c->fechaUmOlho = 0.0f;
+    int primeiraEDireita = (o->meios.x - o->meios.z) * o->lado > 0.0f;
+    Vector4 formas[2];
+    for (int lado = 0; lado < 2; lado++) {   /* 0 o olho direito do carro, 1 o esquerdo */
+        float ladoDoOlho = (lado == 0) ? 1.0f : -1.0f;
+        /* a pálpebra de cima acompanha o olhar: sobe junto quando ele sobe, desce quando ele desce */
+        float fecha = c->fechar.x - PALPEBRA_SEGUE_O_OLHAR * c->olharY.x + 0.5f * ladoDoOlho * c->assimetria.x;
+        float fechou = fmaxf(piscada, (c->ladoDaPiscadela == ladoDoOlho) ? piscadela : 0.0f);
+        fechou = fmaxf(fechou, fminf(fmaxf(umOlho * ladoDoOlho, 0.0f), 1.0f));
+        formas[lado] = (Vector4){ fecha + (1.08f - fecha) * fechou, c->inclinar.x * (1.0f - fechou), c->arco.x * (1.0f - fechou), 0.0f };
+    }
+    Vector4 daPrimeira = primeiraEDireita ? formas[0] : formas[1], daOutra = primeiraEDireita ? formas[1] : formas[0];
+    Vector2 desvio = { o->lado * o->anda * c->olharX.x, o->ladoDeCima * o->raio * (SOBE_O_OLHAR * c->olharY.x - o->desceAIris) };
     float tamanho = fmaxf(0.5f, c->iris.x);
     SetShaderValue(shaderDosOlhos, locDoDesvio, &desvio, SHADER_UNIFORM_VEC2);
     SetShaderValue(shaderDosOlhos, locDosMeios, &o->meios, SHADER_UNIFORM_VEC4);
     SetShaderValue(shaderDosOlhos, locDoTamanho, &tamanho, SHADER_UNIFORM_FLOAT);
-    SetShaderValue(shaderDosOlhos, locDaForma, &forma, SHADER_UNIFORM_VEC4);
+    SetShaderValue(shaderDosOlhos, locDaForma, &daPrimeira, SHADER_UNIFORM_VEC4);
+    SetShaderValue(shaderDosOlhos, locDaFormaDoOutro, &daOutra, SHADER_UNIFORM_VEC4);
 }
 
 /*
@@ -1102,7 +1257,12 @@ void desenharCarro3D(int numero, Matrix noMundo, float anguloDasRodas, float vol
     SetShaderValue(shaderOpaco, locsDaMandibula[0], &mandibula, SHADER_UNIFORM_VEC3);
     SetShaderValue(shaderTranslucido, locsDaMandibula[1], &mandibula, SHADER_UNIFORM_VEC3);
     desenharComShader(modelo, shaderOpaco, materialDosOlhos);
+    Vector4 cruzados = garfosCruzados;
     if (comGarfos) {
+        cruzados.z = GARFOS_CRUZADOS_GIRAM * cruzamentoDosGarfos;
+        cruzados.w *= cruzamentoDosGarfos;
+        SetShaderValue(shaderOpaco, locsDosGarfos[0], &cruzados, SHADER_UNIFORM_VEC4);
+        SetShaderValue(shaderTranslucido, locsDosGarfos[1], &cruzados, SHADER_UNIFORM_VEC4);
         desenharComShader(doGuido, shaderOpaco, -1);
     }
     desenharRodas(numero, modelo, noMundo, anguloDasRodas, volante, 0, subida);
@@ -1119,10 +1279,16 @@ void desenharCarro3D(int numero, Matrix noMundo, float anguloDasRodas, float vol
     rlDrawRenderBatchActive();
     rlEnableDepthMask();
     EndBlendMode();
+    if (comGarfos && cruzados.z != 0.0f) {   /* os outros desenhos (a roda solta, os outros carros) com os garfos soltos */
+        Vector4 soltos = { 0 };
+        SetShaderValue(shaderOpaco, locsDosGarfos[0], &soltos, SHADER_UNIFORM_VEC4);
+        SetShaderValue(shaderTranslucido, locsDosGarfos[1], &soltos, SHADER_UNIFORM_VEC4);
+    }
     rodaEmTroca = -1;
     rodaEscondida = -1;
     estouradosNoProximo = 0;
     temPoseDosGarfos = 0;
+    cruzamentoDosGarfos = 0.0f;
     temCorpoInclinado = 0;
     aberturaNoProximo[numero] = 0.0f;
     aberturaDasRodas = 0.0f;
@@ -2015,6 +2181,7 @@ static int acharOlhosNaTabela(const char *tabela, const char *nome, OlhosDoCarro
                       &lidos.linha, &lidos.raio, &lidos.meios.x, &lidos.meios.y, &lidos.meios.z, &lidos.meios.w) == 10
             && strcmp(carro, nome) == 0) {
             lidos.ladoDaPalpebra = (float) ladoDaPalpebra;
+            lidos.desceAIris = irisDeDescanso(nome);
             *achados = lidos;
             return noGlb + 1;   /* a raylib põe um material padrão antes dos do .glb */
         }
@@ -2259,9 +2426,52 @@ static void porPesosNaMalha(Mesh *malha, float *pesos) {
 }
 
 /*
+ * prepararGarfosCruzados
+ * Para os garfos do Guido cruzarem como braços: acha o meio dos mastros (o alto deles: só os mastros chegam lá em
+ * cima) e dá a cada vértice o lado dele vezes o quanto ele gira (no y do vertexTexCoord2): o mastro e a pá giram
+ * inteiros; o suporte preso ao corpo fica parado; o braço entre os dois dobra aos poucos.
+ * Recebe: nada (os garfos já carregados).
+ * Devolve: nada.
+ */
+static void prepararGarfosCruzados(void) {
+    BoundingBox caixa = GetModelBoundingBox(garfos);
+    float alto = caixa.min.y + 0.92f * (caixa.max.y - caixa.min.y);
+    double somaX = 0.0, somaZ = 0.0;
+    long noAlto = 0;
+    for (int m = 0; m < garfos.meshCount; m++) {
+        const float *v = garfos.meshes[m].vertices;
+        for (int k = 0; k < garfos.meshes[m].vertexCount; k++) {
+            if (v[k * 3 + 1] > alto) {
+                somaX += fabsf(v[k * 3]);
+                somaZ += v[k * 3 + 2];
+                noAlto++;
+            }
+        }
+    }
+    if (noAlto == 0) {
+        return;
+    }
+    float comprimento = caixa.max.z - caixa.min.z;
+    garfosCruzados = (Vector4){ (float) (somaX / noAlto), (float) (somaZ / noAlto), 0.0f,
+                                GARFOS_CRUZADOS_SOBEM * (caixa.max.y - caixa.min.y) };
+    float de = garfosCruzados.y - GARFO_DOBRA_DE * comprimento, ate = garfosCruzados.y - GARFO_DOBRA_ATE * comprimento;
+    for (int m = 0; m < garfos.meshCount; m++) {
+        Mesh *malha = &garfos.meshes[m];
+        float *pesos = (float *) RL_CALLOC((size_t) malha->vertexCount * 2, sizeof(float));
+        for (int k = 0; k < malha->vertexCount; k++) {
+            float x = malha->vertices[k * 3], z = malha->vertices[k * 3 + 2];
+            float s = fmaxf(0.0f, fminf(1.0f, (z - de) / (ate - de)));
+            pesos[k * 2 + 1] = ((x > 0.0f) ? 1.0f : -1.0f) * s * s * (3.0f - 2.0f * s);
+        }
+        porPesosNaMalha(malha, pesos);
+    }
+    TraceLog(LOG_INFO, "CARRO: os mastros dos garfos do Guido em x = +-%.2f, z = %.2f", garfosCruzados.x, garfosCruzados.y);
+}
+
+/*
  * prepararBoca
  * A boca do modelo, da tabela das bocas: a dobradiça, o quanto abre e o peso de cada ponto da mandíbula
- * (o lábio de baixo, o queixo, os dentes de baixo e a língua; veja ferramentas/medir_bocas.py). Cada
+ * (o lábio de baixo, o queixo, os dentes de baixo e a língua; veja a ferramenta medir_bocas). Cada
  * vértice das malhas do modelo que está num ponto da tabela leva o peso dele.
  * Recebe: o carro e o texto da tabela (NULL: sem tabela).
  * Devolve: nada.
@@ -2466,6 +2676,7 @@ void carregarCarros3D(void) {
     locDosMeios = GetShaderLocation(shaderDosOlhos, "meiosDasIris");
     locDoTamanho = GetShaderLocation(shaderDosOlhos, "tamanhoDaIris");
     locDaForma = GetShaderLocation(shaderDosOlhos, "formaDaPalpebra");
+    locDaFormaDoOutro = GetShaderLocation(shaderDosOlhos, "formaDoOutroOlho");
     /* a raylib só liga sozinha texture0 a texture2; a texture3 (as bordas) é o mapa de rugosidade */
     shaderDosOlhos.locs[SHADER_LOC_MAP_ROUGHNESS] = GetShaderLocation(shaderDosOlhos, "texture3");
     registrarShaderIluminado(shaderOpaco);
@@ -2492,6 +2703,7 @@ void carregarCarros3D(void) {
         locsDoOlho[i] = GetShaderLocation(comReflexo[i], "olho");
         if (i < 2) {
             locsDaMandibula[i] = GetShaderLocation(comReflexo[i], "mandibula");
+            locsDosGarfos[i] = GetShaderLocation(comReflexo[i], "garfosCruzados");
         }
         SetShaderValue(comReflexo[i], locsDoReflexo[i], &reflexoNormal, SHADER_UNIFORM_FLOAT);
     }
@@ -2515,8 +2727,10 @@ void carregarCarros3D(void) {
             garfos = LoadModel(TextFormat("%s%s", PASTA_DOS_MODELOS, ARQUIVO_DOS_GARFOS));
             prepararTexturas(garfos);
             translucidosDosGarfos = medirTranslucidos(garfos);
+            prepararGarfosCruzados();
             temGarfos = 1;
         }
+
         normalizarModelo(numero);
         medirLadoDosOlhos(numero);
         if (numero == CARRO_COM_GARFOS && temGarfos) {

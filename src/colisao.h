@@ -2,7 +2,7 @@
  * colisao.h
  * ------------------------------------------------------------------
  * Os triângulos sólidos do mundo aberto (recursos/modelos/radiator_springs.col,
- * gerado por ferramentas/montar_mundo_aberto.py), e as perguntas que a
+ * gerado pela ferramenta montar_mundo_aberto), e as perguntas que a
  * física do passeio livre faz a eles:
  *
  *   - onde é o chão embaixo deste ponto? (de cima para baixo)

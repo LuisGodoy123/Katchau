@@ -61,18 +61,18 @@ lista circular duplamente encadeada de segmentos.
   música do menu seguindo até a apresentação da pista); desistindo, o carro desce de ré pela rampa. No fim
   da corrida (ou saindo dela pela pausa), o carro desce do mesmo jeito, de volta na cidade, com o resultado
   no alto da tela. Por dentro, a carreta é o "camarim" do McQueen (`src/carreta.c`), um modelo 3D
-  (`recursos/modelos/mack_interior.glb`, de `ferramentas/montar_carreta_do_mack.py`, com a luz assada nas cores
+  (`recursos/modelos/mack_interior.glb`, da ferramenta `montar_carreta_do_mack`, com a luz assada nas cores
   dos vértices), como no filme: escuro, com o neon amarelo contornando os raios das paredes e os caixotões do
   teto, o céu de estrelas de fibra ótica no meio do teto, as fileiras de spots sobre as prateleiras de troféus,
   pôsteres e carrinhos, o teclado da porta, o piso de chapa xadrez preta polida e, no fundo, o console com a tela
   e as caixas de som e o 95 em relevo com as bandeiras. O que brilha (`mack_interior_luzes.glb`) é desenhado aceso
   por cima e entra no brilho em volta. Por fora, de noite o Mack acende as 281 lâmpadas âmbar de contorno da
   carreta e da cabine, os faróis e as lanternas (`recursos/modelos/mack_luzes.glb` e `.json`, de
-  `ferramentas/luzes/montar_luzes_do_mack.py`), que andam com ele (`registrarLuzesMoveis` em `src/luzes.c`). Os olhos do Mack são vivos
+  `montar_luzes_do_mack`), que andam com ele (`registrarLuzesMoveis` em `src/luzes.c`). Os olhos do Mack são vivos
   como os dos carros (o mesmo shader e a mesma cara de `src/carros3d.c`): ele pisca, olha em volta,
   acompanha o carro do jogador e se assusta se bater nele. O modelo (`recursos/modelos/mack.glb`, as 10
   rodas em `mack_rodas.glb`, que giram quando ele anda, e a porta em `mack_porta.glb`) e as camadas dos
-  olhos saem de `ferramentas/preparar_mack.py`, que redesenha os olhos como os do filme, amplia 4 vezes as
+  olhos saem da ferramenta `preparar_mack`, que redesenha os olhos como os do filme, amplia 4 vezes as
   texturas (filtro xBR do ffmpeg), separa as rodas e a porta e põe o caminhão em metros (30 m).
 - **Os moradores de Radiator Springs** (`src/moradores.c`, o mapa deles em `src/moradores_mapa.h`): o McQueen
   (quando o jogador está com outro carro), o Mate, a Sally, o Doc, o Luigi, o Guido, o Ramone, a Flo, o Xerife,
@@ -97,7 +97,7 @@ lista circular duplamente encadeada de segmentos.
   outdoor, vai atrás de quem passa a mais de 90 km/h (no minimapa, um ponto vermelho): parando, leva uma
   bronca; fugindo para longe, ele desiste. A Flo, o Ruivo, o Xerife e a
   Lizzie não correm: os modelos deles (`recursos/modelos/carros/flo.glb`, `ruivo.glb`, `xerife.glb`,
-  `lizzie.glb`) saem de `ferramentas/preparar_figurantes.py` (que passa as texturas JPEG para PNG, porque a
+  `lizzie.glb`) saem da ferramenta `preparar_figurantes` (que passa as texturas JPEG para PNG, porque a
   raylib do jogo não lê JPEG, separa os olhos pintados de cada um nas três camadas dos olhos vivos, redesenha
   os do Ruivo como os do filme e desvira a Lizzie, que vem do avesso) e entram em `carros3d.c` depois dos carros da corrida.
 - **A linguagem do corpo dos moradores e do Mack** (`src/gestos.c`; o jeito de cada um, o humor das falas e os
@@ -107,6 +107,33 @@ lista circular duplamente encadeada de segmentos.
   deita de lado e abaixa ou ergue o bico **girando em volta do eixo de trás** (o eixo de trás é o quadril e o
   carro inteiro é a cabeça). As rodas da frente são as mãos. O resto está nos olhos, com a pálpebra fazendo de
   sobrancelha (contente, bravo, triste ou sem graça, espantado, com sono).
+- **O painel dos olhos** (`src/olhos.h` e `src/olhos.c`). Tudo o que decide a cara dos carros fica num lugar só:
+  - **As expressões** são uma tabela (`FORMAS_DAS_EXPRESSOES`): feliz, brava, triste, espantada, sonolenta,
+    concentrada (o "modo caça" em alta velocidade), assustada, convencida (um pouco fechado, o canto de dentro
+    descendo e um olho mais que o outro), desconfiada e entediada (a pálpebra pesada e reta: "e daí?"). Cada uma diz o quanto a pálpebra fecha, inclina e faz arco,
+    o tamanho da íris, se o olhar sobe e se um olho fecha mais que o outro. Para ajustar uma cara, muda a linha
+    dela; para criar uma nova, um nome no `enum Expressao` e uma linha na tabela. Elas se somam (feliz e convencida
+    ao mesmo tempo). Só a pálpebra de cima mexe, então fechar por cima lê como sono: a feliz quase não fecha (nos
+    filmes, o olho feliz fica aberto e o sorriso é da boca).
+  - **O descanso da íris** de quem precisa (`IRIS_DE_DESCANSO`, em `olhos.c`): quando o modelo desenhou a íris num
+    lugar diferente do filme, ela descansa mais baixa ou mais alta. O McQueen tinha a íris alta, com muito branco
+    embaixo e a pálpebra por cima (cara de sono); ela desce meio raio.
+  - **Os ajustes** (as molas de cada parte da cara, as piscadas, as olhadelas, o alcance do olhar) são constantes
+    em `olhos.h`.
+  - **Para onde olha:** `olharParaNoProximoDesenho(carro, matriz, ponto)` olha para um ponto do mundo pela pose do
+    carro: a câmera na garagem, o morador com quem conversa, o carro que passa. O alcance (a quantos graus do bico
+    a íris chega no canto) foi medido na garagem. Sem pedir, os olhos seguem o volante.
+  - **As reações**, todas para o próximo desenho (pedidas a cada quadro, como o resto da cara):
+    `mostrarExpressao(carro, EXPRESSAO_FELIZ, 0.8)`, `desviarOlharNoProximoDesenho` (a olhadela de quem está
+    encarando), `focarOlhar` (sem olhadelas), `fecharUmOlhoNoProximoDesenho` (a piscadela, no tempo de quem pede),
+    `piscarUmOlho` e `piscarAgora` (no tempo deles).
+  - **Os reflexos de um olho de verdade**, em todos: a pálpebra de cima acompanha o olhar (sobe quando ele olha
+    para cima, desce quando ele olha para baixo), e num salto grande do olhar (do volante para alguém, de um lado
+    para o outro) às vezes ele pisca no caminho, nunca logo depois de outra piscada.
+  - **As íris são limpas** (a ferramenta `limpar_iris`): quando as camadas dos olhos foram separadas, a sombra da
+    pálpebra pintada por cima da íris (e, no Fillmore, pedaços da lataria) ficou grudada nela, e andava junto
+    quando o olho mexia. A faixa suja de cada um está marcada na ferramenta e é trocada pelo espelho da parte
+    limpa da mesma íris (as fibras saem do meio, então o espelho continua sendo íris).
   - **Nada é animação pronta.** Há duas camadas ao mesmo tempo. A involuntária é física: a suspensão de cada um
     (o mesmo gesto no Mate, mole, balança e demora a parar; no Sargento sai seco), a respiração do motor em
     marcha lenta (mais rápida agitado), o corpo que nunca fica parado de todo (um ruído suave, diferente em cada
@@ -138,7 +165,7 @@ lista circular duplamente encadeada de segmentos.
     e falando a mandíbula abre nas vogais e fecha no m, no b e no p, no ritmo da frase. Ela gira em volta de uma
     dobradiça de lado a lado do carro, no vertex shader dos carros (`carros3d.c`), pelo peso de cada vértice,
     que vai num atributo livre dele (o `vertexTexCoord2`). Os pesos vêm de `recursos/modelos/carros/bocas.txt`,
-    feito por `ferramentas/medir_bocas.py` (rode com o Python do Blender, que tem o numpy): uma caixa não
+    feito pela ferramenta `medir_bocas` (no Blender): uma caixa não
     separa a mandíbula, porque os lábios de cima e de baixo se sobrepõem na boca fechada; a ferramenta a
     escolhe pela malha, partindo do lábio de baixo sem atravessar a fenda da boca, e mais os dentes de baixo e
     a língua. Abre até 20 graus; 15 quando o lábio de baixo é o para-choque ou um friso (o Doc, o Xerife, o
@@ -177,7 +204,7 @@ lista circular duplamente encadeada de segmentos.
   ligada por uma planície de areia plana (o mapa costura os dois com uma "emenda"); a areia
   da cidade é a mesma da arena do Cars 2 (a textura, na mesma escala) e tem os mesmos matinhos e cactos. Do
   lado da cidade, a pista de treino tem a mesa de pedra da arena, inteira e com a lombada vermelha em volta
-  descendo até o chão da cidade (`ferramentas/montar_mundo_aberto.py` guarda as rochas da arena por peça e
+  descendo até o chão da cidade (a ferramenta `montar_mundo_aberto` guarda as rochas da arena por peça e
   encaixa as beiradas baixas delas no chão, mas não a terra do oval nem o butte no meio dele; as texturas
   JPEG viram PNG, que a raylib do jogo não lê JPEG). As calçadas da cidade ficam no nível do asfalto: ampliadas
   4,5 vezes, as guias do Race-O-Rama viravam degraus de 20 a 40 cm com uma faixa de 60 cm em cima; a ferramenta
@@ -187,7 +214,7 @@ lista circular duplamente encadeada de segmentos.
   cidade: a de concreto cinza e a de cimento bege (a do Luigi, a do Ramone; o cimento no nível da rua é pátio e
   entrada, e conta como rua). O piso de um lote apoiado na calçada (a laje da loja do Luigi) é cortado na linha
   em que a calçada começa a subir: dali para dentro ele fica na altura de antes, rente à porta, e só a frente
-  desce até a rua. Os postes de luz (`ferramentas/luzes/montar_postes.py`) são gerados de novo em cima do mapa
+  desce até a rua. Os postes de luz (a ferramenta `montar_postes`) são gerados de novo em cima do mapa
   nivelado, para a base deles não flutuar.
 
 ## 1. Instalar a raylib
@@ -254,7 +281,7 @@ O jogo abre em **tela cheia, na resolução do monitor**. Para abrir numa janela
 `./katchau --passeio` (dá para juntar as duas).
 
 O mapa do passeio (`recursos/modelos/radiator_springs.glb` e `.col`) é gerado no Blender, a partir dos
-dois modelos de Radiator Springs do PS3, por `ferramentas/montar_mundo_aberto.py` (o uso está no começo
+dois modelos de Radiator Springs do PS3, pela ferramenta `montar_mundo_aberto` (o uso está no começo
 do arquivo). Ele põe os dois na mesma escala, puxa as cores do Race-O-Rama para as do Cars 2 e exporta
 também os triângulos da colisão.
 
@@ -282,27 +309,27 @@ como no filme: no pôr do sol, cada lugar liga na sua vez, letra por letra e lâ
 firmar (os neons do Ramone, da Flo, do Luigi, do Sargento, da placa do Cozy Cone, as lâmpadas da Curios, o domo do
 Fillmore brilhando, os letreiros e as vitrines da rua), e as luzes jogam cor no chão e nas paredes em volta; no
 amanhecer apagam. De dia os tubos aparecem apagados, como vidro colorido. Cada lugar é um modelo
-(`recursos/modelos/luzes/<lugar>.glb`, com as luzes em volta no `.json`, feitos pelas ferramentas de
-`ferramentas/luzes/`) desenhado por cima do mapa (`src/luzes.c`); a luz deles alcança a cidade toda (até 64 luzes ao
+(`recursos/modelos/luzes/<lugar>.glb`, com as luzes em volta no `.json`, feitos pelas ferramentas das
+luzes) desenhado por cima do mapa (`src/luzes.c`); a luz deles alcança a cidade toda (até 64 luzes ao
 mesmo tempo, as que estão na frente da câmera) e não atravessa as paredes (de cada lâmpada, raios na malha de colisão
 medem até onde ela enxerga), e o brilho em volta é tapado pelo que está na frente (prédios, carros, o Mack). Como no filme, os carros não acendem faróis; a rua
 é iluminada pelos postes de madeira com luminárias amarelas de sódio, ligados por fios, e no cruzamento um semáforo
 pendurado pisca amarelo dia e noite (`recursos/modelos/postes.glb`, com a sombra do sol e o tronco sólido para o
 carro, `src/postes.c`; as luminárias e as lentes em `luzes/postes.glb` e `luzes/semaforo.glb`, todos de
-`ferramentas/luzes/montar_postes.py`). Os prédios em que se entra têm a luz de noite deles (abajures e luminárias acesos, misturada com a de
+`montar_postes`). Os prédios em que se entra têm a luz de noite deles (abajures e luminárias acesos, misturada com a de
 dia pela hora: `<interior>_noite.glb`), os moradores recolhem para casa (de noitinha só se vai ao café da Flo) e os
 grilos cantam (`src/grilos.c`, gerados no próprio jogo). Nas cenas do Mack, **ENTER** (ou A) pula. A pista de treino fica além da planície de areia, ao sul
 da rua principal; na frente da loja do Luigi, a torre de pneus é de pneus 3D. A **Casa Della Tires** é aberta: o
 carro entra dirigindo pela porta de garagem e encontra o lado de dentro da
 loja como no filme, com o piso de tábuas encerado, os pôsteres de corridas italianas, o móvel dos pneus com o nicho
 "Fettuccini Alfredo", e o Luigi e o Guido estacionados (`src/interiores.c`; o modelo
-`recursos/modelos/loja_do_luigi.glb`, a colisão de dentro e as medidas saem de `ferramentas/montar_loja_do_luigi.py`,
-e `montar_mundo_aberto.py` tira do prédio do mapa o painel pintado da porta e os vidros). O **Cozy Cone** também:
+`recursos/modelos/loja_do_luigi.glb`, a colisão de dentro e as medidas saem da ferramenta `montar_loja_do_luigi`,
+e `montar_mundo_aberto` tira do prédio do mapa o painel pintado da porta e os vidros). O **Cozy Cone** também:
 os 8 cones são quartos, como o do McQueen no filme, com o carpete, o papel de parede, os quadros, os abajures, o
 ar-condicionado e os capachos de fibra (`recursos/modelos/cozy_cone_quartos.glb`, de
-`ferramentas/montar_quartos_do_cozy_cone.py`), e a recepção é o escritório da Sally, com o piso xadrez, o balcão,
+`montar_quartos_do_cozy_cone`), e a recepção é o escritório da Sally, com o piso xadrez, o balcão,
 a estante de cones, os cactos e o letreiro OFFICE em neon (`recursos/modelos/cozy_cone_recepcao.glb`, de
-`ferramentas/montar_recepcao_do_cozy_cone.py`); o carro entra pela porta de cada cone e pela entrada da recepção,
+`montar_recepcao_do_cozy_cone`); o carro entra pela porta de cada cone e pela entrada da recepção,
 e de fora se vê o lado de dentro pelas janelas. A câmera vem atrás de para onde o
 carro está indo (a velocidade), como nos jogos de corrida, e no drift atrás do corpo dele: o carro fica de costas para
 ela e quem escorrega na tela é o mundo (devagar ou de ré, ela vem atrás do bico). E ela nunca perde o carro de vista: com um morro atrás, sobe por cima
@@ -314,9 +341,6 @@ curva, o freio, a ré, o nitro e o drift são iguais, em qualquer piso (a areia 
 sobe e anda nela enquanto tiver velocidade (abaixo de ~30 km/h ele solta). Na parede o controle é arcade: a câmera
 deita junto com o carro (a parede vira chão na tela), o volante gira o carro na hora e ainda o empurra para o lado,
 e a gravidade pesa só um terço. Virando para o chão, ele volta para o chão sozinho.
-
-Para conferir a colisão de uma região do mapa (buracos, degraus, lugares onde o carro enrosca):
-`make sondar-colisao` e `./build/sondar_colisao recursos/modelos/radiator_springs.col x0 z0 x1 z1`.
 
 A pista e os carros são desenhados na resolução real da tela; em monitores largos
 (16:9), a pista não estica, só mostra mais dos lados. O HUD e os menus são
@@ -405,6 +429,8 @@ src/
   config.h         constantes compartilhadas (TOTAL_VOLTAS, tamanho da tela...)
   pista.c/.h       lista circular duplamente encadeada de segmentos   (fase 1)
   linha_de_corrida.c/.h  a linha de corrida ideal de cada pista, para o traçado no asfalto
+  palco.c/.h       a apresentação dos carros na garagem: a entrada, o anúncio e a firula de cada um
+  olhos.c/.h       o painel dos olhos dos carros: as expressões, os ajustes e a conta de olhar para um ponto
   render.c/.h      câmera, carros e sprites na corrida em 3D
   corte.c/.h       o corte pelo campo de visão: não manda desenhar o que está fora da tela
   mundo.c/.h       cenário 3D: os modelos das pistas e o que o jogo põe em cima deles
@@ -414,8 +440,8 @@ src/
   holofotes.c/.h   as torres de holofotes das pistas de dia, de noite
   copa_pistao.h    traçado da Copa Pistão, medido no modelo 3D
   oval.h           traçado e lugares da torcida do Oval
-  interlagos.h     traçado, bordas, muros, pit lane e torcida de Interlagos (gerado: veja ferramentas/)
-  montreal.h       o mesmo de Montreal (gerado: veja ferramentas/)
+  interlagos.h     traçado, bordas, muros, pit lane e torcida de Interlagos (gerado a partir do modelo 3D)
+  montreal.h       o mesmo de Montreal (gerado a partir do modelo 3D)
   materiais_do_modelo.h   os tipos de chão e de desenho dos materiais dos modelos de Interlagos e Montreal
   interlagos_materiais.h  o que é cada material do modelo de Interlagos (chão e jeito de desenhar)
   montreal_materiais.h    o que é cada material do modelo de Montreal
@@ -447,26 +473,6 @@ src/
   controle.c/.h    controle (gamepad): comandos do carro e botões dos menus
 testes/
   teste_pista.c    testa pista, carro, corrida, IA e ordenação no terminal
-ferramentas/
-  medir_pista.c          mede o modelo de Interlagos ou de Montreal e escreve src/interlagos.h ou src/montreal.h
-                         (make medir-interlagos, make medir-montreal)
-  preparar_montreal.py   prepara o modelo de Montreal baixado: recursos/modelos/montreal.glb (Python com numpy)
-  preparar_carros.py     prepara os modelos do Luigi, do Wingo, do Jackson Storm, do Boost e do DJ (Blender)
-  preparar_figurantes.py prepara os da Flo, do Ruivo, do Xerife e da Lizzie (Blender)
-  montar_mundo_aberto.py monta o mapa do passeio, radiator_springs.glb e .col (Blender)
-  montar_loja_do_luigi.py  o lado de dentro da Casa Della Tires: o desenho, a colisão e as medidas (Blender)
-  montar_carreta_do_mack.py  o lado de dentro da carreta do Mack (Blender)
-  montar_quartos_do_cozy_cone.py    os quartos dos 8 cones do Cozy Cone: o desenho, a colisão e as medidas (Blender)
-  montar_recepcao_do_cozy_cone.py   a recepção do Cozy Cone (o escritório da Sally) (Blender)
-  (as três ferramentas dos interiores, com --noite, fazem também a luz de noite: <interior>_noite.glb e .json)
-  luzes/montar_luzes_ramone_e_flo.py           os neons do Ramone e do café da Flo (Blender)
-  luzes/montar_luzes_luigi_e_curios.py         os neons, os varais e as lâmpadas do Luigi e da Curios (Blender)
-  luzes/montar_luzes_sarge_fillmore_cozy.py    o Sargento, o domo do Fillmore e a placa e os cones do Cozy Cone (Blender)
-  luzes/montar_luzes_da_cidade.py              os letreiros e as vitrines do resto da cidade (Blender)
-  luzes/montar_postes.py                       os postes de luz da rua, os fios e o semáforo (Blender)
-  luzes/montar_luzes_do_mack.py                as lâmpadas de contorno, os faróis e as lanternas do Mack (Blender)
-  preparar_trator.py     prepara o trator-vaca (corpo, olhos, rodas, medidas) e escolhe os pastos dos rebanhos (Blender)
-  gerar_som_da_zebra.py  gera recursos/sons/efeitos/zebra.wav
 recursos/
   fontes/          Racing Sans One, Saira Condensed e Lobster (licença OFL, arquivos *_licenca.txt)
   sons/            música, efeitos dos menus e falas do McQueen (*.wav, *.mp3)
@@ -480,13 +486,57 @@ recursos/
     sprites/       árvores, pórtico, pneus e placas
 ```
 
+As ferramentas que prepararam o jogo ficam fora do repositório: as que mediram Interlagos e Montreal nos modelos 3D
+(`medir_pista`, que escreveu `src/interlagos.h` e `src/montreal.h`), as que prepararam os modelos no Blender (o mapa do
+passeio, os interiores, as luzes da cidade, os carros e os figurantes, o Mack, o trator, as bocas, as íris e o modelo de
+Montreal) e as que geraram o som da zebra e as vozes do locutor. O que elas geraram já está em `recursos/` e em `src/`;
+o README cita cada uma pelo nome.
+
 Regra: só `render.c`, `corte.c`, `mundo.c`, `carros3d.c`, `fumaca.c`, `noite.c`, `hud.c`, `menu.c`, `visual.c`, `audio.c`, `efeitos.c` e `controle.c` incluem `raylib.h` (além do `main.c`, que abre
 a janela). O resto é lógica pura e pode ser testado no terminal.
 
 ## Os carros
 
 São 17 carros (`FICHAS` em `corrida.c`), todos modelos 3D em `recursos/modelos/carros/`. Na garagem o
-jogador escolhe um; os outros 16 viram os rivais, e o jogador larga em último. A "volta limpa" é o tempo de
+jogador escolhe um; os outros 16 viram os rivais, e o jogador larga em último.
+
+**A garagem é uma apresentação**, como as telas de escolha de personagem (`palco.c`, desenhado por
+`fotografarPalco` em `render.c`). Num estúdio escuro (a parede de fibra de carbono com a luz atrás do carro, o
+chão com a poça do holofote e uma mesa giratória em 3D: o tampo de metal escovado com o chanfro da borda pegando a
+luz, e embaixo uma faixa de luz branca que faz ele flutuar e acende o chão em volta), o carro marcado **entra do jeito dele**: derrapando e
+virando até a pose (McQueen, Francesco, os tuners, Storm), pulando e aterrissando (Finn), de ré e virando no
+lugar (Mate), devagar (Doc, Sally, King, Fillmore, Sargento), aos pulinhos (Guido, Luigi, DJ). Ele entra pela
+esquerda e para em três quartos, olhando para a direita, onde fica o cartão dele. A freada abaixa o bico, a curva
+deita o corpo e a aterrissagem o afunda (uma mola de suspensão no palco).
+
+Parado, um **locutor de voz grossa anuncia o nome** dele, como nos jogos de luta, e o nome aparece grande, com
+a faixa vermelha. Ele ouve como quem conversa (gestos.c: acena nas ênfases do locutor e pega o ânimo dele) e
+faz a **firula** dele, o número que diz quem ele é: o McQueen acelera mostrando o motor e solta o "Katchau" (vira
+para a câmera e chega perto, o bico baixo e o corpo deitando para ela, de olhos bem abertos; o raio de luz de um flash
+pisca três vezes no alto do para-lama da frente, como no filme); o Ramone sobe a traseira na hidráulica, lá no alto
+sobre os braços cromados, quica e salta de lado; o Guido rodopia no lugar com os garfos erguidos e depois cruza os
+garfos como braços e encara a câmera de pálpebra pesada, sem se impressionar; o Mate
+chacoalha e olha para todo lado com o sorriso dentuço; o Snot Rod prende o espirro e dá o tranco no "atchim" (ele para quase de frente: de lado, o compressor tampa os
+olhos);
+o Storm quase não se mexe, de bico erguido e meio sorriso; o Finn se abaixa e confere um lado e o outro; o
+Sargento estufa o peito e bate continência; o Fillmore balança devagar de olhos meio fechados; o DJ dança
+(`calcularFirula` em `palco.c`; a apresentação espera o número acabar). Depois ele fica vivo, olhando nos olhos de quem escolhe (os olhos olham para o
+ponto onde a câmera está, pela pose do carro, então funciona com qualquer carro; só de vez em quando uma olhada
+rápida para o lado), e de tempos em tempos repete
+a firula, mais leve. A firula passa por molas com a suspensão de cada um (o Mate mole, que balança e demora a
+parar; o Sargento seco), então tudo tem a inércia do corpo. A carroceria só anda o curso da suspensão em volta das
+rodas, para o pneu nunca atravessar o para-lama: o que a firula pede além disso move o carro inteiro, com as rodas
+(o bico desce e a traseira levanta, ele empina, deita sobre duas rodas, dá pulinhos). A exceção é a hidráulica do
+Ramone, em que a carroceria sobe de verdade: a suspensão dele aparece (o eixo de trás e, em cada roda, dois braços
+telescópicos com as juntas), em peças 3D desenhadas com o cromado e a luz do próprio modelo
+(`desenharPecaCromada` em `carros3d.c`). Na garagem a música para, para o locutor falar: a do menu e, aberta da pausa da cidade, a da noite (somem aos poucos
+e voltam de onde pararam). Trocando de carro, ele sai pela direita e o próximo entra. Os carros que não moram na cidade
+ganharam um jeito próprio (`JEITOS_DE_FORA`).
+
+A voz do locutor fica em `recursos/sons/vozes/<carro>.wav` (o volume é o das vozes). As de agora são feitas
+pelo sintetizador de voz do macOS, mais graves e com eco de arena (com a grafia que acerta a pronúncia:
+"MacQueen", "Bernoolee"); para trocar por uma gravação de verdade,
+basta pôr o arquivo com o mesmo nome (.wav, .mp3 ou .ogg). A "volta limpa" é o tempo de
 uma volta lançada, sozinho na pista e dirigido pela IA, usando o nitro.
 
 | Carro | Jeito | Interlagos | Copa Pistão |
@@ -519,11 +569,11 @@ tem um limite, porque acima dele a roda pareceria girar ao contrário. A garagem
 
 Os modelos são do Sketchfab, de DinseyPixarCarsModels e LukeMcQueen02 (o Luigi), publicados como CC-BY-4.0. Os
 personagens são de *Carros* (Disney/Pixar). Nos arquivos, as texturas JPEG viraram PNG, porque a raylib da Homebrew não
-lê JPEG. O Luigi, o Wingo, o Jackson Storm, o Boost e o DJ passam por `ferramentas/preparar_carros.py`, que também separa
+lê JPEG. O Luigi, o Wingo, o Jackson Storm, o Boost e o DJ passam pela ferramenta `preparar_carros`, que também separa
 os olhos pintados nas três camadas dos olhos vivos, desvira as peças do avesso (o jogo não desenha o lado de trás das
 faces: o Wingo aparecia oco, e o Luigi antigo tinha a luz do lado errado) e põe o DJ, que vinha deitado, de frente para +z.
 O trator-vaca dos pastos é o "cars tractor" de [zairiqzairiq](https://sketchfab.com/zairiqzairiq), também CC-BY-4.0,
-preparado por `ferramentas/preparar_trator.py` (sem o esqueleto, em metros, separado em corpo, olhos e rodas).
+preparado pela ferramenta `preparar_trator` (sem o esqueleto, em metros, separado em corpo, olhos e rodas).
 
 ## Pilotagem
 
@@ -572,8 +622,29 @@ Com o pit stop obrigatório (o padrão do médio e do difícil), a parada nos bo
 - **Entrar:** no fim da Subida dos Boxes, onde acaba o guard-rail da esquerda e começam as faixas brancas que separam o pit lane, com as rodas da esquerda em cima da linha branca (`querEntrarNoPit`). Ali o piloto automático assume, no limite de 100 km/h perto das garagens. A linha de corrida da Subida passa pela esquerda, então só entra quem encosta de propósito na linha (`soEncostadoNaBorda`).
 - **O caminho:** é o pit lane do modelo, medido (`PIT_INTERLAGOS` em `interlagos.h`): passa na frente das garagens, logo depois da linha de chegada, corre por dentro do S do Senna e da Curva do Sol e volta à pista na Reta Oposta. A tabela medida é alisada (média dos vizinhos) e, longe da vaga, o carro anda exatamente por ela, sem atraso; o passo na pista é corrigido para ele andar no mundo o que a velocidade manda (por dentro de uma curva, um metro da linha da pista vale menos), o bico aponta para onde ele andou de verdade (com um giro máximo) e a câmera vem atrás do bico. Chegando ao caminho, o que ainda falta até ele some em um quarto de segundo, em vez de um passo de lado num quadro. Nas curvas do caminho ele anda no máximo na velocidade que as faz com 25 m/s² de lado, freando com calma antes delas, e antes da manobra até a vaga já chega devagar: nada de balanço, câmera de lado ou trancos na saída.
 - **O chão do pit lane:** além da borda da pista, o chão é medido em poucos pontos (a 1, 2, 3, 5, 7, 10 m...), e um degrau entre dois deles vira uma rampa. Perto da linha, o pit lane fica 3 m acima da pista, atrás da mureta: as rodas do lado da pista caíam nessa rampa e o carro tombava uns 30°. Por isso, no pit lane (que é plano de lado), a inclinação de lado medida no chão some ao sair da borda, para o carro e para a câmera (ela também não inclina fora do asfalto da pista), e a altura da câmera vem do **rastro** do carro: o chão por onde ele acabou de passar, os metros atrás que ela está (`chaoNoRastro` em `render.c`). Quando o pit devolve o carro, ele segue com o bico para onde já apontava (`andarNoMundo`), e a câmera continua atrás dele, sem trocar de jeito no meio.
+- **O caminho alisado:** o caminho no mundo é o ponto da linha da pista mais o lado, e longe da linha, por dentro de
+  uma curva, ele faz zigue-zague e dobra sobre si mesmo; o carro seguia as quinas. Ao montar a pista, ele é medido no
+  mundo e alisado: em Montreal vira a estrada medida (sempre para a frente: onde a tabela volta, o avanço vira uma reta
+  do antes ao depois), e em todo pit lane passa por uma média de 5 m para cada lado, medida pelo caminho. Cada segmento
+  guarda o ponto e o rumo do caminho alisado no começo dele, e quem está no pit é posto nele (`alisarEstradaDoPit` e
+  `pontoNoMundoDoPit`); a tabela do caminho é refeita com um ponto no começo de cada segmento, para o carro cair
+  exatamente em cima dele. Perto da entrada e de onde o carro volta à pista, o alisamento some aos poucos. O passo de
+  cada quadro é achado medindo no mundo (corta o intervalo ao meio até o carro andar o que a velocidade manda), e o
+  ângulo do bico fica entre -180 e 180 graus: no grampo de Montreal ele passava de uma volta, e o piloto, de volta à
+  pista, desenrolava o carro inteiro no próprio eixo. A sombra de quem está no pit é montada em volta do carro
+  desenhado, no rumo do caminho alisado (e não pela pista, que a deixava no caminho de antes).
+- **A devolução:** o piloto automático só devolve o carro com o bico na direção da pista (a menos de 2 graus; depois do
+  fim do caminho, o lado fica parado e o bico alinha logo). A estrada do pit encontra a pista na diagonal, e o carro
+  devolvido assim, sem a direção guiada, seguia para onde apontava e atravessava a pista até a grama.
+- **O chão das vagas:** o chão além da borda é medido em poucos pontos, e da vaga 10 em diante (a do Fillmore) o ponto
+  seguinte ao pit lane cai em cima das garagens de Interlagos, 4,7 m acima: a conta fazia uma rampa, e a vaga ficava
+  torta, com o carro no ar. No pit lane, o chão é medido a partir do meio da estrada do pit, andando de lado até o
+  ponto pedido e parando onde ele vira parede (`alturaDoChaoNoPit` em `pista.c`): o carro, a sombra, a vaga pintada e a
+  cena do Guido usam ele.
 - **A troca:** cada carro tem uma vaga (as 17 cabem na frente das garagens). Na do jogador, o Guido passa por todas as rodas em 3,2 s (`faseDaTroca` e `lugarDoGuido` em `pitstop.c`, desenho em `render.c`), e a imagem corta para uma câmera ao lado do carro.
-- **Rivais:** cada um para numa volta (`voltaDoPit`) e leva mais tempo na troca que o Guido. No pit lane há fila: quem vem atrás reduz, quem sai da vaga espera passar quem já vem na faixa, e a colisão só separa os carros, sem tranco nem rodada; o carro parado na troca nunca é empurrado.
+- **Rivais:** cada um para numa volta (`voltaDoPit`) e leva mais tempo na troca que o Guido. Saindo da vaga, até entrar
+  na faixa ele anda na velocidade da manobra: sem lugar para entrar (um carro ao lado), ele acelerava por fora da fila e
+  chegava rápido onde quem vem atrás encosta na própria vaga. No pit lane há fila: quem vem atrás reduz, quem sai da vaga espera passar quem já vem na faixa, e a colisão só separa os carros, sem tranco nem rodada; o carro parado na troca nunca é empurrado.
 
 Todas as pistas têm pit lane.
 
@@ -944,7 +1015,7 @@ frente dele, alguém do pelotão). O placar da torre e do telão do alto mostra 
 trocadas por RenderTextures (`telao.c`); a câmera de TV fica em `render.c`.
 
 Nas outras pistas, o telão é uma estrutura 3D (`objetos/telao.glb` e `telao_katchau.glb`, gerados por
-`build/exp/gerar_telao3d.py`): duas torres de treliça com sapatas, o gabinete com a tela, a passarela de manutenção,
+`gerar_telao3d`): duas torres de treliça com sapatas, o gabinete com a tela, a passarela de manutenção,
 as caixas de som e o letreiro KATCHAU com lâmpadas. A tela traz uma imagem de espera só dela; ao carregar, o jogo troca
 essa imagem pela transmissão (`ligarTeloesDoCenario` em `mundo.c`). A transmissão é desenhada sem as sombras do sol.
 
@@ -958,7 +1029,7 @@ transmissão de vez, para comparar o desempenho.
 
 Em todas as pistas, os lugares das arquibancadas perto da câmera ganham carrinhos de verdade (`torcida3d.c`): o
 completo (76 triângulos, `objetos/carro_torcida.glb`) até 200 m e um simples (28 triângulos,
-`carro_torcida_longe.glb`) de 200 a 400 m; os dois são gerados por `build/exp/gerar_torcida.py`. Cada um fica
+`carro_torcida_longe.glb`) de 200 a 400 m; os dois são gerados pela ferramenta `gerar_torcida`. Cada um fica
 virado para a pista, com cor sorteada e pulando, e cada grupo vai para a placa de vídeo numa chamada só
 (os lugares ficam na placa de vídeo desde a carga; por quadro, o processador só escolhe os trechos da grade perto
 da câmera, e o shader gira, posiciona e escala cada carrinho). Os lugares vêm dos degraus do estádio (Copa Pistão) e
@@ -1029,7 +1100,7 @@ material, de shader e de buffers. As malhas são separadas por tipo de desenho n
 (`prepararCaixasDoMapa` em `mundo.c`), com a caixa de cada uma já em coordenadas do mundo. O mesmo corte vale para o
 mapa de sombra (que enxerga um quadrado de 330 m) e para a transmissão dos telões.
 
-O traçado foi **medido no modelo** por `ferramentas/medir_pista.c` (`make medir-interlagos`), que escreve
+O traçado foi **medido no modelo** pela ferramenta `medir_pista` (fora do repositório), que escreveu
 `src/interlagos.h`. A ferramenta carrega o modelo com a raylib e:
 
 - anda pela pista a partir da linha de chegada, de 2 em 2 m, achando as duas bordas do asfalto e corrigindo o ponto para o
@@ -1042,7 +1113,7 @@ O traçado foi **medido no modelo** por `ferramentas/medir_pista.c` (`make medir
 
 **Cortar caminho pela grama.** Em Interlagos não há parede invisível: onde não há barreira (muro, guard-rail,
 alambrado), o carro vai até onde quiser, sai da pista, volta por qualquer lugar e pode cortar pela grama até outro
-trecho (`cortarPelaGrama` em `ferramentas/medir_pista.c`; antes, onde não havia barreira, um limite parava o carro
+trecho (`cortarPelaGrama`, na ferramenta `medir_pista`; antes, onde não havia barreira, um limite parava o carro
 logo depois do escape). Longe do asfalto e bem mais perto de outro trecho da pista, o jogo passa a contá-lo nesse
 trecho (`trechoMaisPerto` em `andarNoMundo`, `carro.c`), contando a volta se o corte passar pela linha de chegada.
 Ele só passa para o outro trecho do lado de dentro dos muros dele: um guard-rail no caminho continua segurando o
@@ -1098,7 +1169,7 @@ no lugar do Splat. Como Interlagos, o modelo está em metros e o jogo usa ele 40
 real o asfalto tem de 10 a 13 m. A volta é no sentido horário: 4.355 m no modelo (4.361 m de verdade), 6.097 m no jogo.
 
 O modelo baixado tem uma malha só, com uma parte por material, e algumas passam de 65 mil vértices (o alambrado tem
-230 mil, os prédios 388 mil), o que a raylib não aponta (ela usa índices de 16 bits). `ferramentas/preparar_montreal.py`
+230 mil, os prédios 388 mil), o que a raylib não aponta (ela usa índices de 16 bits). `preparar_montreal`
 põe a rotação do nó nos vértices (o modelo vinha deitado), corta cada material grande em ladrilhos de 300 m vistos de
 cima (os que se espalham por quilômetros, como a água e a cidade ao longe, em ladrilhos de 1,5 km), cada ladrilho em
 pedaços de até 60 mil vértices, e reduz as imagens de 4096 pixels para 2048 (a borracha do traçado, para 1024): 281
@@ -1111,8 +1182,8 @@ próprio modelo: o asfalto já traz as linhas brancas da borda, a borracha do tr
 alambrados são telas transparentes e as árvores e os tufos de capim são recortes. A água da bacia de remo e do rio
 fica um pouco mais escura que a imagem (`COR_DA_AGUA_DE_MONTREAL`).
 
-A mesma ferramenta de Interlagos mede Montreal (`make medir-montreal` escreve `src/montreal.h`), com o que muda de uma
-pista para a outra numa tabela (`PISTAS` em `ferramentas/medir_pista.c`):
+A mesma ferramenta de Interlagos mediu Montreal (e escreveu `src/montreal.h`), com o que muda de uma pista para a outra
+numa tabela (`PISTAS`, na ferramenta `medir_pista`):
 
 - a pista é o asfalto com as linhas brancas da borda (em Montreal a borracha só cobre o meio dela), e a borracha só
   guia a caminhada: ela segue a volta da corrida, e não as rotas de fuga em linha reta (a da curva 3 enganava a linha);
@@ -1137,12 +1208,18 @@ O jogador entra quando, em vez de virar na chicane, segue reto e sai do asfalto 
 rivais só entra quando decidiu parar (`moverCarro` em `corrida.c`): antes, quem passava pela metade esquerda da pista
 para fazer a chicane era puxado para o box.
 
-Na saída, a estrada do pit fica a até 63 m da linha da pista, por dentro de uma curva de 30 a 50 m de raio: ali o
-ponto "linha da pista mais o lado" dobraria sobre si mesmo, e os carros do pit pulavam de lugar. Por isso, a cada
+Ao lado da chicane, a estrada do pit fica a até 63 m da linha da pista, por dentro de uma curva de 30 a 50 m de raio:
+ali o ponto "linha da pista mais o lado" dobraria sobre si mesmo, e os carros do pit pulavam de lugar. Por isso, a cada
 segmento, o jogo guarda quanto o ponto calculado está longe do ponto mais perto da estrada medida
 (`ESTRADA_DO_PIT_MONTREAL`, `corrigirOPitPelaEstrada` em `pista.c`) e soma essa correção a quem está no pit
 (`pontoNoMundoDoPit`; o carro, a sombra e a câmera usam `pontoDoCarro`). A correção some aos poucos nos 14 m em que a
-estrada encontra a pista.
+estrada encontra a pista. Quem entra no pit ali (o jogador saindo reto da chicane) não começa no lugar que tinha na
+pista, que o desenho com a correção levaria 20 m para longe num quadro: entra já em cima do caminho, no ponto da
+estrada mais perto de onde estava, e o pouco que sobra some no desenho em um terço de segundo (`ancorarNaEstrada` em
+`pitstop.c`). Na saída, o caminho passa por dentro do grampo da Curva Senna, a 78 m da linha, quase no centro da curva:
+60 m de pista viram 2 m de estrada, e pela tabela o caminho ia e voltava 26 m pela mesma estrada (o carro dava ré).
+Lá, como em todo o pit lane de Montreal, o caminho é a estrada medida, sempre para a frente (veja o alisamento do
+caminho, em Pitstop).
 
 O **sol** é o da largada do GP do Canadá de 2026 (veja o sol das pistas). As curvas têm os nomes de verdade: Curva
 Senna (a 1 e o grampo da 2), Curvas 3 e 4, Curva 5, Curvas 6 e 7, Curvas 8 e 9, Grampo, Reta do Cassino e Muro dos

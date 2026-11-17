@@ -631,11 +631,14 @@ int main(int argc, char *argv[]) {
         } else if (tela != TELA_CORRIDA) {
             definirVolumeDaTrilha(1.0f);
         }
-        atualizarAudio(tela == TELA_ENTRADA || tela == TELA_MENU || tela == TELA_GARAGEM || tela == TELA_PISTAS || tela == TELA_CONFIGURACOES || tela == TELA_COMO_JOGAR
+        /* Na garagem não toca música (a do menu e a da noite somem aos poucos e voltam de onde pararam): é o palco do
+         * locutor. Ela abre do menu ou da pausa da cidade */
+        int naGaragem = (tela == TELA_GARAGEM) || (tela == TELA_PASSEIO && passeioPausado() && menu.telaNaPausa == TELA_GARAGEM);
+        atualizarAudio(tela == TELA_ENTRADA || tela == TELA_MENU || tela == TELA_PISTAS || tela == TELA_CONFIGURACOES || tela == TELA_COMO_JOGAR
                        || (tela == TELA_PASSEIO && cenaDoMackComMusica())   /* da escolha da corrida, a música segue na estrada com o Mack */
                        || apresentando);   /* e na apresentação da largada */
         /* A noite da cidade: os neons acendem e toca a Sh-Boom, até amanhecer (nas cenas do Mack, a música do menu) */
-        atualizarMusicaDaNoite(luzesDaCidadeLigadas(), tela == TELA_PASSEIO && !cenaDoMackComMusica());
+        atualizarMusicaDaNoite(luzesDaCidadeLigadas(), tela == TELA_PASSEIO && !cenaDoMackComMusica() && !naGaragem);
 
         /* Sons da corrida:
          *  - antes do GO, o motor em marcha lenta (som provisório) e o "3... 2... 1... GO!",
@@ -704,7 +707,7 @@ int main(int argc, char *argv[]) {
                 terminarInterface();
                 break;
             case TELA_GARAGEM:
-                desenharFundoAlternado(pistas);
+                ClearBackground(BLACK);   /* o palco da garagem cobre a tela inteira */
                 comecarInterface(1);
                 desenharGaragem(&menu);
                 terminarInterface();

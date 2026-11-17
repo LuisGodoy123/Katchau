@@ -6,8 +6,8 @@
  * os programas e as falas de cada morador.
  *
  * Tudo nos eixos do jogo, em metros (rumo 0 olhando para -z, crescendo
- * para a direita). Os nós foram medidos no mundo aberto montado por
- * ferramentas/montar_mundo_aberto.py (renders de cima e da rua, e raios
+ * para a direita). Os nós foram medidos no mundo aberto montado pela
+ * ferramenta montar_mundo_aberto (renders de cima e da rua, e raios
  * conferindo cada vaga e cada trecho):
  *   L* / O*  a rua principal, faixa de quem vai para leste (z 138,8) e
  *            para oeste (z 131,5): mão pela direita;

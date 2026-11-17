@@ -361,6 +361,15 @@ static float olharPara(const Morador *m, float x, float z) {
     return limitar(atan2f(direita, frente) / CANTO_DO_OLHO, -1.0f, 1.0f);
 }
 
+/* Ele olha para alguém em (x, z): o corpo vira para o lado dele e os olhos vão no ponto (passeio.c desenha) */
+static void olharParaAlguem(Morador *m, float x, float z) {
+    m->olhaAlgo = 1;
+    m->olhar = olharPara(m, x, z);
+    m->olhaNoPonto = 1;
+    m->olharX = x;
+    m->olharZ = z;
+}
+
 /*
  * humorDaFala
  * O humor com que a pessoa diz a fala: o da tabela, se a fala está lá; senão, pela pontuação
@@ -1539,8 +1548,7 @@ static void conversar(float tempo) {
             continue;
         }
         Morador *m = &moradores[i];
-        m->olhaAlgo = 1;
-        m->olhar = olharPara(m, moradores[j].x, moradores[j].z);
+        olharParaAlguem(m, moradores[j].x, moradores[j].z);
         if (r->parceiro != j) {   /* começou a conversa agora */
             r->parceiro = j;
             r->turno = sortear(r, 0.5f, 2.0f);
@@ -1607,10 +1615,10 @@ static void reagirAoJogador(int i, float tempo) {
         return;
     }
     if (d < OLHA_O_JOGADOR_ATE && jogador.velocidade < DEVAGAR_ATE) {
-        m->olhaAlgo = 1;
-        m->olhar = olharPara(m, jogador.x, jogador.z);
+        olharParaAlguem(m, jogador.x, jogador.z);
         if (m->pessoa == P_RUIVO && d < CUMPRIMENTA_ATE) {
             m->olhar = -m->olhar;   /* tímido: olha para o outro lado */
+            m->olhaNoPonto = 0;
         }
     }
     if (d < CUMPRIMENTA_ATE && jogador.velocidade < PARADO_ATE) {
@@ -1644,8 +1652,7 @@ static void olharQuemPassa(int i) {
         float d = distanciaEntre(m, moradores[j].x, moradores[j].z);
         if (j != i && fabsf(moradores[j].velocidade) > 1.0f && d < menor) {
             menor = d;
-            m->olhaAlgo = 1;
-            m->olhar = olharPara(m, moradores[j].x, moradores[j].z);
+            olharParaAlguem(m, moradores[j].x, moradores[j].z);
         }
     }
 }
@@ -1748,8 +1755,7 @@ static void acompanharConversa(float tempo) {
     }
     int doJogador = 0;
     const char *fala = falaDoPapo(&papo, &doJogador);
-    m->olhaAlgo = 1;
-    m->olhar = olharPara(m, jogador.x, jogador.z);
+    olharParaAlguem(m, jogador.x, jogador.z);
     if (doJogador) {
         m->fala = NULL;   /* agora ele ouve */
         m->falaRestante = 0.0f;
@@ -1893,6 +1899,7 @@ void atualizarMoradores(MalhaDeColisao *malha, float jogadorX, float jogadorZ, f
         Rotina *r = &rotinas[i];
         m->buzinou = 0;
         m->olhaAlgo = 0;
+        m->olhaNoPonto = 0;
         m->aperto = 0.0f;
         m->perseguindo = 0;
         if (m->susto > 0.0f) {
@@ -1927,8 +1934,7 @@ void atualizarMoradores(MalhaDeColisao *malha, float jogadorX, float jogadorZ, f
             case DANDO_BRONCA:
                 m->velocidade = 0.0f;
                 m->aperto = 0.6f;
-                m->olhaAlgo = 1;
-                m->olhar = olharPara(m, jogador.x, jogador.z);
+                olharParaAlguem(m, jogador.x, jogador.z);
                 m->espera -= tempo;
                 if (m->espera <= 0.0f) {
                     r->descanso = XERIFE_DESCANSA;

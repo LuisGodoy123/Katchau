@@ -14,7 +14,7 @@ CFLAGS = -std=c99 -O2 -Wall -Wextra -g -Isrc
 
 # Módulos de lógica: não usam a raylib (regra 2 do roadmap)
 LOGICA = src/gestos.c src/papo.c src/pista.c src/obstaculos.c src/carro.c src/ia.c \
-         src/ordenacao.c src/corrida.c src/motor.c src/motorgranular.c src/recordes.c src/olhar.c src/pitstop.c src/vibracao.c src/configuracoes.c src/mjpeg.c src/colisao.c src/livre.c src/moradores.c src/leitor_json.c src/linha_de_corrida.c
+         src/ordenacao.c src/corrida.c src/motor.c src/motorgranular.c src/recordes.c src/olhar.c src/pitstop.c src/vibracao.c src/configuracoes.c src/mjpeg.c src/colisao.c src/livre.c src/moradores.c src/leitor_json.c src/linha_de_corrida.c src/palco.c src/olhos.c
 
 # Módulos que desenham na tela
 DESENHO = src/render.c src/corte.c src/mundo.c src/construcao.c src/carros3d.c src/malhas.c src/fumaca.c src/faiscas.c src/fogos.c src/marcas.c src/torcida3d.c src/telao.c src/posprocesso.c src/noite.c src/hud.c src/menu.c src/visual.c src/audio.c src/efeitos.c src/exibicao.c src/apresentacao.c src/intro.c src/videofundo.c src/controle.c src/passeio.c src/carreta.c src/interiores.c src/espera.c src/hora.c src/luzes.c src/grilos.c src/postes.c src/tratores.c src/desempenho.c src/holofotes.c
@@ -116,12 +116,6 @@ build/teste_livre: testes/teste_livre.c $(LOGICA) $(wildcard src/*.h) | build
 build/teste_pista: testes/teste_pista.c $(LOGICA) $(wildcard src/*.h) | build
 	$(CC) $(CFLAGS) testes/teste_pista.c $(LOGICA) -o $@ -lm -lpthread
 
-# Procura buracos, degraus e lugares onde o carro do passeio livre enrosca
-sondar-colisao: build/sondar_colisao
-
-build/sondar_colisao: ferramentas/sondar_colisao.c $(LOGICA) $(wildcard src/*.h) | build
-	$(CC) $(CFLAGS) ferramentas/sondar_colisao.c $(LOGICA) -o $@ -lm -lpthread
-
 # Corre muitas provas sem gráficos e mede o quanto cada dificuldade é competitiva
 simulacao: build/simular_dificuldade
 	./build/simular_dificuldade
@@ -136,23 +130,13 @@ testar-vibracao: build/teste_vibracao
 build/teste_vibracao: testes/teste_vibracao.m src/vibrar_mac.m $(LOGICA) $(wildcard src/*.h) | build
 	$(CC) -Wall -Wextra -g -Isrc -fobjc-arc testes/teste_vibracao.m src/vibrar_mac.m $(LOGICA) -o $@ $(FRAMEWORKS_DA_VIBRACAO) -lm
 
-# Mede Interlagos e Montreal nos modelos 3D e reescreve src/interlagos.h e src/montreal.h (só quando o modelo muda)
-medir-interlagos: build/medir_pista
-	./build/medir_pista interlagos recursos/modelos/interlagos.glb src/interlagos.h
-
-medir-montreal: build/medir_pista
-	./build/medir_pista montreal recursos/modelos/montreal.glb src/montreal.h
-
-build/medir_pista: ferramentas/medir_pista.c src/materiais_do_modelo.h src/interlagos_materiais.h src/montreal_materiais.h | build
-	$(CC) $(CFLAGS) -O2 ferramentas/medir_pista.c -o $@ $(LIBS)
-
 memoria: build/teste_pista
 	valgrind --leak-check=full --error-exitcode=1 ./build/teste_pista
 
 zip: clean
-	zip -r $(NOME).zip Makefile README.md src testes recursos ferramentas
+	zip -r $(NOME).zip Makefile README.md src testes recursos
 
 clean:
 	rm -rf build $(NOME) $(NOME).exe $(NOME).zip
 
-.PHONY: all run testes testar-vibracao medir-interlagos medir-montreal memoria zip clean
+.PHONY: all run testes simulacao testar-vibracao memoria zip clean

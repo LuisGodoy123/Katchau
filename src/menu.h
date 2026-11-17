@@ -53,7 +53,6 @@ typedef struct {
     int voltarAnterior;                         /* o mouse estava no VOLTAR no quadro anterior? */
     float destaqueVoltar;                       /* animação (0 a 1) do botão VOLTAR */
     float rolagemDaVitrine;                     /* o carrossel da garagem, andando até o carro marcado */
-    float giroDaVitrine;                        /* o carro da vitrine girando (radianos) */
     float destaqueOrdem;                        /* animação (0 a 1) do seletor de ordem */
     int opcaoPausa;                             /* item marcado na pausa */
     int opcoesDaPausa[MAIS_OPCOES_PAUSA];       /* os botões desta pausa (a da cidade ou a da corrida) */

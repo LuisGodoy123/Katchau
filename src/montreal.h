@@ -2,8 +2,8 @@
  * montreal.h
  * ------------------------------------------------------------------
  * Montreal medido no modelo recursos/modelos/montreal.glb, em metros e nos
- * eixos do próprio modelo. GERADO por ferramentas/medir_pista.c: não edite
- * à mão; rode "make medir-montreal".
+ * eixos do próprio modelo. GERADO pela ferramenta medir_pista (fora do
+ * repositório): não edite à mão.
  *
  * A linha passa no meio do asfalto, a cada ~2 m, a partir da linha de chegada
  * e no sentido da corrida (horário).

@@ -17,3 +17,8 @@ telemetria.csv
 # O que o --benchmark grava
 benchmark-*.csv
 benchmark-*.csv.txt
+
+# Python: as ferramentas de preparação (Blender) ficam fora do repositório
+*.py
+*.pyc
+__pycache__/

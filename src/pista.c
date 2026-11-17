@@ -14,6 +14,7 @@
 #include "oval.h"
 #include "montreal.h"
 #include "interlagos.h"
+#include "pitstop.h"
 
 #define GRAUS_PARA_RADIANOS   0.017453292f
 #define META_LARGURA_DA_INCLINACAO 3.0f   /* mede a inclinação 3 m para cada lado */
@@ -81,6 +82,9 @@ static Segmento *criarSegmento(float curvatura) {
     for (int i = 0; i < 4; i++) {
         novo->correcaoDoPit[i] = 0.0f;
     }
+    novo->estradaDoPit = 0.0f;
+    novo->trajetoDoPit[0] = novo->trajetoDoPit[1] = novo->trajetoDoPit[2] = 0.0f;
+    novo->temTrajetoDoPit = 0;
     novo->obstaculos = NULL;
     novo->proximo = novo;    /* sozinho, ele é o próprio vizinho */
     novo->anterior = novo;
@@ -256,7 +260,7 @@ static PontoDoTracado pontoDaTabela(const PontoDoTracado *tabela, int total, int
     return tabela[(indice + total) % total];
 }
 
-/* As distâncias além da borda onde a tabela mediu a altura do chão (ferramentas/medir_interlagos.c) */
+/* As distâncias além da borda onde a tabela mediu a altura do chão (a ferramenta medir_pista) */
 static const float DISTANCIAS_ALEM_DA_BORDA[PONTOS_FORA_DA_PISTA] = { 1.0f, 2.0f, 3.0f, 5.0f, 7.0f, 10.0f, 14.0f, 20.0f, 28.0f, 40.0f, 55.0f, 70.0f, 90.0f };
 
 /*
@@ -736,6 +740,7 @@ Pista *criarMontreal(void) {
     pit.pontosDoCaminho = ultimo + 1;
     pit.estrada = ESTRADA_DO_PIT_MONTREAL;
     pit.pontosDaEstrada = TOTAL_PONTOS_DA_ESTRADA_DO_PIT_MONTREAL;
+    pit.escalaDaEstrada = e;
     pista->pit = pit;
     pista->temPit = 1;
     /* Ao lado da chicane, a estrada do pit fica 50 a 60 m à esquerda da pista, por dentro da curva 14 (raio de 30 a
@@ -850,12 +855,15 @@ float metrosDesdeAEntrada(const Pista *pista, float metros) {
  * Devolve: a pista completa.
  */
 Pista *criarPistaPorId(IdPista id) {
+    Pista *pista;
     switch (id) {
-        case PISTA_COPA_PISTAO: return criarCopaPistao();
-        case PISTA_OVAL: return criarOval();
-        case PISTA_MONTREAL: return criarMontreal();
-        default: return criarPista();
+        case PISTA_COPA_PISTAO: pista = criarCopaPistao(); break;
+        case PISTA_OVAL: pista = criarOval(); break;
+        case PISTA_MONTREAL: pista = criarMontreal(); break;
+        default: pista = criarPista(); break;
     }
+    medirEstradaDoPit(pista);
+    return pista;
 }
 
 /* ==================================================================
@@ -1166,6 +1174,7 @@ void liberarPista(Pista *pista) {
     }
 
     free(pista->linhaDeCorrida);
+    free(pista->pit.caminhoProprio);
     free(pista);
 }
 
@@ -1270,6 +1279,38 @@ float alturaDoChao(PosicaoNaPista posicao, float lateralEmMetros) {
 }
 
 /*
+ * alturaDoChaoNoPit
+ * O chão de quem está no pit lane. Ele é plano de lado, e além da borda o chão é medido em poucos pontos: entre o
+ * último do pit lane e o primeiro em cima da garagem (ou entre a pista e o pit lane, do outro lado da mureta), a conta
+ * fazia uma rampa, e as vagas que caíam nela ficavam tortas, com o carro no ar (em Interlagos, da do Fillmore em
+ * diante). Então ele parte do meio da estrada do pit e anda de lado até o ponto pedido, parando onde o chão vira
+ * parede: dali em diante, vale a altura de antes dela.
+ * Recebe: a posição e a lateral, em metros.
+ * Devolve: a altura do chão, em metros (fora do pit lane, a de alturaDoChao).
+ */
+#define PASSO_NO_PIT          0.5f    /* metros de lado entre uma medida e a outra */
+#define PAREDE_NO_PIT         0.2f    /* metros de altura por metro de lado: mais que isto é parede, não chão */
+float alturaDoChaoNoPit(PosicaoNaPista posicao, float lateralEmMetros) {
+    Segmento *a = posicao.segmento, *b = a->proximo;
+    if (a->estradaDoPit == 0.0f || b->estradaDoPit == 0.0f) {
+        return alturaDoChao(posicao, lateralEmMetros);
+    }
+    float t = posicao.distanciaNoSegmento / COMPRIMENTO_SEGMENTO;
+    float estrada = a->estradaDoPit + (b->estradaDoPit - a->estradaDoPit) * t;
+    float falta = lateralEmMetros - estrada;
+    int passos = (int) ceilf(fabsf(falta) / PASSO_NO_PIT);
+    float altura = alturaDoChao(posicao, estrada);
+    for (int i = 1; i <= passos; i++) {
+        float aqui = alturaDoChao(posicao, estrada + falta * (float) i / (float) passos);
+        if (fabsf(aqui - altura) > PAREDE_NO_PIT * fabsf(falta) / (float) passos) {
+            break;
+        }
+        altura = aqui;
+    }
+    return altura;
+}
+
+/*
  * pontoNoMundo
  * Onde um ponto da pista fica no mundo 3D: interpola entre o começo do
  * segmento e o começo do seguinte, anda para o lado e sobe até o chão.
@@ -1318,6 +1359,21 @@ PontoNoMundo pontoNoMundoDoPit(PosicaoNaPista posicao, float deslocamentoLateral
     PontoNoMundo ponto = pontoNoMundo(posicao, deslocamentoLateral);
     Segmento *a = posicao.segmento, *b = a->proximo;
     float t = posicao.distanciaNoSegmento / COMPRIMENTO_SEGMENTO;
+    if (a->temTrajetoDoPit && b->temTrajetoDoPit) {
+        /* No caminho alisado: o ponto dele ali, mais o quanto o carro está fora do caminho, na perpendicular dele */
+        float largura = larguraDoLado(a, deslocamentoLateral) + (larguraDoLado(b, deslocamentoLateral) - larguraDoLado(a, deslocamentoLateral)) * t;
+        float foraDoCaminho = deslocamentoLateral * largura - (a->estradaDoPit + (b->estradaDoPit - a->estradaDoPit) * t);
+        float giro = b->trajetoDoPit[2] - a->trajetoDoPit[2];
+        ponto.rumo = a->trajetoDoPit[2] + (giro - 360.0f * roundf(giro / 360.0f)) * t;
+        float angulo = ponto.rumo * GRAUS_PARA_RADIANOS;
+        ponto.x = a->trajetoDoPit[0] + (b->trajetoDoPit[0] - a->trajetoDoPit[0]) * t + cosf(angulo) * foraDoCaminho;
+        ponto.z = a->trajetoDoPit[1] + (b->trajetoDoPit[1] - a->trajetoDoPit[1]) * t + sinf(angulo) * foraDoCaminho;
+        ponto.y += a->correcaoDoPit[1] + (b->correcaoDoPit[1] - a->correcaoDoPit[1]) * t;
+        if (temCorrecaoDoPit(posicao)) {
+            ponto.inclinacao = 0.0f;   /* a estrada do pit é plana de lado */
+        }
+        return ponto;
+    }
     ponto.x += a->correcaoDoPit[0] + (b->correcaoDoPit[0] - a->correcaoDoPit[0]) * t;
     ponto.y += a->correcaoDoPit[1] + (b->correcaoDoPit[1] - a->correcaoDoPit[1]) * t;
     ponto.z += a->correcaoDoPit[2] + (b->correcaoDoPit[2] - a->correcaoDoPit[2]) * t;

@@ -5,9 +5,9 @@
  *
  * O mapa (radiator_springs.glb) e a colisão (radiator_springs.col) são
  * carregados só na primeira vez que o jogador entra aqui. Os dois são
- * gerados por ferramentas/montar_mundo_aberto.py. Na mesma hora, o mapa
+ * gerados pela ferramenta montar_mundo_aberto. Na mesma hora, o mapa
  * é fotografado de cima uma vez: a foto vira o minimapa e o mapa grande.
- * O Mack (mack.glb, de ferramentas/preparar_mack.py) fica estacionado
+ * O Mack (mack.glb, da ferramenta preparar_mack) fica estacionado
  * na rua principal, logo à frente da largada.
  *
  * O dia passa (hora.c): 48 minutos do nascer do sol ao nascer do sol, com
@@ -163,7 +163,7 @@ static float treino[3] = { TREINO_X, 0.0f, TREINO_Z };
  * porta sobe, e aí vem a escolha da corrida (TELA_PISTAS). Escolhida, o Mack parte pela rua (e depois
  * vem a apresentação da pista); desistindo, o carro desce de ré pela rampa. Na volta de uma
  * corrida, ele desce do mesmo jeito */
-#define ARQUIVO_DO_MACK       "recursos/modelos/mack.glb"   /* feito por ferramentas/preparar_mack.py */
+#define ARQUIVO_DO_MACK       "recursos/modelos/mack.glb"   /* feito pela ferramenta preparar_mack */
 #define ARQUIVO_DAS_RODAS_DO_MACK "recursos/modelos/mack_rodas.glb"   /* uma malha por roda */
 #define ARQUIVO_DA_PORTA_DO_MACK  "recursos/modelos/mack_porta.glb"   /* a porta de trás, que vira rampa */
 #define MAIS_RODAS            16
@@ -437,7 +437,7 @@ static void carregarMack(void) {
             darBocaAoModelo(&mack, "mack");   /* a boca fala (bocas.txt); sem a linha dele, fica fechada */
         }
     } else {
-        TraceLog(LOG_WARNING, "PASSEIO: falta %s (gere com ferramentas/preparar_mack.py)", ARQUIVO_DO_MACK);
+        TraceLog(LOG_WARNING, "PASSEIO: falta %s (gere com a ferramenta preparar_mack)", ARQUIVO_DO_MACK);
     }
     if (temMack) {
         prepararModeloDoMundoAberto(&mack);
@@ -872,7 +872,7 @@ static void prepararMapa(void) {
     passoDaEspera("CARREGANDO RADIATOR SPRINGS", 0.0f);
     malha = carregarMalhaDeColisao(ARQUIVO_DA_COLISAO);
     if (malha == NULL) {
-        TraceLog(LOG_WARNING, "PASSEIO: falta %s (gere com ferramentas/montar_mundo_aberto.py)", ARQUIVO_DA_COLISAO);
+        TraceLog(LOG_WARNING, "PASSEIO: falta %s (gere com a ferramenta montar_mundo_aberto)", ARQUIVO_DA_COLISAO);
     } else {
         TraceLog(LOG_INFO, "PASSEIO: %d triângulos de colisão", triangulosDaMalha(malha));
         pontosDaMalha(malha, largada, treino);
@@ -1414,7 +1414,7 @@ static Tela atualizarCena(float tempoQuadro) {
  * ------------------------------------------------------------------ */
 
 static void desenharLegenda(const char *quem, const char *fala, float alfa, float centroX, float altura);
-static float olharDoJogador = 0.0f;   /* conversando: para que lado está quem ele ouve (os olhos vão lá) */
+static Vector3 ondeOJogadorOlha;      /* conversando: os olhos de quem ele ouve (a cabine do Mack, o morador) */
 static int jogadorConversando = 0;
 
 /* De noite (0 de dia a 1 tarde da noite): o Mack fica mais calmo e o sono chega mais fácil */
@@ -1427,6 +1427,9 @@ static float noiteAgora(void) {
 }
 
 /* Para que lado (-1 à esquerda a +1 à direita) está um ponto, visto de (x, z) olhando para o rumo */
+/* A altura dos olhos de um carro, no chão dele: para onde os outros olham quando olham para ele */
+#define ALTURA_DOS_OLHOS_DE_QUEM_OLHA 0.9f
+
 static float ladoDoPonto(float x, float z, float rumo, float px, float pz) {
     float dx = px - x, dz = pz - z;
     float frente = dx * sinf(rumo) - dz * cosf(rumo), direita = dx * cosf(rumo) + dz * sinf(rumo);
@@ -1613,6 +1616,7 @@ static void moverOJogador(float tempo) {
         }
         Vector3 f = frenteDaCabine();
         s.lado = ladoDoPonto(carro.x, carro.z, carro.rumo, f.x, f.z);
+        ondeOJogadorOlha = f;
         jogadorConversando = 1;
     } else if (quem >= 0) {
         float duracao = 0.0f;
@@ -1628,12 +1632,12 @@ static void moverOJogador(float tempo) {
             s.agitacaoDoOutro = a->agitacao;
         }
         s.lado = ladoDoPonto(carro.x, carro.z, carro.rumo, morador(quem)->x, morador(quem)->z);
+        ondeOJogadorOlha = (Vector3){ morador(quem)->x, morador(quem)->y + ALTURA_DOS_OLHOS_DE_QUEM_OLHA, morador(quem)->z };
         jogadorConversando = 1;
     }
     if (jogadorConversando) {
         s.atento = 1;
         s.perto = 1.0f;
-        olharDoJogador = s.lado;
     }
     if (s.fala != NULL) {
         size_t n = strlen(s.fala);
@@ -2266,8 +2270,10 @@ static void desenharMoradores(Camera3D camera) {
         emocaoNoProximoDesenho(m->modelo, &pose->olhos);
         bocaNoProximoDesenho(m->modelo, pose->boca);   /* falando, a boca abre nas vogais */
         abrirRodasNoProximoDesenho(pose->abreAsMaos);  /* e as mãos (as rodas da frente) se abrem */
-        if (m->olhaAlgo) {
-            olharNoProximoDesenho(m->modelo, m->olhar);   /* estacionado, olhando alguém */
+        if (m->olhaAlgo && m->olhaNoPonto) {   /* olhando alguém: nos olhos dele (olhos.h) */
+            olharParaNoProximoDesenho(m->modelo, noMundo, (Vector3){ m->olharX, m->y + ALTURA_DOS_OLHOS_DE_QUEM_OLHA, m->olharZ });
+        } else if (m->olhaAlgo) {
+            olharNoProximoDesenho(m->modelo, m->olhar);   /* desviando o olhar (o tímido) */
         } else if (pose->maos != 0.0f) {
             olharNoProximoDesenho(m->modelo, m->volante);  /* as mãos gesticulam, os olhos não vão junto */
         }
@@ -2301,7 +2307,7 @@ static void desenharCarro(Matrix noMundo) {
         bocaNoProximoDesenho(numero, cabeca * poseDoJogador.boca);
         abrirRodasNoProximoDesenho(parado * poseDoJogador.abreAsMaos);   /* as mãos, só parado: andando, as rodas guiam */
         if (jogadorConversando) {
-            olharNoProximoDesenho(numero, olharDoJogador);   /* olha para quem conversa com ele */
+            olharParaNoProximoDesenho(numero, noMundo, ondeOJogadorOlha);   /* olha nos olhos de quem conversa com ele */
         }
     }
     float rapidez = fabsf(velocidadeParaFrente(&carro)) / carro.velocidadeMaxima;
@@ -2664,7 +2670,7 @@ static void quadrado(Vector3 a, Vector3 b, Vector3 c, Vector3 d, Color ca, Color
 /*
  * desenharBauDoMack
  * O lado de dentro da carreta (carreta.c), sempre que o Mack está perto: o modelo não tem nada dentro
- * do baú (ferramentas/preparar_mack.py tira o que havia lá), então é ele que fecha o baú, visto de
+ * do baú (a ferramenta preparar_mack tira o que havia lá), então é ele que fecha o baú, visto de
  * qualquer lado (pela porta aberta ou, pelos arcos das rodas, as caixas delas). Com a porta aberta,
  * também o lado de dentro da porta, de chapa de metal, que vira o piso da rampa.
  */
@@ -2743,7 +2749,7 @@ void desenharPasseio(EstadoMenu *menu) {
         ClearBackground(BLACK);
         comecarInterface(1);
         escreverCentralizado(FONTE_TITULO, "MAPA DO PASSEIO NÃO ENCONTRADO", LARGURA_TELA / 2.0f, 250.0f, 30.0f, WHITE);
-        escreverCentralizado(FONTE_TEXTO, "Gere recursos/modelos/radiator_springs.glb e .col com ferramentas/montar_mundo_aberto.py",
+        escreverCentralizado(FONTE_TEXTO, "Gere recursos/modelos/radiator_springs.glb e .col com a ferramenta montar_mundo_aberto",
                              LARGURA_TELA / 2.0f, 296.0f, 16.0f, COR_TEXTO_FRACO);
         escreverCentralizado(FONTE_FORTE, "ENTER volta ao menu", LARGURA_TELA / 2.0f, 340.0f, 16.0f, COR_AMARELO);
         terminarInterface();

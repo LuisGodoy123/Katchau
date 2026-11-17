@@ -8,9 +8,9 @@
  *
  * Cada um é um modelo nas coordenadas do mundo (recursos/modelos/
  * loja_do_luigi.glb, cozy_cone_quartos.glb e cozy_cone_recepcao.glb),
- * feito no Blender por uma ferramenta (ferramentas/montar_loja_do_luigi.py,
- * montar_quartos_do_cozy_cone.py e montar_recepcao_do_cozy_cone.py). O mapa
- * (ferramentas/montar_mundo_aberto.py) tira dos prédios as portas e os
+ * feito no Blender por uma ferramenta (montar_loja_do_luigi,
+ * montar_quartos_do_cozy_cone e montar_recepcao_do_cozy_cone). O mapa
+ * (a ferramenta montar_mundo_aberto) tira dos prédios as portas e os
  * vidros pintados e põe a colisão do lado de dentro no .col.
  *
  * A luz vem assada nas cores dos vértices (textura × cor do vértice). Com

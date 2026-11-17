@@ -853,7 +853,7 @@ static void colocarModelo(ModeloDeObjeto qual, Vector3 pe, float giro, float tam
  * Recebe: nada.
  * Devolve: nada.
  */
-#define LARGURA_DA_TELA_DE_ESPERA 320   /* a imagem da tela dos telões (gerar_telao3d.py) */
+#define LARGURA_DA_TELA_DE_ESPERA 320   /* a imagem da tela dos telões (a ferramenta gerar_telao3d) */
 #define ALTURA_DA_TELA_DE_ESPERA  192
 
 static void carregarModelosDosObjetos(void) {
@@ -1002,7 +1002,8 @@ static Vector3 lugarDoPit(Pista *pista, float metros, float aoLado, float *rumo)
     if (rumo != NULL) {
         *rumo = ponto.rumo;
     }
-    return (Vector3){ ponto.x, ponto.y, ponto.z };
+    /* No chão do pit lane, plano de lado: o medido fazia uma rampa até as garagens, e as vagas ficavam tortas */
+    return (Vector3){ ponto.x, alturaDoChaoNoPit(lugar, pista->pit.lado * aoLado), ponto.z };
 }
 
 /*
@@ -2761,7 +2762,7 @@ int carregarMundoAberto(void) {
         return 1;
     }
     if (!FileExists(ARQUIVO_DO_MUNDO_ABERTO)) {
-        TraceLog(LOG_WARNING, "MUNDO: falta %s (gere com ferramentas/montar_mundo_aberto.py)", ARQUIVO_DO_MUNDO_ABERTO);
+        TraceLog(LOG_WARNING, "MUNDO: falta %s (gere com a ferramenta montar_mundo_aberto)", ARQUIVO_DO_MUNDO_ABERTO);
         return 0;
     }
     mundoAberto = LoadModel(ARQUIVO_DO_MUNDO_ABERTO);

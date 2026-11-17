@@ -256,7 +256,7 @@ static LoopDeEfeito loops[TOTAL_LOOPS] = {
     [LOOP_VENTO] = { .arquivo = "recursos/sons/efeitos/vento.wav" },
     [LOOP_PNEU] = { .arquivo = "recursos/sons/efeitos/pneu_cantando.wav" },
     [LOOP_GRAMA] = { .arquivo = "recursos/sons/efeitos/grama.wav" },
-    [LOOP_ZEBRA] = { .arquivo = "recursos/sons/efeitos/zebra.wav" },   /* ferramentas/gerar_som_da_zebra.py */
+    [LOOP_ZEBRA] = { .arquivo = "recursos/sons/efeitos/zebra.wav" },   /* da ferramenta gerar_som_da_zebra */
     [LOOP_MURO] = { .arquivo = "recursos/sons/efeitos/muro_raspando.wav" },
     [LOOP_NITRO] = { .arquivo = "recursos/sons/efeitos/nitro_queimando.wav" },
 };

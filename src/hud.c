@@ -1382,6 +1382,9 @@ static void desenharDicaDoFimDeCorrida(Corrida *corrida, float centro, float cur
  *         do jogador dela, e quem chega primeiro já o vê enquanto o outro ainda corre.
  * Devolve: nada.
  */
+#define VOLTAS_POR_COLUNA     10      /* no cartão do fim da corrida: 10 cabem na altura da tela (600 virtuais) */
+#define LARGURA_DA_COLUNA_A_MAIS 312.0f   /* o cartão fica tanto mais largo a cada coluna de voltas a mais */
+#define VAO_ENTRE_COLUNAS     24.0f
 void desenharFimDeCorridaDoJogador(Corrida *corrida, int humano) {
     /* Na grade de 4: o cartão com 24 de folga e cantos de 24; o título dentro dele, a 16 da borda,
      * com cantos de 24 - 16 = 8.
@@ -1389,8 +1392,15 @@ void desenharFimDeCorridaDoJogador(Corrida *corrida, int humano) {
      * Na tela dividida o cartão é COMPACTO: a faixa tem ~290 de altura virtual e a lista de voltas
      * (32 por volta) fazia o cartão ir de 328 a 488, estourando a faixa no difícil. No lugar dela
      * entra uma linha só com a melhor volta — a lista inteira continua na tela de resultado. */
-    const float largura = 384.0f, folga = 24.0f, linhaDaVolta = 32.0f, borda = 16.0f;
+    const float folga = 24.0f, linhaDaVolta = 32.0f, borda = 16.0f;
     int compacto = naFaixaEstreita();   /* é a altura que manda: o cartão tem de caber onde está */
+    /* As voltas, em colunas de até VOLTAS_POR_COLUNA: com mais, o cartão passava da altura da tela; em vez de mais
+     * alto, ele fica mais largo */
+    int voltas = (corrida->totalVoltas < MAXIMO_DE_VOLTAS) ? corrida->totalVoltas : MAXIMO_DE_VOLTAS;
+    int colunas = (voltas + VOLTAS_POR_COLUNA - 1) / VOLTAS_POR_COLUNA;
+    colunas = (colunas < 1) ? 1 : colunas;
+    int linhas = (voltas + colunas - 1) / colunas;
+    const float largura = (compacto || colunas == 1) ? 384.0f : 384.0f + (colunas - 1) * LARGURA_DA_COLUNA_A_MAIS;
     const float alturaDoTitulo = compacto ? 48.0f : 64.0f;
     const float corpoDoTitulo = compacto ? 32.0f : 40.0f;
     Carro *jogador = carroDoHumano(corrida, humano);
@@ -1400,7 +1410,7 @@ void desenharFimDeCorridaDoJogador(Corrida *corrida, int humano) {
     int temObservacao = desclassificado || jogador->ultimaTroca > 0.0f;
 
     float alturaDosTempos = compacto ? linhaDaVolta                        /* uma linha: a melhor volta */
-                                     : 16.0f + corrida->totalVoltas * linhaDaVolta;
+                                     : 16.0f + linhas * linhaDaVolta;
     float altura = borda + alturaDoTitulo + (compacto ? 20.0f : 24.0f)     /* título */
                  + 40.0f + (temObservacao ? 20.0f : 0.0f)                  /* tempo total */
                  + alturaDosTempos
@@ -1440,7 +1450,7 @@ void desenharFimDeCorridaDoJogador(Corrida *corrida, int humano) {
     }
     /* Qual foi a melhor volta dele */
     int melhorVolta = 0;
-    for (int i = 0; i < corrida->totalVoltas; i++) {
+    for (int i = 0; i < voltas; i++) {
         if (jogador->temposDeVolta[i] < jogador->temposDeVolta[melhorVolta]) {
             melhorVolta = i;
         }
@@ -1463,21 +1473,27 @@ void desenharFimDeCorridaDoJogador(Corrida *corrida, int humano) {
 
     cursor += 16.0f;
 
-    /* As voltas: fios finos separando; a melhor em roxo, com o selo em pílula */
-    for (int i = 0; i < corrida->totalVoltas; i++) {
+    /* As voltas: fios finos separando; a melhor em roxo, com o selo em pílula. Uma coluna, ou mais, lado a lado */
+    float larguraDaColuna = (largura - 2.0f * folga - (colunas - 1) * VAO_ENTRE_COLUNAS) / colunas;
+    for (int i = 0; i < voltas; i++) {
         int ehMelhor = (i == melhorVolta);
-        DrawRectangleRec((Rectangle){ x + folga, cursor, largura - 2.0f * folga, 1.0f }, Fade(COR_TEXTO_CLARO, 0.10f));
-        float meioDaLinha = cursor + linhaDaVolta / 2.0f;
-        escrever(FONTE_FORTE, TextFormat("VOLTA %d", i + 1), x + folga, noMeio(FONTE_FORTE, 16.0f, meioDaLinha), 16.0f, COR_TEXTO_FRACO);
+        float esquerda = x + folga + (i / linhas) * (larguraDaColuna + VAO_ENTRE_COLUNAS);
+        float topo = cursor + (i % linhas) * linhaDaVolta;
+        DrawRectangleRec((Rectangle){ esquerda, topo, larguraDaColuna, 1.0f }, Fade(COR_TEXTO_CLARO, 0.10f));
+        float meioDaLinha = topo + linhaDaVolta / 2.0f;
+        escrever(FONTE_FORTE, TextFormat("VOLTA %d", i + 1), esquerda, noMeio(FONTE_FORTE, 16.0f, meioDaLinha), 16.0f, COR_TEXTO_FRACO);
         if (ehMelhor) {
-            caixaArredondada((Rectangle){ x + folga + 80.0f, meioDaLinha - 8.0f, 64.0f, 16.0f }, RAIO_PEQUENO, COR_ROXO_HUD);
-            escreverCentralizado(FONTE_FORTE, "MELHOR", x + folga + 112.0f, noMeio(FONTE_FORTE, 12.0f, meioDaLinha), 12.0f, COR_TEXTO_CLARO);
+            caixaArredondada((Rectangle){ esquerda + 80.0f, meioDaLinha - 8.0f, 64.0f, 16.0f }, RAIO_PEQUENO, COR_ROXO_HUD);
+            escreverCentralizado(FONTE_FORTE, "MELHOR", esquerda + 112.0f, noMeio(FONTE_FORTE, 12.0f, meioDaLinha), 12.0f, COR_TEXTO_CLARO);
         }
         formatarTempo(jogador->temposDeVolta[i], tempo, sizeof(tempo));
-        escreverADireita(FONTE_FORTE, tempo, x + largura - folga, noMeio(FONTE_FORTE, 16.0f, meioDaLinha), 16.0f, ehMelhor ? COR_ROXO_HUD : COR_TEXTO_CLARO);
-        cursor += linhaDaVolta;
+        escreverADireita(FONTE_FORTE, tempo, esquerda + larguraDaColuna, noMeio(FONTE_FORTE, 16.0f, meioDaLinha), 16.0f, ehMelhor ? COR_ROXO_HUD : COR_TEXTO_CLARO);
     }
-    DrawRectangleRec((Rectangle){ x + folga, cursor, largura - 2.0f * folga, 1.0f }, Fade(COR_TEXTO_CLARO, 0.10f));
+    cursor += linhas * linhaDaVolta;
+    for (int c = 0; c < colunas; c++) {
+        DrawRectangleRec((Rectangle){ x + folga + c * (larguraDaColuna + VAO_ENTRE_COLUNAS), cursor, larguraDaColuna, 1.0f },
+                         Fade(COR_TEXTO_CLARO, 0.10f));
+    }
     cursor += 24.0f;
     desenharDicaDoFimDeCorrida(corrida, centro, cursor);
 }

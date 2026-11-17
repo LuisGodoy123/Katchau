@@ -87,7 +87,10 @@ typedef struct {
 
     /* A cara e o corpo, para o desenho */
     int olhaAlgo;            /* 1: os olhos vão para "olhar" (estacionado, olhando alguém), não para o volante */
-    float olhar;             /* -1 (todo à esquerda) a +1 (todo à direita) */
+    float olhar;             /* -1 (todo à esquerda) a +1 (todo à direita); o corpo vira para este lado */
+    int olhaNoPonto;         /* 1: ele olha para alguém que está em (olharX, olharZ): os olhos vão até lá pela conta do
+                              * painel dos olhos (olhos.h); 0 (o tímido desviando): os olhos vão para "olhar" */
+    float olharX, olharZ;
     Pose pose;               /* o corpo (gestos.c): a suspensão, as rodas da frente como mãos e a emoção dos olhos */
     float aperto;            /* 0 a 1: os olhos apertados (o xerife atrás de alguém) */
     int perseguindo;         /* 1: o xerife atrás do jogador (no minimapa, em vermelho) */

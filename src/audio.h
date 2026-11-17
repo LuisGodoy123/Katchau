@@ -38,6 +38,9 @@ void tocarSomDaBatida(float volume, int contraCarro);
 void tocarGritoDeRodada(float volume);
 void tocarFalaDeLideranca(int comecou);
 void tocarFalaDeUltrapassagem(int ultrapassou);
+/* O locutor da garagem anunciando o nome do carro (recursos/sons/vozes/<arquivo>.wav). Devolve quantos segundos
+ * a voz dura (0: o arquivo não existe) */
+float anunciarNaGaragem(const char *arquivo);
 /* A voz do McQueen agora, para a boca dele: o quanto ela abre (0 a 1, pelo volume da fala que está tocando,
  * medido quadro a quadro ao carregar) e o tipo da fala (a cara que ele faz; fica um pouco depois dela) */
 enum { VOZ_NENHUMA, VOZ_CONTENTE, VOZ_IRRITADA, VOZ_ASSUSTADA };

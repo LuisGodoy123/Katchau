@@ -340,7 +340,7 @@ void carregarTratores(void) {
     temRodasFrente = carregarParte(&rodasFrente, "rodas_frente.glb");
     carregados = 1;
     if (!temCorpo) {
-        TraceLog(LOG_INFO, "TRATORES: sem %s/corpo.glb (gere com ferramentas/preparar_trator.py)", PASTA_DO_TRATOR);
+        TraceLog(LOG_INFO, "TRATORES: sem %s/corpo.glb (gere com a ferramenta preparar_trator)", PASTA_DO_TRATOR);
         return;
     }
     lerMedidas();

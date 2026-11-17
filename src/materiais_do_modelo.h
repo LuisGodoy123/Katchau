@@ -3,7 +3,7 @@
  * ------------------------------------------------------------------
  * O que é cada material dos modelos de pista que vieram de outros jogos
  * (interlagos_materiais.h, montreal_materiais.h): o chão que o carro sente em
- * cima dele, que a ferramenta ferramentas/medir_pista.c procura, e o jeito de
+ * cima dele, que a ferramenta medir_pista procurava, e o jeito de
  * desenhar (os shaders de PIXELS_DOS_MODELOS, em mundo.c).
  * ------------------------------------------------------------------
  */

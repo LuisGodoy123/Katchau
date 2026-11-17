@@ -240,6 +240,7 @@ Carro criarCarro(const char *nome, int numero, Segmento *largada, float deslocam
     carro.vemAlguemAtras = 0;
     carro.noCaminhoDoPit = 0;
     carro.sobraDoCaminho = 0.0f;
+    carro.sobraNoMundo[0] = carro.sobraNoMundo[1] = 0.0f;
     carro.tempoDaTroca = 0.0f;
     carro.duracaoDaTroca = 0.0f;
     carro.ultimaTroca = 0.0f;
@@ -1153,9 +1154,12 @@ static float girarNoMundo(Carro *carro, float tempoQuadro, float aderenciaDoChao
     float maximo = fminf(metrosPorSegundo / RAIO_MINIMO_DA_DIRECAO, agarra / fmaxf(metrosPorSegundo, 1.0f));
     float giroDoVolante = carro->volante * maximo;
 
-    /* Levando o pneu ao limite, ele canta e o carro perde um pouco de velocidade */
+    /* Levando o pneu ao limite, ele canta e o carro perde um pouco de velocidade (só para a frente: de ré, a velocidade é
+     * negativa, e a conta abaixo, que não deixa ela passar de zero, zerava a ré: na corrida o carro engatava e não saía
+     * do lugar) */
     float uso = fabsf(carro->volante) * maximo * metrosPorSegundo / agarra;
-    float noLimite = limitar((uso - INICIO_DA_DERRAPAGEM_LIVRE) / (1.0f - INICIO_DA_DERRAPAGEM_LIVRE), 0.0f, 1.0f);
+    float noLimite = (carro->velocidade > 0.0f) ? limitar((uso - INICIO_DA_DERRAPAGEM_LIVRE) / (1.0f - INICIO_DA_DERRAPAGEM_LIVRE), 0.0f, 1.0f)
+                                               : 0.0f;
 
     if (carro->velocidade > 0.0f && (carro->forcaDoDrift > 0.0f || puxouOFreioDeMao(carro, carro->ultimosComandos))) {
         derrapar(carro, tempoQuadro, maximo);
@@ -1164,7 +1168,9 @@ static float girarNoMundo(Carro *carro, float tempoQuadro, float aderenciaDoChao
     }
     carro->derrapagem = fmaxf(noLimite * (1.0f - carro->forcaDoDrift), carro->forcaDoDrift);
     float gastaNaCurva = PERDA_NO_LIMITE_DO_PNEU * noLimite;
-    carro->velocidade = fmaxf(carro->velocidade - gastaNaCurva * (1.0f - carro->forcaDoDrift) * tempoQuadro, 0.0f);
+    if (carro->velocidade > 0.0f) {
+        carro->velocidade = fmaxf(carro->velocidade - gastaNaCurva * (1.0f - carro->forcaDoDrift) * tempoQuadro, 0.0f);
+    }
     return 0.0f;
 }
 
@@ -1292,7 +1298,7 @@ void atualizarSuspensao(Carro *carro, float tempoQuadro) {
     if (carro->direcaoLivre && carro->temRumoNoMundo) {
         rumo = carro->rumoNoMundo;   /* (sem pista, no passeio livre, é sempre este) */
     } else {
-        PontoNoMundo aqui = pontoNoMundo(carro->posicao, carro->deslocamentoLateral);
+        PontoNoMundo aqui = pontoDoCarro(carro);   /* no pit, o rumo do desenho (com a correção da estrada) */
         rumo = aqui.rumo + carro->anguloDeFuga + carro->anguloDeDrift;
     }
     if (!carro->temSuspensao) {
@@ -1702,6 +1708,11 @@ float tempoAteVelocidade(const FichaTecnica *ficha, float velocidade) {
  * Devolve: o ponto.
  */
 PontoNoMundo pontoDoCarro(const Carro *carro) {
-    return (carro->estadoDoPit != PIT_FORA) ? pontoNoMundoDoPit(carro->posicao, carro->deslocamentoLateral)
-                                            : pontoNoMundo(carro->posicao, carro->deslocamentoLateral);
+    if (carro->estadoDoPit == PIT_FORA) {
+        return pontoNoMundo(carro->posicao, carro->deslocamentoLateral);
+    }
+    PontoNoMundo ponto = pontoNoMundoDoPit(carro->posicao, carro->deslocamentoLateral);
+    ponto.x += carro->sobraNoMundo[0];
+    ponto.z += carro->sobraNoMundo[1];
+    return ponto;
 }

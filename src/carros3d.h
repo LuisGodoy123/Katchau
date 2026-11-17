@@ -18,6 +18,7 @@
 
 #include "raylib.h"
 #include "gestos.h"
+#include "olhos.h"
 
 void carregarCarros3D(void);
 void descarregarCarros3D(void);
@@ -37,6 +38,14 @@ void bocaNoProximoDesenho(int numero, float abertura);
 void emocaoNoProximoDesenho(int numero, const Emocao *emocao);
 /* Para onde os olhos vão no próximo desenho (-1 a +1), no lugar do volante (as rodas seguem o volante) */
 void olharNoProximoDesenho(int numero, float olhar);
+/* O painel dos olhos (olhos.h tem a tabela das expressões e os ajustes): o que vale para o próximo desenho */
+void olharParaNoProximoDesenho(int numero, Matrix noMundo, Vector3 ponto);   /* para um ponto do mundo */
+void mostrarExpressao(int numero, Expressao expressao, float forca);       /* soma uma expressão (0 a 1) */
+void focarOlhar(int numero, float foco);                                     /* sem as olhadelas (0 a 1) */
+void piscarAgora(int numero);
+void piscarUmOlho(int numero, int direito);                                  /* a piscadela, no tempo dela */
+void fecharUmOlhoNoProximoDesenho(int numero, float quanto);                 /* + o direito, - o esquerdo (0 a 1) */
+void desviarOlharNoProximoDesenho(int numero, float deLado, float paraCima); /* somado a para onde ele olha */
 void comecarSombrasNoChao(void);
 void terminarSombrasNoChao(void);
 float ladoDaSombra(int numero);
@@ -59,9 +68,11 @@ void inclinarCorpoNoProximoDesenho(int numero, float rolagem, float arfagem);
 /* O corpo com a suspensão (a arfagem gira no meio) e os gestos (gestos.c: o aceno gira no eixo de trás) */
 void posturaNoProximoDesenho(int numero, float rolagem, float arfagem, float aceno, float subida);
 void moverGarfosNoProximoDesenho(float subida, float inclinacao);
+void cruzarGarfosNoProximoDesenho(float cruzado);   /* os garfos do Guido cruzados como braços: 0 soltos, 1 cruzados */
 Vector3 pontaDosGarfos(void);
 float raioDaRoda(int numero, int roda);
 void desenharRodaSolta(int numero, int roda, Matrix noMundo);
+void desenharPecaCromada(int numero, Mesh malha, Matrix noMundo);   /* com o cromado e o shader do carro */
 void desenharCarro3D(int numero, Matrix noMundo, float anguloDasRodas, float volante);
 void desenharMiniatura(int numero, float centroX, float baseY, float larguraNaTela);
 int bordaDaMiniatura(int numero);

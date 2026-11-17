@@ -18,6 +18,7 @@
 #include <math.h>
 #include "raylib.h"
 #include "menu.h"
+#include "palco.h"
 #include "configuracoes.h"
 #include "render.h"
 #include "hud.h"
@@ -72,10 +73,6 @@
 #define FRACAO_MINIMA_BARRA   0.15f   /* o pior carro ainda mostra um pedacinho de barra */
 
 /* A vitrine da garagem, na grade de 4 */
-#define X_PALCO               24.0f    /* o carro girando */
-#define Y_PALCO               96.0f
-#define LARGURA_PALCO         480.0f
-#define ALTURA_PALCO          300.0f
 #define X_FICHA               536.0f   /* o nome e os atributos */
 #define Y_FICHA               128.0f
 #define LARGURA_FICHA         240.0f
@@ -88,7 +85,6 @@
 #define Y_ORDEM               396.0f
 #define LARGURA_ORDEM         180.0f
 #define ALTURA_ORDEM          24.0f
-#define GIRO_DA_VITRINE       0.55f    /* radianos por segundo */
 #define UNIDADES_EM_100_KMH   4000.0f /* 100 km/h em unidades por segundo (KMH_POR_UNIDADE = 0,025) */
 
 /* ---------- Resultado ---------- */
@@ -722,6 +718,48 @@ static int sobreOVoltar(float mouseX, float mouseY) {
     return dentroDoRetangulo(mouseX, mouseY, X_VOLTAR, Y_VOLTAR, LARGURA_VOLTAR + INCLINACAO, ALTURA_VOLTAR);
 }
 
+/* O palco da garagem (palco.c): o carro marcado entra, para no disco e é anunciado */
+static Palco palcoDaGaragem;
+
+/*
+ * desenharAnuncioDoNome
+ * O nome que o locutor anuncia, grande, embaixo à esquerda do carro, como nos jogos de luta: entra deslizando e
+ * crescendo com a voz, com a faixa vermelha correndo embaixo. É o nome do carro na garagem: fica enquanto ele está
+ * no disco e apaga quando ele sai.
+ * Recebe: nada (o palco da garagem).
+ * Devolve: nada.
+ */
+#define X_DO_ANUNCIO        36.0f
+#define Y_DO_ANUNCIO        (Y_CARROSSEL - 74.0f)
+#define TAMANHO_DO_ANUNCIO  42.0f
+#define SOME_EM             0.25f    /* segundos: o nome apagando quando o carro sai do disco */
+static void desenharAnuncioDoNome(void) {
+    static const char *texto = NULL;
+    static float alfa = 0.0f;
+    const Palco *p = &palcoDaGaragem;
+    float entrada = 1.0f;
+    if (p->anuncio != NULL) {
+        texto = p->anuncio;
+        alfa = 1.0f;
+        entrada = suavizar(fminf(p->tempoDoAnuncio / 0.22f, 1.0f));
+    } else if (texto != NULL && p->fase != PALCO_APRESENTANDO && p->fase != PALCO_PARADO) {
+        alfa -= GetFrameTime() / SOME_EM;   /* fica enquanto ele está no disco; apaga quando ele sai */
+        if (alfa <= 0.0f) {
+            alfa = 0.0f;
+            texto = NULL;
+        }
+    }
+    if (texto == NULL || alfa <= 0.0f) {
+        return;
+    }
+    float tamanho = TAMANHO_DO_ANUNCIO * (1.12f - 0.12f * entrada);
+    float x = X_DO_ANUNCIO - 40.0f * (1.0f - entrada);
+    float largura = larguraDoTexto(FONTE_TITULO, texto, tamanho);
+    desenharParalelogramo(x - 10.0f, Y_DO_ANUNCIO + tamanho * 0.92f, (largura + 30.0f) * entrada, 6.0f, 6, Fade(COR_VERMELHO, alfa));
+    escrever(FONTE_TITULO, texto, x + 3.0f, Y_DO_ANUNCIO + 3.0f, tamanho, Fade(BLACK, 0.6f * alfa * entrada));
+    escrever(FONTE_TITULO, texto, x, Y_DO_ANUNCIO, tamanho, Fade(WHITE, alfa * entrada));
+}
+
 /*
  * atualizarGaragem
  * Cima/baixo marcam um carro; esquerda/direita trocam o critério de
@@ -735,13 +773,14 @@ Tela atualizarGaragem(EstadoMenu *menu) {
     /* Entrando agora (o carrossel não andou desde a última vez): começa no seu carro, já no meio */
     static double ultimoQuadro = -1.0;
     double agora = GetTime();
-    if (ultimoQuadro < 0.0 || agora - ultimoQuadro > 0.25) {
+    if (ultimoQuadro < 0.0 || agora - ultimoQuadro > 1.0) {   /* parada mais longa que um engasgo: voltou à garagem */
         for (int i = 0; i < TOTAL_CARROS; i++) {
             if (numeroDaFicha(menu->garagem[i]) == menu->carroEscolhido) {
                 menu->selecionado = i;
                 menu->rolagemDaVitrine = (float) i;
             }
         }
+        iniciarPalco(&palcoDaGaragem);   /* o carro entra de novo no palco */
     }
     ultimoQuadro = agora;
     int marcadoAntes = menu->selecionado;
@@ -799,12 +838,18 @@ Tela atualizarGaragem(EstadoMenu *menu) {
     /* O carrossel desliza até o marcado; o carro gira; os cartões acendem e apagam */
     float passo = fminf(GetFrameTime() * 10.0f, 1.0f);
     menu->rolagemDaVitrine += (menu->selecionado - menu->rolagemDaVitrine) * passo;
-    menu->giroDaVitrine = fmodf(menu->giroDaVitrine + GIRO_DA_VITRINE * GetFrameTime(), 2.0f * PI);
     for (int i = 0; i < TOTAL_CARROS; i++) {
         menu->destaqueLinha[i] = animarDestaque(menu->destaqueLinha[i], i == menu->selecionado);
     }
     menu->destaqueOrdem = animarDestaque(menu->destaqueOrdem, ordem);
     menu->destaqueVoltar = animarDestaque(menu->destaqueVoltar, voltar);
+
+    /* O palco: o carro marcado entra (o de antes sai), para no disco e o locutor anuncia o nome dele */
+    mostrarNoPalco(&palcoDaGaragem, numeroDaFicha(menu->garagem[menu->selecionado]));
+    atualizarPalco(&palcoDaGaragem, GetFrameTime());
+    if (palcoDaGaragem.anuncioComecou) {
+        duracaoDoAnuncioNoPalco(&palcoDaGaragem, anunciarNaGaragem(vozDoCarroNoPalco(palcoDaGaragem.numero)));
+    }
 
     if (apertouConfirmar()) {
         menu->carroEscolhido = numeroDaFicha(menu->garagem[menu->selecionado]);
@@ -896,54 +941,23 @@ static void desenharBotaoVoltar(float destaque) {
 }
 
 /*
- * notaGeral
- * Recebe: a ficha.
- * Devolve: a nota do carro, de 70 a 99, pela média dos três atributos (o selo "geral").
- */
-static int notaGeral(const FichaTecnica *ficha) {
-    float soma = 0.0f;
-    for (int a = 0; a < TOTAL_ATRIBUTOS; a++) {
-        soma += fracaoDoAtributo(ficha, (Atributo) a);
-    }
-    return 70 + (int) (soma / TOTAL_ATRIBUTOS * 29.0f + 0.5f);
-}
-
-/*
  * desenharCartaoDoCarro
- * A ficha do carro, como um cartão de piloto: o brilho na cor da equipe, o número grande ao fundo,
- * o nome, o selo da nota geral e os três atributos em barras de gomos. O atributo que ordena o
- * carrossel fica aceso.
+ * A ficha do carro, solta sobre o palco: o selo de "seu carro" (se for o escolhido) e os três atributos em
+ * barras de gomos, na cor da equipe. O atributo que ordena o carrossel fica aceso. O nome é o do anúncio.
  * Recebe: o estado do menu, a ficha e o número do carro.
  * Devolve: nada.
  */
 static void desenharCartaoDoCarro(EstadoMenu *menu, const FichaTecnica *ficha, int numero) {
-    const float x = X_FICHA - 16.0f, largura = LARGURA_FICHA + 32.0f, altura = 264.0f;
     const float y0 = Y_FICHA - 24.0f;
     Color equipe = corDoCarro(numero);
 
-    /* O cartão e a faixa da equipe */
-    Rectangle cartao = { x, y0, largura, altura };
-    caixaArredondada(cartao, RAIO_GRANDE, Fade(COR_GRAFITE, 0.86f));
-    caixaArredondada(cartao, RAIO_GRANDE, Fade(equipe, 0.07f));   /* um toque da cor da equipe no cartão todo */
-    contornoArredondado(cartao, RAIO_GRANDE, 1.0f, Fade(COR_CROMO, 0.16f));
-    /* O número da equipe, grande e apagado, atrás do nome */
-    escreverADireita(FONTE_TITULO, TextFormat("%d", numero + 1), x + largura - 12.0f, y0 - 8.0f, 88.0f, Fade(COR_TEXTO_CLARO, 0.06f));
-
-    /* O nome, a frase dele e o selo da nota */
-    float y = y0 + 16.0f;
-    escrever(FONTE_TITULO, ficha->nome, X_FICHA, y, 28.0f, COR_TEXTO_CLARO);
-    escrever(FONTE_TEXTO, ficha->descricao, X_FICHA, y + 32.0f, 12.0f, COR_TEXTO_FRACO);
-    float xSelo = X_FICHA + LARGURA_FICHA - 48.0f;
-    caixaArredondada((Rectangle){ xSelo, y, 48.0f, 48.0f }, raioDeDentro(RAIO_GRANDE, 16.0f), equipe);   /* 16 do cartão */
-    escreverCentralizado(FONTE_TITULO, TextFormat("%d", notaGeral(ficha)), xSelo + 24.0f, noMeio(FONTE_TITULO, 28.0f, y + 19.0f), 28.0f, COR_TEXTO_CLARO);
-    escreverCentralizado(FONTE_FORTE, "GERAL", xSelo + 24.0f, noMeio(FONTE_FORTE, 10.0f, y + 38.0f), 10.0f, Fade(COR_TEXTO_CLARO, 0.8f));
     if (numero == menu->carroEscolhido) {
-        caixaArredondada((Rectangle){ X_FICHA, y + 52.0f, 64.0f, 16.0f }, raioDeDentro(RAIO_GRANDE, 16.0f), COR_AMARELO);
-        escreverCentralizado(FONTE_FORTE, "SEU CARRO", X_FICHA + 32.0f, noMeio(FONTE_FORTE, 12.0f, y + 60.0f), 12.0f, COR_GRAFITE);
+        caixaArredondada((Rectangle){ X_FICHA, y0 + 62.0f, 64.0f, 16.0f }, raioDeDentro(RAIO_GRANDE, 16.0f), COR_AMARELO);
+        escreverCentralizado(FONTE_FORTE, "SEU CARRO", X_FICHA + 32.0f, noMeio(FONTE_FORTE, 12.0f, y0 + 70.0f), 12.0f, COR_GRAFITE);
     }
-    y += 84.0f;
+    float y = y0 + 100.0f;
 
-    /* Os atributos: rótulo, valor, colocação e a barra em 12 gomos */
+    /* Os atributos: rótulo, valor e a barra em 12 gomos */
     const int gomos = 12;
     const float vao = 4.0f, larguraDoGomo = (LARGURA_FICHA - vao * (gomos - 1)) / gomos;
     for (int atributo = 0; atributo < TOTAL_ATRIBUTOS; atributo++) {
@@ -955,7 +969,7 @@ static void desenharCartaoDoCarro(EstadoMenu *menu, const FichaTecnica *ficha, i
         int cheios = (int) (fracaoDoAtributo(ficha, (Atributo) atributo) * gomos + 0.5f);
         for (int g = 0; g < gomos; g++) {
             float gx = X_FICHA + g * (larguraDoGomo + vao);
-            Color cor = (g < cheios) ? Fade(corDaBarra, 0.55f + 0.45f * (g + 1) / gomos) : Fade(COR_TEXTO_CLARO, 0.08f);
+            Color cor = (g < cheios) ? Fade(corDaBarra, 0.55f + 0.45f * (g + 1) / gomos) : Fade(COR_TEXTO_CLARO, 0.14f);   /* sem cartão atrás, o vazio um pouco mais claro */
             DrawRectangleRounded((Rectangle){ gx, y + 24.0f, larguraDoGomo, 8.0f }, 0.5f, 4, cor);   /* gomos em pílula */
         }
         y += ALTURA_ATRIBUTO;
@@ -971,23 +985,17 @@ void desenharGaragem(EstadoMenu *menu) {
     const FichaTecnica *ficha = menu->garagem[menu->selecionado];
     int numero = numeroDaFicha(ficha);
 
-    /* A foto do carro girando sai antes: ela tem a câmera dela, fora do modo 2D */
+    /* O palco, na tela inteira (fora do modo 2D: ele tem a câmera dele) */
     terminarInterface();
-    Vector2 chao;
-    Texture2D foto = fotografarVitrine(numero, menu->giroDaVitrine, &chao);
+    Texture2D cena = fotografarPalco(&palcoDaGaragem, GetScreenWidth(), GetScreenHeight());
+    DrawTexturePro(cena, (Rectangle){ 0, 0, (float) cena.width, -(float) cena.height },
+                   (Rectangle){ 0, 0, (float) GetScreenWidth(), (float) GetScreenHeight() }, (Vector2){ 0 }, 0.0f, WHITE);
     comecarInterface(1);
 
-    escurecerTela(0.7f, 0.55f, 0.75f);
+    escurecerTela(0.35f, 0.0f, 0.55f);   /* só em cima e embaixo, para ler o título e o carrossel */
     desenharCabecalho("GARAGEM");
     desenharBotaoVoltar(menu->destaqueVoltar);
-
-    /* O palco: holofote, e o carro em cima dele */
-    /* O chão do palco cai exatamente embaixo do carro (o ponto que a foto devolve) */
-    float chaoX = X_PALCO + LARGURA_PALCO * chao.x, chaoY = Y_PALCO + ALTURA_PALCO * chao.y;
-    desenharBrilho(chaoX, chaoY - 56.0f, 200.0f, Fade(COR_AMARELO, 0.14f));
-    DrawEllipse((int) chaoX, (int) chaoY, 184, 24, Fade(BLACK, 0.40f));
-    DrawTexturePro(foto, (Rectangle){ 0, 0, (float) foto.width, -(float) foto.height },
-                   (Rectangle){ X_PALCO, Y_PALCO, LARGURA_PALCO, ALTURA_PALCO }, (Vector2){ 0 }, 0.0f, WHITE);
+    desenharAnuncioDoNome();
 
     desenharCartaoDoCarro(menu, ficha, numero);
 
@@ -2910,7 +2918,7 @@ Tela atualizarResultado(void) {
  */
 static float melhorVolta(Carro *carro) {
     float melhor = 0.0f;
-    for (int i = 0; i < carro->voltas && i < carro->voltasDaProva; i++) {
+    for (int i = 0; i < carro->voltas && i < carro->voltasDaProva && i < MAXIMO_DE_VOLTAS; i++) {
         if (melhor == 0.0f || carro->temposDeVolta[i] < melhor) {
             melhor = carro->temposDeVolta[i];
         }

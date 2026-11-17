@@ -891,7 +891,46 @@ void pausarSonsDaCorrida(int pausar) {
  * Recebe: nada.
  * Devolve: nada.
  */
+/* O locutor da garagem: um nome de cada vez (o de antes para e sai da memória) */
+static Sound vozDoLocutor;
+static int temVozDoLocutor = 0;
+
+/*
+ * anunciarNaGaragem
+ * O locutor anuncia o carro que entrou no palco da garagem, como nos jogos de luta. A voz de cada um fica em
+ * recursos/sons/vozes (.wav, .mp3 ou .ogg): para trocar a locução, basta trocar o arquivo.
+ * Recebe: o nome do arquivo, sem a pasta e sem a extensão (NULL: só cala o anterior).
+ * Devolve: quantos segundos a voz dura (0 se não há o arquivo).
+ */
+float anunciarNaGaragem(const char *arquivo) {
+    if (temVozDoLocutor) {
+        StopSound(vozDoLocutor);
+        UnloadSound(vozDoLocutor);
+        temVozDoLocutor = 0;
+    }
+    if (arquivo == NULL) {
+        return 0.0f;
+    }
+    static const char *EXTENSOES[] = { ".wav", ".mp3", ".ogg" };
+    for (int i = 0; i < 3; i++) {
+        const char *caminho = TextFormat("recursos/sons/vozes/%s%s", arquivo, EXTENSOES[i]);
+        if (!FileExists(caminho)) {
+            continue;
+        }
+        vozDoLocutor = LoadSound(caminho);
+        if (vozDoLocutor.frameCount == 0) {
+            return 0.0f;
+        }
+        temVozDoLocutor = 1;
+        SetSoundVolume(vozDoLocutor, fatorDeVolume(configuracoesAtuais()->volumeVozes));
+        PlaySound(vozDoLocutor);
+        return (float) vozDoLocutor.frameCount / (float) vozDoLocutor.stream.sampleRate;
+    }
+    return 0.0f;
+}
+
 void descarregarAudio(void) {
+    anunciarNaGaragem(NULL);
     vozTocando = NULL;
     for (int i = 0; i < TOTAL_FALAS; i++) {
         if (falaCarregada[i]) {

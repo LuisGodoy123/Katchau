@@ -440,7 +440,7 @@ int separarLuzesMoveis(int qual, float zMinimo) {
     }
     Conjunto *c = &conjuntos[qual];
     if (!c->temModelo || c->modelo.meshCount != 1) {
-        return -1;   /* as lâmpadas acesas vêm numa malha só (ferramentas/luzes) */
+        return -1;   /* as lâmpadas acesas vêm numa malha só (das ferramentas das luzes) */
     }
     Mesh fica, vai;
     if (!separarMalhaPorIlhas(c->modelo.meshes[0], alemDoZ, &zMinimo, &fica, &vai)) {

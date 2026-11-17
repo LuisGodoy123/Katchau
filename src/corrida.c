@@ -566,7 +566,7 @@ static void registrarVolta(Corrida *corrida, Carro *carro) {
     }
     int indiceDaVolta = carro->voltas - 1;   /* volta 1 fica na posição 0 */
     float tempoDaVolta = tempoDeCorrida - carro->inicioDaVolta;
-    if (indiceDaVolta >= 0 && indiceDaVolta < carro->voltasDaProva) {
+    if (indiceDaVolta >= 0 && indiceDaVolta < carro->voltasDaProva && indiceDaVolta < MAXIMO_DE_VOLTAS) {
         carro->temposDeVolta[indiceDaVolta] = tempoDaVolta;
     }
 
@@ -1071,7 +1071,7 @@ static int moverCarro(Corrida *corrida, Carro *carro, Comandos comandos, float t
          * é a metade esquerda da pista antes da chicane, por onde passa a linha de corrida), segue na pista */
         int podeEntrar = carroEDeHumano(corrida, carro) || carro->querParar;
         if (corrida->temParada && podeEntrar && querEntrarNoPit(corrida->pista, carro)) {
-            entrarNoPit(carro);
+            entrarNoPit(carro, corrida->pista);
         }
     }
     return cruzou;

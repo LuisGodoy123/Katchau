@@ -35,6 +35,7 @@
 #include "telao.h"
 #include "posprocesso.h"
 #include "hora.h"
+#include "palco.h"
 #include "configuracoes.h"
 #include "noite.h"
 #include "corte.h"
@@ -464,10 +465,12 @@ static Matrix matrizDoCarro(Carro *carro) {
     PosicaoNaPista eixoDaFrente = carro->posicao, eixoDeTras = carro->posicao;
     moverNaPista(&eixoDaFrente, naPista * UNIDADES_POR_METRO);
     moverNaPista(&eixoDeTras, -naPista * UNIDADES_POR_METRO);
-    float frenteEsquerda = alturaDoChao(eixoDaFrente, lateral - rodaAoLado);
-    float frenteDireita = alturaDoChao(eixoDaFrente, lateral + rodaAoLado);
-    float trasEsquerda = alturaDoChao(eixoDeTras, lateral - rodaAoLado);
-    float trasDireita = alturaDoChao(eixoDeTras, lateral + rodaAoLado);
+    /* No pit lane, o chão é o dele (alturaDoChaoNoPit: plano de lado, sem as rampas falsas até as garagens) */
+    float (*chao)(PosicaoNaPista, float) = carroNoPit(carro) ? alturaDoChaoNoPit : alturaDoChao;
+    float frenteEsquerda = chao(eixoDaFrente, lateral - rodaAoLado);
+    float frenteDireita = chao(eixoDaFrente, lateral + rodaAoLado);
+    float trasEsquerda = chao(eixoDeTras, lateral - rodaAoLado);
+    float trasDireita = chao(eixoDeTras, lateral + rodaAoLado);
 
     float ladeira = ((frenteEsquerda + frenteDireita) - (trasEsquerda + trasDireita)) / (4.0f * meiaDistancia);
     float inclinacao = ((frenteDireita + trasDireita) - (frenteEsquerda + trasEsquerda)) / (4.0f * meiaBitola);
@@ -530,7 +533,7 @@ static void desenharSombraDoCarro(Camera3D camera, Carro *carro) {
     float lateral = carro->deslocamentoLateral * larguraDoLado(carro->posicao.segmento, carro->deslocamentoLateral);
     PontoNoMundo doCarro = pontoDoCarro(carro);
     float rumoDaPista = doCarro.rumo;
-    int naEstradaDoPit = carroNoPit(carro) && temCorrecaoDoPit(carro->posicao);
+    int noPit = carroNoPit(carro), naEstradaDoPit = noPit && temCorrecaoDoPit(carro->posicao);
     float giro = (rumoDesenhado(carro, rumoDaPista) - rumoDaPista + carro->giro + carro->anguloDeDrift + volanteDesenhado(carro) * GRAUS_DO_VOLANTE) * DEG2RAD;
     float coseno = cosf(giro), seno = sinf(giro);   /* o giro é o mesmo nos 49 pontos da grade */
     for (int i = 0; i < PONTOS_DA_SOMBRA; i++) {
@@ -541,12 +544,19 @@ static void desenharSombraDoCarro(Camera3D camera, Carro *carro) {
             float aoLado = lateral + paraDireita * coseno + paraFrente * seno;
 
             PontoNoMundo chao;
-            if (naEstradaDoPit) {
-                /* Na estrada medida do pit, plana: a grade em volta do carro, no rumo dela */
+            if (noPit) {
+                /* No pit, o carro é desenhado no caminho alisado (pontoDoCarro, com a sobra da entrada): a grade vai em
+                 * volta dele, no rumo do caminho. Montada pela pista, ela ficava no caminho de antes, longe do carro.
+                 * O chão é o do pit lane (na estrada medida, plana, o do carro) */
                 float r = doCarro.rumo * DEG2RAD, frenteX = sinf(r), frenteZ = -cosf(r);
                 chao = doCarro;
                 chao.x += frenteX * naPista - frenteZ * (aoLado - lateral);
                 chao.z += frenteZ * naPista + frenteX * (aoLado - lateral);
+                if (!naEstradaDoPit) {
+                    PosicaoNaPista lugar = carro->posicao;
+                    moverNaPista(&lugar, naPista * UNIDADES_POR_METRO);
+                    chao.y = alturaDoChaoNoPit(lugar, aoLado);
+                }
             } else {
                 PosicaoNaPista lugar = carro->posicao;
                 moverNaPista(&lugar, naPista * UNIDADES_POR_METRO);
@@ -722,13 +732,15 @@ static Vector3 ondeCaiOVelho(Vector3 roda, float lado) {
  * Devolve: nada.
  */
 static void desenharGuido(Camera3D camera, Pista *pista, Carro *jogador) {
-    /* A vaga, como se o carro já estivesse parado nela */
+    /* A vaga, como se o carro já estivesse parado nela (no pit: com o chão do pit lane, plano de lado, como o carro.
+     * Fora dele, a vaga pegava a inclinação do chão medido, e onde ele faz uma rampa até a garagem, o Guido e os
+     * pneus ficavam tortos) */
     Carro naVaga = *jogador;
     lugarDaVaga(pista, jogador, &naVaga.posicao, &naVaga.deslocamentoLateral);
     naVaga.volante = 0.0f;
     naVaga.giro = 0.0f;
     naVaga.velocidade = 0.0f;
-    naVaga.estadoDoPit = PIT_FORA;
+    naVaga.estadoDoPit = PIT_CHEGANDO;
     naVaga.direcaoLivre = 0;
     naVaga.ultimosComandos.frear = 0;
     PontoNoMundo ponto = pontoNoMundo(naVaga.posicao, naVaga.deslocamentoLateral);
@@ -2266,53 +2278,587 @@ void desenharFundoAlternado(Pista *pistas[]) {
     }
 }
 
-/* A vitrine da garagem: o carro girando, fotografado a cada quadro numa imagem transparente */
-#define LARGURA_DA_VITRINE    960
-#define ALTURA_DA_VITRINE     600
-static RenderTexture2D vitrine = { 0 };
+/* ------------------------------------------------------------------
+ * O palco da garagem (palco.c): o carro entra, para no disco e é anunciado
+ * ------------------------------------------------------------------ */
+#define ALTURA_DO_DISCO       0.14f    /* metros: o disco giratório, um pouco acima do chão */
+#define MENOR_RAIO_DO_DISCO   2.7f
+#define PAREDE_DO_PALCO      (-9.0f)   /* z da parede de fibra de carbono */
+#define COR_DO_FUNDO_DO_PALCO (Color){ 6, 7, 9, 255 }
+static RenderTexture2D palcoNaTela = { 0 };
+static Texture2D texturaDoCarbono = { 0 }, texturaDoDisco = { 0 };
+static Model tampoDoDisco;
+static int temTampo = 0;
+static float distanciaDoPalco = 0.0f, raioDoDisco = 0.0f;
+
+static float sorteioDoPalco(int n) {
+    unsigned int x = (unsigned int) n * 2654435761u;
+    x ^= x >> 13;
+    x *= 0x5bd1e995u;
+    x ^= x >> 15;
+    return (float) (x & 0xffffu) / 65535.0f;
+}
 
 /*
- * fotografarVitrine
- * O carro de pé num ponto, girando, visto de cima em três quartos, com a sombra no chão. Chamar
- * fora do modo 2D (a imagem tem a câmera dela).
- * Recebe: o carro, o giro (radianos) e onde guardar o ponto do chão embaixo do carro, de 0 a 1 na imagem.
- * Devolve: a imagem (de cabeça para baixo, como toda RenderTexture), com fundo transparente.
+ * prepararTexturasDoPalco
+ * A fibra de carbono (a trama em sarja, fios claros e escuros) e o tampo do disco (o metal escovado em raios,
+ * a poça do holofote no meio e o friso da borda), feitos uma vez, na mão.
  */
-Texture2D fotografarVitrine(int numero, float giro, Vector2 *chao) {
-    if (vitrine.id == 0) {
-        vitrine = LoadRenderTexture(LARGURA_DA_VITRINE, ALTURA_DA_VITRINE);
-        SetTextureFilter(vitrine.texture, TEXTURE_FILTER_BILINEAR);
+static void prepararTexturasDoPalco(void) {
+    if (texturaDoCarbono.id == 0) {
+        Image imagem = GenImageColor(128, 128, BLACK);
+        Color *px = (Color *) imagem.data;
+        for (int y = 0; y < 128; y++) {
+            for (int x = 0; x < 128; x++) {
+                int celula = ((x / 16) + (y / 16)) & 1;          /* a trama: um fio deitado, outro em pé */
+                float t = (float) (celula ? (y % 16) : (x % 16)) / 16.0f;
+                float fio = 0.35f + 0.65f * sinf(PI * t);          /* o fio é claro no meio e escuro na borda */
+                float brilho = 0.5f + 0.5f * sinf((float) (x + y) * 0.049f);   /* o brilho correndo na diagonal */
+                float v = 16.0f + 26.0f * fio * (0.75f + 0.25f * brilho);
+                px[y * 128 + x] = (Color){ (unsigned char) v, (unsigned char) (v * 1.03f), (unsigned char) (v * 1.10f), 255 };
+            }
+        }
+        texturaDoCarbono = LoadTextureFromImage(imagem);
+        UnloadImage(imagem);
+        GenTextureMipmaps(&texturaDoCarbono);
+        SetTextureFilter(texturaDoCarbono, TEXTURE_FILTER_TRILINEAR);
+        SetTextureWrap(texturaDoCarbono, TEXTURE_WRAP_REPEAT);
     }
-    float comprimento = comprimentoDoCarro3D(numero), altura = alturaDoCarro3D(numero);
-    /* Enquadra pelo maior: o comprimento ou a altura (o Guido é curto, mas alto) */
-    float tamanho = fmaxf(comprimento, altura * 2.4f);
-    float distancia = tamanho * 1.5f + 1.0f;
+    if (texturaDoDisco.id == 0) {
+        const int lado = 512;
+        Image imagem = GenImageColor(lado, lado, BLANK);
+        Color *px = (Color *) imagem.data;
+        for (int y = 0; y < lado; y++) {
+            for (int x = 0; x < lado; x++) {
+                float dx = ((float) x + 0.5f) / (lado / 2.0f) - 1.0f, dy = ((float) y + 0.5f) / (lado / 2.0f) - 1.0f;
+                float r = sqrtf(dx * dx + dy * dy);
+                if (r > 1.0f) {
+                    continue;
+                }
+                float angulo = atan2f(dy, dx);
+                /* O escovado em raios: cada fatia fina do disco com um brilho um pouco diferente */
+                int fatia = (int) ((angulo + PI) / (2.0f * PI) * 720.0f);
+                float escovado = 0.86f + 0.14f * sorteioDoPalco(fatia) + 0.05f * sorteioDoPalco(fatia * 7 + (int) (r * 90.0f));
+                /* A poça do holofote, e a luz correndo nos raios em cruz (o reflexo do metal escovado) */
+                float poca = 0.62f * expf(-(r * r) / 0.30f);
+                float cruz = 0.18f * powf(fabsf(cosf(angulo * 2.0f)), 24.0f) * expf(-r * 2.2f);
+                float v = (0.22f + poca + cruz) * escovado;
+                /* Os frisos da borda: um sulco escuro e a beirada clara */
+                if (r > 0.90f && r < 0.93f) {
+                    v *= 0.45f;
+                } else if (r > 0.97f) {
+                    v *= 1.25f;
+                }
+                v = fminf(v, 1.0f);
+                float alfa = Clamp((1.0f - r) / 0.012f, 0.0f, 1.0f);
+                px[y * lado + x] = (Color){ (unsigned char) (v * 232.0f), (unsigned char) (v * 236.0f), (unsigned char) (v * 244.0f),
+                                            (unsigned char) (alfa * 255.0f) };
+            }
+        }
+        texturaDoDisco = LoadTextureFromImage(imagem);
+        UnloadImage(imagem);
+        GenTextureMipmaps(&texturaDoDisco);
+        SetTextureFilter(texturaDoDisco, TEXTURE_FILTER_TRILINEAR);
+    }
+    if (!temTampo) {
+        tampoDoDisco = LoadModelFromMesh(GenMeshPlane(2.0f, 2.0f, 1, 1));
+        tampoDoDisco.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = texturaDoDisco;
+        temTampo = 1;
+    }
+}
+
+/* ---------- A mesa giratória, em 3D ----------
+ * Um torno: o perfil dela gira em volta do meio. De baixo para cima: a base recuada, com a faixa de luz (o tampo
+ * parece flutuar sobre ela), a beirada de baixo do tampo, a lateral de grafite com um friso no meio, o chanfro de
+ * cima (pega a luz do holofote e desenha a borda) e o topo, coberto pelo metal escovado. O raio é em frações do
+ * raio do disco (a malha é de raio 1 e cresce com o carro); a altura, em metros. A câmera e a luz do palco são
+ * fixas, então a luz fica pintada nos vértices. */
+typedef enum { MESA_LUZ, MESA_BAIXO, MESA_LADO, MESA_FRISO, MESA_CHANFRO, MESA_TOPO } PecaDaMesa;
+typedef struct {
+    float r, y;
+} PontoDoPerfil;
+static const PontoDoPerfil PERFIL_DA_MESA[] = {
+    { 0.962f, 0.000f }, { 0.962f, 0.040f },                      /* a base, recuada, com a faixa de luz */
+    { 1.000f, 0.040f },                                          /* a beirada de baixo do tampo */
+    { 1.000f, 0.074f }, { 0.993f, 0.078f }, { 0.993f, 0.086f }, { 1.000f, 0.090f },   /* a lateral e o friso */
+    { 1.000f, 0.122f },
+    { 0.986f, ALTURA_DO_DISCO }, { 0.0f, ALTURA_DO_DISCO },      /* o chanfro e o topo */
+};
+static const PecaDaMesa PECAS_DA_MESA[] = { MESA_LUZ, MESA_BAIXO, MESA_LADO, MESA_FRISO, MESA_FRISO, MESA_FRISO,
+                                            MESA_LADO, MESA_CHANFRO, MESA_TOPO };
+#define VOLTAS_DA_MESA        120
+#define RAIO_DA_MESA_NA_LUZ   2.9f     /* metros: o raio de referência para pintar a luz (o disco vai de 2,7 a ~3,5) */
+#define COR_DA_FAIXA_DE_LUZ   (Color){ 236, 240, 248, 255 }   /* branca neutra */
+#define BORDA_DO_TAMPO        0.986f   /* onde o chanfro começa: o metal escovado vai até aqui */
+static Mesh mesaGiratoria;
+static Material materialDaMesa;
+static int temMesa = 0;
+
+/* O brilho do "Katchau": o raio de luz de um flash, uma estrela de quatro pontas que pisca em cima do para-lama da
+ * frente do McQueen, como no filme */
+#define TAMANHO_DA_ESTRELA    1.7f      /* metros, com o brilho todo aceso */
+#define ESTRELA_NO_PARA_LAMA  1.35f     /* raios da roda acima do meio dela: o alto do para-lama */
+#define ESTRELA_PARA_DENTRO   0.40f     /* da largura do carro, do meio até ela: um pouco para dentro da quina */
+#define LADO_DA_ESTRELA       128       /* pixels da imagem dela */
+static Texture2D estrelaDoFlash;
+static int temEstrela = 0;
+
+/*
+ * montarEstrela
+ * A imagem da estrela do flash, feita aqui: o miolo, as quatro pontas finas e um halo fraco, em branco, com a força
+ * na transparência (para somar a luz).
+ * Recebe: nada.
+ * Devolve: nada (guarda em estrelaDoFlash).
+ */
+static void montarEstrela(void) {
+    Color *pixels = (Color *) MemAlloc(LADO_DA_ESTRELA * LADO_DA_ESTRELA * sizeof(Color));
+    for (int y = 0; y < LADO_DA_ESTRELA; y++) {
+        for (int x = 0; x < LADO_DA_ESTRELA; x++) {
+            float u = ((float) x + 0.5f) / LADO_DA_ESTRELA * 2.0f - 1.0f, v = ((float) y + 0.5f) / LADO_DA_ESTRELA * 2.0f - 1.0f;
+            float r2 = u * u + v * v;
+            float pontaDeLado = expf(-fabsf(v) / 0.018f) * powf(fmaxf(1.0f - fabsf(u), 0.0f), 2.0f);
+            float pontaEmPe = expf(-fabsf(u) / 0.018f) * powf(fmaxf(1.0f - fabsf(v), 0.0f), 2.0f);
+            float forca = fminf(1.0f, expf(-r2 / 0.012f) + pontaDeLado + pontaEmPe + 0.35f * expf(-r2 / 0.08f));
+            pixels[y * LADO_DA_ESTRELA + x] = (Color){ 255, 255, 255, (unsigned char) (255.0f * forca) };
+        }
+    }
+    Image imagem = { pixels, LADO_DA_ESTRELA, LADO_DA_ESTRELA, 1, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8 };
+    estrelaDoFlash = LoadTextureFromImage(imagem);
+    SetTextureFilter(estrelaDoFlash, TEXTURE_FILTER_BILINEAR);
+    MemFree(pixels);
+    temEstrela = 1;
+}
+
+/*
+ * desenharEstrelaDoKatchau
+ * A estrela do flash no alto do para-lama da frente, do lado do carro que está para a câmera, por cima de tudo,
+ * somando a luz. Chamar dentro do BeginMode3D do palco.
+ * Recebe: a câmera, o carro, a matriz dele e a força (0 a 1, piscando).
+ * Devolve: nada.
+ */
+static void desenharEstrelaDoKatchau(Camera3D camera, int numero, Matrix noMundo, float forca) {
+    if (!temEstrela) {
+        montarEstrela();
+    }
+    Vector3 roda = { 0.0f, 0.3f, comprimentoDoCarro3D(numero) * 0.3f };   /* a da frente */
+    int qual = rodaDoCanto(numero, 0, &roda);
+    float lado = ESTRELA_PARA_DENTRO * larguraDoCarro3D(numero);
+    float altura = roda.y + ESTRELA_NO_PARA_LAMA * raioDaRoda(numero, qual);
+    Vector3 esquerda = Vector3Transform((Vector3){ lado, altura, roda.z }, noMundo);
+    Vector3 direita = Vector3Transform((Vector3){ -lado, altura, roda.z }, noMundo);
+    Vector3 lugar = (Vector3Distance(esquerda, camera.position) < Vector3Distance(direita, camera.position)) ? esquerda : direita;
+    float tamanho = TAMANHO_DA_ESTRELA * forca;
+    Rectangle tudo = { 0.0f, 0.0f, (float) estrelaDoFlash.width, (float) estrelaDoFlash.height };
+    rlDrawRenderBatchActive();
+    rlDisableDepthTest();
+    BeginBlendMode(BLEND_ADDITIVE);
+    DrawBillboardPro(camera, estrelaDoFlash, tudo, lugar, (Vector3){ 0.0f, 1.0f, 0.0f }, (Vector2){ tamanho, tamanho },
+                     (Vector2){ 0.5f * tamanho, 0.5f * tamanho }, 25.0f * (float) GetTime(), (Color){ 255, 246, 214, 255 });
+    EndBlendMode();
+    rlDrawRenderBatchActive();
+    rlEnableDepthTest();
+}
+
+/*
+ * corDaMesa
+ * A luz pintada num ponto da mesa: a do holofote do estúdio (a mesma direção do sol de fotografarPalco) e o
+ * reflexo dele, visto mais ou menos de onde a câmera fica.
+ * Recebe: a peça, a normal e o ponto (em metros).
+ * Devolve: a cor.
+ */
+static Color corDaMesa(PecaDaMesa peca, Vector3 normal, Vector3 ponto) {
+    if (peca == MESA_LUZ) {
+        return COR_DA_FAIXA_DE_LUZ;
+    }
+    Vector3 luz = Vector3Normalize((Vector3){ 0.30f, 1.0f, 0.55f });
+    Vector3 olho = Vector3Normalize(Vector3Subtract((Vector3){ 1.5f, 1.7f, 10.0f }, ponto));
+    float difusa = fmaxf(Vector3DotProduct(normal, luz), 0.0f);
+    Vector3 reflexo = Vector3Subtract(Vector3Scale(normal, 2.0f * Vector3DotProduct(normal, olho)), olho);
+    float brilho = fmaxf(Vector3DotProduct(reflexo, luz), 0.0f);
+    float v;
+    if (peca == MESA_BAIXO) {
+        v = 0.04f;
+    } else if (peca == MESA_TOPO) {
+        v = 0.20f;
+    } else if (peca == MESA_CHANFRO) {
+        v = 0.22f + 0.62f * difusa + 0.6f * powf(brilho, 10.0f);
+    } else {   /* a lateral de grafite, mais clara em cima, onde reflete o holofote; o friso, na sombra */
+        float subida = Clamp((ponto.y - 0.04f) / 0.08f, 0.0f, 1.0f);
+        v = 0.16f * (0.55f + 0.9f * difusa) + 0.07f * subida + 0.35f * powf(brilho, 16.0f);
+        if (peca == MESA_FRISO) {
+            v *= 0.45f;
+        }
+    }
+    v = fminf(v, 1.0f);
+    return (Color){ (unsigned char) (v * 238.0f), (unsigned char) (v * 244.0f), (unsigned char) (v * 255.0f), 255 };
+}
+
+/*
+ * montarMesaGiratoria
+ * A malha da mesa: cada trecho do perfil girado em volta do meio, em faixas (os vértices de cada trecho são só
+ * dele, para a quina entre a lateral e o chanfro ficar marcada).
+ * Recebe: nada.
+ * Devolve: nada (guarda em mesaGiratoria).
+ */
+static void montarMesaGiratoria(void) {
+    const int trechos = (int) (sizeof(PECAS_DA_MESA) / sizeof(PECAS_DA_MESA[0]));
+    Mesh m = { 0 };
+    m.triangleCount = VOLTAS_DA_MESA * trechos * 2;
+    m.vertexCount = m.triangleCount * 3;
+    m.vertices = (float *) MemAlloc((unsigned int) (m.vertexCount * 3 * sizeof(float)));
+    m.normals = (float *) MemAlloc((unsigned int) (m.vertexCount * 3 * sizeof(float)));
+    m.texcoords = (float *) MemAlloc((unsigned int) (m.vertexCount * 2 * sizeof(float)));
+    m.colors = (unsigned char *) MemAlloc((unsigned int) (m.vertexCount * 4));
+    int v = 0;
+    for (int k = 0; k < trechos; k++) {
+        PontoDoPerfil a = PERFIL_DA_MESA[k], b = PERFIL_DA_MESA[k + 1];
+        /* a normal do trecho, no perfil e em metros (o raio cresce com o disco; a altura não) */
+        float dr = (b.r - a.r) * RAIO_DA_MESA_NA_LUZ, dy = b.y - a.y;
+        float tamanho = sqrtf(dr * dr + dy * dy);
+        float nr = dy / tamanho, ny = -dr / tamanho;
+        for (int i = 0; i < VOLTAS_DA_MESA; i++) {
+            float a0 = 2.0f * PI * (float) i / VOLTAS_DA_MESA, a1 = 2.0f * PI * (float) (i + 1) / VOLTAS_DA_MESA;
+            const float rs[4] = { a.r, b.r, b.r, a.r }, ys[4] = { a.y, b.y, b.y, a.y }, angulos[4] = { a0, a0, a1, a1 };
+            const int ordem[6] = { 0, 1, 2, 0, 2, 3 };
+            for (int t = 0; t < 6; t++, v++) {
+                int c = ordem[t];
+                float co = cosf(angulos[c]), se = sinf(angulos[c]);
+                Vector3 normal = { nr * co, ny, nr * se };
+                Vector3 emMetros = { rs[c] * co * RAIO_DA_MESA_NA_LUZ, ys[c], rs[c] * se * RAIO_DA_MESA_NA_LUZ };
+                Color cor = corDaMesa(PECAS_DA_MESA[k], normal, emMetros);
+                m.vertices[v * 3 + 0] = rs[c] * co;
+                m.vertices[v * 3 + 1] = ys[c];
+                m.vertices[v * 3 + 2] = rs[c] * se;
+                m.normals[v * 3 + 0] = normal.x;
+                m.normals[v * 3 + 1] = normal.y;
+                m.normals[v * 3 + 2] = normal.z;
+                m.texcoords[v * 2 + 0] = 0.0f;
+                m.texcoords[v * 2 + 1] = 0.0f;
+                m.colors[v * 4 + 0] = cor.r;
+                m.colors[v * 4 + 1] = cor.g;
+                m.colors[v * 4 + 2] = cor.b;
+                m.colors[v * 4 + 3] = 255;
+            }
+        }
+    }
+    UploadMesh(&m, false);
+    mesaGiratoria = m;
+    materialDaMesa = LoadMaterialDefault();
+    temMesa = 1;
+}
+
+/*
+ * desenharLuzEmbaixoDaMesa
+ * A faixa de luz da base acende o chão em volta da mesa: um anel que some para fora, somado à luz do chão.
+ * Recebe: o raio do disco.
+ * Devolve: nada.
+ */
+static void desenharLuzEmbaixoDaMesa(float raio) {
+    const float aneis[3] = { 0.95f, 1.10f, 1.45f }, forcas[3] = { 0.40f, 0.12f, 0.0f };
+    Color luz = COR_DA_FAIXA_DE_LUZ;
+    BeginBlendMode(BLEND_ADDITIVE);
+    rlBegin(RL_TRIANGLES);
+    for (int i = 0; i < VOLTAS_DA_MESA; i++) {
+        float a0 = 2.0f * PI * (float) i / VOLTAS_DA_MESA, a1 = 2.0f * PI * (float) (i + 1) / VOLTAS_DA_MESA;
+        for (int anel = 0; anel < 2; anel++) {
+            float r[4] = { aneis[anel], aneis[anel + 1], aneis[anel + 1], aneis[anel] };
+            float f[4] = { forcas[anel], forcas[anel + 1], forcas[anel + 1], forcas[anel] };
+            float angulos[4] = { a0, a0, a1, a1 };
+            const int ordem[6] = { 0, 1, 2, 0, 2, 3 };
+            for (int t = 0; t < 6; t++) {
+                int c = ordem[t];
+                rlColor4ub(luz.r, luz.g, luz.b, (unsigned char) (f[c] * 255.0f));
+                rlVertex3f(raio * r[c] * cosf(angulos[c]), 0.003f, raio * r[c] * sinf(angulos[c]));
+            }
+        }
+    }
+    rlEnd();
+    EndBlendMode();
+}
+
+/* Um quadrado com as cores de cada canto (o degradê da luz), em grade: a parede e o chão */
+static float luzDaParede(float x, float y) {
+    return 0.30f + 0.95f * expf(-(x * x) / (7.5f * 7.5f) - ((y - 2.6f) * (y - 2.6f)) / (4.2f * 4.2f));
+}
+
+static float luzDoChao(float x, float z) {
+    return 0.035f + 0.20f * expf(-(x * x + z * z) / (6.0f * 6.0f));
+}
+
+static void desenharParedeDoPalco(void) {
+    const int colunas = 16, linhas = 8;
+    const float x0 = -18.0f, x1 = 18.0f, y0 = 0.0f, y1 = 13.0f, ladrilho = 1.1f;
+    rlSetTexture(texturaDoCarbono.id);
+    rlBegin(RL_QUADS);
+    for (int i = 0; i < colunas; i++) {
+        for (int j = 0; j < linhas; j++) {
+            float xa = x0 + (x1 - x0) * i / colunas, xb = x0 + (x1 - x0) * (i + 1) / colunas;
+            float ya = y0 + (y1 - y0) * j / linhas, yb = y0 + (y1 - y0) * (j + 1) / linhas;
+            float xs[4] = { xa, xa, xb, xb }, ys[4] = { yb, ya, ya, yb };
+            for (int k = 0; k < 4; k++) {
+                unsigned char c = (unsigned char) fminf(255.0f, 255.0f * luzDaParede(xs[k], ys[k]));
+                rlColor4ub(c, c, c, 255);
+                rlTexCoord2f(xs[k] / ladrilho, -ys[k] / ladrilho);
+                rlVertex3f(xs[k], ys[k], PAREDE_DO_PALCO);
+            }
+        }
+    }
+    rlEnd();
+    rlSetTexture(0);
+}
+
+static void desenharChaoDoPalco(void) {
+    const int partes = 20;
+    const float x0 = -22.0f, x1 = 22.0f, z0 = PAREDE_DO_PALCO, z1 = 14.0f;
+    rlBegin(RL_QUADS);
+    for (int i = 0; i < partes; i++) {
+        for (int j = 0; j < partes; j++) {
+            float xa = x0 + (x1 - x0) * i / partes, xb = x0 + (x1 - x0) * (i + 1) / partes;
+            float za = z0 + (z1 - z0) * j / partes, zb = z0 + (z1 - z0) * (j + 1) / partes;
+            float xs[4] = { xa, xa, xb, xb }, zs[4] = { za, zb, zb, za };
+            for (int k = 0; k < 4; k++) {
+                float v = luzDoChao(xs[k], zs[k]);
+                rlColor4ub((unsigned char) (v * 255.0f), (unsigned char) (v * 258.0f), (unsigned char) (v * 270.0f), 255);
+                rlVertex3f(xs[k], 0.0f, zs[k]);
+            }
+        }
+    }
+    rlEnd();
+}
+
+/* A matriz do carro no palco: no lugar e no rumo dele (o +z do modelo é a frente, o +x a esquerda) */
+static Matrix matrizNoPalco(float x, float y, float z, float rumo) {
+    Vector3 frente = { sinf(rumo), 0.0f, -cosf(rumo) };
+    Vector3 esquerda = Vector3Normalize((Vector3){ frente.z, 0.0f, -frente.x });
+    Vector3 cima = Vector3CrossProduct(frente, esquerda);
+    Matrix m = { 0 };
+    m.m0 = esquerda.x; m.m1 = esquerda.y; m.m2 = esquerda.z;
+    m.m4 = cima.x;     m.m5 = cima.y;     m.m6 = cima.z;
+    m.m8 = frente.x;   m.m9 = frente.y;   m.m10 = frente.z;
+    m.m12 = x;         m.m13 = y;         m.m14 = z;
+    m.m15 = 1.0f;
+    return m;
+}
+
+/* O curso da carroceria em volta das rodas: além disso o pneu atravessaria o para-lama, e o carro inteiro se move */
+#define ROLAGEM_DO_CORPO      0.03f    /* radianos */
+#define ACENO_DO_CORPO        0.02f
+#define SOBE_O_CORPO          0.03f    /* metros */
+#define BAIXA_O_CORPO         0.02f
+
+/* As peças da suspensão: um cilindro e uma esfera de raio 1 (o cilindro de 0 a 1 no eixo y), esticados no lugar */
+static Mesh cilindroDaPeca, esferaDaPeca;
+static int temPecas = 0;
+
+/*
+ * pecaEntre
+ * Um cilindro da suspensão de um ponto a outro do carro, com o cromado dele.
+ * Recebe: o carro, a matriz dele, as duas pontas (no carro) e o raio.
+ * Devolve: nada.
+ */
+static void pecaEntre(int numero, Matrix noMundo, Vector3 de, Vector3 ate, float raio) {
+    Vector3 eixo = Vector3Subtract(ate, de);
+    float tamanho = Vector3Length(eixo);
+    if (tamanho < 0.001f) {
+        return;
+    }
+    Vector3 para = Vector3Scale(eixo, 1.0f / tamanho), cima = { 0.0f, 1.0f, 0.0f };
+    Vector3 gira = Vector3CrossProduct(cima, para);
+    float angulo = acosf(Clamp(Vector3DotProduct(cima, para), -1.0f, 1.0f));
+    Matrix giro = (Vector3Length(gira) < 1e-5f) ? MatrixIdentity() : MatrixRotate(Vector3Normalize(gira), angulo);
+    Matrix m = MatrixMultiply(MatrixMultiply(MatrixMultiply(MatrixScale(raio, tamanho, raio), giro), MatrixTranslate(de.x, de.y, de.z)), noMundo);
+    desenharPecaCromada(numero, cilindroDaPeca, m);
+}
+
+static void pecaRedonda(int numero, Matrix noMundo, Vector3 onde, float raio) {
+    desenharPecaCromada(numero, esferaDaPeca, MatrixMultiply(MatrixMultiply(MatrixScale(raio, raio, raio), MatrixTranslate(onde.x, onde.y, onde.z)), noMundo));
+}
+
+/*
+ * desenharSuspensaoHidraulica
+ * A suspensão do lowrider (o Ramone), com a traseira lá em cima: o eixo de trás entre as rodas, que ficam no chão,
+ * e em cada roda dois braços telescópicos em V até o chassi (o cilindro grosso preso em cima, a haste fina saindo
+ * dele para baixo), com uma junta redonda em cada ponta. Tudo com o cromado do carro, na luz dele.
+ * Recebe: o carro, a matriz dele, o giro da carroceria (o mesmo de posturaNoProximoDesenho) e a subida dela.
+ * Devolve: nada.
+ */
+static void desenharSuspensaoHidraulica(int numero, Matrix noMundo, float giro, float subida) {
+    if (!temPecas) {
+        cilindroDaPeca = GenMeshCylinder(1.0f, 1.0f, 18);
+        esferaDaPeca = GenMeshSphere(1.0f, 12, 16);
+        temPecas = 1;
+    }
+    Vector3 esquerda, direita;
+    if (rodaDoCanto(numero, 1, &esquerda) < 0 || rodaDoCanto(numero, 2, &direita) < 0) {
+        return;
+    }
+    float eixo = esquerda.y;   /* a altura dos centros das rodas: o pivô da carroceria (posturaNoProximoDesenho) */
+    pecaEntre(numero, noMundo, (Vector3){ esquerda.x * 0.86f, eixo, esquerda.z }, (Vector3){ direita.x * 0.86f, eixo, direita.z }, 0.05f);
+    Vector3 rodas[2] = { esquerda, direita };
+    for (int r = 0; r < 2; r++) {
+        for (int braco = -1; braco <= 1; braco += 2) {
+            Vector3 embaixo = { rodas[r].x * 0.76f, eixo, rodas[r].z + braco * 0.08f };
+            /* O ponto do chassi acima da roda, levado pelo giro e pela subida da carroceria */
+            float z = rodas[r].z + braco * 0.36f, y = eixo + 0.14f;
+            Vector3 emCima = { rodas[r].x * 0.76f, eixo + (y - eixo) * cosf(giro) - z * sinf(giro) + subida,
+                               (y - eixo) * sinf(giro) + z * cosf(giro) };
+            pecaEntre(numero, noMundo, emCima, Vector3Lerp(emCima, embaixo, 0.55f), 0.06f);        /* o cilindro */
+            pecaEntre(numero, noMundo, Vector3Lerp(emCima, embaixo, 0.45f), embaixo, 0.028f);      /* a haste */
+            pecaRedonda(numero, noMundo, emCima, 0.075f);                                          /* as juntas */
+            pecaRedonda(numero, noMundo, embaixo, 0.05f);
+        }
+    }
+}
+
+/*
+ * fotografarPalco
+ * O palco da garagem, na tela inteira: a parede de fibra de carbono com a luz atrás do carro, o chão escuro com a
+ * poça de luz, a mesa giratória (em 3D, com a faixa de luz embaixo) e o carro, com a luz de estúdio (de cima, um pouco da frente) e os
+ * reflexos de um estúdio escuro. A câmera é fixa, baixa, com o carro à esquerda do meio (à direita fica o cartão
+ * dele); ela se afasta ou chega perto aos poucos, conforme o tamanho do carro (o Guido é pequeno, o King é longo).
+ * Recebe: o palco e o tamanho da imagem (o da janela).
+ * Devolve: a imagem (de cabeça para baixo, como toda RenderTexture).
+ */
+Texture2D fotografarPalco(const Palco *palco, int largura, int altura) {
+    if (palcoNaTela.id == 0 || palcoNaTela.texture.width != largura || palcoNaTela.texture.height != altura) {
+        if (palcoNaTela.id != 0) {
+            UnloadRenderTexture(palcoNaTela);
+        }
+        palcoNaTela = LoadRenderTexture(largura, altura);
+        SetTextureFilter(palcoNaTela.texture, TEXTURE_FILTER_BILINEAR);
+    }
+    prepararTexturasDoPalco();
+    int numero = (palco->numero >= 0) ? palco->numero : palco->proximo;
+    if (numero < 0) {
+        numero = 0;
+    }
+    float comprimento = comprimentoDoCarro3D(numero), alturaDoCarro = alturaDoCarro3D(numero);
+    float alvo = fmaxf(comprimento, alturaDoCarro * 2.4f) * 2.3f + 2.2f;   /* o carro em ~40% da largura da tela */
+    float alvoDoRaio = fmaxf(MENOR_RAIO_DO_DISCO, comprimento * 0.62f);
+    float passo = fminf(GetFrameTime() * 3.0f, 1.0f);
+    distanciaDoPalco = (distanciaDoPalco <= 0.0f) ? alvo : distanciaDoPalco + (alvo - distanciaDoPalco) * passo;
+    raioDoDisco = (raioDoDisco <= 0.0f) ? alvoDoRaio : raioDoDisco + (alvoDoRaio - raioDoDisco) * passo;
+    float d = distanciaDoPalco;
+    float deLado = d * 0.15f;   /* a câmera um pouco à direita: o carro fica à esquerda do meio (à direita, o cartão) */
     Camera3D camera = { 0 };
-    camera.position = (Vector3){ 0.0f, altura * 0.5f + distancia * 0.26f, distancia };
-    camera.target = (Vector3){ 0.0f, altura * 0.5f, 0.0f };
+    camera.position = (Vector3){ deLado, alturaDoCarro * 0.5f + d * 0.12f, d };
+    camera.target = (Vector3){ deLado, alturaDoCarro * 0.5f - d * 0.075f, 0.0f };   /* o carro acima do carrossel */
     camera.up = (Vector3){ 0.0f, 1.0f, 0.0f };
     camera.fovy = 30.0f;
     camera.projection = CAMERA_PERSPECTIVE;
-    Matrix noMundo = MatrixRotateY(giro);
+
+    /* A luz de estúdio: o holofote de cima, a luz em volta baixa e um estúdio escuro nos reflexos */
+    LuzDoDia antes = *luzAplicada();
+    LuzDoDia estudio = *luzDoMeioDia();
+    estudio.sol = Vector3Normalize((Vector3){ 0.30f, 1.0f, 0.55f });
+    estudio.luzDoSol = (Vector3){ 1.15f, 1.13f, 1.10f };
+    estudio.base = (Vector3){ 0.46f, 0.47f, 0.50f };
+    estudio.ceu = (Vector3){ 0.40f, 0.41f, 0.45f };
+    estudio.ceuDeBaixo = (Vector3){ 0.03f, 0.03f, 0.04f };
+    estudio.ceuDeCima = (Vector3){ 0.32f, 0.33f, 0.36f };
+    estudio.sombra = 0.0f;
 
     rlDrawRenderBatchActive();
-    BeginTextureMode(vitrine);
-    ClearBackground(BLANK);
+    BeginTextureMode(palcoNaTela);
+    ClearBackground(COR_DO_FUNDO_DO_PALCO);
+    aplicarLuzDoDia(&estudio);
+    aplicarLampadas(NULL, 0);
     prepararLuzes(0);
-    apagarSombraDoSol();   /* a vitrine não está em lugar nenhum do mundo: sem a sombra do fundo do menu */
+    apagarSombraDoSol();
     definirOlhoDosCarros(camera.position);
     BeginMode3D(camera);
     rlDisableBackfaceCulling();
-    desenharSombra(numero, noMundo);
-    desenharCarro3D(numero, noMundo, 0.0f, 0.0f);
+    desenharParedeDoPalco();
+    desenharChaoDoPalco();
+    if (!temMesa) {
+        montarMesaGiratoria();
+    }
+    desenharLuzEmbaixoDaMesa(raioDoDisco);
+    DrawMesh(mesaGiratoria, materialDaMesa, MatrixScale(raioDoDisco, 1.0f, raioDoDisco));
+    DrawModelEx(tampoDoDisco, (Vector3){ 0.0f, ALTURA_DO_DISCO + 0.003f, 0.0f }, (Vector3){ 0.0f, 1.0f, 0.0f }, 0.0f,
+                (Vector3){ raioDoDisco * BORDA_DO_TAMPO, 1.0f, raioDoDisco * BORDA_DO_TAMPO }, WHITE);
+    if (palco->numero >= 0 && palco->fase != PALCO_VAZIO) {
+        const Pose *pose = &palco->pose;
+        const Firula *f = &palco->firula;
+        /* O lugar: o do palco, mais o rodopio e o tranco da firula */
+        float rumo = palco->rumo + f->giro;
+        float x = palco->x + sinf(rumo) * f->avanco, z = -cosf(rumo) * f->avanco;
+        float noChao = (fabsf(x) < raioDoDisco) ? ALTURA_DO_DISCO : 0.0f;   /* fora do disco, no chão */
+        Matrix noMundo = matrizNoPalco(x, noChao + palco->y, z, rumo);
+        desenharSombra(numero, matrizNoPalco(x, noChao, z, rumo));
+        /* O corpo e o carro inteiro. A carroceria só anda o curso da suspensão em volta das rodas (senão o pneu
+         * atravessa o para-lama); o que a firula pede além disso move o carro inteiro, com as rodas: o bico desce e
+         * a traseira levanta, ele empina, deita sobre duas rodas, dá pulinhos. A exceção é a hidráulica do Ramone:
+         * ali a carroceria sobe de verdade, sobre os braços cromados */
+        Vector3 rodaDaFrente = { 0.0f, 0.3f, comprimentoDoCarro3D(numero) * 0.3f };
+        Vector3 rodaDeTras = { 0.0f, 0.3f, -comprimentoDoCarro3D(numero) * 0.3f };
+        rodaDoCanto(numero, 0, &rodaDaFrente);
+        rodaDoCanto(numero, 1, &rodaDeTras);
+        float meiaBitola = fmaxf(fabsf(rodaDaFrente.x), 0.4f);
+        float tremor = f->tremor, agora = (float) GetTime();
+        float rolagem = palco->rolagem + pose->rolagem + f->rolagem;
+        float subida = palco->subida + pose->subida + f->subida;
+        float rolagemDoCorpo = Clamp(rolagem, -ROLAGEM_DO_CORPO, ROLAGEM_DO_CORPO);
+        float subidaDoCorpo = Clamp(subida, -BAIXA_O_CORPO, SOBE_O_CORPO);
+        float acenoDoCorpo = Clamp(f->aceno, -ACENO_DO_CORPO, ACENO_DO_CORPO);
+        float rolagemDoCarro = rolagem - rolagemDoCorpo;
+        float pulo = fmaxf(subida - subidaDoCorpo, 0.0f);   /* abaixo do curso, o chão segura */
+        float acenoDoCarro = f->aceno - acenoDoCorpo;
+        float traseira = fmaxf(f->traseira, 0.0f);
+        float levanta = rodaDaFrente.z * sinf(traseira) + rodaDeTras.z * sinf(acenoDoCorpo);
+        float subidaTotal = subidaDoCorpo + levanta + tremor * 0.004f * sinf(agora * 57.0f);
+        posturaNoProximoDesenho(numero, rolagemDoCorpo + tremor * 0.008f * sinf(agora * 41.0f), traseira + acenoDoCorpo,
+                                palco->arfagem + pose->aceno, subidaTotal);
+        /* O carro inteiro: o giro no eixo que fica no chão (bico descendo: o da frente; empinando: o de trás), o
+         * deitar sobre as rodas de um lado e o pulo */
+        float eixoNoChao = (acenoDoCarro > 0.0f) ? rodaDaFrente.z : rodaDeTras.z;
+        float ladoNoChao = (rolagemDoCarro > 0.0f) ? meiaBitola : -meiaBitola;
+        Matrix inteiro = MatrixMultiply(MatrixMultiply(MatrixTranslate(0.0f, 0.0f, -eixoNoChao), MatrixRotateX(acenoDoCarro)),
+                                        MatrixTranslate(0.0f, 0.0f, eixoNoChao));
+        inteiro = MatrixMultiply(inteiro, MatrixMultiply(MatrixMultiply(MatrixTranslate(-ladoNoChao, 0.0f, 0.0f),
+                                                                        MatrixRotateZ(-rolagemDoCarro)),
+                                                         MatrixTranslate(ladoNoChao, 0.0f, 0.0f)));
+        inteiro = MatrixMultiply(inteiro, MatrixTranslate(0.0f, pulo, 0.0f));
+        noMundo = MatrixMultiply(inteiro, noMundo);
+
+        /* A cara: a do corpo (gestos.c) e, por cima, as expressões da firula (olhos.h). Os olhos: andando, para onde
+         * vira; no disco, na câmera, olhando para quem escolhe (a conta do ponto, pela pose do carro: vale para
+         * qualquer carro e qualquer jeito que ele estiver), com as olhadelas da firula por cima */
+        expressaoNoProximoDesenho(numero, (palco->fase == PALCO_SAINDO) ? 0.6f : 0.0f, 0.0f);
+        emocaoNoProximoDesenho(numero, &pose->olhos);
+        for (int e = 0; e < TOTAL_EXPRESSOES; e++) {
+            mostrarExpressao(numero, (Expressao) e, f->expressoes[e]);
+        }
+        fecharUmOlhoNoProximoDesenho(numero, f->piscadela);
+        bocaNoProximoDesenho(numero, fmaxf(pose->boca, f->boca));
+        abrirRodasNoProximoDesenho(pose->abreAsMaos);
+        if (palco->naCamera) {
+            olharParaNoProximoDesenho(numero, noMundo, camera.position);
+            focarOlhar(numero, 0.7f);
+            desviarOlharNoProximoDesenho(numero, palco->desvioDoOlhar + f->olhar, 0.0f);
+        } else {
+            olharNoProximoDesenho(numero, palco->olhar + f->olhar);
+        }
+        float garfos = Clamp(pose->garfos + f->garfos, 0.0f, 1.0f);
+        if (numero == NUMERO_DO_GUIDO && garfos > 0.01f) {
+            moverGarfosNoProximoDesenho(0.20f * garfos, 0.18f * garfos);
+        }
+        if (numero == NUMERO_DO_GUIDO) {
+            cruzarGarfosNoProximoDesenho(f->cruzaGarfos);
+        }
+        desenharCarro3D(numero, noMundo, palco->giroDasRodas, palco->volante + pose->maos + f->maos);
+        if (f->raio > 0.01f) {
+            desenharEstrelaDoKatchau(camera, numero, noMundo, f->raio);
+        }
+        if (traseira > 0.01f) {
+            desenharSuspensaoHidraulica(numero, noMundo, traseira + acenoDoCorpo, subidaTotal);
+        }
+    }
     rlEnableBackfaceCulling();
     EndMode3D();
     EndTextureMode();
-    if (chao != NULL) {
-        Vector2 p = GetWorldToScreenEx((Vector3){ 0.0f, 0.0f, 0.0f }, camera, LARGURA_DA_VITRINE, ALTURA_DA_VITRINE);
-        *chao = (Vector2){ p.x / LARGURA_DA_VITRINE, p.y / ALTURA_DA_VITRINE };
-    }
-    return vitrine.texture;
+    aplicarLuzDoDia(&antes);
+    return palcoNaTela.texture;
 }
 
 /*

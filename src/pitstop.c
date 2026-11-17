@@ -6,6 +6,8 @@
  */
 
 #include <math.h>
+#include <stddef.h>
+#include <stdlib.h>
 
 #include "pitstop.h"
 
@@ -40,6 +42,10 @@
 #define RAPIDEZ_DE_LADO       17.0f     /* metros por segundo, no máximo */
 #define RAPIDEZ_NO_CAMINHO    24.0f     /* onde a estrada do pit dobra de verdade */
 #define RESPOSTA_DE_LADO      2.5f      /* por segundo: quanto do caminho até a linha ele anda */
+#define FORA_DA_FAIXA         1.0f      /* metros do caminho: saindo da vaga, ainda não entrou na faixa */
+#define ALINHADO_COM_A_PISTA  2.0f      /* graus entre o bico e a pista: daqui para baixo, o piloto pode assumir... */
+#define DEVOLVE_DE_TODO_JEITO 40.0f     /* ...ou, passando tantos metros do fim do pit lane, de qualquer jeito */
+#define SOBRA_NO_MUNDO        0.35f     /* segundos: entrando na estrada de Montreal, o que faltava até ela some nisso */
 
 /*
  * carroNoPit
@@ -192,17 +198,79 @@ int querEntrarNoPit(const Pista *pista, const Carro *carro) {
 }
 
 /*
+ * dentroDeMeiaVolta
+ * Recebe: um ângulo, em graus.
+ * Devolve: o mesmo ângulo, entre -180 e 180.
+ */
+static float dentroDeMeiaVolta(float graus) {
+    return graus - 360.0f * roundf(graus / 360.0f);
+}
+
+/*
+ * ancorarNaEstrada
+ * Onde a estrada do pit passa longe da pista (Montreal, ao lado da chicane), quem está no pit é desenhado com a correção
+ * do segmento (pontoNoMundoDoPit), de até dezenas de metros, e o caminho na conta da pista muda de lado mais depressa
+ * do que o carro consegue acompanhar de lado. Entrando com o lugar que ele tinha na pista, o carro pulava esses metros
+ * num quadro, o bico virava de uma vez, e fora do caminho ele se perdia da estrada. Então ele entra já em cima do
+ * caminho, no ponto da estrada mais perto de onde estava; o pouco que sobra entre os dois some aos poucos, no desenho
+ * (sobraNoMundo).
+ * Recebe: o carro (com o lugar de antes de entrar), a pista e o ponto do mundo onde ele está.
+ * Devolve: nada (muda o lugar, o lado e a sobra do carro).
+ */
+#define ANCORA_PROCURA        60.0f   /* metros da pista, para trás e para a frente */
+#define ANCORA_PASSO          0.25f
+static void ancorarNaEstrada(Carro *carro, const Pista *pista, PontoNoMundo alvo) {
+    if (pista == NULL || pista->pit.pontosDoCaminho <= 0 || !temCorrecaoDoPit(carro->posicao)) {
+        return;
+    }
+    float noPit = metrosDesdeAEntrada(pista, metrosNaVolta(carro));
+    PosicaoNaPista melhorLugar = carro->posicao;
+    float melhorLado = 0.0f, melhorAndar = 0.0f, melhor = 1e9f;
+    PontoNoMundo melhorPonto = alvo;
+    for (float andar = -ANCORA_PROCURA; andar <= ANCORA_PROCURA; andar += ANCORA_PASSO) {
+        PosicaoNaPista lugar = carro->posicao;
+        moverNaPista(&lugar, andar * UNIDADES_POR_METRO);
+        float lado = pista->pit.lado * ladoNoCaminho(pista, noPit + andar);
+        PontoNoMundo la = pontoNoMundoDoPit(lugar, lado / larguraNaPosicao(lugar, lado));
+        float longe = hypotf(alvo.x - la.x, alvo.z - la.z) + 0.001f * fabsf(andar);   /* no empate, o mais perto */
+        if (longe < melhor) {
+            melhor = longe;
+            melhorLugar = lugar;
+            melhorLado = lado;
+            melhorAndar = andar;
+            melhorPonto = la;
+        }
+    }
+    carro->posicao = melhorLugar;
+    carro->deslocamentoLateral = melhorLado / larguraNaPosicao(melhorLugar, melhorLado);
+    carro->distanciaPercorrida += melhorAndar * UNIDADES_POR_METRO;
+    carro->sobraNoMundo[0] = alvo.x - melhorPonto.x;
+    carro->sobraNoMundo[1] = alvo.z - melhorPonto.z;
+}
+
+/*
  * entrarNoPit
  * Liga o piloto automático: o que acontecia com o carro na pista termina aqui.
- * Recebe: o carro.
+ * Recebe: o carro e a pista.
  * Devolve: nada.
  */
-void entrarNoPit(Carro *carro) {
-    /* O bico continua para onde estava: o pit lane endireita ele aos poucos */
-    float rumoDaPista = pontoNoMundo(carro->posicao, carro->deslocamentoLateral).rumo;
+void entrarNoPit(Carro *carro, const Pista *pista) {
+    /* O bico continua para onde estava, no mundo: o pit lane endireita ele aos poucos */
+    PontoNoMundo aqui = pontoNoMundo(carro->posicao, carro->deslocamentoLateral);   /* fora do pit: sem a correção */
+    float rumoDaPista = aqui.rumo;
     float desenhado = (carro->direcaoLivre && carro->temRumoNoMundo) ? carro->rumoNoMundo - rumoDaPista
                     : carro->anguloDeFuga + carro->anguloDeDrift + carro->giro + carro->volante * GRAUS_DO_VOLANTE;
-    desenhado -= 360.0f * roundf(desenhado / 360.0f);
+    float rumoNoMundo = rumoDaPista + desenhado;
+    carro->sobraNoMundo[0] = carro->sobraNoMundo[1] = 0.0f;
+    if (temCorrecaoDoPit(carro->posicao)) {
+        ancorarNaEstrada(carro, pista, aqui);
+    } else {
+        /* No pit o desenho tem o alisamento da estrada (pontoNoMundoDoPit): o pouco que ele mudar ali some aos poucos */
+        PontoNoMundo noPit = pontoNoMundoDoPit(carro->posicao, carro->deslocamentoLateral);
+        carro->sobraNoMundo[0] = aqui.x - noPit.x;
+        carro->sobraNoMundo[1] = aqui.z - noPit.z;
+    }
+    desenhado = dentroDeMeiaVolta(rumoNoMundo - pontoNoMundoDoPit(carro->posicao, carro->deslocamentoLateral).rumo);
     carro->estadoDoPit = PIT_CHEGANDO;
     carro->noCaminhoDoPit = 0;
     carro->sobraDoCaminho = 0.0f;
@@ -319,6 +387,288 @@ float ladoDoPitEm(const Pista *pista, float noPit) {
     return pit->lado * (pit->borda + (pit->faixa - pit->borda) * chegou);
 }
 
+/* O alisamento do caminho do pit (alisarEstradaDoPit) */
+#define JANELA_DO_ALISAMENTO  5.0f    /* metros do caminho no mundo, para cada lado */
+#define PASSO_DO_ALISAMENTO   0.25f   /* metros do pit lane entre as amostras */
+#define SOME_O_ALISAMENTO     15.0f   /* metros em que ele some, nas pontas */
+#define RUMO_DO_ALISAMENTO    2.0f    /* metros do caminho para cada lado, medindo para onde ele aponta */
+
+/*
+ * pontoDaEstradaMedida
+ * Recebe: a estrada medida (já na escala do jogo), o comprimento até cada ponto dela, quantos pontos, um comprimento u
+ *         e onde guardar o ponto.
+ * Devolve: nada.
+ */
+static void pontoDaEstradaMedida(const float *ex, const float *ez, const float *eu, int pontos, float u, float *x, float *z) {
+    int i = 0;
+    while (i < pontos - 2 && eu[i + 1] < u) {
+        i++;
+    }
+    float t = fminf(fmaxf((u - eu[i]) / fmaxf(eu[i + 1] - eu[i], 1e-4f), 0.0f), 1.0f);
+    *x = ex[i] + (ex[i + 1] - ex[i]) * t;
+    *z = ez[i] + (ez[i + 1] - ez[i]) * t;
+}
+
+/*
+ * usarAEstradaMedida
+ * O caminho do pit vira a estrada medida no mundo, onde ele passa em cima dela (veja alisarEstradaDoPit).
+ * Recebe: o pit, quantas amostras, o caminho de cada uma (x, z) e a base (começa igual ao caminho; muda aqui).
+ * Devolve: nada.
+ */
+#define EM_CIMA_DA_MEDIDA     3.0f    /* metros: o caminho está em cima da estrada medida */
+#define MISTURA_NA_MEDIDA     15.0f   /* metros do pit lane em que a mistura com a média vai e volta */
+#define FOLGA_DA_VOLTA        10.0f   /* metros do pit lane antes e depois de onde o caminho volta, refeitos em reta */
+static void usarAEstradaMedida(const DadosDoPit *pit, int total, const float *x, const float *z, float *mx, float *mz) {
+    int pontos = pit->pontosDaEstrada;
+    float escala = (pit->escalaDaEstrada > 0.0f) ? pit->escalaDaEstrada : 1.0f;
+    float *dados = (float *) malloc(sizeof(float) * (3 * (size_t) pontos + 2 * (size_t) total));
+    if (dados == NULL) {
+        return;
+    }
+    float *ex = dados, *ez = dados + pontos, *eu = dados + 2 * pontos, *u = dados + 3 * pontos, *longe = u + total;
+    for (int k = 0; k < pontos; k++) {
+        ex[k] = pit->estrada[k][0] * escala;
+        ez[k] = pit->estrada[k][2] * escala;
+        eu[k] = (k > 0) ? eu[k - 1] + hypotf(ex[k] - ex[k - 1], ez[k] - ez[k - 1]) : 0.0f;
+    }
+    /* Onde cada amostra cai na estrada, e a que distância dela */
+    for (int i = 0; i < total; i++) {
+        float menor = 1e18f;
+        for (int k = 0; k + 1 < pontos; k++) {
+            float dx = ex[k + 1] - ex[k], dz = ez[k + 1] - ez[k], l2 = dx * dx + dz * dz;
+            float t = (l2 > 1e-6f) ? fminf(fmaxf(((x[i] - ex[k]) * dx + (z[i] - ez[k]) * dz) / l2, 0.0f), 1.0f) : 0.0f;
+            float d = hypotf(ex[k] + dx * t - x[i], ez[k] + dz * t - z[i]);
+            if (d < menor) {
+                menor = d;
+                u[i] = eu[k] + (eu[k + 1] - eu[k]) * t;
+            }
+        }
+        longe[i] = menor;
+    }
+    int folga = (int) (FOLGA_DA_VOLTA / PASSO_DO_ALISAMENTO), mistura = (int) (MISTURA_NA_MEDIDA / PASSO_DO_ALISAMENTO);
+    for (int de = 0; de < total; ) {
+        if (longe[de] >= EM_CIMA_DA_MEDIDA) {
+            de++;
+            continue;
+        }
+        int ate = de;
+        while (ate + 1 < total && longe[ate + 1] < EM_CIMA_DA_MEDIDA) {
+            ate++;
+        }
+        /* Sempre para a frente: onde o ponto da estrada volta (ou para), refaz em reta, com uma folga para cada lado */
+        float maior = u[de];
+        for (int i = de; i <= ate; i++) {
+            if (u[i] < maior) {
+                int a = i - 1, b = i;
+                while (b <= ate && u[b] <= maior) {
+                    b++;
+                }
+                a = (a - folga > de) ? a - folga : de;
+                b = (b + folga < ate) ? b + folga : ate;
+                float ua = u[a], ub = fmaxf(u[b], ua);
+                for (int j = a; j <= b; j++) {
+                    u[j] = ua + (ub - ua) * (float) (j - a) / (float) ((b > a) ? b - a : 1);
+                }
+                maior = u[b];
+                i = b;
+                continue;
+            }
+            maior = u[i];
+        }
+        for (int i = de; i <= ate; i++) {
+            float ex1, ez1;
+            pontoDaEstradaMedida(ex, ez, eu, pontos, u[i], &ex1, &ez1);
+            float peso = fminf(fminf((float) (i - de) / (float) mistura, (float) (ate - i) / (float) mistura), 1.0f);
+            mx[i] += (ex1 - mx[i]) * peso;
+            mz[i] += (ez1 - mz[i]) * peso;
+        }
+        de = ate + 1;
+    }
+    free(dados);
+}
+
+/*
+ * alisarEstradaDoPit
+ * O caminho do pit no mundo é o ponto da linha da pista mais o lado do caminho (e, ao lado da chicane de Montreal, a
+ * correção da estrada medida). Onde a estrada passa longe da pista, ele faz zigue-zague (de um segmento para o outro, a
+ * correção muda aos saltos) e dobra sobre si mesmo (no grampo da saída de Montreal, a 78 m da linha, por dentro de uma
+ * curva mais fechada que isso, o ponto anda para trás). O carro seguia essas quinas: o bico virava de um lado para o
+ * outro, e ele travava e pulava. Então mede o caminho no mundo, em amostras próximas, faz a média de cada uma com as
+ * vizinhas a até JANELA_DO_ALISAMENTO metros pelo caminho, e guarda em cada segmento o ponto e o rumo do caminho
+ * alisado (pontoNoMundoDoPit põe nele quem está no pit). Na entrada, e onde o carro pode voltar à pista, o alisamento
+ * some aos poucos.
+ * Recebe: a pista (com o pit pronto e a estradaDoPit medida).
+ * Devolve: nada.
+ */
+static void alisarEstradaDoPit(Pista *pista) {
+    const DadosDoPit *pit = &pista->pit;
+    float fim = metrosDesdeAEntrada(pista, pit->fim);
+    int total = (int) (fim / PASSO_DO_ALISAMENTO) + 2;
+    float *dados = (float *) malloc(sizeof(float) * 7 * (size_t) total);
+    if (dados == NULL) {
+        return;
+    }
+    float *x = dados, *z = dados + total, *s = dados + 2 * total, *mx = dados + 3 * total, *mz = dados + 4 * total;
+    float *bx = dados + 5 * total, *bz = dados + 6 * total;   /* o caminho de base, antes da média */
+    PosicaoNaPista entrada = { pista->largada, 0.0f };
+    moverNaPista(&entrada, pit->entrada * UNIDADES_POR_METRO);
+    /* O caminho como ele é, e o comprimento dele no mundo até cada amostra */
+    float volta = fim;   /* onde o caminho já encosta na pista, depois das vagas: dali em diante ele pode voltar */
+    float depoisDasVagas = metrosDesdeAEntrada(pista, pit->primeiraVaga + (LUGARES_NO_GRID - 1) * pit->entreVagas) + pit->encostar;
+    for (int i = 0; i < total; i++) {
+        float noPit = fminf(i * PASSO_DO_ALISAMENTO, fim);
+        PosicaoNaPista lugar = entrada;
+        moverNaPista(&lugar, noPit * UNIDADES_POR_METRO);
+        float lado = ladoDoPitEm(pista, noPit);
+        PontoNoMundo p = pontoNoMundoDoPit(lugar, lado / larguraNaPosicao(lugar, lado));
+        x[i] = p.x;
+        z[i] = p.z;
+        s[i] = (i > 0) ? s[i - 1] + hypotf(x[i] - x[i - 1], z[i] - z[i - 1]) : 0.0f;
+        if (noPit > depoisDasVagas && noPit < volta && fabsf(lado) <= larguraNaPosicao(lugar, lado)) {
+            volta = noPit;
+        }
+    }
+    /* A base: o caminho como ele é; onde a estrada foi medida no mundo (Montreal), ela: cada amostra vai para o ponto
+     * dela mais perto, sempre para a frente (onde o caminho volta, no grampo da saída, o avanço vira uma reta do antes
+     * ao depois), misturando aos poucos nas pontas do trecho em cima dela */
+    for (int i = 0; i < total; i++) {
+        bx[i] = x[i];
+        bz[i] = z[i];
+    }
+    if (pit->pontosDaEstrada >= 2) {
+        usarAEstradaMedida(pit, total, x, z, bx, bz);
+        for (int i = 0; i < total; i++) {
+            s[i] = (i > 0) ? s[i - 1] + hypotf(bx[i] - bx[i - 1], bz[i] - bz[i - 1]) : 0.0f;
+        }
+    }
+    /* A média pelo caminho (tira o tremido da medida e o zigue-zague): cada amostra pesa o pedaço de caminho dela */
+    int de = 0, ate = 0;
+    double somaX = 0.0, somaZ = 0.0, somaPeso = 0.0;
+    for (int i = 0; i < total; i++) {
+        while (ate < total && s[ate] <= s[i] + JANELA_DO_ALISAMENTO) {
+            float peso = 0.5f * (s[(ate + 1 < total) ? ate + 1 : ate] - s[(ate > 0) ? ate - 1 : 0]) + 1e-4f;
+            somaX += bx[ate] * peso;
+            somaZ += bz[ate] * peso;
+            somaPeso += peso;
+            ate++;
+        }
+        while (s[de] < s[i] - JANELA_DO_ALISAMENTO) {
+            float peso = 0.5f * (s[(de + 1 < total) ? de + 1 : de] - s[(de > 0) ? de - 1 : 0]) + 1e-4f;
+            somaX -= bx[de] * peso;
+            somaZ -= bz[de] * peso;
+            somaPeso -= peso;
+            de++;
+        }
+        mx[i] = (float) (somaX / somaPeso);
+        mz[i] = (float) (somaZ / somaPeso);
+    }
+    /* O comprimento do caminho alisado, para medir para onde ele aponta */
+    for (int i = 0; i < total; i++) {
+        s[i] = (i > 0) ? s[i - 1] + hypotf(mx[i] - mx[i - 1], mz[i] - mz[i - 1]) : 0.0f;
+    }
+    /* Em cada segmento do pit lane: o ponto do caminho alisado no começo dele (perto das pontas, misturado com o de
+     * antes, até ficar só ele). Primeiro mede todos, com o caminho de antes; depois liga */
+    Segmento *seg = entrada.segmento;
+    int segmentos = (int) (fim * UNIDADES_POR_METRO / COMPRIMENTO_SEGMENTO) + 2;
+    for (int k = 0; k < segmentos; k++, seg = seg->proximo) {
+        seg->temTrajetoDoPit = 0;
+    }
+    seg = entrada.segmento;
+    for (int k = 0; k < segmentos; k++, seg = seg->proximo) {
+        float noPit = metrosDesdeAEntrada(pista, seg->indice * COMPRIMENTO_SEGMENTO / UNIDADES_POR_METRO);
+        if (noPit > fim) {
+            continue;
+        }
+        float peso = fminf(fminf(noPit / SOME_O_ALISAMENTO, (volta - noPit) / SOME_O_ALISAMENTO), 1.0f);
+        if (peso <= 0.0f) {
+            continue;
+        }
+        float f = noPit / PASSO_DO_ALISAMENTO;
+        int i = (int) f;
+        if (i >= total - 1) {
+            continue;
+        }
+        float t = f - (float) i;
+        float alvoX = mx[i] + (mx[i + 1] - mx[i]) * t, alvoZ = mz[i] + (mz[i + 1] - mz[i]) * t;
+        PosicaoNaPista lugar = { seg, 0.0f };
+        float lado = ladoDoPitEm(pista, noPit);
+        PontoNoMundo p = pontoNoMundoDoPit(lugar, lado / larguraNaPosicao(lugar, lado));
+        int atras = i, frente = i + 1;
+        while (atras > 0 && s[i] - s[atras] < RUMO_DO_ALISAMENTO) {
+            atras--;
+        }
+        while (frente < total - 1 && s[frente] - s[i] < RUMO_DO_ALISAMENTO) {
+            frente++;
+        }
+        float rumo = atan2f(mx[frente] - mx[atras], mz[atras] - mz[frente]) * 57.2958f;
+        seg->trajetoDoPit[0] = p.x + (alvoX - p.x) * peso;
+        seg->trajetoDoPit[1] = p.z + (alvoZ - p.z) * peso;
+        seg->trajetoDoPit[2] = p.rumo + dentroDeMeiaVolta(rumo - p.rumo) * peso;
+        seg->temTrajetoDoPit = 2;   /* medido: liga embaixo */
+    }
+    seg = entrada.segmento;
+    for (int k = 0; k < segmentos; k++, seg = seg->proximo) {
+        float noPit = metrosDesdeAEntrada(pista, seg->indice * COMPRIMENTO_SEGMENTO / UNIDADES_POR_METRO);
+        seg->temTrajetoDoPit = seg->temTrajetoDoPit == 2 && noPit > 0.0f && noPit < volta;
+    }
+    free(dados);
+}
+
+/*
+ * medirEstradaDoPit
+ * Guarda em cada segmento do pit lane onde passa o meio da estrada do pit (para alturaDoChaoNoPit). Chamar uma vez,
+ * com a pista pronta.
+ * Recebe: a pista.
+ * Devolve: nada.
+ */
+void medirEstradaDoPit(Pista *pista) {
+    if (pista == NULL || pista->largada == NULL || !pista->temPit) {
+        return;
+    }
+    float fim = metrosDesdeAEntrada(pista, pista->pit.fim);
+    /* O caminho com um ponto no começo de cada segmento: entre eles, ele é reto na conta da pista, como o ponto do
+     * caminho alisado (pontoNoMundoDoPit), e quem anda por ele cai exatamente em cima dele. Com os pontos da tabela
+     * medida no meio do segmento, a diferença balançava o carro de lado (na chicane de Montreal, onde o caminho muda de
+     * lado mais de 1 m a cada metro, um zigue-zague) */
+    if (pista->pit.pontosDoCaminho > 0) {
+        int maximo = (int) (fim * UNIDADES_POR_METRO / COMPRIMENTO_SEGMENTO) + 4;
+        float (*novo)[2] = (float (*)[2]) malloc(sizeof(float) * 2 * (size_t) maximo);
+        if (novo != NULL) {
+            float inicio = pista->pit.caminho[0][0];
+            float primeiro = metrosDesdeAEntrada(pista, ceilf(pista->pit.entrada * UNIDADES_POR_METRO / COMPRIMENTO_SEGMENTO)
+                                                            * COMPRIMENTO_SEGMENTO / UNIDADES_POR_METRO);
+            int n = 0;
+            novo[n][0] = inicio;
+            novo[n][1] = ladoNoCaminho(pista, 0.0f);
+            n++;
+            for (float noPit = primeiro; noPit < fim && n < maximo - 1; noPit += COMPRIMENTO_SEGMENTO / UNIDADES_POR_METRO) {
+                if (noPit > 0.01f) {
+                    novo[n][0] = inicio + noPit;
+                    novo[n][1] = ladoNoCaminho(pista, noPit);
+                    n++;
+                }
+            }
+            novo[n][0] = inicio + fim;
+            novo[n][1] = ladoNoCaminho(pista, fim);
+            n++;
+            free(pista->pit.caminhoProprio);   /* (os pontos acima ainda leem o caminho de antes) */
+            pista->pit.caminhoProprio = novo;
+            pista->pit.caminho = (const float (*)[2]) novo;
+            pista->pit.pontosDoCaminho = n;
+        }
+    }
+    Segmento *s = pista->largada;
+    do {
+        float noPit = metrosDesdeAEntrada(pista, s->indice * COMPRIMENTO_SEGMENTO / UNIDADES_POR_METRO);
+        float lado = (noPit <= fim) ? ladoDoPitEm(pista, noPit) : 0.0f;
+        s->estradaDoPit = (fabsf(lado) < 0.01f) ? 0.0f : lado;
+        s = s->proximo;
+    } while (s != pista->largada);
+    if (pista->pit.pontosDoCaminho > 0) {
+        alisarEstradaDoPit(pista);
+    }
+}
+
 /*
  * pontoDoCaminho
  * Recebe: a pista, o carro (para achar a pista a partir dele) e quantos metros depois da entrada.
@@ -362,6 +712,29 @@ static float velocidadeNaCurvaDoCaminho(const Pista *pista, const Carro *carro, 
         menor = fminf(menor, podeVir);
     }
     return menor * UNIDADES_POR_METRO;
+}
+
+/*
+ * andadoNoPasso
+ * Recebe: a pista, o carro, onde ele está (metros depois da entrada), se ele anda preso ao caminho, o lado dele agora
+ *         (metros), o ponto de onde ele sai e um passo na linha da pista (unidades).
+ * Devolve: quantos metros ele andaria no mundo com esse passo.
+ */
+#define PASSO_DOBRA           6       /* vezes que o passo pode dobrar, procurando o intervalo... */
+#define PASSO_CORTA           12      /* ...e que o intervalo é cortado ao meio */
+static float andadoNoPasso(const Pista *pista, const Carro *carro, float noPit, int presoAoCaminho, float agora,
+                           PontoNoMundo antes, float passo) {
+    PosicaoNaPista tentativa = carro->posicao;
+    moverNaPista(&tentativa, passo);
+    /* Preso ao caminho, ele vai junto com o que ainda falta até ele (a sobra, que some aos poucos): sem ela, esse
+     * pedaço de lado contava como andar, e o carro chegando ao caminho andava menos que a velocidade manda */
+    float lateral = agora;
+    if (presoAoCaminho) {
+        float sobra = carro->noCaminhoDoPit ? carro->sobraDoCaminho : agora - ladoNoCaminhoEm(pista, noPit);
+        lateral = ladoNoCaminhoEm(pista, noPit + passo / UNIDADES_POR_METRO) + sobra;
+    }
+    PontoNoMundo la = pontoNoMundoDoPit(tentativa, lateral / larguraNaPosicao(tentativa, lateral));
+    return hypotf(la.x - antes.x, la.z - antes.z);
 }
 
 /*
@@ -443,6 +816,15 @@ int atualizarCarroNoPit(Carro *carro, Pista *pista, float tempoQuadro) {
     if (carro->estadoDoPit == PIT_SAINDO && distanciaDaVaga < METROS_SAINDO_DA_VAGA && carro->vemAlguemAtras) {
         alvo = 0.0f;
     }
+    /* Saindo da vaga, até entrar na faixa (o caminho) ele anda na velocidade de manobra. Sem lugar para entrar nela (o
+     * carro ao lado), ele acelerava por fora da fila, entre ela e as vagas, e chegava rápido onde quem vem na faixa
+     * encosta na própria vaga, cruzando a frente dele: não dava mais para frear */
+    if (carro->estadoDoPit == PIT_SAINDO && pit->pontosDoCaminho > 0) {
+        float ladoAgora = carro->deslocamentoLateral * larguraNaPosicao(carro->posicao, carro->deslocamentoLateral);
+        if (fabsf(ladoAgora - linhaNoPit(pista, carro, 1, 0.0f)) > FORA_DA_FAIXA) {
+            alvo = fminf(alvo, VELOCIDADE_ENCOSTANDO);
+        }
+    }
 
     /* Nas curvas do caminho (a saída de Interlagos serpenteia por dentro do S do Senna), ele anda
      * no máximo na velocidade que faz a curva sem tranco */
@@ -512,19 +894,25 @@ int atualizarCarroNoPit(Carro *carro, Pista *pista, float tempoQuadro) {
         PontoNoMundo ali = pontoNoMundoDoPit(adiante, lateralAdiante / larguraNaPosicao(adiante, lateralAdiante));
         float noMundo = fminf(fmaxf(hypotf(ali.x - antes.x, ali.z - antes.z), MENOR_FATOR_NO_PIT), 1.0f / MENOR_FATOR_NO_PIT);
         distancia /= noMundo;
-        /* E confere no passo de verdade: onde a pista muda de jeito no meio do passo (a emenda da
-         * volta, na linha de chegada, tem um segmento sem comprimento no mundo), corrige */
+        /* E acha o passo de verdade, medindo no mundo: onde a pista muda de jeito no meio do passo (a emenda da volta,
+         * na linha de chegada, tem um segmento sem comprimento no mundo; longe da linha, por dentro de uma curva e com a
+         * correção da estrada de Montreal, um metro da linha muda de valor de um segmento para o outro), a estimativa
+         * errava e o carro dava um pulo num quadro. Abre o intervalo até passar do que a velocidade manda e corta ao meio */
         float quer = carro->velocidade * tempoQuadro / UNIDADES_POR_METRO;
-        for (int vez = 0; vez < 2; vez++) {
-            PosicaoNaPista tentativa = carro->posicao;
-            moverNaPista(&tentativa, distancia);
-            float lateralLa = presoAoCaminho ? ladoNoCaminhoEm(pista, noPit + distancia / UNIDADES_POR_METRO) : agora;
-            PontoNoMundo la = pontoNoMundoDoPit(tentativa, lateralLa / larguraNaPosicao(tentativa, lateralLa));
-            float andou = hypotf(la.x - antes.x, la.z - antes.z);
-            if (andou > 0.001f) {
-                distancia *= fminf(fmaxf(quer / andou, 0.5f), 2.0f);
+        float curto = 0.0f, longo = distancia;
+        for (int vez = 0; vez < PASSO_DOBRA && andadoNoPasso(pista, carro, noPit, presoAoCaminho, agora, antes, longo) < quer; vez++) {
+            curto = longo;
+            longo *= 2.0f;
+        }
+        for (int vez = 0; vez < PASSO_CORTA; vez++) {
+            float meio = 0.5f * (curto + longo);
+            if (andadoNoPasso(pista, carro, noPit, presoAoCaminho, agora, antes, meio) < quer) {
+                curto = meio;
+            } else {
+                longo = meio;
             }
         }
+        distancia = 0.5f * (curto + longo);
     }
     if (carro->estadoDoPit != PIT_TROCANDO) {
         distancia += carro->empurraoPendente;
@@ -552,20 +940,23 @@ int atualizarCarroNoPit(Carro *carro, Pista *pista, float tempoQuadro) {
     carro->noCaminhoDoPit = presoAoCaminho;
     carro->deslocamentoLateral = agora / larguraDepois;
     carro->velocidadeDeLado = (tempoQuadro > 0.0f) ? rapidez : 0.0f;
+    for (int k = 0; k < 2; k++) {
+        carro->sobraNoMundo[k] *= expf(-tempoQuadro / SOBRA_NO_MUNDO);
+    }
 
-    /* O bico aponta para onde ele andou de verdade no mundo, virando aos poucos e sem passar de
-     * um giro máximo (perto da vaga, mais devagar ainda, como numa manobra) */
+    /* O bico aponta para onde ele andou de verdade no mundo, virando aos poucos e sem passar de um giro máximo (perto
+     * da vaga, mais devagar ainda, como numa manobra). O ângulo é medido a partir do rumo do pit ali (o da estrada
+     * alisada), então gira junto com ela; e fica entre -180 e 180: onde a estrada dá a volta no grampo de Montreal, ele
+     * passava de uma volta, e o piloto, de volta à pista, desenrolava o carro inteiro no próprio eixo */
     PontoNoMundo depois = pontoNoMundoDoPit(carro->posicao, carro->deslocamentoLateral);
     float andou = hypotf(depois.x - antes.x, depois.z - antes.z);
     if (andou > 0.001f && tempoQuadro > 0.0f) {
-        float apontar = atan2f(depois.x - antes.x, antes.z - depois.z) * 57.2958f - depois.rumo;
-        apontar -= 360.0f * roundf(apontar / 360.0f);
-        float diferenca = apontar - carro->anguloDeFuga;
-        diferenca -= 360.0f * roundf(diferenca / 360.0f);
+        float apontar = dentroDeMeiaVolta(atan2f(depois.x - antes.x, antes.z - depois.z) * 57.2958f - depois.rumo);
+        float diferenca = dentroDeMeiaVolta(apontar - carro->anguloDeFuga);
         float resposta = (atePerto < trechoDeEncostar) ? ENDIREITANDO : SEGUINDO_O_CAMINHO;
         float passo = diferenca * (1.0f - expf(-tempoQuadro / resposta));
         float maximo = GIRO_MAXIMO_NO_PIT * tempoQuadro;
-        carro->anguloDeFuga += fminf(fmaxf(passo, -maximo), maximo);
+        carro->anguloDeFuga = dentroDeMeiaVolta(carro->anguloDeFuga + fminf(fmaxf(passo, -maximo), maximo));
         float volanteAlvo = fminf(fmaxf(diferenca / GRAUS_DO_VOLANTE, -1.0f), 1.0f);
         carro->volante = aproximarDe(carro->volante, volanteAlvo, MUDANCA_DO_VOLANTE * tempoQuadro);
     }
@@ -576,7 +967,14 @@ int atualizarCarroNoPit(Carro *carro, Pista *pista, float tempoQuadro) {
     /* Ou antes, assim que o pit lane já devolveu o carro à pista (o fim do muro de pit) */
     int devolvido = noPit > vaga + pit->encostar + LONGE_DA_VAGA && fabsf(carro->deslocamentoLateral) <= 1.0f
                     && fabsf(linhaNoPit(pista, carro, 1, 0.0f)) <= larguraDaPista;
-    if (carro->estadoDoPit == PIT_SAINDO && (noPit >= fim || devolvido) && fabsf(carro->deslocamentoLateral) <= 1.0f) {
+    /* E só com o bico na direção da pista: a estrada do pit encontra a pista na diagonal (em Montreal, uns 16 graus), e
+     * o carro devolvido assim, sem a direção guiada, seguia para onde apontava e atravessava a pista até a grama do
+     * outro lado. Depois do fim do caminho o lado fica parado: o carro anda junto da pista e o bico alinha logo */
+    float naPista = dentroDeMeiaVolta(carro->anguloDeFuga + depois.rumo - pontoNoMundo(carro->posicao, carro->deslocamentoLateral).rumo);
+    int alinhado = fabsf(naPista) < ALINHADO_COM_A_PISTA || noPit >= fim + DEVOLVE_DE_TODO_JEITO;
+    if (carro->estadoDoPit == PIT_SAINDO && (noPit >= fim || devolvido) && fabsf(carro->deslocamentoLateral) <= 1.0f && alinhado) {
+        /* De volta à pista, o ângulo é medido a partir do rumo dela (sem o alisamento da estrada do pit) */
+        carro->anguloDeFuga = naPista;
         carro->estadoDoPit = PIT_FORA;
         carro->volante = 0.0f;
         carro->velocidadeDeLado = 0.0f;

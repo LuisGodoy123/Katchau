@@ -3697,7 +3697,7 @@ static void testarTransitoNoPit(void) {
             carro->distanciaPercorrida = (pista->pit.entrada + 60.0f + (TOTAL_CARROS - i) * vao) * UNIDADES_POR_METRO;
             carro->deslocamentoLateral = -3.1f;
             carro->velocidade = 3000.0f;
-            entrarNoPit(carro);
+            entrarNoPit(carro, pista);
         }
         float maiorEntrada = 0.0f;
         int quadrosEncostados = 0, moveuNaTroca = 0, naPista = 0;
@@ -3756,14 +3756,14 @@ static void testarTransitoNoPit(void) {
     parado->deslocamentoLateral = -1.27f;
     parado->velocidade = 1200.0f;
     parado->duracaoDaTroca = 30.0f;
-    entrarNoPit(parado);
+    entrarNoPit(parado, pista);
     float atras = noParado - 60.0f;
     passando->posicao.segmento = buscarSegmento(pista, (int) (fmodf(atras, pista->metrosDaVolta) * SEGMENTOS_POR_METRO));
     passando->posicao.distanciaNoSegmento = 0.0f;
     passando->distanciaPercorrida = atras * UNIDADES_POR_METRO;
     passando->deslocamentoLateral = -1.27f;
     passando->velocidade = LIMITE_DO_PIT;
-    entrarNoPit(passando);
+    entrarNoPit(passando, pista);
     float menorVelocidadePassando = 1e9f;
     int passou = 0;
     for (int q = 0; q < 60 * 12 && !passou; q++) {
